@@ -1799,4 +1799,4 @@ const dynamicCSS = th => `
 .bot-btn.active{color:#a5b4fc}
 .scan-drop{border-color:${th.border}}
 .tog-row{border-color:${th.border}}
-`;
+`;// Tue Apr  7 21:09:13 WIB 2026
