@@ -862,7 +862,7 @@ function Finance({user, signOut}) {
             {/* CC Sub-tabs */}
             <div style={{display:"flex",gap:0,marginBottom:18,background:th.bgInput,borderRadius:11,padding:3,border:`1px solid ${th.border}`}}>
               {[["cards","💳 Kartu"],["transactions","≡ Transaksi"],["installments","⟳ Cicilan"],["recurring","↺ Recurring"],["budget","◎ Budget"]].map(([id,label])=>(
-                <button key={id} onClick={()=>setFilterCard(id==="cards"?"__cards":filterCard)} className={`subtab-btn`} style={{flex:1,background:filterCard===id?"rgba(99,102,241,.15)":"transparent",color:filterCard===id?"#a5b4fc":th.textMuted,border:"none",padding:"7px 4px",borderRadius:8,fontFamily:"inherit",fontWeight:700,fontSize:11,cursor:"pointer",transition:"all .15s",whiteSpace:"nowrap"}} onClick={()=>{ if(id==="cards"||id==="transactions"||id==="installments"||id==="recurring"||id==="budget") setCCSubTab(id); }}>
+                <button key={id} onClick={()=>setFilterCard(id==="cards"?"__cards":filterCard)} className={`subtab-btn`} style={{flex:1,background:filterCard===id?"rgba(99,102,241,.15)":"transparent",color:filterCard===id?"#a5b4fc":th.textMuted,border:"none",padding:"7px 4px",borderRadius:8,fontFamily:"inherit",fontWeight:700,fontSize:11,cursor:"pointer",transition:"all .15s",whiteSpace:"nowrap"}} onClick={()=>{ if(id==="cards"||id==="transactions"||id==="installments"||id==="recurring"||id==="budget")  }}>
                   {label}
                 </button>
               ))}
