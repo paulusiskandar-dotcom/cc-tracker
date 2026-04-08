@@ -1,9 +1,9 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "./lib/supabase";
 import { getTheme } from "./theme";
-import { TABS, CURRENCIES } from "./constants";
+import { TABS, CURRENCIES, APP_VERSION, APP_BUILD } from "./constants";
 import { accountsApi, ledgerApi, categoriesApi, incomeSrcApi, installmentsApi,
-         recurringApi, merchantApi, fxApi, settingsApi, fmtIDR, todayStr, ym } from "./api";
+         recurringApi, merchantApi, fxApi, settingsApi, gmailApi, fmtIDR, todayStr, ym } from "./api";
 import { injectBaseCSS, calcNetWorth, Spinner } from "./components/shared";
 import Dashboard    from "./components/Dashboard";
 import Transactions from "./components/Transactions";
@@ -106,6 +106,7 @@ function Finance({ user, signOut }) {
   const [reminders, setReminders] = useState([]);
   const [merchantMaps, setMerchantMaps] = useState([]);
   const [fxRates, setFxRates]     = useState({ USD:16400, SGD:12200, MYR:3700, JPY:110, EUR:17800, AUD:10500 });
+  const [pendingSyncs, setPendingSyncs] = useState([]);
 
   const th = getTheme(isDark);
   const curMonth = ym(todayStr());
@@ -113,7 +114,7 @@ function Finance({ user, signOut }) {
   // ── Load all data
   const loadData = useCallback(async () => {
     try {
-      const [acc, led, cats, inc, inst, rtempl, rem, merch, fx, dark] = await Promise.all([
+      const [acc, led, cats, inc, inst, rtempl, rem, merch, fx, dark, pending] = await Promise.all([
         accountsApi.getAll(user.id),
         ledgerApi.getAll(user.id, { limit: 500 }),
         categoriesApi.getAll(user.id),
@@ -124,6 +125,7 @@ function Finance({ user, signOut }) {
         merchantApi.getMappings(user.id),
         fxApi.getAll(user.id),
         settingsApi.get(user.id, "isDark", false),
+        gmailApi.getPending(user.id).catch(() => []),
       ]);
       setAccounts(acc);
       setLedger(led);
@@ -135,6 +137,7 @@ function Finance({ user, signOut }) {
       setMerchantMaps(merch);
       if (Object.keys(fx).length) setFxRates(fx);
       setIsDark(dark);
+      setPendingSyncs(pending);
     } catch (e) {
       console.error("[loadData]", e);
     }
@@ -160,6 +163,7 @@ function Finance({ user, signOut }) {
     th, user, accounts, ledger, thisMonthLedger, categories, incomeSrcs, installments,
     recurTemplates, reminders, merchantMaps, fxRates, CURRENCIES, netWorth,
     bankAccounts, creditCards, assets, liabilities, receivables, curMonth,
+    pendingSyncs, setPendingSyncs, setTab,
     onRefresh: loadData,
     setAccounts, setLedger, setCategories, setIncomeSrcs, setInstallments,
     setRecurTemplates, setReminders, setMerchantMaps, setFxRates,
@@ -247,6 +251,10 @@ function Finance({ user, signOut }) {
           <div style={{ fontSize:10, color:th.tx3, fontWeight:600, marginBottom:4 }}>NET WORTH</div>
           <div className="num" style={{ fontSize:16, fontWeight:800, color:netWorth.total>=0?th.gr:th.rd }}>{fmtIDR(netWorth.total,true)}</div>
           <button onClick={signOut} style={{ marginTop:10, width:"100%", border:`1px solid ${th.bor}`, borderRadius:8, padding:"7px", background:"none", color:th.tx3, fontFamily:"'Sora',sans-serif", fontSize:11, fontWeight:600, cursor:"pointer" }}>Sign Out</button>
+          <div style={{ marginTop:10, paddingTop:8, borderTop:`1px solid ${th.bor}2` }}>
+            <div style={{ fontSize:10, fontWeight:700, color:th.tx3 }}>Paulus Finance v{APP_VERSION}</div>
+            <div style={{ fontSize:9, color:th.tx3, opacity:.6, marginTop:1 }}>Build {APP_BUILD}</div>
+          </div>
         </div>
       </aside>
 

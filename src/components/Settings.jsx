@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { supabase } from "../lib/supabase";
-import { fxApi, merchantApi, settingsApi, recurringApi, fmtIDR } from "../api";
-import { CURRENCIES, EXPENSE_CATEGORIES, ENTITIES, FREQUENCIES, TX_TYPES } from "../constants";
+import { fxApi, merchantApi, settingsApi, recurringApi, gmailApi, fmtIDR } from "../api";
+import { CURRENCIES, EXPENSE_CATEGORIES, ENTITIES, FREQUENCIES, TX_TYPES, APP_VERSION, APP_BUILD } from "../constants";
 import { SubTabs, SectionHeader, Overlay, F, R2, Input, Select, BtnRow, Empty, showToast, confirmDelete } from "./shared";
 
 const SUBTABS = [
   { id:"profile",    label:"Profile" },
+  { id:"email",      label:"Email Sync" },
   { id:"fx",         label:"FX Rates" },
   { id:"recurring",  label:"Recurring" },
   { id:"merchants",  label:"Merchants" },
@@ -16,8 +17,62 @@ export default function Settings({
   th, user, isDark, setIsDark, fxRates, setFxRates,
   recurTemplates, setRecurTemplates, merchantMaps, setMerchantMaps, onRefresh,
 }) {
-  const [subTab, setSubTab] = useState("profile");
-  const [saving, setSaving] = useState(false);
+  const [subTab, setSubTab]   = useState("profile");
+  const [saving, setSaving]   = useState(false);
+
+  // ── Gmail state ──────────────────────────────────────────────
+  const [gmailToken, setGmailToken]     = useState(null);
+  const [gmailLoaded, setGmailLoaded]   = useState(false);
+  const [clientId, setClientId]         = useState("");
+  const [autoSync, setAutoSync]         = useState(true);
+  const [markRead, setMarkRead]         = useState(false);
+  const [syncingNow, setSyncingNow]     = useState(false);
+  const [whatsNewOpen, setWhatsNewOpen] = useState(false);
+
+  const loadGmailToken = async () => {
+    if (gmailLoaded) return;
+    try {
+      const t = await gmailApi.getToken(user.id);
+      setGmailToken(t);
+    } catch { /* table may not exist yet */ }
+    setGmailLoaded(true);
+  };
+
+  const connectGmail = () => {
+    if (!clientId.trim()) return showToast("Enter your Google Client ID first","error");
+    const redirectUri = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/gmail-oauth`;
+    const scope = "https://www.googleapis.com/auth/gmail.readonly";
+    const state = user.id;
+    const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent&state=${state}`;
+    const popup = window.open(url, "Connect Gmail", "width=500,height=620,scrollbars=yes");
+    const poll = setInterval(async () => {
+      if (!popup || popup.closed) {
+        clearInterval(poll);
+        const t = await gmailApi.getToken(user.id).catch(() => null);
+        if (t) { setGmailToken(t); showToast("Gmail connected!"); }
+        else showToast("Connection incomplete — try again","error");
+      }
+    }, 1000);
+  };
+
+  const disconnectGmail = async () => {
+    if (!window.confirm("Disconnect Gmail? Auto-sync will stop.")) return;
+    try {
+      await gmailApi.disconnect(user.id);
+      setGmailToken(null);
+      showToast("Gmail disconnected");
+    } catch (e) { showToast(e.message,"error"); }
+  };
+
+  const syncNow = async () => {
+    setSyncingNow(true);
+    try {
+      const result = await gmailApi.triggerSync(user.id);
+      showToast(`Sync complete: ${result?.new_transactions || 0} new transactions`);
+      await onRefresh?.();
+    } catch (e) { showToast(e.message,"error"); }
+    setSyncingNow(false);
+  };
 
   // ── FX state ────────────────────────────────────────────────
   const [rates, setRates] = useState(() => {
@@ -149,7 +204,7 @@ export default function Settings({
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
       <div style={{ fontSize:20, fontWeight:800, color:th.tx }}>Settings</div>
 
-      <SubTabs tabs={SUBTABS} active={subTab} onChange={setSubTab} th={th}/>
+      <SubTabs tabs={SUBTABS} active={subTab} onChange={t => { setSubTab(t); if (t === "email") loadGmailToken(); }} th={th}/>
 
       {/* ── PROFILE ── */}
       {subTab === "profile" && (
@@ -208,6 +263,18 @@ export default function Settings({
           </div>
         </div>
       )}
+
+      {/* ── EMAIL SYNC ── */}
+      {subTab === "email" && <EmailSyncTab
+        th={th} user={user}
+        gmailToken={gmailToken} gmailLoaded={gmailLoaded}
+        loadGmailToken={loadGmailToken}
+        clientId={clientId} setClientId={setClientId}
+        autoSync={autoSync} setAutoSync={setAutoSync}
+        markRead={markRead} setMarkRead={setMarkRead}
+        syncingNow={syncingNow}
+        connectGmail={connectGmail} disconnectGmail={disconnectGmail} syncNow={syncNow}
+      />}
 
       {/* ── FX RATES ── */}
       {subTab === "fx" && (
@@ -354,16 +421,38 @@ export default function Settings({
             <SectionHeader title="About" th={th}/>
             <div style={{ marginTop:10, display:"flex", flexDirection:"column", gap:6 }}>
               {[
-                { label:"App", value:"Paulus Finance" },
-                { label:"Version", value:"v5.0" },
-                { label:"User ID", value:user?.id?.slice(0,8) + "…" },
-                { label:"Email", value:user?.email },
+                { label:"App",      value:"Paulus Finance" },
+                { label:"Version",  value:`v${APP_VERSION}` },
+                { label:"Build",    value:APP_BUILD },
+                { label:"Database", value:"v5 (unified ledger)" },
+                { label:"User ID",  value:user?.id?.slice(0,8) + "…" },
+                { label:"Email",    value:user?.email },
               ].map(item => (
                 <div key={item.label} style={{ display:"flex", justifyContent:"space-between", padding:"6px 0", borderBottom:`1px solid ${th.bor}` }}>
                   <span style={{ fontSize:12, color:th.tx3 }}>{item.label}</span>
                   <span style={{ fontSize:12, color:th.tx, fontWeight:600 }}>{item.value}</span>
                 </div>
               ))}
+            </div>
+            {/* What's new */}
+            <div style={{ marginTop:12 }}>
+              <button onClick={() => setWhatsNewOpen(o => !o)}
+                style={{ background:"none", border:"none", cursor:"pointer", fontSize:12, color:th.ac, fontFamily:"'Sora',sans-serif", fontWeight:600, padding:0 }}>
+                {whatsNewOpen ? "▲" : "▼"} What's new in v{APP_VERSION}
+              </button>
+              {whatsNewOpen && (
+                <div style={{ marginTop:8, padding:"10px 12px", background:th.acBg, borderRadius:9, fontSize:12, color:th.tx2, lineHeight:1.7 }}>
+                  <div style={{ fontWeight:700, color:th.ac, marginBottom:4 }}>v{APP_VERSION} — {APP_BUILD}</div>
+                  {[
+                    "📧 Gmail auto-sync: connect once, transactions import automatically",
+                    "🔍 Duplicate detection: smart matching prevents double-imports",
+                    "🏪 Merchant learning: categories remembered per merchant",
+                    "⏳ Pending review UI: approve, edit or skip each email transaction",
+                    "📊 Version indicator in sidebar and settings",
+                    "🔢 Unified ledger v5 with full double-entry accounting",
+                  ].map((item, i) => <div key={i}>• {item}</div>)}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -435,6 +524,138 @@ export default function Settings({
           </div>
         </Overlay>
       )}
+    </div>
+  );
+}
+
+// ─── EMAIL SYNC TAB ───────────────────────────────────────────
+const SETUP_STEPS = [
+  { n:1, label:'Go to console.cloud.google.com → Create project "Paulus Finance"' },
+  { n:2, label:"Enable Gmail API (APIs & Services → Library)" },
+  { n:3, label:"OAuth consent screen → External · Scope: gmail.readonly (read-only)" },
+  { n:4, label:"Create OAuth credentials → Web application" },
+  { n:5, label:"Add Authorized redirect URI: [SUPABASE_URL]/functions/v1/gmail-oauth" },
+  { n:6, label:"Copy Client ID and paste below" },
+  { n:7, label:"Click Connect Gmail → authorize → done" },
+];
+
+function EmailSyncTab({ th, user, gmailToken, gmailLoaded, loadGmailToken,
+  clientId, setClientId, autoSync, setAutoSync, markRead, setMarkRead,
+  syncingNow, connectGmail, disconnectGmail, syncNow }) {
+
+  const supabaseUrl = process.env.REACT_APP_SUPABASE_URL || "[SUPABASE_URL]";
+  const redirectUri = `${supabaseUrl}/functions/v1/gmail-oauth`;
+  const isConnected = !!gmailToken;
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+      {/* Status card */}
+      <div style={{ background:th.sur, border:`1px solid ${isConnected?"#b2f2e8":"#ffd43b"}`, borderRadius:14, padding:16 }}>
+        <SectionHeader title={isConnected ? "✅ Gmail Connected" : "📧 Gmail Not Connected"} th={th}/>
+        {isConnected ? (
+          <div style={{ marginTop:10 }}>
+            <div style={{ fontSize:13, color:th.tx, fontWeight:600, marginBottom:4 }}>{gmailToken.gmail_email || user?.email}</div>
+            {gmailToken.last_sync && (
+              <div style={{ fontSize:11, color:th.tx3, marginBottom:8 }}>
+                Last sync: {new Date(gmailToken.last_sync).toLocaleString()}
+              </div>
+            )}
+            <div style={{ display:"flex", gap:8, marginTop:10 }}>
+              <button className="btn btn-primary" onClick={syncNow} disabled={syncingNow}
+                style={{ fontSize:12 }}>
+                {syncingNow ? "Syncing…" : "🔄 Sync Now"}
+              </button>
+              <button className="btn btn-ghost" onClick={disconnectGmail}
+                style={{ fontSize:12, color:"#e03131", borderColor:"#ffc9c9" }}>
+                Disconnect
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ marginTop:10, fontSize:12, color:th.tx3 }}>
+            Connect your Gmail to automatically import bank transaction notifications.
+            Only <strong>gmail.readonly</strong> access — cannot send or delete emails.
+          </div>
+        )}
+      </div>
+
+      {/* Setup guide (if not connected) */}
+      {!isConnected && (
+        <div style={{ background:th.sur, border:`1px solid ${th.bor}`, borderRadius:14, padding:16 }}>
+          <SectionHeader title="Setup Guide" th={th}/>
+          <div style={{ marginTop:10, display:"flex", flexDirection:"column", gap:8 }}>
+            {SETUP_STEPS.map(step => (
+              <div key={step.n} style={{ display:"flex", gap:10, alignItems:"flex-start" }}>
+                <div style={{ width:22, height:22, borderRadius:"50%", background:th.acBg, border:`1px solid ${th.ac}44`,
+                  display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:800, color:th.ac, flexShrink:0 }}>
+                  {step.n}
+                </div>
+                <div style={{ fontSize:12, color:th.tx2, lineHeight:1.6 }}>{step.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Redirect URI copy */}
+          <div style={{ marginTop:14, padding:"8px 12px", background:th.bg, borderRadius:9, border:`1px solid ${th.bor}` }}>
+            <div style={{ fontSize:10, color:th.tx3, marginBottom:4 }}>Authorized redirect URI (copy this exactly):</div>
+            <div style={{ fontSize:11, fontFamily:"'JetBrains Mono',monospace", color:th.ac, wordBreak:"break-all" }}>{redirectUri}</div>
+          </div>
+
+          {/* Client ID input + connect */}
+          <div style={{ marginTop:14, display:"flex", flexDirection:"column", gap:8 }}>
+            <F label="Google Client ID" th={th} required>
+              <Input value={clientId} onChange={e => setClientId(e.target.value)}
+                placeholder="123456789-abc...apps.googleusercontent.com" th={th}/>
+            </F>
+            <button className="btn btn-primary" onClick={connectGmail} style={{ fontSize:13 }}>
+              Connect Gmail →
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Sync preferences */}
+      <div style={{ background:th.sur, border:`1px solid ${th.bor}`, borderRadius:14, padding:16 }}>
+        <SectionHeader title="Sync Preferences" th={th}/>
+        <div style={{ marginTop:12, display:"flex", flexDirection:"column", gap:10 }}>
+          {[
+            { label:"Auto-sync every 15 minutes", value:autoSync, setter:setAutoSync },
+            { label:"Mark emails as read after sync", value:markRead, setter:setMarkRead },
+          ].map(pref => (
+            <div key={pref.label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <span style={{ fontSize:12, color:th.tx2 }}>{pref.label}</span>
+              <button onClick={() => pref.setter(v => !v)}
+                style={{ width:44, height:24, borderRadius:12, border:"none", cursor:"pointer",
+                  background: pref.value ? th.ac : th.bor,
+                  transition:"background .2s", position:"relative" }}>
+                <div style={{ width:18, height:18, borderRadius:"50%", background:"#fff",
+                  position:"absolute", top:3, left: pref.value ? 23 : 3, transition:"left .2s",
+                  boxShadow:"0 1px 3px rgba(0,0,0,.2)" }}/>
+              </button>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop:10, padding:"8px 12px", background:th.bg, borderRadius:9, fontSize:11, color:th.tx3 }}>
+          Auto-sync requires Supabase cron schedule set to <code>*/15 * * * *</code> on the <strong>gmail-sync</strong> edge function.
+        </div>
+      </div>
+
+      {/* Bank senders info */}
+      <div style={{ background:th.sur, border:`1px solid ${th.bor}`, borderRadius:14, padding:16 }}>
+        <SectionHeader title="Monitored Bank Senders" th={th}/>
+        <div style={{ marginTop:8, fontSize:11, color:th.tx3, lineHeight:1.8 }}>
+          {[
+            "BCA: info@klikbca.com, notification@bca.co.id",
+            "Mandiri: notification@bankmandiri.co.id",
+            "BNI: bni@bni.co.id",
+            "CIMB: notification@cimbniaga.co.id",
+            "Jenius: hello@jenius.com",
+            "SeaBank: noreply@sea.com",
+            "GoPay: noreply@gojek.com",
+          ].map((s, i) => <div key={i} style={{ padding:"3px 0", borderBottom:`1px solid ${th.bor}` }}>✉️ {s}</div>)}
+          <div style={{ marginTop:6, color:th.tx3 }}>+ OVO, DANA, ShopeePay, BRI</div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -1,10 +1,10 @@
 import { useState, useMemo, useRef } from "react";
-import { ledgerApi, aiCall, parseJSON, fmtIDR, todayStr, ym, toIDR, agingLabel } from "../api";
+import { ledgerApi, gmailApi, aiCall, parseJSON, fmtIDR, todayStr, ym, toIDR, agingLabel } from "../api";
 import { EXPENSE_CATEGORIES, ENTITIES, TX_TYPES, CURRENCIES } from "../constants";
 import { Overlay, F, R2, BtnRow, SubTabs, Input, Select, Textarea, Tag, EntityTag, TxTypeTag, Amount,
          CatPill, Empty, SectionHeader, Spinner, showToast, confirmDelete, MonthSelect } from "./shared";
 
-const SUBTABS = [
+const SUBTABS_BASE = [
   { id:"all",        label:"All" },
   { id:"expense",    label:"Expenses" },
   { id:"income",     label:"Income" },
@@ -21,8 +21,13 @@ const EMPTY_ENTRY = {
 export default function Transactions({
   th, user, accounts, ledger, categories, fxRates, CURRENCIES: C,
   bankAccounts, creditCards, assets, liabilities, receivables,
-  onRefresh, setLedger,
+  onRefresh, setLedger, pendingSyncs, setPendingSyncs,
 }) {
+  const pendingCount = pendingSyncs?.length || 0;
+  const SUBTABS = pendingCount > 0
+    ? [...SUBTABS_BASE, { id:"pending", label:`Pending ${pendingCount > 0 ? `(${pendingCount})` : ""}` }]
+    : SUBTABS_BASE;
+
   const [subTab, setSubTab]       = useState("all");
   const [showForm, setShowForm]   = useState(false);
   const [editId, setEditId]       = useState(null);
@@ -179,18 +184,27 @@ export default function Transactions({
       {/* ── Sub-tabs ── */}
       <SubTabs tabs={SUBTABS} active={subTab} onChange={setSubTab} th={th}/>
 
-      {/* ── Filters ── */}
-      <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+      {/* ── PENDING TAB ── */}
+      {subTab === "pending" && (
+        <PendingReview
+          th={th} user={user} accounts={accounts} categories={categories}
+          pendingSyncs={pendingSyncs} setPendingSyncs={setPendingSyncs}
+          ledger={ledger} setLedger={setLedger} onRefresh={onRefresh}
+        />
+      )}
+
+      {/* ── Filters (hide on pending tab) ── */}
+      {subTab !== "pending" && <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
         <MonthSelect value={filterMonth} onChange={setFilterMonth} th={th}/>
         <Select value={filterEntity} onChange={e=>setFilterEntity(e.target.value)} th={th} style={{ width:140 }}>
           <option value="all">All Entities</option>
           {ENTITIES.map(e=><option key={e}>{e}</option>)}
         </Select>
         <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search…" th={th} style={{ flex:1, minWidth:120 }}/>
-      </div>
+      </div>}
 
-      {/* ── Bulk actions ── */}
-      {selCount > 0 && (
+      {/* ── Bulk actions (hide on pending tab) ── */}
+      {subTab !== "pending" && selCount > 0 && (
         <div style={{ display:"flex", gap:8, alignItems:"center", padding:"8px 12px", background:th.acBg, borderRadius:9, border:`1px solid ${th.ac}44` }}>
           <span style={{ fontSize:12, color:th.ac, fontWeight:700 }}>{selCount} selected</span>
           <button className="btn btn-danger" onClick={bulkDelete} style={{ padding:"5px 12px", fontSize:11 }}>🗑 Delete</button>
@@ -198,15 +212,15 @@ export default function Transactions({
         </div>
       )}
 
-      {/* ── Summary ── */}
-      <div style={{ display:"flex", gap:12, flexWrap:"wrap", fontSize:12 }}>
+      {/* ── Summary (hide on pending tab) ── */}
+      {subTab !== "pending" && <div style={{ display:"flex", gap:12, flexWrap:"wrap", fontSize:12 }}>
         <span style={{ color:th.tx3 }}>{filtered.length} transactions</span>
         <span className="num" style={{ color:th.rd }}>Out: {fmtIDR(filtered.filter(e=>["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan","qris_debit"].includes(e.type)).reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0),true)}</span>
         <span className="num" style={{ color:th.gr }}>In: {fmtIDR(filtered.filter(e=>["income","sell_asset","reimburse_in","collect_loan"].includes(e.type)).reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0),true)}</span>
-      </div>
+      </div>}
 
-      {/* ── Transaction list ── */}
-      {filtered.length === 0
+      {/* ── Transaction list (hide on pending tab) ── */}
+      {subTab !== "pending" && (filtered.length === 0
         ? <Empty icon="📋" message="No transactions found" th={th}/>
         : filtered.map(e => {
             const isOut = ["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan","qris_debit"].includes(e.type);
@@ -247,7 +261,7 @@ export default function Transactions({
               </div>
             );
           })
-      }
+      )}
 
       {/* ── ADD/EDIT FORM ── */}
       {showForm && (
@@ -560,5 +574,197 @@ Rules: TRSF/Transfer→transfer, QRIS/QR→is_qris=true, CC/Credit Card payment�
         {rows.length===0&&!loading&&!error&&<button onClick={onClose} style={{ padding:10, borderRadius:9, border:`1px solid ${th.bor}`, background:th.sur2, color:th.tx3, fontFamily:"'Sora',sans-serif", fontWeight:600, fontSize:13, cursor:"pointer" }}>Cancel</button>}
       </div>
     </Overlay>
+  );
+}
+
+// ─── PENDING REVIEW COMPONENT ─────────────────────────────────
+function PendingReview({
+  th, user, accounts, categories, pendingSyncs, setPendingSyncs,
+  ledger, setLedger, onRefresh,
+}) {
+  const [saving, setSaving] = useState(false);
+
+  const confirmOne = async (sync) => {
+    if (!sync.ai_raw_result) return showToast("No transaction data to import","error");
+    setSaving(true);
+    try {
+      const txs = Array.isArray(sync.ai_raw_result) ? sync.ai_raw_result : [sync.ai_raw_result];
+      for (const tx of txs) {
+        const entry = {
+          date: tx.date || sync.received_at?.slice(0,10) || new Date().toISOString().slice(0,10),
+          description: tx.description || tx.merchant_name || sync.subject || "Email import",
+          merchant_name: tx.merchant_name || "",
+          amount: Number(tx.amount || 0),
+          currency: tx.currency || "IDR",
+          amount_idr: Number(tx.amount_idr || tx.amount || 0),
+          type: tx.suggested_tx_type || tx.type || "expense",
+          from_account_id: tx.from_account_id || "",
+          to_account_id: tx.to_account_id || "",
+          category_id: tx.category_id || "",
+          category_label: tx.category_label || tx.suggested_category || "",
+          entity: tx.suggested_entity || "Personal",
+          notes: `Imported from email (${sync.sender_email || "Gmail"})`,
+        };
+        const created = await ledgerApi.create(user.id, entry, accounts);
+        if (created) setLedger(p => [created, ...p]);
+      }
+      await gmailApi.updateSync(sync.id, { status: "confirmed" });
+      setPendingSyncs(p => p.filter(s => s.id !== sync.id));
+      showToast(`Imported from ${sync.sender_email || "email"}`);
+      await onRefresh();
+    } catch (e) { showToast(e.message, "error"); }
+    setSaving(false);
+  };
+
+  const skipOne = async (sync) => {
+    try {
+      await gmailApi.updateSync(sync.id, { status: "skipped" });
+      setPendingSyncs(p => p.filter(s => s.id !== sync.id));
+      showToast("Skipped");
+    } catch (e) { showToast(e.message, "error"); }
+  };
+
+  const checkDuplicate = (sync) => {
+    const txs = Array.isArray(sync.ai_raw_result) ? sync.ai_raw_result : sync.ai_raw_result ? [sync.ai_raw_result] : [];
+    for (const tx of txs) {
+      const amt = Number(tx.amount_idr || tx.amount || 0);
+      const date = tx.date || sync.received_at?.slice(0,10);
+      const dupe = ledger.find(e => {
+        const dateDiff = date ? Math.abs(new Date(e.date) - new Date(date)) / 86400000 : 999;
+        return dateDiff <= 1 && Math.abs(Number(e.amount_idr || e.amount || 0) - amt) < 500;
+      });
+      if (dupe) return { isDuplicate: true, existingEntry: dupe };
+    }
+    return { isDuplicate: false };
+  };
+
+  const confirmAll = async () => {
+    const fresh = pendingSyncs.filter(s => !checkDuplicate(s).isDuplicate);
+    if (!fresh.length) return showToast("No new (non-duplicate) items", "error");
+    for (const s of fresh) await confirmOne(s);
+  };
+
+  const skipAllDupes = async () => {
+    const dupes = pendingSyncs.filter(s => checkDuplicate(s).isDuplicate);
+    for (const s of dupes) await skipOne(s);
+  };
+
+  const dupeCount = pendingSyncs.filter(s => checkDuplicate(s).isDuplicate).length;
+  const newCount  = pendingSyncs.filter(s => !checkDuplicate(s).isDuplicate).length;
+
+  if (!pendingSyncs?.length) {
+    return (
+      <div style={{ padding:"32px", textAlign:"center", background:th.sur, border:`1px solid ${th.bor}`, borderRadius:14 }}>
+        <div style={{ fontSize:32, marginBottom:8 }}>📭</div>
+        <div style={{ fontSize:14, fontWeight:700, color:th.tx }}>No pending email transactions</div>
+        <div style={{ fontSize:12, color:th.tx3, marginTop:4 }}>Connect Gmail in Settings → Email Sync to auto-import</div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+      {/* Stats + batch actions */}
+      <div style={{ padding:"12px 14px", background:th.sur, border:`1px solid ${th.bor}`, borderRadius:12, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8 }}>
+        <div style={{ fontSize:12, color:th.tx2 }}>
+          <span style={{ fontWeight:700, color:"#0ca678" }}>{newCount} new</span>
+          {dupeCount > 0 && <span style={{ color:"#e67700", marginLeft:10 }}>⚠️ {dupeCount} possible duplicates</span>}
+        </div>
+        <div style={{ display:"flex", gap:6 }}>
+          {newCount > 0 && (
+            <button className="btn btn-primary" onClick={confirmAll} disabled={saving}
+              style={{ fontSize:11, padding:"5px 12px" }}>
+              ✓ Confirm All New ({newCount})
+            </button>
+          )}
+          {dupeCount > 0 && (
+            <button className="btn btn-ghost" onClick={skipAllDupes}
+              style={{ fontSize:11, padding:"5px 12px", color:"#e67700", borderColor:"#ffd43b" }}>
+              Skip Duplicates ({dupeCount})
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Individual cards */}
+      {pendingSyncs.map(sync => {
+        const txs = Array.isArray(sync.ai_raw_result) ? sync.ai_raw_result
+          : sync.ai_raw_result ? [sync.ai_raw_result] : [];
+        const { isDuplicate: isDupe, existingEntry } = checkDuplicate(sync);
+        const mainTx = txs[0] || {};
+        const fromAcc = accounts.find(a => a.id === mainTx.from_account_id);
+        const amt = Number(mainTx.amount_idr || mainTx.amount || 0);
+        const txDate = mainTx.date || sync.received_at?.slice(0,10) || "—";
+        const catDef = EXPENSE_CATEGORIES.find(c => c.id === mainTx.category_id || c.label === mainTx.suggested_category);
+
+        return (
+          <div key={sync.id} style={{
+            background: th.sur, borderRadius: 13, padding: "14px 16px",
+            border: `1px solid ${isDupe ? "#ffd43b" : th.bor}`,
+            borderLeft: `4px solid ${isDupe ? "#e67700" : "#0ca678"}`,
+          }}>
+            {/* Email source */}
+            <div style={{ fontSize:10, color:th.tx3, marginBottom:8, display:"flex", gap:8, flexWrap:"wrap" }}>
+              <span>📧 {sync.sender_email || "Gmail"}</span>
+              {sync.received_at && <span>· {sync.received_at.slice(0,10)}</span>}
+              {isDupe && <span style={{ color:"#e67700", fontWeight:700 }}>⚠️ Possible Duplicate</span>}
+            </div>
+
+            {/* Tx info */}
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
+              <div>
+                <div style={{ fontSize:13, fontWeight:700, color:th.tx }}>
+                  {mainTx.description || mainTx.merchant_name || sync.subject || "Unknown transaction"}
+                </div>
+                <div style={{ fontSize:11, color:th.tx3, marginTop:2, display:"flex", gap:8, flexWrap:"wrap" }}>
+                  {catDef && <span>{catDef.icon} {catDef.label}</span>}
+                  {mainTx.suggested_entity && mainTx.suggested_entity !== "Personal" && <span>· {mainTx.suggested_entity}</span>}
+                  {fromAcc && <span>· {fromAcc.name}</span>}
+                </div>
+              </div>
+              <div style={{ textAlign:"right" }}>
+                <div className="num" style={{ fontSize:15, fontWeight:800, color:th.rd }}>{fmtIDR(amt,true)}</div>
+                <div style={{ fontSize:10, color:th.tx3 }}>{txDate}</div>
+              </div>
+            </div>
+
+            {/* Duplicate info */}
+            {isDupe && existingEntry && (
+              <div style={{ padding:"8px 10px", background:"#fff9db", border:"1px solid #ffd43b", borderRadius:8, marginBottom:10, fontSize:11 }}>
+                <div style={{ fontWeight:700, color:"#e67700", marginBottom:2 }}>Already in ledger:</div>
+                <div style={{ color:"#7c5800" }}>
+                  {existingEntry.date} · {existingEntry.description} · {fmtIDR(existingEntry.amount_idr || existingEntry.amount || 0, true)}
+                </div>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+              {!isDupe ? (
+                <button onClick={() => confirmOne(sync)} disabled={saving} className="btn btn-primary"
+                  style={{ fontSize:11, padding:"5px 12px" }}>
+                  ✓ Confirm
+                </button>
+              ) : (
+                <>
+                  <button onClick={() => skipOne(sync)} className="btn btn-ghost"
+                    style={{ fontSize:11, padding:"5px 12px", color:"#0ca678", borderColor:"#b2f2e8" }}>
+                    ↩ Skip — Already Exists
+                  </button>
+                  <button onClick={() => confirmOne(sync)} disabled={saving} className="btn btn-ghost"
+                    style={{ fontSize:11, padding:"5px 12px", color:th.tx2, borderColor:th.bor }}>
+                    Import Anyway
+                  </button>
+                </>
+              )}
+              <button onClick={() => skipOne(sync)} className="btn btn-ghost"
+                style={{ fontSize:11, padding:"5px 12px", color:"#e03131", borderColor:"#ffc9c9" }}>
+                ✗ Skip
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
   );
 }

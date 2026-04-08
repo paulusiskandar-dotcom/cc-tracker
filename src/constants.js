@@ -130,3 +130,7 @@ export const MOBILE_TABS = ["dashboard","transactions","accounts","assets","more
 // ─── AI PROXY ─────────────────────────────────────────────────
 export const AI_PROXY    = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/ai-proxy`;
 export const AI_ANON_KEY = process.env.REACT_APP_SUPABASE_ANON_KEY || "";
+
+// ─── APP VERSION ──────────────────────────────────────────────
+export const APP_VERSION = "2.1.0";
+export const APP_BUILD   = "2026-04-08";

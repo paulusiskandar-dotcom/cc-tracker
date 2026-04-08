@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { fmtIDR, fmtCur } from "../api";
 import { ENT_COL, ENT_BG, TX_TYPE_MAP, EXPENSE_CATEGORIES } from "../constants";
 
@@ -29,6 +29,13 @@ export function injectBaseCSS() {
     ::-webkit-scrollbar{width:4px;height:4px}
     ::-webkit-scrollbar-track{background:transparent}
     ::-webkit-scrollbar-thumb{background:#d0d3e0;border-radius:4px}
+    .overlay-backdrop{align-items:flex-end}
+    .overlay-modal{border-radius:20px 20px 0 0}
+    @media(min-width:769px){
+      .overlay-backdrop{align-items:center;padding:24px 16px}
+      .overlay-modal{border-radius:20px!important;max-height:85vh!important}
+      .overlay-handle{display:none}
+    }
   `;
   document.head.appendChild(s);
 }
@@ -45,51 +52,53 @@ export function Spinner({ size = 24, color = "#3b5bdb" }) {
 }
 
 // ─── OVERLAY / MODAL ──────────────────────────────────────────
-export function Overlay({ children, onClose, th, title, sub, maxWidth = 480, noPad = false }) {
-  const ref = useRef(null);
-  useEffect(() => {
-    const fn = e => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
-    const timer = setTimeout(() => document.addEventListener("mousedown", fn), 50);
-    // Prevent body scroll while modal is open
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener("mousedown", fn);
-      document.body.style.overflow = prev;
-    };
+export function Overlay({ children, onClose, th, title, sub, maxWidth = 500, noPad = false }) {
+  const contentRef = useRef(null);
+  const handleBackdrop = useCallback(e => {
+    if (e.target === e.currentTarget) onClose();
   }, [onClose]);
 
+  useEffect(() => {
+    contentRef.current?.scrollTo({ top: 0 });
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
   return (
-    <div style={{
-      position:"fixed", inset:0, background:"rgba(0,0,0,.48)", zIndex:1000,
-      display:"flex", alignItems:"flex-end", justifyContent:"center",
-    }}>
-      <div ref={ref} style={{
-        background:th.sur, borderRadius:"18px 18px 0 0", width:"100%", maxWidth,
-        maxHeight:"90vh", display:"flex", flexDirection:"column",
-        boxShadow:th.sh2, animation:"fadeUp .2s ease both",
+    <div onClick={handleBackdrop}
+      className="overlay-backdrop"
+      style={{
+        position:"fixed", inset:0, background:"rgba(0,0,0,.48)", zIndex:1000,
+        display:"flex", justifyContent:"center",
+      }}>
+      {/* ONE scroll container — sticky header/footer work relative to this div */}
+      <div ref={contentRef} className="overlay-modal" style={{
+        background:th.sur, width:"100%", maxWidth,
+        maxHeight:"92vh", overflowY:"auto",
+        WebkitOverflowScrolling:"touch", overscrollBehavior:"contain",
+        animation:"fadeUp .2s ease both", boxShadow:th.sh2,
         paddingBottom:"env(safe-area-inset-bottom)",
       }}>
-        {/* Drag handle + sticky header */}
-        <div style={{ flexShrink:0, padding:"12px 20px 0" }}>
-          <div style={{ width:36, height:4, borderRadius:2, background:th.bor2, margin:"0 auto 12px" }}/>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start",
-            paddingBottom:12, borderBottom:`1px solid ${th.bor}` }}>
-            <div>
-              <div style={{ fontSize:16, fontWeight:800, color:th.tx, letterSpacing:"-.3px" }}>{title||""}</div>
-              {sub && <div style={{ fontSize:11, color:th.tx3, marginTop:2 }}>{sub}</div>}
-            </div>
-            <button onClick={onClose} style={{ background:"none", border:"none", cursor:"pointer",
-              color:th.tx3, fontSize:22, padding:"0 0 0 12px", lineHeight:1, flexShrink:0 }}>×</button>
-          </div>
+        {/* Drag handle — hidden on desktop via CSS */}
+        <div className="overlay-handle" style={{ padding:"12px 0 0", textAlign:"center" }}>
+          <div style={{ width:40, height:4, borderRadius:2, background:th.bor2, display:"inline-block" }}/>
         </div>
-        {/* Scrollable body */}
+        {/* Sticky header — sticky because its parent IS the scroll container */}
         <div style={{
-          flex:1, overflowY:"auto", WebkitOverflowScrolling:"touch",
-          overscrollBehavior:"contain",
-          padding: noPad ? 0 : "16px 20px 28px",
+          position:"sticky", top:0, zIndex:10, background:th.sur,
+          padding:"0 20px 12px", borderBottom:`1px solid ${th.bor}`,
+          display:"flex", justifyContent:"space-between", alignItems:"flex-start",
         }}>
+          <div>
+            <div style={{ fontSize:16, fontWeight:800, color:th.tx, letterSpacing:"-.3px" }}>{title||""}</div>
+            {sub && <div style={{ fontSize:11, color:th.tx3, marginTop:2 }}>{sub}</div>}
+          </div>
+          <button onClick={onClose} style={{ background:"none", border:"none", cursor:"pointer",
+            color:th.tx3, fontSize:22, padding:"0 0 0 12px", lineHeight:1, flexShrink:0 }}>×</button>
+        </div>
+        {/* Content */}
+        <div style={{ padding: noPad ? 0 : "16px 20px 4px" }}>
           {children}
         </div>
       </div>
@@ -117,8 +126,15 @@ export function R2({ children }) {
 // ─── BUTTON ROW ───────────────────────────────────────────────
 export function BtnRow({ onCancel, onOk, label = "Save", th, saving, disabled }) {
   return (
-    <div style={{ display:"flex", gap:8, marginTop:8 }}>
-      <button className="btn btn-ghost" onClick={onCancel} disabled={saving} style={{ flex:1, color:th.tx2, borderColor:th.bor }}>Cancel</button>
+    <div style={{
+      position:"sticky", bottom:0,
+      background:th.sur,
+      paddingTop:12, marginTop:16,
+      borderTop:`1px solid ${th.bor}`,
+      display:"flex", gap:8,
+    }}>
+      <button className="btn btn-ghost" onClick={onCancel} disabled={saving}
+        style={{ flex:1, color:th.tx2, borderColor:th.bor }}>Cancel</button>
       <button className="btn btn-primary" onClick={onOk} disabled={saving||disabled} style={{ flex:2 }}>
         {saving ? <><Spinner size={14} color="#fff"/>&nbsp;Saving…</> : label}
       </button>

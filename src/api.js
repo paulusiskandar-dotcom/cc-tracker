@@ -335,6 +335,47 @@ export const scanApi = {
   },
 };
 
+// ─── GMAIL OAUTH + SYNC ───────────────────────────────────────
+export const gmailApi = {
+  getToken: async (userId) => {
+    const { data } = await supabase.from("gmail_tokens").select("*").eq("user_id", userId).single();
+    return data || null;
+  },
+  getPending: async (userId, limit = 100) => {
+    const { data, error } = await supabase.from("email_sync")
+      .select("*").eq("user_id", userId).eq("status", "pending")
+      .order("received_at", { ascending: false }).limit(limit);
+    if (error) throw new Error(error.message);
+    return data || [];
+  },
+  updateSync: async (id, updates) => {
+    const { error } = await supabase.from("email_sync").update(updates).eq("id", id);
+    if (error) throw new Error(error.message);
+  },
+  getHistory: async (userId, limit = 50) => {
+    const { data, error } = await supabase.from("email_sync")
+      .select("*").eq("user_id", userId)
+      .in("status", ["confirmed","skipped","error"])
+      .order("created_at", { ascending: false }).limit(limit);
+    if (error) throw new Error(error.message);
+    return data || [];
+  },
+  disconnect: async (userId) => {
+    await supabase.from("gmail_tokens").delete().eq("user_id", userId);
+  },
+  triggerSync: async (userId) => {
+    const key = process.env.REACT_APP_SUPABASE_ANON_KEY || "";
+    const url = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/gmail-sync`;
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type":"application/json", "apikey":key, "Authorization":`Bearer ${key}` },
+      body: JSON.stringify({ user_id: userId }),
+    });
+    if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.error || `HTTP ${r.status}`); }
+    return await r.json();
+  },
+};
+
 // ─── AI PROXY ─────────────────────────────────────────────────
 export async function aiCall(body) {
   const proxy = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/ai-proxy`;
