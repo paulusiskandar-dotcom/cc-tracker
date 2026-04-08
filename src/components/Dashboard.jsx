@@ -1,380 +1,626 @@
 import { useMemo, useState } from "react";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
-import { ledgerApi, recurringApi, fmtIDR, ym, mlShort, daysUntil, todayStr } from "../api";
-import { EXPENSE_CATEGORIES, ENT_COL } from "../constants";
-import { StatCard, EntityTag, CatPill, ProgressBar, Empty, SectionHeader, Tag, calcNetWorth, showToast } from "./shared";
+import { ledgerApi, recurringApi } from "../api";
+import { EXPENSE_CATEGORIES } from "../constants";
+import { fmtIDR, ym, mlShort, daysUntilDate, getGreeting, todayStr, groupByDate } from "../utils";
+import { showToast, Spinner, EmptyState } from "./shared/index";
+import { GroupedTransactionList } from "./shared/TransactionRow";
 
 export default function Dashboard({
-  th, user, accounts, ledger, thisMonthLedger, categories, reminders,
-  recurTemplates, netWorth, bankAccounts, creditCards, curMonth,
-  fxRates, CURRENCIES, onRefresh, setTab,
-  pendingSyncs, setPendingSyncs,
-  setLedger, setReminders,
+  user, accounts, ledger, thisMonthLedger, categories,
+  reminders, recurTemplates, netWorth, bankAccounts,
+  creditCards, assets, receivables, liabilities,
+  curMonth, pendingSyncs, setTab,
+  setLedger, setReminders, onRefresh,
 }) {
   const [confirmingId, setConfirmingId] = useState(null);
 
+  // ─── DERIVED STATS ───────────────────────────────────────────
+  const nw = netWorth || { total: 0, bank: 0, assets: 0, receivables: 0, ccDebt: 0, liabilities: 0 };
+
+  const thisMonthIncome = useMemo(() =>
+    thisMonthLedger
+      .filter(e => e.type === "income")
+      .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0),
+  [thisMonthLedger]);
+
+  const thisMonthExpense = useMemo(() =>
+    thisMonthLedger
+      .filter(e => e.type === "expense")
+      .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0),
+  [thisMonthLedger]);
+
+  const surplus = thisMonthIncome - thisMonthExpense;
+
+  const totalCCDebt = useMemo(() =>
+    creditCards.reduce((s, c) => s + Number(c.current_balance || 0), 0),
+  [creditCards]);
+
+  const thisMonthCCSpend = useMemo(() =>
+    thisMonthLedger
+      .filter(e => e.type === "expense" && creditCards.some(c => c.id === e.from_account_id))
+      .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0),
+  [thisMonthLedger, creditCards]);
+
+  const totalAssets = useMemo(() =>
+    assets.reduce((s, a) => s + Number(a.current_value || 0), 0),
+  [assets]);
+
+  const totalReceivables = useMemo(() =>
+    receivables.reduce((s, r) => s + Number(r.outstanding_amount || 0), 0),
+  [receivables]);
+
+  // Last 6 months cash flow (for mini chart)
+  const cashFlowData = useMemo(() => {
+    const months = [];
+    const now = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const m = d.toISOString().slice(0, 7);
+      const income  = ledger.filter(e => ym(e.date) === m && e.type === "income")
+        .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
+      const expense = ledger.filter(e => ym(e.date) === m && e.type === "expense")
+        .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
+      months.push({ month: mlShort(m), income, expense, m });
+    }
+    return months;
+  }, [ledger]);
+
+  const maxCF = Math.max(...cashFlowData.flatMap(d => [d.income, d.expense]), 1);
+
+  // Recent transactions, grouped by date (last 10)
+  const recentGroups = useMemo(() => {
+    const recent = ledger.slice(0, 10);
+    return groupByDate(recent);
+  }, [ledger]);
+
+  // Next 5 pending reminders
+  const upcomingReminders = useMemo(() =>
+    [...reminders]
+      .sort((a, b) => new Date(a.due_date) - new Date(b.due_date))
+      .slice(0, 5),
+  [reminders]);
+
+  // Last sync time
+  const lastSyncMins = useMemo(() => {
+    if (!pendingSyncs?.length) return null;
+    const latest = pendingSyncs.reduce((max, s) =>
+      new Date(s.received_at) > new Date(max.received_at) ? s : max
+    );
+    return Math.floor((Date.now() - new Date(latest.received_at)) / 60000);
+  }, [pendingSyncs]);
+
+  // Month-over-month net worth change
+  const prevMonthLedger = useMemo(() => {
+    const now = new Date();
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 7);
+    return ledger.filter(e => ym(e.date) === prev);
+  }, [ledger]);
+
+  const monthlyChange = useMemo(() => {
+    const inc  = thisMonthLedger.filter(e => e.type === "income").reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
+    const exp  = thisMonthLedger.filter(e => e.type === "expense").reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
+    return inc - exp;
+  }, [thisMonthLedger]);
+
+  // ─── REMINDER ACTIONS ────────────────────────────────────────
   const confirmReminder = async (r) => {
     if (confirmingId === r.id) return;
     setConfirmingId(r.id);
     const tmpl = r.recurring_templates || {};
     try {
-      // If it's a loan collection, create a ledger entry
-      if (tmpl.type === "collect_loan" && tmpl.from_account_id) {
-        const fromAcc = accounts.find(a => a.id === tmpl.from_account_id);
-        const toAccId = tmpl.to_account_id || bankAccounts[0]?.id || "";
-        if (fromAcc) {
-          const entry = {
-            date: todayStr(),
-            description: `${tmpl.name} — confirmed`,
-            amount: Number(tmpl.amount || 0),
-            currency: tmpl.currency || "IDR",
-            amount_idr: Number(tmpl.amount || 0),
-            type: "collect_loan",
-            from_account_id: tmpl.from_account_id,
-            to_account_id: toAccId,
-            entity: tmpl.entity || "Personal",
-            notes: `Via reminder confirmation`,
-          };
-          const created = await ledgerApi.create(user.id, entry, accounts);
-          if (created) setLedger?.(p => [created, ...p]);
-          // Check if loan fully paid
-          const recAcc = accounts.find(a => a.id === tmpl.from_account_id);
-          if (recAcc && Number(recAcc.outstanding_amount || 0) - Number(tmpl.amount || 0) <= 0) {
-            showToast(`🎉 ${tmpl.name} — loan fully paid!`);
-          } else {
-            showToast(`Collected ${fmtIDR(tmpl.amount||0,true)} — ${tmpl.name}`);
-          }
-        }
-      } else {
-        showToast(`Confirmed: ${tmpl.name}`);
-      }
       await recurringApi.confirmReminder(r.id);
       setReminders?.(p => p.filter(x => x.id !== r.id));
+      showToast(`✓ Confirmed: ${tmpl.name || "Reminder"}`);
       await onRefresh?.();
-    } catch (e) { showToast(e.message, "error"); }
+    } catch (e) {
+      showToast(e.message, "error");
+    }
     setConfirmingId(null);
   };
 
   const skipReminder = async (r) => {
+    const tmpl = r.recurring_templates || {};
     try {
       await recurringApi.skipReminder(r.id);
       setReminders?.(p => p.filter(x => x.id !== r.id));
-      showToast("Skipped");
-    } catch (e) { showToast(e.message, "error"); }
-  };
-  // ── Derived stats
-  const nw = netWorth || calcNetWorth(accounts);
-
-  const thisMonthIncome = useMemo(() =>
-    thisMonthLedger.filter(e=>e.type==="income").reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0),
-  [thisMonthLedger]);
-
-  const thisMonthExpense = useMemo(() =>
-    thisMonthLedger.filter(e=>["expense"].includes(e.type)).reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0),
-  [thisMonthLedger]);
-
-  // Last 6 months cash flow
-  const cashFlowData = useMemo(() => {
-    const months = [];
-    const now = new Date();
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
-      const m = d.toISOString().slice(0,7);
-      months.push({
-        month: mlShort(m),
-        income:  ledger.filter(e=>ym(e.date)===m&&e.type==="income").reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0),
-        expense: ledger.filter(e=>ym(e.date)===m&&["expense"].includes(e.type)).reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0),
-      });
+      showToast(`Skipped: ${tmpl.name || "Reminder"}`);
+    } catch (e) {
+      showToast(e.message, "error");
     }
-    return months;
-  }, [ledger]);
+  };
 
-  // Spending by category this month
-  const catSpend = useMemo(() => {
-    const map = {};
-    thisMonthLedger.filter(e=>["expense"].includes(e.type)).forEach(e => {
-      const k = e.category_label || e.category || "Other";
-      map[k] = (map[k]||0) + Number(e.amount_idr||e.amount||0);
-    });
-    return Object.entries(map).map(([name,value])=>({name,value})).sort((a,b)=>b.value-a.value).slice(0,6);
-  }, [thisMonthLedger]);
-
-  // CC utilization
-  const ccStats = useMemo(() => creditCards.map(cc => {
-    const debt = Number(cc.current_balance||0);
-    const limit = Number(cc.card_limit||0);
-    const util = limit > 0 ? (debt/limit)*100 : 0;
-    const target = Number(cc.monthly_target||0);
-    const thisMonthSpent = thisMonthLedger
-      .filter(e=>["expense"].includes(e.type)&&e.from_account_id===cc.id)
-      .reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0);
-    return { ...cc, debt, limit, util, target, thisMonthSpent, daysUntilDue: cc.due_day ? daysUntil(cc.due_day) : null };
-  }), [creditCards, thisMonthLedger]);
-
-  const recentLedger = ledger.slice(0,5);
-  const alertCC = ccStats.filter(cc=>cc.util>80);
-  const overdueReminders = reminders.filter(r=>{
-    const due = new Date(r.due_date); const now = new Date(); return due < now;
-  });
-
-  // PIE colors
-  const PIE_COLORS = ["#3b5bdb","#0ca678","#e67700","#7048e8","#0c8599","#c2255c"];
-
+  // ─── RENDER ──────────────────────────────────────────────────
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
 
-      {/* ── HERO NET WORTH ── */}
-      <div style={{
-        background:"linear-gradient(135deg,#3b5bdb,#7048e8)",
-        borderRadius:18, padding:"24px 20px", color:"#fff", position:"relative", overflow:"hidden",
-      }}>
-        <div style={{ position:"absolute", top:-20, right:-20, width:100, height:100, background:"rgba(255,255,255,.06)", borderRadius:"50%" }}/>
-        <div style={{ position:"absolute", bottom:-30, right:40, width:60, height:60, background:"rgba(255,255,255,.04)", borderRadius:"50%" }}/>
-        <div style={{ fontSize:11, fontWeight:700, opacity:.7, textTransform:"uppercase", letterSpacing:.5, marginBottom:6 }}>Net Worth</div>
-        <div className="num" style={{ fontSize:34, fontWeight:800, letterSpacing:"-.5px", marginBottom:4 }}>{fmtIDR(nw.total)}</div>
-        <div style={{ fontSize:11, opacity:.7 }}>as of {new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}</div>
-        <div style={{ display:"flex", gap:16, marginTop:16, flexWrap:"wrap" }}>
-          {[
-            { label:"Bank", value:nw.bank,      color:"#a5f3fc" },
-            { label:"Assets", value:nw.assets,  color:"#86efac" },
-            { label:"Receivables", value:nw.receivables, color:"#fde68a" },
-            { label:"CC Debt", value:-nw.ccDebt, color:"#fca5a5" },
-            { label:"Liabilities", value:-nw.liabilities, color:"#fca5a5" },
-          ].filter(x=>x.value!==0).map(x=>(
-            <div key={x.label} style={{ fontSize:11 }}>
-              <div style={{ opacity:.6, fontWeight:600 }}>{x.label}</div>
-              <div className="num" style={{ fontWeight:700, color:x.color }}>{fmtIDR(Math.abs(x.value),true)}</div>
-            </div>
-          ))}
-        </div>
+      {/* ── GREETING ── */}
+      <div style={{ fontSize: 15, fontWeight: 600, color: "#6b7280", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>
+        {getGreeting()}, Paulus 👋
       </div>
 
-      {/* ── PENDING EMAIL SYNC BANNER ── */}
+      {/* ── GMAIL PENDING BANNER ── */}
       {pendingSyncs?.length > 0 && (
         <div style={{
-          padding:"12px 16px", background:"#e3fafc", border:"1px solid #99e9f2",
-          borderRadius:12, display:"flex", justifyContent:"space-between", alignItems:"center",
+          background:   "#fef9ec",
+          border:       "1.5px solid #fde68a",
+          borderRadius: 14,
+          padding:      "14px 16px",
+          display:      "flex",
+          alignItems:   "center",
+          justifyContent: "space-between",
+          gap:          12,
         }}>
-          <div>
-            <div style={{ fontSize:13, fontWeight:700, color:"#0c8599" }}>
-              📧 {pendingSyncs.length} transaction{pendingSyncs.length>1?"s":""} pending from email
-            </div>
-            <div style={{ fontSize:11, color:"#0c8599", opacity:.8, marginTop:2 }}>
-              {pendingSyncs[0]?.sender_email
-                ? `From: ${pendingSyncs[0].sender_email}`
-                : "Gmail sync found new transactions"}
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <span style={{ fontSize: 20 }}>📧</span>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#92400e", fontFamily: "Figtree, sans-serif" }}>
+                {pendingSyncs.length} transaction{pendingSyncs.length > 1 ? "s" : ""} from Gmail need review
+              </div>
+              <div style={{ fontSize: 11, color: "#b45309", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
+                {lastSyncMins != null
+                  ? `Last sync ${lastSyncMins < 1 ? "just now" : `${lastSyncMins} min ago`}`
+                  : "Gmail sync found new transactions"}
+              </div>
             </div>
           </div>
-          <div style={{ display:"flex", gap:8 }}>
-            <button onClick={() => setTab?.("transactions")} className="btn btn-primary"
-              style={{ fontSize:11, padding:"6px 12px", background:"#0c8599", border:"none" }}>
-              Review Now
-            </button>
-          </div>
+          <button
+            onClick={() => setTab?.("transactions")}
+            style={{
+              background:   "#d97706",
+              color:        "#fff",
+              border:       "none",
+              borderRadius: 8,
+              padding:      "7px 14px",
+              fontSize:     12,
+              fontWeight:   700,
+              cursor:       "pointer",
+              fontFamily:   "Figtree, sans-serif",
+              whiteSpace:   "nowrap",
+              flexShrink:   0,
+            }}
+          >
+            Review Now →
+          </button>
         </div>
       )}
 
-      {/* ── ALERTS ── */}
-      {(alertCC.length > 0 || overdueReminders.length > 0) && (
-        <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-          {alertCC.map(cc => (
-            <div key={cc.id} style={{ padding:"10px 14px", background:th.amBg, border:`1px solid ${th.am}44`, borderRadius:10, fontSize:12, color:th.am, display:"flex", gap:8, alignItems:"center" }}>
-              <span>⚠️</span>
-              <span><strong>{cc.name}</strong>: {cc.util.toFixed(0)}% utilized — Rp {fmtIDR(cc.debt,true)} of {fmtIDR(cc.limit,true)}</span>
-            </div>
-          ))}
-          {overdueReminders.length > 0 && (
-            <div style={{ padding:"10px 14px", background:th.rdBg, border:`1px solid ${th.rd}44`, borderRadius:10, fontSize:12, color:th.rd, display:"flex", gap:8, alignItems:"center" }}>
-              <span>🔔</span><span><strong>{overdueReminders.length}</strong> overdue recurring reminders</span>
+      {/* ── BENTO GRID ── */}
+      <div className="bento-grid" style={GRID}>
+
+        {/* [1] Net Worth — dark hero, spans 2 cols */}
+        <div className="bento-span2" style={{ ...BENTO_DARK, gridColumn: "span 2" }}>
+          <div style={DARK_LABEL}>Total Net Worth</div>
+          <div style={DARK_VALUE}>{fmtIDR(nw.total)}</div>
+          {monthlyChange !== 0 && (
+            <div style={{
+              fontSize:   12,
+              fontWeight: 600,
+              color:      monthlyChange >= 0 ? "#4ade80" : "#f87171",
+              fontFamily: "Figtree, sans-serif",
+              marginBottom: 14,
+            }}>
+              {monthlyChange >= 0 ? "↑" : "↓"} {fmtIDR(Math.abs(monthlyChange), true)} this month
             </div>
           )}
-        </div>
-      )}
-
-      {/* ── THIS MONTH STATS ── */}
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-        <StatCard label="Income This Month" value={fmtIDR(thisMonthIncome,true)} color={th.gr} icon="↓" th={th}
-          sub={`Surplus: ${fmtIDR(thisMonthIncome-thisMonthExpense,true)}`}/>
-        <StatCard label="Expenses This Month" value={fmtIDR(thisMonthExpense,true)} color={th.rd} icon="↑" th={th}
-          sub={`${thisMonthLedger.filter(e=>["expense"].includes(e.type)).length} transactions`}/>
-      </div>
-
-      {/* ── CASH FLOW CHART ── */}
-      <div style={{ background:th.sur, border:`1px solid ${th.bor}`, borderRadius:14, padding:"16px" }}>
-        <SectionHeader title="Cash Flow — Last 6 Months" th={th}/>
-        <ResponsiveContainer width="100%" height={160}>
-          <BarChart data={cashFlowData} barSize={12} barGap={2}>
-            <XAxis dataKey="month" tick={{ fontSize:10, fill:th.tx3 }} axisLine={false} tickLine={false}/>
-            <YAxis hide/>
-            <Tooltip contentStyle={{ background:th.sur, border:`1px solid ${th.bor}`, borderRadius:8, fontFamily:"'Sora',sans-serif", fontSize:11 }}
-              formatter={(v)=>fmtIDR(v,true)}/>
-            <Bar dataKey="income"  fill={th.gr} radius={4} name="Income"/>
-            <Bar dataKey="expense" fill={th.rd} radius={4} name="Expense"/>
-          </BarChart>
-        </ResponsiveContainer>
-        <div style={{ display:"flex", gap:12, justifyContent:"center", marginTop:8 }}>
-          {[["Income",th.gr],["Expense",th.rd]].map(([l,c])=>(
-            <div key={l} style={{ display:"flex", alignItems:"center", gap:4, fontSize:11, color:th.tx3 }}>
-              <div style={{ width:8, height:8, borderRadius:2, background:c }}/>
-              {l}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* ── EXPENSE BY CATEGORY + CC UTILIZATION ── */}
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-
-        {/* Category breakdown */}
-        <div style={{ background:th.sur, border:`1px solid ${th.bor}`, borderRadius:14, padding:"16px" }}>
-          <div style={{ fontSize:11, fontWeight:800, color:th.tx, marginBottom:12, textTransform:"uppercase", letterSpacing:.5 }}>Top Categories</div>
-          {catSpend.length === 0
-            ? <div style={{ fontSize:12, color:th.tx3, textAlign:"center", padding:"20px 0" }}>No expenses this month</div>
-            : <>
-                <PieChart width={100} height={100} style={{ margin:"0 auto 8px" }}>
-                  <Pie data={catSpend} cx={45} cy={45} innerRadius={28} outerRadius={46} dataKey="value" paddingAngle={2}>
-                    {catSpend.map((_,i)=><Cell key={i} fill={PIE_COLORS[i%PIE_COLORS.length]}/>)}
-                  </Pie>
-                </PieChart>
-                {catSpend.slice(0,4).map((c,i)=>(
-                  <div key={c.name} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6, fontSize:11 }}>
-                    <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                      <div style={{ width:8, height:8, borderRadius:2, background:PIE_COLORS[i%PIE_COLORS.length], flexShrink:0 }}/>
-                      <span style={{ color:th.tx2 }}>{c.name}</span>
-                    </div>
-                    <span className="num" style={{ fontWeight:700, color:th.tx }}>{fmtIDR(c.value,true)}</span>
-                  </div>
-                ))}
-              </>
-          }
-        </div>
-
-        {/* CC utilization */}
-        <div style={{ background:th.sur, border:`1px solid ${th.bor}`, borderRadius:14, padding:"16px" }}>
-          <div style={{ fontSize:11, fontWeight:800, color:th.tx, marginBottom:12, textTransform:"uppercase", letterSpacing:.5 }}>CC Utilization</div>
-          {ccStats.length === 0
-            ? <Empty icon="💳" message="No cards" th={th}/>
-            : ccStats.slice(0,3).map(cc => (
-                <div key={cc.id} style={{ marginBottom:12 }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4, fontSize:11 }}>
-                    <span style={{ fontWeight:600, color:th.tx }}>{cc.name}</span>
-                    <span className="num" style={{ color:cc.util>80?th.rd:cc.util>60?th.am:th.gr }}>{cc.util.toFixed(0)}%</span>
-                  </div>
-                  <ProgressBar value={cc.debt} max={cc.limit} color={cc.util>80?th.rd:cc.util>60?th.am:th.gr} height={5} th={th}/>
-                  <div style={{ fontSize:10, color:th.tx3, marginTop:3 }}>
-                    {fmtIDR(cc.debt,true)} / {fmtIDR(cc.limit,true)}
-                    {cc.daysUntilDue!==null && <span style={{ marginLeft:8 }}>· Due in {cc.daysUntilDue}d</span>}
-                  </div>
+          <div style={DARK_STATS}>
+            {[
+              { label: "Bank",    value: fmtIDR(nw.bank, true),        color: "#a5f3fc" },
+              { label: "Assets",  value: fmtIDR(nw.assets, true),      color: "#86efac" },
+              { label: "Recv",    value: fmtIDR(nw.receivables, true), color: "#fde68a" },
+              { label: "CC Debt", value: fmtIDR(nw.ccDebt, true),      color: "#fca5a5" },
+            ].filter(s => {
+              const n = Number(s.value.replace(/[^0-9]/g, ""));
+              return n > 0;
+            }).map(s => (
+              <div key={s.label}>
+                <div style={{ fontSize: 9, fontWeight: 600, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>
+                  {s.label}
                 </div>
-              ))
-          }
-        </div>
-      </div>
-
-      {/* ── UPCOMING REMINDERS ── */}
-      {reminders.length > 0 && (
-        <div style={{ background:th.sur, border:`1px solid ${th.bor}`, borderRadius:14, padding:"16px" }}>
-          <SectionHeader title={`Reminders (${reminders.length})`} th={th}/>
-          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-            {reminders.slice(0,5).map(r => {
-              const tmpl = r.recurring_templates || {};
-              const daysLeft = Math.ceil((new Date(r.due_date)-new Date())/86400000);
-              const isLoan = tmpl.type === "collect_loan";
-              const isIncome = tmpl.type === "income";
-              const icon = isLoan ? "💼" : isIncome ? "💰" : "💳";
-              const confirmLabel = isLoan ? "✓ Confirm Received" : isIncome ? "✓ Confirm Received" : "✓ Mark Paid";
-              const urgentColor = daysLeft <= 0 ? th.rd : daysLeft <= 3 ? th.am : th.tx3;
-              return (
-                <div key={r.id} style={{
-                  padding:"10px 12px", background:th.sur2, borderRadius:10,
-                  border:`1px solid ${daysLeft<=0?th.rd+"44":daysLeft<=3?th.am+"33":"transparent"}`,
-                }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
-                    <div>
-                      <div style={{ fontSize:12, fontWeight:700, color:th.tx }}>
-                        {icon} {tmpl.name || "Recurring"}
-                      </div>
-                      <div style={{ fontSize:11, color:urgentColor, marginTop:2 }}>
-                        {daysLeft <= 0 ? "⏰ Overdue!"
-                          : daysLeft === 0 ? "⏰ Today"
-                          : daysLeft === 1 ? "⏰ Tomorrow"
-                          : `Due in ${daysLeft} days`}
-                        {" · "}{new Date(r.due_date).toLocaleDateString("en-US",{month:"short",day:"numeric"})}
-                      </div>
-                    </div>
-                    <div className="num" style={{ fontSize:13, fontWeight:800, color:th.tx, textAlign:"right" }}>
-                      {fmtIDR(Number(tmpl.amount||0),true)}
-                      <div style={{ marginTop:2 }}><EntityTag entity={tmpl.entity||"Personal"} small/></div>
-                    </div>
-                  </div>
-                  <div style={{ display:"flex", gap:6 }}>
-                    <button onClick={() => confirmReminder(r)} disabled={confirmingId===r.id} className="btn btn-primary"
-                      style={{ fontSize:10, padding:"4px 10px", flex:1 }}>
-                      {confirmingId===r.id ? "…" : confirmLabel}
-                    </button>
-                    <button onClick={() => skipReminder(r)} className="btn btn-ghost"
-                      style={{ fontSize:10, padding:"4px 10px", color:th.tx3, borderColor:th.bor }}>
-                      Skip
-                    </button>
-                  </div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: s.color, fontFamily: "Figtree, sans-serif" }}>
+                  {s.value}
                 </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* ── RECENT TRANSACTIONS ── */}
-      <div style={{ background:th.sur, border:`1px solid ${th.bor}`, borderRadius:14, padding:"16px" }}>
-        <SectionHeader title="Recent Transactions" th={th}
-          action={<button onClick={()=>typeof setTab==="function"&&setTab("transactions")} style={{ background:"none", border:"none", color:th.ac, fontSize:12, fontWeight:700, cursor:"pointer" }}>View all →</button>}
-        />
-        {recentLedger.length === 0
-          ? <Empty icon="📋" message="No transactions yet" th={th}/>
-          : recentLedger.map(e => {
-              const isOut = ["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan"].includes(e.type);
-              const isIn  = ["income","sell_asset","reimburse_in","collect_loan"].includes(e.type);
-              const amt = Number(e.amount_idr||e.amount||0);
-              const acc = accounts.find(a=>a.id===(isOut?e.from_account_id:e.to_account_id));
-              return (
-                <div key={e.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 0", borderBottom:`1px solid ${th.bor}` }}>
-                  <div style={{ flex:1, minWidth:0 }}>
-                    <div style={{ fontSize:12, fontWeight:600, color:th.tx, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{e.description}</div>
-                    <div style={{ fontSize:10, color:th.tx3, marginTop:2 }}>
-                      {e.date} · {acc?.name||"—"}
-                      {e.entity && e.entity!=="Personal" && <span style={{ marginLeft:6 }}><EntityTag entity={e.entity} small/></span>}
-                    </div>
-                  </div>
-                  <div className="num" style={{ fontSize:13, fontWeight:800, color:isOut?th.rd:isIn?th.gr:th.ac, marginLeft:12, flexShrink:0 }}>
-                    {isOut?"−":isIn?"+":""}{fmtIDR(amt,true)}
-                  </div>
-                </div>
-              );
-            })
-        }
-      </div>
-
-      {/* ── QUICK BANK BALANCES ── */}
-      {bankAccounts.length > 0 && (
-        <div style={{ background:th.sur, border:`1px solid ${th.bor}`, borderRadius:14, padding:"16px" }}>
-          <SectionHeader title="Bank Accounts" th={th}/>
-          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-            {bankAccounts.map(b => (
-              <div key={b.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                  <div style={{ width:8, height:8, borderRadius:"50%", background:b.color||"#3b5bdb", flexShrink:0 }}/>
-                  <div>
-                    <div style={{ fontSize:12, fontWeight:600, color:th.tx }}>{b.name}</div>
-                    <div style={{ fontSize:10, color:th.tx3 }}>{b.bank_name} · {b.currency||"IDR"}</div>
-                  </div>
-                </div>
-                <div className="num" style={{ fontSize:13, fontWeight:800, color:th.tx }}>{fmtIDR(Number(b.current_balance||0),true)}</div>
               </div>
             ))}
           </div>
         </div>
-      )}
+
+        {/* [2] CC This Month */}
+        <BentoTile
+          bg="#fde8e8" icon="💳" iconBg="rgba(220,38,38,0.12)"
+          label="CC This Month"
+          value={fmtIDR(thisMonthCCSpend)}
+          sub={`Debt: ${fmtIDR(totalCCDebt, true)}`}
+          badge={creditCards.length > 0 ? `${creditCards.length} cards` : null}
+          badgeColor="#dc2626"
+        />
+
+        {/* [3] Bank Total */}
+        <BentoTile
+          bg="#e8f4fd" icon="🏦" iconBg="rgba(59,91,219,0.12)"
+          label="Bank & Cash"
+          value={fmtIDR(nw.bank)}
+          sub={`${bankAccounts.length} account${bankAccounts.length !== 1 ? "s" : ""}`}
+          badge={bankAccounts.length > 0 ? `${bankAccounts.length} accs` : null}
+          badgeColor="#3b5bdb"
+        />
+
+        {/* [4] Assets */}
+        <BentoTile
+          bg="#e8fdf0" icon="📈" iconBg="rgba(5,150,105,0.12)"
+          label="Assets"
+          value={fmtIDR(totalAssets)}
+          sub={`${assets.length} item${assets.length !== 1 ? "s" : ""}`}
+          badge={assets.length > 0 ? `${assets.length} items` : null}
+          badgeColor="#059669"
+        />
+
+        {/* [5] Receivables */}
+        <BentoTile
+          bg="#fdf6e8" icon="📋" iconBg="rgba(217,119,6,0.12)"
+          label="Receivables"
+          value={fmtIDR(totalReceivables)}
+          sub={`${receivables.length} open`}
+          badge={receivables.length > 0 ? `${receivables.length} open` : null}
+          badgeColor="#d97706"
+        />
+
+        {/* [6] Cash Flow — spans 2 cols */}
+        <div className="bento-span2" style={{ ...BENTO_WHITE, gridColumn: "span 2" }}>
+          <div style={CARD_ROW}>
+            <div style={CARD_TITLE}>Cash Flow</div>
+            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+              <LegendDot color="#059669" label="Income" />
+              <LegendDot color="#dc2626" label="Expense" />
+            </div>
+          </div>
+
+          {/* Numbers */}
+          <div style={{ display: "flex", gap: 20, marginBottom: 14 }}>
+            <div>
+              <div style={STAT_LABEL}>Income</div>
+              <div style={{ ...STAT_VAL, color: "#059669" }}>{fmtIDR(thisMonthIncome, true)}</div>
+            </div>
+            <div>
+              <div style={STAT_LABEL}>Expense</div>
+              <div style={{ ...STAT_VAL, color: "#dc2626" }}>{fmtIDR(thisMonthExpense, true)}</div>
+            </div>
+            <div>
+              <div style={STAT_LABEL}>Surplus</div>
+              <div style={{ ...STAT_VAL, color: surplus >= 0 ? "#059669" : "#dc2626" }}>
+                {surplus >= 0 ? "+" : ""}{fmtIDR(surplus, true)}
+              </div>
+            </div>
+          </div>
+
+          {/* Bar chart */}
+          <MiniBarChart data={cashFlowData} max={maxCF} />
+        </div>
+
+        {/* [7] Upcoming Reminders */}
+        <div style={BENTO_WHITE}>
+          <div style={CARD_TITLE}>Upcoming</div>
+          {upcomingReminders.length === 0 ? (
+            <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 8 }}>
+              No upcoming reminders
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+              {upcomingReminders.map(r => {
+                const tmpl      = r.recurring_templates || {};
+                const daysLeft  = Math.ceil(daysUntilDate(r.due_date));
+                const isOverdue = daysLeft <= 0;
+                const isUrgent  = daysLeft <= 3;
+                const dotColor  = isOverdue ? "#dc2626" : isUrgent ? "#d97706" : "#059669";
+                return (
+                  <div key={r.id} style={{
+                    display:   "flex",
+                    alignItems: "flex-start",
+                    gap:       8,
+                    padding:   "8px 10px",
+                    background: isOverdue ? "#fff1f2" : isUrgent ? "#fffbeb" : "#f9fafb",
+                    borderRadius: 10,
+                    border:    `1px solid ${isOverdue ? "#fecaca" : isUrgent ? "#fde68a" : "#f3f4f6"}`,
+                  }}>
+                    <div style={{
+                      width: 8, height: 8, borderRadius: "50%",
+                      background: dotColor, flexShrink: 0, marginTop: 4,
+                    }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        fontSize: 12, fontWeight: 600, color: "#111827",
+                        fontFamily: "Figtree, sans-serif",
+                        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                      }}>
+                        {tmpl.name || "Reminder"}
+                      </div>
+                      <div style={{ fontSize: 10, color: dotColor, fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
+                        {isOverdue ? "Overdue!" : daysLeft === 0 ? "Today" : daysLeft === 1 ? "Tomorrow" : `${daysLeft}d`}
+                        {" · "}{fmtIDR(Number(tmpl.amount || 0), true)}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+                      <button
+                        onClick={() => confirmReminder(r)}
+                        disabled={confirmingId === r.id}
+                        style={REMIND_BTN_PRIMARY}
+                      >
+                        {confirmingId === r.id ? "…" : "✓"}
+                      </button>
+                      <button onClick={() => skipReminder(r)} style={REMIND_BTN_GHOST}>
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── RECENT TRANSACTIONS ── */}
+      <div style={{ ...BENTO_WHITE, marginTop: 4 }}>
+        <div style={CARD_ROW}>
+          <div style={CARD_TITLE}>Recent Transactions</div>
+          <button
+            onClick={() => setTab?.("transactions")}
+            style={LINK_BTN}
+          >
+            View all →
+          </button>
+        </div>
+
+        {recentGroups.length === 0 ? (
+          <EmptyState icon="📋" message="No transactions yet" />
+        ) : (
+          <GroupedTransactionList
+            groups={recentGroups}
+            accounts={accounts}
+            compact
+          />
+        )}
+      </div>
 
     </div>
   );
 }
+
+// ─── BENTO TILE ───────────────────────────────────────────────
+function BentoTile({ bg, icon, iconBg, label, value, sub, badge, badgeColor }) {
+  return (
+    <div style={{ ...BENTO_BASE, background: bg }}>
+      {/* Badge */}
+      {badge && (
+        <div style={{
+          position:     "absolute", top: 12, right: 12,
+          fontSize:     9, fontWeight: 700,
+          fontFamily:   "Figtree, sans-serif",
+          background:   badgeColor + "20",
+          color:        badgeColor,
+          padding:      "2px 6px",
+          borderRadius: 20,
+        }}>
+          {badge}
+        </div>
+      )}
+      {/* Icon */}
+      <div style={{
+        width: 34, height: 34, borderRadius: 10,
+        background: iconBg || "rgba(0,0,0,0.07)",
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 16, marginBottom: 10,
+      }}>
+        {icon}
+      </div>
+      {/* Label */}
+      <div style={{
+        fontSize: 10, fontWeight: 700, color: "#9ca3af",
+        textTransform: "uppercase", letterSpacing: "0.5px",
+        fontFamily: "Figtree, sans-serif", marginBottom: 4,
+      }}>
+        {label}
+      </div>
+      {/* Value */}
+      <div style={{
+        fontSize: 16, fontWeight: 800, color: "#111827",
+        fontFamily: "Figtree, sans-serif", lineHeight: 1.2,
+        marginBottom: sub ? 4 : 0,
+      }}>
+        {value}
+      </div>
+      {/* Sub */}
+      {sub && (
+        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+          {sub}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── MINI BAR CHART ──────────────────────────────────────────
+function MiniBarChart({ data, max }) {
+  const BAR_H = 72;
+  const BAR_W = 10;
+  const GAP   = 4;
+  const GROUP = BAR_W * 2 + GAP + 8; // pair width + group gap
+
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: BAR_H + 20 }}>
+      {data.map((d, i) => {
+        const incH = max > 0 ? Math.round((d.income  / max) * BAR_H) : 0;
+        const expH = max > 0 ? Math.round((d.expense / max) * BAR_H) : 0;
+        const isCurrent = i === data.length - 1;
+        return (
+          <div key={d.m} style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1 }}>
+            {/* Bars */}
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: BAR_H }}>
+              <div style={{
+                width:        BAR_W,
+                height:       Math.max(incH, 2),
+                borderRadius: "3px 3px 0 0",
+                background:   isCurrent ? "#059669" : "#bbf7d0",
+                transition:   "height 0.3s",
+                flexShrink:   0,
+              }} />
+              <div style={{
+                width:        BAR_W,
+                height:       Math.max(expH, 2),
+                borderRadius: "3px 3px 0 0",
+                background:   isCurrent ? "#dc2626" : "#fecaca",
+                transition:   "height 0.3s",
+                flexShrink:   0,
+              }} />
+            </div>
+            {/* Month label */}
+            <div style={{
+              fontSize:   9,
+              fontWeight: isCurrent ? 700 : 500,
+              color:      isCurrent ? "#111827" : "#9ca3af",
+              fontFamily: "Figtree, sans-serif",
+              marginTop:  4,
+              whiteSpace: "nowrap",
+            }}>
+              {d.month}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── LEGEND DOT ───────────────────────────────────────────────
+function LegendDot({ color, label }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+      <div style={{ width: 8, height: 8, borderRadius: 2, background: color }} />
+      <span style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>{label}</span>
+    </div>
+  );
+}
+
+// ─── STYLES ───────────────────────────────────────────────────
+const GRID = {
+  display:             "grid",
+  gridTemplateColumns: "repeat(3, 1fr)",
+  gap:                 10,
+};
+
+const BENTO_BASE = {
+  borderRadius: 16,
+  padding:      "16px 16px 14px",
+  position:     "relative",
+  overflow:     "hidden",
+};
+
+const BENTO_WHITE = {
+  ...BENTO_BASE,
+  background: "#ffffff",
+};
+
+const BENTO_DARK = {
+  ...BENTO_BASE,
+  background: "#111827",
+};
+
+const DARK_LABEL = {
+  fontSize:      10,
+  fontWeight:    600,
+  color:         "rgba(255,255,255,0.45)",
+  textTransform: "uppercase",
+  letterSpacing: "0.5px",
+  fontFamily:    "Figtree, sans-serif",
+  marginBottom:  6,
+};
+
+const DARK_VALUE = {
+  fontSize:     28,
+  fontWeight:   900,
+  color:        "#ffffff",
+  fontFamily:   "Figtree, sans-serif",
+  lineHeight:   1.1,
+  marginBottom: 6,
+};
+
+const DARK_STATS = {
+  display:             "grid",
+  gridTemplateColumns: "repeat(4, 1fr)",
+  gap:                 8,
+  paddingTop:          12,
+  borderTop:           "1px solid rgba(255,255,255,0.08)",
+};
+
+const CARD_TITLE = {
+  fontSize:   13,
+  fontWeight: 700,
+  color:      "#111827",
+  fontFamily: "Figtree, sans-serif",
+};
+
+const CARD_ROW = {
+  display:        "flex",
+  justifyContent: "space-between",
+  alignItems:     "center",
+  marginBottom:   12,
+};
+
+const STAT_LABEL = {
+  fontSize:      9,
+  fontWeight:    700,
+  color:         "#9ca3af",
+  textTransform: "uppercase",
+  letterSpacing: "0.4px",
+  fontFamily:    "Figtree, sans-serif",
+  marginBottom:  2,
+};
+
+const STAT_VAL = {
+  fontSize:   13,
+  fontWeight: 800,
+  fontFamily: "Figtree, sans-serif",
+};
+
+const LINK_BTN = {
+  background:  "none",
+  border:      "none",
+  color:       "#3b5bdb",
+  fontSize:    12,
+  fontWeight:  700,
+  cursor:      "pointer",
+  fontFamily:  "Figtree, sans-serif",
+  padding:     0,
+};
+
+const REMIND_BTN_PRIMARY = {
+  width:        26,
+  height:       26,
+  borderRadius: 7,
+  border:       "none",
+  background:   "#dcfce7",
+  color:        "#059669",
+  fontSize:     12,
+  fontWeight:   700,
+  cursor:       "pointer",
+  fontFamily:   "Figtree, sans-serif",
+  display:      "flex",
+  alignItems:   "center",
+  justifyContent: "center",
+  flexShrink:   0,
+};
+
+const REMIND_BTN_GHOST = {
+  width:        26,
+  height:       26,
+  borderRadius: 7,
+  border:       "1px solid #e5e7eb",
+  background:   "#f9fafb",
+  color:        "#9ca3af",
+  fontSize:     11,
+  cursor:       "pointer",
+  fontFamily:   "Figtree, sans-serif",
+  display:      "flex",
+  alignItems:   "center",
+  justifyContent: "center",
+  flexShrink:   0,
+};

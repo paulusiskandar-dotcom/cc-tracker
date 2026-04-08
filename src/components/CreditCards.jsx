@@ -1,210 +1,322 @@
 import { useState, useMemo } from "react";
-import { accountsApi, ledgerApi, installmentsApi, recurringApi, fmtIDR, todayStr, ym, daysUntil } from "../api";
-import { ENTITIES, EXPENSE_CATEGORIES } from "../constants";
-import { Overlay, F, R2, BtnRow, SubTabs, Input, Select, Tag, EntityTag, CatPill,
-         ProgressBar, Empty, SectionHeader, showToast, confirmDelete, MonthSelect } from "./shared";
+import { ledgerApi, installmentsApi, recurringApi } from "../api";
+import { ENTITIES } from "../constants";
+import { fmtIDR, todayStr, ym, daysUntil } from "../utils";
+import Modal, { ConfirmModal } from "./shared/Modal";
+import Button from "./shared/Button";
+import Input, { Field, AmountInput, FormRow } from "./shared/Input";
+import Select from "./shared/Select";
+import { EmptyState, showToast } from "./shared/Card";
 
 const SUBTABS = [
-  { id:"overview",     label:"Overview" },
-  { id:"transactions", label:"Transactions" },
-  { id:"installments", label:"Installments" },
-  { id:"recurring",    label:"Recurring" },
+  { id: "overview",     label: "Overview" },
+  { id: "transactions", label: "Transactions" },
+  { id: "installments", label: "Installments" },
+  { id: "recurring",    label: "Recurring" },
 ];
 
+// ─── NETWORK BADGE TEXT ──────────────────────────────────────
+const NETWORK_STYLE = {
+  Visa:       { text: "VISA",       style: { fontStyle: "italic", fontWeight: 800, letterSpacing: 1 } },
+  Mastercard: { text: "MC",         style: { fontWeight: 900 } },
+  JCB:        { text: "JCB",        style: { fontWeight: 800 } },
+  Amex:       { text: "AMEX",       style: { fontWeight: 800, letterSpacing: 1 } },
+  UnionPay:   { text: "UnionPay",   style: { fontWeight: 700, fontSize: 9 } },
+};
+
+// Derive a darker accent from hex color
+function darkenHex(hex, amount = 40) {
+  const n = parseInt(hex.replace("#", ""), 16);
+  const r = Math.max(0, (n >> 16) - amount);
+  const g = Math.max(0, ((n >> 8) & 0xff) - amount);
+  const b = Math.max(0, (n & 0xff) - amount);
+  return `#${r.toString(16).padStart(2,"0")}${g.toString(16).padStart(2,"0")}${b.toString(16).padStart(2,"0")}`;
+}
+
 export default function CreditCards({
-  th, user, accounts, ledger, thisMonthLedger, categories, installments,
-  recurTemplates, fxRates, CURRENCIES, onRefresh,
+  user, accounts, ledger, thisMonthLedger, categories,
+  installments, recurTemplates,
   setAccounts, setLedger, setInstallments, setRecurTemplates,
+  onRefresh, bankAccounts: propBankAccounts,
 }) {
-  const [subTab, setSubTab]         = useState("overview");
+  const [subTab,       setSubTab]       = useState("overview");
   const [selectedCard, setSelectedCard] = useState(null);
-  const [filterMonth, setFilterMonth]   = useState(ym(todayStr()));
-  const [showPayCC, setShowPayCC]       = useState(false);
-  const [payCC, setPayCC]               = useState({ cardId:"", bankId:"", amount:"", notes:"" });
-  const [showInstForm, setShowInstForm] = useState(false);
-  const [instForm, setInstForm]         = useState({ account_id:"", description:"", total_amount:"", months:12, monthly_amount:"", start_date:todayStr(), entity:"Personal", currency:"IDR" });
-  const [saving, setSaving]             = useState(false);
+  const [filterMonth,  setFilterMonth]  = useState(ym(todayStr()));
+  const [modal,        setModal]        = useState(null);
+  const [saving,       setSaving]       = useState(false);
+  const [deleteInstId, setDeleteInstId] = useState(null);
 
-  const creditCards = useMemo(() => accounts.filter(a=>a.type==="credit_card"), [accounts]);
-  const bankAccounts = useMemo(() => accounts.filter(a=>a.type==="bank"), [accounts]);
+  // Pay CC form
+  const [payForm, setPayForm] = useState({
+    cardId: "", bankId: "", amount: "", admin_fee: "", materai: "", notes: "",
+  });
+  const setP = (k, v) => setPayForm(f => ({ ...f, [k]: v }));
 
-  // CC stats
+  // Installment form
+  const [instForm, setInstForm] = useState({
+    account_id: "", description: "", total_amount: "", months: 12,
+    monthly_amount: "", start_date: todayStr(), entity: "Personal",
+  });
+  const setI = (k, v) => setInstForm(f => ({ ...f, [k]: v }));
+
+  const creditCards  = useMemo(() => accounts.filter(a => a.type === "credit_card"), [accounts]);
+  const bankAccounts = useMemo(() =>
+    propBankAccounts || accounts.filter(a => a.type === "bank"),
+  [propBankAccounts, accounts]);
+
+  // ── Card stats ──
   const cardStats = useMemo(() => creditCards.map(cc => {
-    const debt = Number(cc.current_balance||0);
-    const limit = Number(cc.card_limit||0);
-    const util = limit>0?(debt/limit)*100:0;
-    const target = Number(cc.monthly_target||0);
-    const monthLedger = ledger.filter(e=>ym(e.date)===filterMonth&&e.from_account_id===cc.id&&["expense"].includes(e.type));
-    const monthSpent = monthLedger.reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0);
-    const dueIn = cc.due_day ? daysUntil(cc.due_day) : null;
+    const debt   = Number(cc.current_balance || 0);
+    const limit  = Number(cc.card_limit || 0);
+    const avail  = Math.max(0, limit - debt);
+    const util   = limit > 0 ? (debt / limit) * 100 : 0;
+    const target = Number(cc.monthly_target || 0);
+    const monthSpent = ledger
+      .filter(e => ym(e.date) === filterMonth && e.from_account_id === cc.id && e.type === "expense")
+      .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
+    const dueIn  = cc.due_day       ? daysUntil(cc.due_day)       : null;
     const stmtIn = cc.statement_day ? daysUntil(cc.statement_day) : null;
-    return { ...cc, debt, limit, util, target, monthSpent, dueIn, stmtIn };
+    return { ...cc, debt, limit, avail, util, target, monthSpent, dueIn, stmtIn };
   }), [creditCards, ledger, filterMonth]);
 
-  const activeCard = selectedCard ? cardStats.find(c=>c.id===selectedCard) : null;
+  const ccLedger = useMemo(() =>
+    ledger.filter(e => {
+      const isCC   = creditCards.some(c => c.id === e.from_account_id || c.id === e.to_account_id);
+      const inMon  = !filterMonth || ym(e.date) === filterMonth;
+      const forCard= !selectedCard || e.from_account_id === selectedCard || e.to_account_id === selectedCard;
+      return isCC && inMon && forCard;
+    }),
+  [ledger, creditCards, filterMonth, selectedCard]);
 
+  const ccInstallments = useMemo(() =>
+    installments.filter(i => creditCards.some(c => c.id === i.account_id)),
+  [installments, creditCards]);
+
+  const ccRecurring = useMemo(() =>
+    recurTemplates.filter(r => creditCards.some(c => c.id === r.from_account_id)),
+  [recurTemplates, creditCards]);
+
+  // ── Pay CC ──
   const payBill = async () => {
-    if (!payCC.cardId || !payCC.bankId || !payCC.amount) return showToast("Fill all fields","error");
+    if (!payForm.cardId || !payForm.bankId || !payForm.amount) {
+      showToast("Select card, bank, and amount", "error"); return;
+    }
     setSaving(true);
     try {
-      const amt = Number(payCC.amount);
-      const cc  = accounts.find(a=>a.id===payCC.cardId);
-      const bank= accounts.find(a=>a.id===payCC.bankId);
+      const amt  = Number(payForm.amount);
+      const cc   = accounts.find(a => a.id === payForm.cardId);
+      const total = amt + Number(payForm.admin_fee || 0) + Number(payForm.materai || 0);
       const entry = {
-        date:todayStr(), description:`Pay ${cc?.name||"CC"} bill`,
-        amount:amt, currency:"IDR", amount_idr:amt,
-        type:"pay_cc", from_account_id:payCC.bankId, to_account_id:payCC.cardId,
-        entity:"Personal", notes:payCC.notes||"",
+        date:            todayStr(),
+        description:     `Pay ${cc?.name || "CC"} bill`,
+        amount:          total,
+        currency:        "IDR",
+        amount_idr:      total,
+        type:            "pay_cc",
+        from_account_id: payForm.bankId,
+        to_account_id:   payForm.cardId,
+        entity:          "Personal",
+        notes:           payForm.notes || "",
       };
-      const r = await ledgerApi.create(user.id, entry, accounts);
-      if (r) setLedger(p=>[r,...p]);
+      const created = await ledgerApi.create(user.id, entry, accounts);
+      if (created) setLedger(p => [created, ...p]);
       await onRefresh();
-      showToast(`Paid ${fmtIDR(amt,true)} to ${cc?.name}`);
-      setShowPayCC(false); setPayCC({cardId:"",bankId:"",amount:"",notes:""});
-    } catch(e) { showToast(e.message,"error"); }
+      showToast(`Paid ${fmtIDR(amt)} to ${cc?.name}`);
+      setModal(null);
+      setPayForm({ cardId: "", bankId: "", amount: "", admin_fee: "", materai: "", notes: "" });
+    } catch (e) { showToast(e.message, "error"); }
     setSaving(false);
   };
 
+  // ── Add installment ──
   const saveInst = async () => {
-    if (!instForm.account_id||!instForm.description||!instForm.total_amount) return showToast("Fill required fields","error");
+    if (!instForm.account_id || !instForm.description || !instForm.total_amount) {
+      showToast("Fill required fields", "error"); return;
+    }
     setSaving(true);
     try {
-      const monthlyAmt = instForm.monthly_amount||Math.round(Number(instForm.total_amount)/Number(instForm.months||12));
-      const d = { ...instForm, monthly_amount:monthlyAmt, total_amount:Number(instForm.total_amount), months:Number(instForm.months), paid_months:0 };
-      const r = await installmentsApi.create(user.id, d);
-      if (r) setInstallments(p=>[r,...p]);
-      showToast("Installment added");
-      setShowInstForm(false);
-    } catch(e) { showToast(e.message,"error"); }
+      const monthlyAmt = instForm.monthly_amount
+        || Math.round(Number(instForm.total_amount) / Number(instForm.months || 12));
+      const d = {
+        ...instForm,
+        monthly_amount: Number(monthlyAmt),
+        total_amount:   Number(instForm.total_amount),
+        months:         Number(instForm.months),
+        paid_months:    0,
+      };
+      const created = await installmentsApi.create(user.id, d);
+      if (created) setInstallments(p => [created, ...p]);
+      showToast("Installment plan added");
+      setModal(null);
+    } catch (e) { showToast(e.message, "error"); }
     setSaving(false);
   };
 
+  // ── Mark installment month paid ──
   const markInstPaid = async (inst) => {
     try {
-      const newPaid = Math.min(inst.paid_months+1, inst.months);
-      await installmentsApi.update(inst.id,{paid_months:newPaid});
-      setInstallments(p=>p.map(x=>x.id===inst.id?{...x,paid_months:newPaid}:x));
-      // Create ledger entry
-      const cc = accounts.find(a=>a.id===inst.account_id);
-      const entry = { date:todayStr(), description:`${inst.description} — Month ${newPaid}/${inst.months}`, amount:Number(inst.monthly_amount), currency:inst.currency||"IDR", amount_idr:Number(inst.monthly_amount), type:"cc_installment", from_account_id:inst.account_id, entity:inst.entity||"Personal", notes:"CC Installment" };
-      const r = await ledgerApi.create(user.id, entry, accounts);
-      if (r) setLedger(p=>[r,...p]);
+      const newPaid = Math.min(inst.paid_months + 1, inst.months);
+      await installmentsApi.update(inst.id, { paid_months: newPaid });
+      setInstallments(p => p.map(x => x.id === inst.id ? { ...x, paid_months: newPaid } : x));
+      const entry = {
+        date:            todayStr(),
+        description:     `${inst.description} — Month ${newPaid}/${inst.months}`,
+        amount:          Number(inst.monthly_amount),
+        currency:        inst.currency || "IDR",
+        amount_idr:      Number(inst.monthly_amount),
+        type:            "cc_installment",
+        from_account_id: inst.account_id,
+        entity:          inst.entity || "Personal",
+        notes:           "CC Installment",
+      };
+      const created = await ledgerApi.create(user.id, entry, accounts);
+      if (created) setLedger(p => [created, ...p]);
       showToast(`Month ${newPaid} marked paid`);
-    } catch(e) { showToast(e.message,"error"); }
+    } catch (e) { showToast(e.message, "error"); }
   };
 
-  const delInst = async (id) => {
-    if (!window.confirm("Delete installment?")) return;
-    await installmentsApi.delete(id);
-    setInstallments(p=>p.filter(x=>x.id!==id));
-    showToast("Deleted");
+  const deleteInstallment = async () => {
+    if (!deleteInstId) return;
+    try {
+      await installmentsApi.delete(deleteInstId);
+      setInstallments(p => p.filter(x => x.id !== deleteInstId));
+      showToast("Deleted");
+    } catch (e) { showToast(e.message, "error"); }
+    setDeleteInstId(null);
   };
 
-  // Filter ledger for CC transactions
-  const ccLedger = useMemo(()=>ledger.filter(e=>{
-    const isCC = creditCards.some(c=>c.id===e.from_account_id);
-    const inMonth = filterMonth==="all"||ym(e.date)===filterMonth;
-    const forCard = !selectedCard||(e.from_account_id===selectedCard||e.to_account_id===selectedCard);
-    return isCC&&inMonth&&forCard;
-  }),[ledger,creditCards,filterMonth,selectedCard]);
+  // ── Toggle recurring active ──
+  const toggleRecurring = async (r) => {
+    try {
+      const updated = await recurringApi.updateTemplate(r.id, { active: !r.active });
+      setRecurTemplates(p => p.map(x => x.id === r.id ? updated : x));
+      showToast(updated.active ? "Activated" : "Paused");
+    } catch (e) { showToast(e.message, "error"); }
+  };
 
-  const ccInstallments = useMemo(()=>installments.filter(i=>creditCards.some(c=>c.id===i.account_id)),[installments,creditCards]);
-  const ccRecurring = useMemo(()=>recurTemplates.filter(r=>creditCards.some(c=>c.id===r.from_account_id)),[recurTemplates,creditCards]);
+  // ── Apply recurring now ──
+  const applyRecurringNow = async (r) => {
+    try {
+      const cc = accounts.find(a => a.id === r.from_account_id);
+      const entry = {
+        date:            todayStr(),
+        description:     r.name,
+        amount:          Number(r.amount),
+        currency:        r.currency || "IDR",
+        amount_idr:      Number(r.amount),
+        type:            r.type || "expense",
+        from_account_id: r.from_account_id || "",
+        to_account_id:   r.to_account_id   || "",
+        entity:          r.entity          || "Personal",
+        notes:           `Applied from recurring template`,
+      };
+      const created = await ledgerApi.create(user.id, entry, accounts);
+      if (created) setLedger(p => [created, ...p]);
+      await onRefresh();
+      showToast(`Applied: ${r.name}`);
+    } catch (e) { showToast(e.message, "error"); }
+  };
 
+  // ─── RENDER ────────────────────────────────────────────────
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-        <div style={{ fontSize:20, fontWeight:800, color:th.tx }}>Credit Cards</div>
-        <div style={{ display:"flex", gap:6 }}>
-          <button className="btn btn-ghost" onClick={()=>setShowInstForm(true)} style={{ fontSize:12, padding:"8px 12px", color:th.tx2, borderColor:th.bor }}>+ Installment</button>
-          <button className="btn btn-primary" onClick={()=>setShowPayCC(true)}>💳 Pay Bill</button>
-        </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+      {/* ── HEADER ── */}
+      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <Button variant="secondary" size="sm" onClick={() => { setInstForm({ account_id: "", description: "", total_amount: "", months: 12, monthly_amount: "", start_date: todayStr(), entity: "Personal" }); setModal("inst"); }}>
+          + Installment
+        </Button>
+        <Button size="sm" onClick={() => { setPayForm({ cardId: "", bankId: "", amount: "", admin_fee: "", materai: "", notes: "" }); setModal("pay"); }}>
+          💳 Pay Bill
+        </Button>
       </div>
 
-      <SubTabs tabs={SUBTABS} active={subTab} onChange={setSubTab} th={th}/>
+      {/* ── SUBTABS ── */}
+      <div style={{ display: "flex", gap: 4 }}>
+        {SUBTABS.map(t => {
+          const active = subTab === t.id;
+          return (
+            <button key={t.id} onClick={() => setSubTab(t.id)} style={{
+              height: 30, padding: "0 12px", borderRadius: 20,
+              border: `1.5px solid ${active ? "#111827" : "#e5e7eb"}`,
+              background: active ? "#111827" : "#fff",
+              color: active ? "#fff" : "#6b7280",
+              fontSize: 12, fontWeight: active ? 700 : 500,
+              cursor: "pointer", fontFamily: "Figtree, sans-serif",
+            }}>
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
 
-      {/* ── OVERVIEW ── */}
-      {subTab==="overview" && (
-        <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-          {creditCards.length===0
-            ? <Empty icon="💳" message="No credit cards. Add one from Accounts." th={th}/>
-            : cardStats.map(cc=>(
-                <div key={cc.id} style={{ background:th.sur, border:`1px solid ${th.bor}`, borderRadius:16, overflow:"hidden" }}>
-                  {/* Card visual */}
-                  <div style={{ background:`linear-gradient(135deg,${cc.color||"#3b5bdb"},${cc.accent||"#7048e8"})`, padding:"18px 20px", color:"#fff", position:"relative", overflow:"hidden" }}>
-                    <div style={{ position:"absolute", top:-15, right:-15, width:80, height:80, background:"rgba(255,255,255,.08)", borderRadius:"50%" }}/>
-                    <div style={{ fontSize:10, opacity:.7, fontWeight:600, marginBottom:8 }}>{cc.bank_name||"Card"} · {cc.network||"Visa"}</div>
-                    <div style={{ fontSize:18, fontWeight:800, letterSpacing:"3px" }}>···· ···· ···· {cc.last4||"????"}  </div>
-                    <div style={{ marginTop:10, display:"flex", justifyContent:"space-between", alignItems:"flex-end" }}>
-                      <div>
-                        <div style={{ fontSize:10, opacity:.7 }}>Current Debt</div>
-                        <div className="num" style={{ fontSize:22, fontWeight:800 }}>{fmtIDR(cc.debt,true)}</div>
-                      </div>
-                      <div style={{ textAlign:"right" }}>
-                        <div style={{ fontSize:10, opacity:.7 }}>Limit</div>
-                        <div className="num" style={{ fontSize:14, fontWeight:700 }}>{fmtIDR(cc.limit,true)}</div>
-                      </div>
-                    </div>
-                  </div>
-                  {/* Stats */}
-                  <div style={{ padding:"14px 16px" }}>
-                    <ProgressBar value={cc.debt} max={cc.limit||1} color={cc.util>80?"#e03131":cc.util>60?"#e67700":"#0ca678"} height={6} th={th}/>
-                    <div style={{ display:"flex", justifyContent:"space-between", marginTop:6, fontSize:11, color:th.tx3 }}>
-                      <span>{cc.util.toFixed(0)}% utilized</span>
-                      {cc.dueIn!==null&&<span style={{ color:cc.dueIn<=3?"#e03131":cc.dueIn<=7?"#e67700":th.tx3 }}>Due in {cc.dueIn}d</span>}
-                      {cc.stmtIn!==null&&<span>Statement in {cc.stmtIn}d</span>}
-                    </div>
-                    {cc.target>0&&(
-                      <div style={{ marginTop:10 }}>
-                        <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, marginBottom:4 }}>
-                          <span style={{ color:th.tx3 }}>Monthly Spend vs Target</span>
-                          <span className="num" style={{ fontWeight:700, color:cc.monthSpent>cc.target?"#e03131":"#0ca678" }}>
-                            {fmtIDR(cc.monthSpent,true)} / {fmtIDR(cc.target,true)}
-                          </span>
-                        </div>
-                        <ProgressBar value={cc.monthSpent} max={cc.target} color={cc.monthSpent>cc.target?"#e03131":"#0ca678"} height={5} th={th}/>
-                      </div>
-                    )}
-                    <div style={{ display:"flex", gap:8, marginTop:12 }}>
-                      <button onClick={()=>{setPayCC(p=>({...p,cardId:cc.id}));setShowPayCC(true);}} className="btn btn-primary" style={{ flex:1, fontSize:12 }}>💳 Pay Bill</button>
-                      <button onClick={()=>{setSelectedCard(selectedCard===cc.id?null:cc.id);setSubTab("transactions");}} style={{ border:`1px solid ${th.bor}`, background:th.sur2, color:th.tx2, borderRadius:9, padding:"8px 14px", cursor:"pointer", fontSize:12, fontWeight:700, fontFamily:"'Sora',sans-serif" }}>📋 Transactions</button>
-                    </div>
-                  </div>
-                </div>
-              ))
-          }
-        </div>
+      {/* ══ OVERVIEW ══ */}
+      {subTab === "overview" && (
+        creditCards.length === 0
+          ? <EmptyState icon="💳" title="No credit cards" message="Add a credit card from Accounts." />
+          : <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {cardStats.map(cc => <CCCard key={cc.id} cc={cc} onPay={() => { setPayForm(f => ({ ...f, cardId: cc.id, amount: cc.debt })); setModal("pay"); }} onTransactions={() => { setSelectedCard(cc.id); setSubTab("transactions"); }} />)}
+            </div>
       )}
 
-      {/* ── TRANSACTIONS ── */}
-      {subTab==="transactions" && (
-        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-            <MonthSelect value={filterMonth} onChange={setFilterMonth} th={th}/>
-            <Select value={selectedCard||""} onChange={e=>setSelectedCard(e.target.value||null)} th={th} style={{ flex:1 }}>
+      {/* ══ TRANSACTIONS ══ */}
+      {subTab === "transactions" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {/* Filters */}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <select value={filterMonth} onChange={e => setFilterMonth(e.target.value)} style={FILTER_SEL}>
+              <option value="">All months</option>
+              {Array.from({ length: 12 }).map((_, i) => {
+                const d = new Date(); d.setMonth(d.getMonth() - i);
+                const m = d.toISOString().slice(0, 7);
+                return <option key={m} value={m}>{d.toLocaleDateString("en-US", { month: "short", year: "numeric" })}</option>;
+              })}
+            </select>
+            <select value={selectedCard || ""} onChange={e => setSelectedCard(e.target.value || null)} style={FILTER_SEL}>
               <option value="">All Cards</option>
-              {creditCards.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-            </Select>
+              {creditCards.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
           </div>
-          <div style={{ fontSize:12, color:th.tx3 }}>{ccLedger.length} transactions · Total: {fmtIDR(ccLedger.reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0),true)}</div>
-          {ccLedger.length===0
-            ? <Empty icon="📋" message="No CC transactions" th={th}/>
-            : ccLedger.map(e=>{
-                const cc = creditCards.find(c=>c.id===e.from_account_id);
-                const cat = categories.find(c=>c.id===e.category_id);
-                return(
-                  <div key={e.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 14px", background:th.sur, border:`1px solid ${th.bor}`, borderRadius:11 }}>
-                    <div>
-                      <div style={{ fontSize:13, fontWeight:700, color:th.tx }}>{e.description}</div>
-                      <div style={{ fontSize:11, color:th.tx3, marginTop:2, display:"flex", gap:8, flexWrap:"wrap" }}>
-                        <span>{e.date}</span>
-                        {cc&&<span style={{ color:cc.color||th.ac }}>····{cc.last4}</span>}
-                        {(cat||e.category_label)&&<CatPill category={cat?.name||e.category_label} small th={th}/>}
-                        {e.entity&&e.entity!=="Personal"&&<EntityTag entity={e.entity} small/>}
-                        {e.is_reimburse&&<Tag bg={th.amBg} color={th.am} small>↗ Reimburse</Tag>}
+          <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+            {ccLedger.length} transactions · {fmtIDR(ccLedger.reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0), true)}
+          </div>
+          {ccLedger.length === 0
+            ? <EmptyState icon="📋" message="No CC transactions found" />
+            : ccLedger.map(e => {
+                const cc  = creditCards.find(c => c.id === e.from_account_id);
+                const cat = categories.find(c => c.id === e.category_id);
+                const isPayment = e.type === "pay_cc";
+                return (
+                  <div key={e.id} style={{
+                    display: "flex", alignItems: "center", gap: 12,
+                    padding: "10px 0", borderBottom: "1px solid #f3f4f6",
+                  }}>
+                    <div style={{
+                      width: 36, height: 36, borderRadius: 10,
+                      background: isPayment ? "#dcfce7" : "#fee2e2",
+                      display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0,
+                    }}>
+                      {isPayment ? "✓" : cat?.icon || "💳"}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {e.description}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
+                        {e.date}
+                        {cc && <span style={{ color: cc.color || "#3b5bdb" }}> · ····{cc.last4}</span>}
+                        {(cat || e.category_label) && ` · ${cat?.name || e.category_label}`}
+                        {e.entity && e.entity !== "Personal" && ` · ${e.entity}`}
+                        {e.is_reimburse && <span style={{ color: "#d97706" }}> · ↗ Reimb</span>}
                       </div>
                     </div>
-                    <div className="num" style={{ fontSize:14, fontWeight:800, color:"#e03131" }}>−{fmtIDR(Number(e.amount_idr||e.amount||0),true)}</div>
+                    <div style={{
+                      fontSize: 13, fontWeight: 700,
+                      color: isPayment ? "#059669" : "#dc2626",
+                      fontFamily: "Figtree, sans-serif", flexShrink: 0,
+                    }}>
+                      {isPayment ? "+" : "−"}{fmtIDR(Number(e.amount_idr || e.amount || 0))}
+                    </div>
                   </div>
                 );
               })
@@ -212,41 +324,81 @@ export default function CreditCards({
         </div>
       )}
 
-      {/* ── INSTALLMENTS ── */}
-      {subTab==="installments" && (
-        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-          <div style={{ textAlign:"right" }}>
-            <button className="btn btn-primary" onClick={()=>setShowInstForm(true)}>+ Add Installment</button>
+      {/* ══ INSTALLMENTS ══ */}
+      {subTab === "installments" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <Button size="sm" onClick={() => setModal("inst")}>+ Add Installment</Button>
           </div>
-          {ccInstallments.length===0
-            ? <Empty icon="📅" message="No installment plans" th={th}/>
-            : ccInstallments.map(inst=>{
-                const cc=creditCards.find(c=>c.id===inst.account_id);
-                const pct=(inst.paid_months/inst.months)*100;
-                const remaining=inst.months-inst.paid_months;
-                return(
-                  <div key={inst.id} style={{ background:th.sur, border:`1px solid ${th.bor}`, borderRadius:12, padding:"14px 16px" }}>
-                    <div style={{ display:"flex", justifyContent:"space-between", marginBottom:8 }}>
+          {ccInstallments.length === 0
+            ? <EmptyState icon="📅" title="No installments" message="Track 0% installment plans here." />
+            : ccInstallments.map(inst => {
+                const cc        = creditCards.find(c => c.id === inst.account_id);
+                const remaining = inst.months - inst.paid_months;
+                const pct       = inst.months > 0 ? (inst.paid_months / inst.months) * 100 : 0;
+                const isDone    = inst.paid_months >= inst.months;
+                return (
+                  <div key={inst.id} style={{
+                    background: "#ffffff", borderRadius: 14,
+                    border: `1px solid ${isDone ? "#bbf7d0" : "#f3f4f6"}`,
+                    padding: "14px 16px",
+                  }}>
+                    {/* Header */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                       <div>
-                        <div style={{ fontSize:13, fontWeight:700, color:th.tx }}>{inst.description}</div>
-                        <div style={{ fontSize:11, color:th.tx3 }}>{cc?.name||"CC"} · {inst.months} months · {fmtIDR(inst.monthly_amount,true)}/mo</div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
+                          {inst.description}
+                        </div>
+                        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 3, display: "flex", gap: 8 }}>
+                          <span>{cc?.name || "CC"}</span>
+                          <span>{inst.months} months</span>
+                          <span style={{ fontWeight: 700, color: "#374151" }}>{fmtIDR(inst.monthly_amount)}/mo</span>
+                        </div>
                       </div>
-                      <div style={{ textAlign:"right" }}>
-                        <div className="num" style={{ fontSize:13, fontWeight:800, color:th.ac }}>{fmtIDR(Number(inst.monthly_amount||0)*remaining,true)}</div>
-                        <div style={{ fontSize:10, color:th.tx3 }}>remaining</div>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: isDone ? "#059669" : "#3b5bdb", fontFamily: "Figtree, sans-serif" }}>
+                          {isDone ? "✓ Done" : fmtIDR(Number(inst.monthly_amount || 0) * remaining, true)}
+                        </div>
+                        <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+                          {isDone ? "Fully paid" : "remaining"}
+                        </div>
                       </div>
                     </div>
-                    {/* Month dots */}
-                    <div style={{ display:"flex", gap:3, flexWrap:"wrap", marginBottom:8 }}>
-                      {Array.from({length:inst.months}).map((_,i)=>(
-                        <div key={i} style={{ width:14, height:14, borderRadius:3, background:i<inst.paid_months?th.gr:th.sur3, border:`1px solid ${i<inst.paid_months?th.gr:th.bor}` }}/>
+
+                    {/* Progress dots */}
+                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 10 }}>
+                      {Array.from({ length: inst.months }).map((_, i) => (
+                        <div key={i} style={{
+                          width: Math.min(16, Math.max(8, Math.floor(240 / inst.months))),
+                          height: 14, borderRadius: 3,
+                          background: i < inst.paid_months ? "#059669" : "#f3f4f6",
+                          border: `1px solid ${i < inst.paid_months ? "#059669" : "#e5e7eb"}`,
+                          title: `Month ${i + 1}`,
+                          cursor: "default",
+                          flexShrink: 0,
+                        }} />
                       ))}
                     </div>
-                    <ProgressBar value={inst.paid_months} max={inst.months} color={th.gr} height={5} th={th} showPct/>
-                    <div style={{ fontSize:10, color:th.tx3, marginTop:4 }}>{inst.paid_months}/{inst.months} months paid</div>
-                    <div style={{ display:"flex", gap:6, marginTop:10 }}>
-                      {inst.paid_months<inst.months&&<button className="btn btn-primary" onClick={()=>markInstPaid(inst)} style={{ fontSize:11, padding:"6px 12px" }}>✓ Mark Month Paid</button>}
-                      <button onClick={()=>delInst(inst.id)} style={{ border:`1px solid ${th.rd}44`, background:th.rdBg, color:th.rd, borderRadius:7, padding:"6px 12px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"'Sora',sans-serif" }}>🗑</button>
+
+                    {/* Progress bar + label */}
+                    <BarWithLabel
+                      value={inst.paid_months}
+                      max={inst.months}
+                      color={isDone ? "#059669" : "#3b5bdb"}
+                      label={`${inst.paid_months}/${inst.months} months paid`}
+                      labelRight={`${pct.toFixed(0)}%`}
+                    />
+
+                    {/* Actions */}
+                    <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                      {!isDone && (
+                        <Button size="sm" onClick={() => markInstPaid(inst)}>
+                          ✓ Mark Month {inst.paid_months + 1} Paid
+                        </Button>
+                      )}
+                      <Button size="sm" variant="danger" onClick={() => setDeleteInstId(inst.id)}>
+                        🗑
+                      </Button>
                     </div>
                   </div>
                 );
@@ -255,23 +407,68 @@ export default function CreditCards({
         </div>
       )}
 
-      {/* ── RECURRING ── */}
-      {subTab==="recurring" && (
-        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-          {ccRecurring.length===0
-            ? <Empty icon="🔄" message="No recurring CC templates. Add them in Settings." th={th}/>
-            : ccRecurring.map(r=>{
-                const cc=creditCards.find(c=>c.id===r.from_account_id);
-                return(
-                  <div key={r.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 14px", background:th.sur, border:`1px solid ${th.bor}`, borderRadius:11 }}>
-                    <div>
-                      <div style={{ fontSize:13, fontWeight:700, color:th.tx }}>{r.name}</div>
-                      <div style={{ fontSize:11, color:th.tx3 }}>{cc?.name||"CC"} · {r.frequency} · Day {r.day_of_month}</div>
+      {/* ══ RECURRING ══ */}
+      {subTab === "recurring" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {ccRecurring.length === 0
+            ? <EmptyState icon="🔄" title="No recurring templates" message="Add recurring CC templates in Settings → Recurring." />
+            : ccRecurring.map(r => {
+                const cc = creditCards.find(c => c.id === r.from_account_id);
+                return (
+                  <div key={r.id} style={{
+                    background: "#ffffff", borderRadius: 12,
+                    border: `1.5px solid ${r.active ? "#e5e7eb" : "#f3f4f6"}`,
+                    padding: "14px 16px",
+                    opacity: r.active ? 1 : 0.65,
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      {/* Info */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
+                          {r.name}
+                        </div>
+                        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 3, display: "flex", gap: 8 }}>
+                          <span>{cc?.name || "CC"}</span>
+                          <span>{r.frequency}</span>
+                          {r.day_of_month && <span>Day {r.day_of_month}</span>}
+                          {r.entity && r.entity !== "Personal" && <span style={{ color: "#3b5bdb" }}>{r.entity}</span>}
+                        </div>
+                      </div>
+
+                      {/* Amount */}
+                      <div style={{ fontSize: 15, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif", flexShrink: 0 }}>
+                        {fmtIDR(Number(r.amount || 0), true)}
+                      </div>
+
+                      {/* Active toggle */}
+                      <button
+                        onClick={() => toggleRecurring(r)}
+                        style={{
+                          height:       26,
+                          padding:      "0 10px",
+                          borderRadius: 20,
+                          border:       "none",
+                          background:   r.active ? "#dcfce7" : "#f3f4f6",
+                          color:        r.active ? "#059669" : "#9ca3af",
+                          fontSize:     11,
+                          fontWeight:   700,
+                          cursor:       "pointer",
+                          fontFamily:   "Figtree, sans-serif",
+                          flexShrink:   0,
+                        }}
+                      >
+                        {r.active ? "Active" : "Paused"}
+                      </button>
                     </div>
-                    <div style={{ textAlign:"right" }}>
-                      <div className="num" style={{ fontSize:13, fontWeight:800, color:th.tx }}>{fmtIDR(Number(r.amount||0),true)}</div>
-                      <Tag bg={r.active?th.grBg:th.sur3} color={r.active?th.gr:th.tx3} small>{r.active?"Active":"Paused"}</Tag>
-                    </div>
+
+                    {/* Apply now */}
+                    {r.active && (
+                      <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid #f3f4f6" }}>
+                        <Button size="sm" variant="secondary" onClick={() => applyRecurringNow(r)}>
+                          ▶ Apply Now
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 );
               })
@@ -279,58 +476,290 @@ export default function CreditCards({
         </div>
       )}
 
-      {/* ── PAY CC MODAL ── */}
-      {showPayCC&&(
-        <Overlay onClose={()=>setShowPayCC(false)} th={th} title="💳 Pay Credit Card Bill">
-          <div style={{ display:"flex", flexDirection:"column", gap:11 }}>
-            <F label="Credit Card" th={th}>
-              <Select value={payCC.cardId} onChange={e=>setPayCC(p=>({...p,cardId:e.target.value}))} th={th}>
-                <option value="">Select card…</option>
-                {cardStats.map(c=><option key={c.id} value={c.id}>{c.name} — Debt: {fmtIDR(c.debt,true)}</option>)}
-              </Select>
-            </F>
-            <F label="From Bank Account" th={th}>
-              <Select value={payCC.bankId} onChange={e=>setPayCC(p=>({...p,bankId:e.target.value}))} th={th}>
-                <option value="">Select bank…</option>
-                {bankAccounts.map(b=><option key={b.id} value={b.id}>{b.name} — {fmtIDR(b.current_balance||0,true)}</option>)}
-              </Select>
-            </F>
-            <F label="Payment Amount (IDR)" th={th}>
-              <Input type="number" value={payCC.amount} onChange={e=>setPayCC(p=>({...p,amount:e.target.value}))} placeholder="0" th={th} style={{ fontFamily:"'JetBrains Mono',monospace" }}/>
-            </F>
-            {payCC.cardId&&<div style={{ fontSize:11, color:th.am, padding:"6px 10px", background:th.amBg, borderRadius:7 }}>
-              Full balance: {fmtIDR(cardStats.find(c=>c.id===payCC.cardId)?.debt||0)} — you can pay partial amount
-            </div>}
-            <F label="Notes" th={th}><Input value={payCC.notes} onChange={e=>setPayCC(p=>({...p,notes:e.target.value}))} placeholder="Optional" th={th}/></F>
-            <BtnRow onCancel={()=>setShowPayCC(false)} onOk={payBill} label="Pay Now →" th={th} saving={saving}/>
-          </div>
-        </Overlay>
-      )}
+      {/* ══ PAY CC MODAL ══ */}
+      <Modal
+        isOpen={modal === "pay"}
+        onClose={() => setModal(null)}
+        title="💳 Pay Credit Card"
+        footer={
+          <Button fullWidth onClick={payBill} busy={saving}>
+            Pay Now →
+          </Button>
+        }
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <Select label="Credit Card"
+            value={payForm.cardId} onChange={e => setP("cardId", e.target.value)}
+            placeholder="Select card…"
+            options={cardStats.map(c => ({ value: c.id, label: `${c.name} — Debt: ${fmtIDR(c.debt, true)}` }))}
+          />
+          <Select label="Pay From (Bank)"
+            value={payForm.bankId} onChange={e => setP("bankId", e.target.value)}
+            placeholder="Select bank…"
+            options={bankAccounts.map(b => ({ value: b.id, label: `${b.name} — ${fmtIDR(Number(b.current_balance || 0), true)}` }))}
+          />
 
-      {/* ── INSTALLMENT FORM ── */}
-      {showInstForm&&(
-        <Overlay onClose={()=>setShowInstForm(false)} th={th} title="Add Installment Plan">
-          <div style={{ display:"flex", flexDirection:"column", gap:11 }}>
-            <F label="Credit Card" th={th}>
-              <Select value={instForm.account_id} onChange={e=>setInstForm(f=>({...f,account_id:e.target.value}))} th={th}>
-                <option value="">Select card…</option>
-                {creditCards.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
-              </Select>
-            </F>
-            <F label="Description" th={th} required><Input value={instForm.description} onChange={e=>setInstForm(f=>({...f,description:e.target.value}))} placeholder="e.g. MacBook Pro 0%" th={th}/></F>
-            <R2>
-              <F label="Total Amount" th={th}><Input type="number" value={instForm.total_amount} onChange={e=>setInstForm(f=>({...f,total_amount:e.target.value}))} placeholder="0" th={th} style={{ fontFamily:"'JetBrains Mono',monospace" }}/></F>
-              <F label="Months" th={th}><Input type="number" value={instForm.months} onChange={e=>setInstForm(f=>({...f,months:e.target.value}))} placeholder="12" th={th}/></F>
-            </R2>
-            <R2>
-              <F label="Monthly Amount" th={th}><Input type="number" value={instForm.monthly_amount||Math.round(Number(instForm.total_amount||0)/Number(instForm.months||12))} onChange={e=>setInstForm(f=>({...f,monthly_amount:e.target.value}))} th={th} style={{ fontFamily:"'JetBrains Mono',monospace" }}/></F>
-              <F label="Start Date" th={th}><Input type="date" value={instForm.start_date} onChange={e=>setInstForm(f=>({...f,start_date:e.target.value}))} th={th}/></F>
-            </R2>
-            <F label="Entity" th={th}><Select value={instForm.entity} onChange={e=>setInstForm(f=>({...f,entity:e.target.value}))} th={th}>{ENTITIES.map(e=><option key={e}>{e}</option>)}</Select></F>
-            <BtnRow onCancel={()=>setShowInstForm(false)} onOk={saveInst} label="Add Installment" th={th} saving={saving}/>
-          </div>
-        </Overlay>
-      )}
+          {payForm.cardId && (() => {
+            const cc = cardStats.find(c => c.id === payForm.cardId);
+            return cc ? (
+              <div style={{ padding: "10px 12px", background: "#fef9ec", borderRadius: 10, border: "1px solid #fde68a" }}>
+                <div style={{ fontSize: 11, color: "#92400e", fontFamily: "Figtree, sans-serif", fontWeight: 600 }}>
+                  Full balance: {fmtIDR(cc.debt)} — you can pay a partial amount
+                </div>
+                <button
+                  onClick={() => setP("amount", cc.debt)}
+                  style={{ fontSize: 11, color: "#d97706", background: "none", border: "none", cursor: "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 700, padding: "4px 0 0" }}
+                >
+                  Pay full balance →
+                </button>
+              </div>
+            ) : null;
+          })()}
+
+          <AmountInput label="Payment Amount" value={payForm.amount} onChange={v => setP("amount", v)} />
+
+          <FormRow>
+            <AmountInput label="Admin Fee (optional)" value={payForm.admin_fee} onChange={v => setP("admin_fee", v)} style={{ flex: 1 }} />
+            <AmountInput label="Materai (optional)"   value={payForm.materai}   onChange={v => setP("materai", v)}   style={{ flex: 1 }} />
+          </FormRow>
+
+          <Input label="Notes (optional)" value={payForm.notes} onChange={e => setP("notes", e.target.value)} placeholder="Optional" />
+        </div>
+      </Modal>
+
+      {/* ══ ADD INSTALLMENT MODAL ══ */}
+      <Modal
+        isOpen={modal === "inst"}
+        onClose={() => setModal(null)}
+        title="Add Installment Plan"
+        footer={<Button fullWidth onClick={saveInst} busy={saving}>Save Installment</Button>}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <Select label="Credit Card" value={instForm.account_id} onChange={e => setI("account_id", e.target.value)}
+            placeholder="Select card…" options={creditCards.map(c => ({ value: c.id, label: c.name }))} />
+          <Input label="Description" value={instForm.description} onChange={e => setI("description", e.target.value)}
+            placeholder="e.g. MacBook Pro 0%" />
+          <FormRow>
+            <AmountInput label="Total Amount" value={instForm.total_amount} onChange={v => setI("total_amount", v)} style={{ flex: 1 }} />
+            <Field label="Months" style={{ width: 90, flexShrink: 0 }}>
+              <input type="number" value={instForm.months} onChange={e => setI("months", e.target.value)}
+                min={1} max={60}
+                style={{ width: "100%", height: 44, padding: "0 12px", border: "1.5px solid #e5e7eb", borderRadius: 10, fontFamily: "Figtree, sans-serif", fontSize: 14, fontWeight: 700, color: "#111827", background: "#fff", outline: "none", boxSizing: "border-box" }}
+              />
+            </Field>
+          </FormRow>
+          <AmountInput
+            label={`Monthly Amount (auto: ${instForm.total_amount && instForm.months ? fmtIDR(Math.round(Number(instForm.total_amount) / Number(instForm.months)), true) : "—"})`}
+            value={instForm.monthly_amount}
+            onChange={v => setI("monthly_amount", v)}
+          />
+          <FormRow>
+            <Input label="Start Date" type="date" value={instForm.start_date} onChange={e => setI("start_date", e.target.value)} style={{ flex: 1 }} />
+            <Select label="Entity" value={instForm.entity} onChange={e => setI("entity", e.target.value)} options={ENTITIES} style={{ flex: 1 }} />
+          </FormRow>
+        </div>
+      </Modal>
+
+      {/* Delete confirm */}
+      <ConfirmModal
+        isOpen={!!deleteInstId}
+        onClose={() => setDeleteInstId(null)}
+        onConfirm={deleteInstallment}
+        title="Delete Installment"
+        message="Remove this installment plan? Transaction history is preserved."
+        danger
+      />
     </div>
   );
 }
+
+// ─── CC VISUAL CARD ──────────────────────────────────────────
+function CCCard({ cc, onPay, onTransactions }) {
+  const base      = cc.color || "#3b5bdb";
+  const dark      = darkenHex(base, 50);
+  const utilColor = cc.util > 80 ? "#dc2626" : cc.util > 60 ? "#d97706" : "#059669";
+  const netw      = NETWORK_STYLE[cc.network] || NETWORK_STYLE.Visa;
+
+  return (
+    <div style={{ background: "#ffffff", borderRadius: 16, border: "1px solid #f3f4f6", overflow: "hidden" }}>
+
+      {/* ── Visual card face ── */}
+      <div style={{
+        background:  `linear-gradient(135deg, ${base} 0%, ${dark} 100%)`,
+        padding:     "20px 20px 18px",
+        color:       "#fff",
+        position:    "relative",
+        overflow:    "hidden",
+        minHeight:   140,
+      }}>
+        {/* Decorative circles */}
+        <div style={{ position: "absolute", top: -20, right: -20, width: 100, height: 100, background: "rgba(255,255,255,0.07)", borderRadius: "50%" }} />
+        <div style={{ position: "absolute", bottom: -30, left: 40,  width: 80,  height: 80,  background: "rgba(255,255,255,0.05)", borderRadius: "50%" }} />
+
+        {/* Row 1: bank · network */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, position: "relative" }}>
+          <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.8, fontFamily: "Figtree, sans-serif" }}>
+            {cc.bank_name || "Bank"}{cc.entity && cc.entity !== "Personal" ? ` · ${cc.entity}` : ""}
+          </div>
+          <div style={{ fontSize: 14, color: "#fff", fontFamily: "Figtree, sans-serif", ...netw.style, opacity: 0.9 }}>
+            {netw.text}
+          </div>
+        </div>
+
+        {/* Card number */}
+        <div style={{
+          fontSize:      17,
+          fontWeight:    700,
+          letterSpacing: "3px",
+          fontFamily:    "Figtree, sans-serif",
+          marginBottom:  16,
+          position:      "relative",
+        }}>
+          ···· ···· ···· {cc.last4 || "????"}
+        </div>
+
+        {/* Row 3: Debt + Available */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", position: "relative" }}>
+          <div>
+            <div style={{ fontSize: 9, fontWeight: 600, opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>Current Debt</div>
+            <div style={{ fontSize: 22, fontWeight: 900, fontFamily: "Figtree, sans-serif", lineHeight: 1 }}>
+              {fmtIDR(cc.debt, true)}
+            </div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 9, fontWeight: 600, opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>Available</div>
+            <div style={{ fontSize: 14, fontWeight: 700, fontFamily: "Figtree, sans-serif" }}>
+              {fmtIDR(cc.avail, true)}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Stats section ── */}
+      <div style={{ padding: "14px 16px" }}>
+
+        {/* Utilization bar */}
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+            <span style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+              Limit: {fmtIDR(cc.limit, true)}
+            </span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: utilColor, fontFamily: "Figtree, sans-serif" }}>
+              {cc.util.toFixed(0)}% used
+            </span>
+          </div>
+          <BarSimple value={cc.debt} max={cc.limit || 1} color={utilColor} height={6} />
+        </div>
+
+        {/* Monthly target bar (with target marker) */}
+        {cc.target > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+              <span style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>This month</span>
+              <span style={{
+                fontSize: 11, fontWeight: 700, fontFamily: "Figtree, sans-serif",
+                color: cc.monthSpent > cc.target ? "#dc2626" : "#059669",
+              }}>
+                {fmtIDR(cc.monthSpent, true)} / {fmtIDR(cc.target, true)}
+              </span>
+            </div>
+            <BarWithTarget value={cc.monthSpent} max={cc.target * 1.5} target={cc.target}
+              color={cc.monthSpent > cc.target ? "#dc2626" : "#059669"} />
+          </div>
+        )}
+
+        {/* Due / Statement dates */}
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+          {cc.dueIn !== null && (
+            <div style={{
+              display: "flex", alignItems: "center", gap: 5,
+              padding: "5px 10px", borderRadius: 8,
+              background: cc.dueIn <= 3 ? "#fee2e2" : cc.dueIn <= 7 ? "#fef3c7" : "#f9fafb",
+              border: `1px solid ${cc.dueIn <= 3 ? "#fecaca" : cc.dueIn <= 7 ? "#fde68a" : "#f3f4f6"}`,
+            }}>
+              <span style={{ fontSize: 12 }}>{cc.dueIn <= 3 ? "🔴" : cc.dueIn <= 7 ? "🟡" : "🟢"}</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
+                Due in {cc.dueIn}d
+              </span>
+            </div>
+          )}
+          {cc.stmtIn !== null && (
+            <div style={{
+              display: "flex", alignItems: "center", gap: 5,
+              padding: "5px 10px", borderRadius: 8,
+              background: "#f9fafb", border: "1px solid #f3f4f6",
+            }}>
+              <span style={{ fontSize: 12 }}>📄</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
+                Statement in {cc.stmtIn}d
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Action buttons */}
+        <div style={{ display: "flex", gap: 8 }}>
+          <Button size="sm" fullWidth onClick={onPay}>💳 Pay Bill</Button>
+          <Button size="sm" variant="secondary" onClick={onTransactions}>📋 Transactions</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── SIMPLE PROGRESS BAR ─────────────────────────────────────
+function BarSimple({ value, max, color = "#059669", height = 5 }) {
+  const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
+  return (
+    <div style={{ height, background: "#f3f4f6", borderRadius: height, overflow: "hidden" }}>
+      <div style={{ height, width: `${pct}%`, background: color, borderRadius: height, transition: "width 0.3s" }} />
+    </div>
+  );
+}
+
+// ─── BAR WITH TARGET MARKER ──────────────────────────────────
+function BarWithTarget({ value, max, target, color }) {
+  const pct       = max > 0 ? Math.min((value / max) * 100, 100) : 0;
+  const targetPct = max > 0 ? Math.min((target / max) * 100, 100) : 0;
+  return (
+    <div style={{ position: "relative", height: 8, background: "#f3f4f6", borderRadius: 8, overflow: "visible" }}>
+      <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: 8, transition: "width 0.3s" }} />
+      {/* Target marker */}
+      <div style={{
+        position:  "absolute",
+        left:      `${targetPct}%`,
+        top:       -3,
+        width:     2,
+        height:    14,
+        background: "#374151",
+        borderRadius: 1,
+        transform: "translateX(-50%)",
+      }} />
+    </div>
+  );
+}
+
+// ─── BAR WITH LABEL ──────────────────────────────────────────
+function BarWithLabel({ value, max, color, label, labelRight }) {
+  const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
+  return (
+    <div>
+      <div style={{ height: 5, background: "#f3f4f6", borderRadius: 5, overflow: "hidden", marginBottom: 4 }}>
+        <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: 5, transition: "width 0.3s" }} />
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between" }}>
+        <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>{label}</span>
+        {labelRight && <span style={{ fontSize: 10, fontWeight: 700, color, fontFamily: "Figtree, sans-serif" }}>{labelRight}</span>}
+      </div>
+    </div>
+  );
+}
+
+// ─── STYLES ──────────────────────────────────────────────────
+const FILTER_SEL = {
+  height: 32, padding: "0 10px", borderRadius: 8,
+  border: "1.5px solid #e5e7eb", background: "#fff",
+  fontFamily: "Figtree, sans-serif", fontSize: 12, fontWeight: 500,
+  color: "#374151", outline: "none", cursor: "pointer",
+  appearance: "none", WebkitAppearance: "none",
+};

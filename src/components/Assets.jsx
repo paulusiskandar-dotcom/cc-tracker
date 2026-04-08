@@ -1,267 +1,651 @@
 import { useState, useMemo } from "react";
-import { accountsApi, ledgerApi, fmtIDR, todayStr } from "../api";
-import { ASSET_SUBTYPES, ASSET_ICON, ASSET_COL, ENTITIES } from "../constants";
-import { Overlay, F, R2, BtnRow, SubTabs, Input, Select, Tag, EntityTag,
-         ProgressBar, Empty, SectionHeader, showToast, confirmDelete, StatCard } from "./shared";
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
+import { accountsApi, ledgerApi } from "../api";
+import { fmtIDR, todayStr } from "../utils";
+import { ASSET_SUBTYPES, ASSET_ICON, ASSET_COL, LIAB_SUBTYPES } from "../constants";
+import { LIGHT, DARK } from "../theme";
+import {
+  Modal, Button,
+  Field, AmountInput, Input, FormRow,
+  Select,
+  SectionHeader, EmptyState, Spinner, showToast,
+} from "./shared/index";
 
-const SUBTABS = [
-  { id:"overview",    label:"Overview" },
-  { id:"assets",      label:"Assets" },
-  { id:"liabilities", label:"Liabilities" },
-];
+// ─── PROGRESS BAR ─────────────────────────────────────────────
+function ProgressBar({ value, max, color = "#059669", height = 6 }) {
+  const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
+  return (
+    <div style={{ background: "#e5e7eb", borderRadius: 99, height, overflow: "hidden" }}>
+      <div style={{ width: `${pct}%`, height: "100%", background: color, borderRadius: 99, transition: "width .4s" }} />
+    </div>
+  );
+}
 
-export default function Assets({
-  th, user, accounts, ledger, onRefresh, setAccounts, setLedger, CURRENCIES,
-}) {
-  const [subTab, setSubTab]           = useState("overview");
-  const [showUpdateForm, setShowUpdateForm] = useState(false);
-  const [selectedAsset, setSelectedAsset]  = useState(null);
-  const [updateVal, setUpdateVal]          = useState({ value:"", date:todayStr(), notes:"" });
-  const [showPayForm, setShowPayForm]       = useState(false);
-  const [payForm, setPayForm]               = useState({ liabId:"", bankId:"", amount:"", date:todayStr(), notes:"" });
-  const [saving, setSaving]                 = useState(false);
+// ─── PURE DIV DONUT CHART ─────────────────────────────────────
+// Renders a conic-gradient donut — no recharts dependency
+function DonutChart({ data, colors, size = 120, thickness = 24 }) {
+  const total = data.reduce((s, d) => s + d.value, 0);
+  if (total === 0) return null;
 
-  const assets      = useMemo(() => accounts.filter(a=>a.type==="asset"), [accounts]);
-  const liabilities = useMemo(() => accounts.filter(a=>a.type==="liability"), [accounts]);
-  const bankAccounts= useMemo(() => accounts.filter(a=>a.type==="bank"), [accounts]);
+  // Build conic-gradient stops
+  let angle = 0;
+  const stops = [];
+  data.forEach((d, i) => {
+    const deg = (d.value / total) * 360;
+    const col = colors[i % colors.length];
+    stops.push(`${col} ${angle.toFixed(1)}deg ${(angle + deg).toFixed(1)}deg`);
+    angle += deg;
+  });
 
-  const totalAssets = assets.reduce((s,a)=>s+Number(a.current_value||0),0);
-  const totalLiab   = liabilities.reduce((s,l)=>s+Number(l.outstanding_amount||0),0);
-  const netAssets   = totalAssets - totalLiab;
-  const totalPurchase = assets.reduce((s,a)=>s+Number(a.purchase_value||0),0);
-  const totalGain   = totalAssets - totalPurchase;
-
-  // By category for pie
-  const byCategory = useMemo(() => {
-    const map = {};
-    assets.forEach(a => { map[a.subtype||"Other"] = (map[a.subtype||"Other"]||0) + Number(a.current_value||0); });
-    return Object.entries(map).map(([name,value])=>({name,value})).filter(x=>x.value>0);
-  }, [assets]);
-
-  const updateValue = async () => {
-    if (!updateVal.value||!selectedAsset) return;
-    setSaving(true);
-    try {
-      const newVal = Number(updateVal.value);
-      await accountsApi.update(selectedAsset.id, { current_value:newVal });
-      setAccounts(p=>p.map(a=>a.id===selectedAsset.id?{...a,current_value:newVal}:a));
-      showToast(`${selectedAsset.name} updated to ${fmtIDR(newVal,true)}`);
-      setShowUpdateForm(false);
-    } catch(e) { showToast(e.message,"error"); }
-    setSaving(false);
-  };
-
-  const payLiability = async () => {
-    if (!payForm.liabId||!payForm.bankId||!payForm.amount) return showToast("Fill all fields","error");
-    setSaving(true);
-    try {
-      const amt = Number(payForm.amount);
-      const liab = accounts.find(a=>a.id===payForm.liabId);
-      const bank = accounts.find(a=>a.id===payForm.bankId);
-      const entry = {
-        date:payForm.date, description:`Pay ${liab?.name||"Liability"}`,
-        amount:amt, currency:"IDR", amount_idr:amt,
-        type:"pay_liability", from_account_id:payForm.bankId, to_account_id:payForm.liabId,
-        entity:liab?.entity||"Personal", notes:payForm.notes||"",
-      };
-      const r = await ledgerApi.create(user.id, entry, accounts);
-      if (r) setLedger(p=>[r,...p]);
-      await onRefresh();
-      showToast(`Paid ${fmtIDR(amt,true)} towards ${liab?.name}`);
-      setShowPayForm(false);
-    } catch(e) { showToast(e.message,"error"); }
-    setSaving(false);
-  };
-
-  const PIE_COLORS = Object.values(ASSET_COL);
+  const half = size / 2;
+  const inner = size - thickness * 2;
 
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-      <div style={{ fontSize:20, fontWeight:800, color:th.tx }}>Assets & Liabilities</div>
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      {/* Outer donut via conic-gradient */}
+      <div style={{
+        width: size, height: size, borderRadius: "50%",
+        background: `conic-gradient(${stops.join(", ")})`,
+      }} />
+      {/* Inner hole */}
+      <div style={{
+        position: "absolute",
+        top: thickness, left: thickness,
+        width: inner, height: inner,
+        borderRadius: "50%",
+        background: "inherit",
+        backgroundColor: "white",
+      }} />
+      {/* Center label */}
+      <div style={{
+        position: "absolute", inset: 0,
+        display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center",
+        pointerEvents: "none",
+      }}>
+        <div style={{ fontSize: 9, color: "#9ca3af", fontWeight: 700, lineHeight: 1 }}>ASSETS</div>
+        <div style={{ fontSize: 11, color: "#111827", fontWeight: 800, lineHeight: 1.2 }}>
+          {data.length}
+        </div>
+      </div>
+    </div>
+  );
+}
 
-      <SubTabs tabs={SUBTABS} active={subTab} onChange={setSubTab} th={th}/>
+const SUBTABS = [
+  { id: "overview",    label: "Overview"     },
+  { id: "assets",      label: "Assets"       },
+  { id: "liabilities", label: "Liabilities"  },
+];
 
-      {/* ── OVERVIEW ── */}
-      {subTab==="overview" && (
-        <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+export default function Assets({ user, accounts, ledger, onRefresh, setAccounts, setLedger, dark }) {
+  const T = dark ? DARK : LIGHT;
+
+  const [subTab, setSubTab]     = useState("overview");
+  const [saving, setSaving]     = useState(false);
+
+  // Update value modal
+  const [updateModal, setUpdateModal] = useState(false);
+  const [selectedAsset, setSelectedAsset] = useState(null);
+  const [updateForm, setUpdateForm] = useState({ value: "", date: todayStr(), notes: "" });
+
+  // Pay liability modal
+  const [payModal, setPayModal] = useState(false);
+  const [payForm, setPayForm]   = useState({ liabId: "", bankId: "", amount: "", date: todayStr(), notes: "" });
+
+  // ── DERIVED ────────────────────────────────────────────────
+  const assets      = useMemo(() => accounts.filter(a => a.type === "asset"),       [accounts]);
+  const liabilities = useMemo(() => accounts.filter(a => a.type === "liability"),   [accounts]);
+  const bankAccounts= useMemo(() => accounts.filter(a => a.type === "bank" || a.type === "debit_card"), [accounts]);
+
+  const totalAssets   = assets.reduce((s, a) => s + Number(a.current_value || 0), 0);
+  const totalLiab     = liabilities.reduce((s, l) => s + Number(l.outstanding_amount || 0), 0);
+  const netAssets     = totalAssets - totalLiab;
+  const totalPurchase = assets.reduce((s, a) => s + Number(a.purchase_value || 0), 0);
+  const totalGain     = totalAssets - totalPurchase;
+
+  // Breakdown by category for donut
+  const byCategory = useMemo(() => {
+    const map = {};
+    assets.forEach(a => {
+      const key = a.subtype || "Other";
+      map[key] = (map[key] || 0) + Number(a.current_value || 0);
+    });
+    return Object.entries(map)
+      .map(([name, value]) => ({ name, value }))
+      .filter(x => x.value > 0)
+      .sort((a, b) => b.value - a.value);
+  }, [assets]);
+
+  const donutColors = byCategory.map(c => ASSET_COL[c.name] || "#9ca3af");
+
+  // ── ACTIONS ───────────────────────────────────────────────
+  const openUpdateModal = (asset) => {
+    setSelectedAsset(asset);
+    setUpdateForm({ value: String(asset.current_value || ""), date: todayStr(), notes: "" });
+    setUpdateModal(true);
+  };
+
+  const handleUpdateValue = async () => {
+    if (!updateForm.value || !selectedAsset) return;
+    setSaving(true);
+    try {
+      const newVal = Number(updateForm.value);
+      await accountsApi.update(selectedAsset.id, { current_value: newVal });
+      setAccounts(prev => prev.map(a =>
+        a.id === selectedAsset.id ? { ...a, current_value: newVal } : a
+      ));
+      showToast(`${selectedAsset.name} updated to ${fmtIDR(newVal, true)}`);
+      setUpdateModal(false);
+    } catch (e) {
+      showToast(e.message, "error");
+    }
+    setSaving(false);
+  };
+
+  const openPayModal = (liabId = "") => {
+    setPayForm({ liabId, bankId: "", amount: "", date: todayStr(), notes: "" });
+    setPayModal(true);
+  };
+
+  const handlePayLiability = async () => {
+    if (!payForm.liabId || !payForm.bankId || !payForm.amount)
+      return showToast("Fill all required fields", "error");
+    setSaving(true);
+    try {
+      const amt  = Number(payForm.amount);
+      const liab = accounts.find(a => a.id === payForm.liabId);
+      const entry = {
+        date:            payForm.date,
+        description:     `Pay ${liab?.name || "Liability"}`,
+        amount:          amt,
+        currency:        "IDR",
+        amount_idr:      amt,
+        type:            "pay_liability",
+        from_account_id: payForm.bankId,
+        to_account_id:   payForm.liabId,
+        entity:          liab?.entity || "Personal",
+        notes:           payForm.notes || "",
+      };
+      const r = await ledgerApi.create(user.id, entry, accounts);
+      if (r) setLedger(prev => [r, ...prev]);
+      await onRefresh();
+      showToast(`Paid ${fmtIDR(amt, true)} towards ${liab?.name}`);
+      setPayModal(false);
+    } catch (e) {
+      showToast(e.message, "error");
+    }
+    setSaving(false);
+  };
+
+  // ── STYLES ────────────────────────────────────────────────
+  const card = {
+    background:   T.surface,
+    border:       `1px solid ${T.border}`,
+    borderRadius: 16,
+    padding:      "16px 18px",
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+      {/* ── SUB-TABS ─────────────────────────────────────── */}
+      <div style={{ display: "flex", gap: 4 }}>
+        {SUBTABS.map(t => (
+          <button
+            key={t.id}
+            onClick={() => setSubTab(t.id)}
+            style={{
+              padding:      "7px 16px",
+              borderRadius: 99,
+              border:       "none",
+              cursor:       "pointer",
+              fontSize:     13,
+              fontWeight:   600,
+              fontFamily:   "Figtree, sans-serif",
+              background:   subTab === t.id ? T.text   : T.sur2,
+              color:        subTab === t.id ? T.darkText : T.text2,
+              transition:   "background .15s, color .15s",
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ══════════════════════════════════════════════════ */}
+      {/* ── OVERVIEW ─────────────────────────────────── */}
+      {/* ══════════════════════════════════════════════════ */}
+      {subTab === "overview" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
           {/* Hero */}
-          <div style={{ background:"linear-gradient(135deg,#0ca678,#0c8599)", borderRadius:16, padding:"20px", color:"#fff" }}>
-            <div style={{ fontSize:11, fontWeight:700, opacity:.7, marginBottom:4 }}>NET ASSET VALUE</div>
-            <div className="num" style={{ fontSize:30, fontWeight:800 }}>{fmtIDR(netAssets)}</div>
-            <div style={{ display:"flex", gap:20, marginTop:12 }}>
-              <div><div style={{ fontSize:10, opacity:.7 }}>Total Assets</div><div className="num" style={{ fontSize:14, fontWeight:700 }}>{fmtIDR(totalAssets,true)}</div></div>
-              <div><div style={{ fontSize:10, opacity:.7 }}>Liabilities</div><div className="num" style={{ fontSize:14, fontWeight:700 }}>−{fmtIDR(totalLiab,true)}</div></div>
-              <div><div style={{ fontSize:10, opacity:.7 }}>Gain/Loss</div><div className="num" style={{ fontSize:14, fontWeight:700, color:totalGain>=0?"#a7f3d0":"#fca5a5" }}>{totalGain>=0?"+":""}{fmtIDR(totalGain,true)}</div></div>
+          <div style={{
+            background:   "linear-gradient(135deg, #059669 0%, #0891b2 100%)",
+            borderRadius: 20,
+            padding:      "22px 22px 20px",
+            color:        "#fff",
+          }}>
+            <div style={{ fontSize: 11, fontWeight: 700, opacity: .7, marginBottom: 4, letterSpacing: "0.06em" }}>
+              NET ASSET VALUE
+            </div>
+            <div style={{ fontSize: 32, fontWeight: 900, letterSpacing: "-0.02em" }}>
+              {fmtIDR(netAssets)}
+            </div>
+            <div style={{ display: "flex", gap: 20, marginTop: 14, flexWrap: "wrap" }}>
+              <div>
+                <div style={{ fontSize: 10, opacity: .65, fontWeight: 600 }}>TOTAL ASSETS</div>
+                <div style={{ fontSize: 14, fontWeight: 800, marginTop: 2 }}>{fmtIDR(totalAssets, true)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, opacity: .65, fontWeight: 600 }}>LIABILITIES</div>
+                <div style={{ fontSize: 14, fontWeight: 800, marginTop: 2 }}>−{fmtIDR(totalLiab, true)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, opacity: .65, fontWeight: 600 }}>UNREALISED</div>
+                <div style={{
+                  fontSize: 14, fontWeight: 800, marginTop: 2,
+                  color: totalGain >= 0 ? "#a7f3d0" : "#fca5a5",
+                }}>
+                  {totalGain >= 0 ? "+" : ""}{fmtIDR(totalGain, true)}
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Pie + category list */}
-          {byCategory.length > 0 && (
-            <div style={{ background:th.sur, border:`1px solid ${th.bor}`, borderRadius:14, padding:16 }}>
-              <SectionHeader title="Asset Breakdown" th={th}/>
-              <div style={{ display:"flex", gap:16, alignItems:"flex-start", flexWrap:"wrap" }}>
-                <PieChart width={120} height={120}>
-                  <Pie data={byCategory} cx={55} cy={55} innerRadius={30} outerRadius={55} dataKey="value" paddingAngle={2}>
-                    {byCategory.map((_,i)=><Cell key={i} fill={PIE_COLORS[i%PIE_COLORS.length]}/>)}
-                  </Pie>
-                </PieChart>
-                <div style={{ flex:1 }}>
-                  {byCategory.map((c,i)=>(
-                    <div key={c.name} style={{ display:"flex", justifyContent:"space-between", marginBottom:6, fontSize:12 }}>
-                      <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-                        <div style={{ width:8, height:8, borderRadius:2, background:PIE_COLORS[i%PIE_COLORS.length] }}/>
-                        <span style={{ color:th.tx2 }}>{ASSET_ICON[c.name]||"📦"} {c.name}</span>
+          {/* Donut + category breakdown */}
+          {byCategory.length > 0 ? (
+            <div style={card}>
+              <SectionHeader title="Asset Breakdown" />
+              <div style={{ display: "flex", gap: 18, alignItems: "flex-start", flexWrap: "wrap", marginTop: 12 }}>
+                <DonutChart data={byCategory} colors={donutColors} size={112} thickness={22} />
+                <div style={{ flex: 1, minWidth: 140 }}>
+                  {byCategory.map((c, i) => (
+                    <div key={c.name} style={{
+                      display: "flex", justifyContent: "space-between",
+                      alignItems: "center", marginBottom: 8,
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                        <div style={{
+                          width: 8, height: 8, borderRadius: 2,
+                          background: donutColors[i],
+                          flexShrink: 0,
+                        }} />
+                        <span style={{ fontSize: 12, color: T.text2 }}>
+                          {ASSET_ICON[c.name] || "📦"} {c.name}
+                        </span>
                       </div>
-                      <span className="num" style={{ fontWeight:700 }}>{fmtIDR(c.value,true)}</span>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: T.text }}>
+                        {fmtIDR(c.value, true)}
+                      </span>
                     </div>
                   ))}
                 </div>
+              </div>
+            </div>
+          ) : (
+            <EmptyState icon="📈" message="No assets yet. Add them from Accounts." />
+          )}
+
+          {/* Summary stats */}
+          {(assets.length > 0 || liabilities.length > 0) && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div style={{ ...card, background: T.assetBg, border: "none" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#059669", letterSpacing: "0.05em" }}>ASSETS</div>
+                <div style={{ fontSize: 20, fontWeight: 900, color: T.text, marginTop: 4 }}>{assets.length}</div>
+                <div style={{ fontSize: 12, color: T.text2 }}>items</div>
+              </div>
+              <div style={{ ...card, background: T.ccBg, border: "none" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#dc2626", letterSpacing: "0.05em" }}>LIABILITIES</div>
+                <div style={{ fontSize: 20, fontWeight: 900, color: T.text, marginTop: 4 }}>{liabilities.length}</div>
+                <div style={{ fontSize: 12, color: T.text2 }}>items</div>
               </div>
             </div>
           )}
         </div>
       )}
 
-      {/* ── ASSETS ── */}
-      {subTab==="assets" && (
-        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-          {assets.length===0
-            ? <Empty icon="📈" message="No assets yet. Add them from Accounts." th={th}/>
-            : assets.map(a=>{
-                const gain = Number(a.current_value||0)-Number(a.purchase_value||0);
-                const gainPct = a.purchase_value>0?(gain/a.purchase_value)*100:0;
-                return(
-                  <div key={a.id} style={{ background:th.sur, border:`1px solid ${th.bor}`, borderRadius:13, padding:"14px 16px" }}>
-                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
-                      <div>
-                        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
-                          <span style={{ fontSize:20 }}>{ASSET_ICON[a.subtype]||"📦"}</span>
-                          <span style={{ fontSize:14, fontWeight:700, color:th.tx }}>{a.name}</span>
-                        </div>
-                        <div style={{ fontSize:11, color:th.tx3, display:"flex", gap:8 }}>
-                          <span>{a.subtype||"Asset"}</span>
-                          {a.entity&&a.entity!=="Personal"&&<EntityTag entity={a.entity} small/>}
-                        </div>
+      {/* ══════════════════════════════════════════════════ */}
+      {/* ── ASSETS TAB ───────────────────────────────── */}
+      {/* ══════════════════════════════════════════════════ */}
+      {subTab === "assets" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {assets.length === 0 ? (
+            <EmptyState icon="📈" message="No assets yet. Add them from Accounts." />
+          ) : (
+            assets.map(a => {
+              const cur     = Number(a.current_value || 0);
+              const bought  = Number(a.purchase_value || 0);
+              const gain    = cur - bought;
+              const gainPct = bought > 0 ? (gain / bought) * 100 : 0;
+              const col     = ASSET_COL[a.subtype] || T.ac;
+
+              return (
+                <div key={a.id} style={card}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    {/* Left */}
+                    <div style={{ display: "flex", gap: 12, alignItems: "center", flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        width: 44, height: 44, borderRadius: 12,
+                        background: col + "22",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 20, flexShrink: 0,
+                      }}>
+                        {ASSET_ICON[a.subtype] || "📦"}
                       </div>
-                      <div style={{ textAlign:"right" }}>
-                        <div className="num" style={{ fontSize:16, fontWeight:800, color:ASSET_COL[a.subtype]||th.ac }}>{fmtIDR(Number(a.current_value||0),true)}</div>
-                        {a.purchase_value>0&&(
-                          <div style={{ fontSize:11, fontWeight:700, color:gain>=0?"#0ca678":"#e03131", marginTop:2 }}>
-                            {gain>=0?"▲":"▼"}{fmtIDR(Math.abs(gain),true)} ({gainPct>=0?"+":""}{gainPct.toFixed(1)}%)
-                          </div>
-                        )}
-                        <div style={{ fontSize:10, color:th.tx3 }}>Bought: {fmtIDR(a.purchase_value||0,true)}</div>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: T.text }}>{a.name}</div>
+                        <div style={{ fontSize: 11, color: T.text3, marginTop: 2 }}>
+                          {a.subtype || "Asset"}
+                          {a.entity && a.entity !== "Personal" && (
+                            <span style={{
+                              marginLeft: 6,
+                              background: T.sur2,
+                              borderRadius: 4,
+                              padding: "1px 5px",
+                              fontSize: 10,
+                              fontWeight: 600,
+                              color: T.text2,
+                            }}>
+                              {a.entity}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
-                    <div style={{ display:"flex", gap:6, marginTop:10 }}>
-                      <button onClick={()=>{setSelectedAsset(a);setUpdateVal({value:a.current_value||"",date:todayStr(),notes:""});setShowUpdateForm(true);}}
-                        className="btn btn-ghost" style={{ fontSize:11, padding:"5px 12px", color:th.tx2, borderColor:th.bor }}>
-                        ✏️ Update Value
-                      </button>
+
+                    {/* Right */}
+                    <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 12 }}>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: col }}>
+                        {fmtIDR(cur, true)}
+                      </div>
+                      {bought > 0 && (
+                        <div style={{
+                          fontSize: 11, fontWeight: 700, marginTop: 2,
+                          color: gain >= 0 ? "#059669" : "#dc2626",
+                        }}>
+                          {gain >= 0 ? "▲" : "▼"} {fmtIDR(Math.abs(gain), true)}&nbsp;
+                          <span style={{ fontWeight: 500 }}>
+                            ({gain >= 0 ? "+" : ""}{gainPct.toFixed(1)}%)
+                          </span>
+                        </div>
+                      )}
+                      {bought > 0 && (
+                        <div style={{ fontSize: 10, color: T.text3, marginTop: 1 }}>
+                          Cost: {fmtIDR(bought, true)}
+                        </div>
+                      )}
                     </div>
                   </div>
-                );
-              })
-          }
+
+                  {/* Notes */}
+                  {a.notes && (
+                    <div style={{ fontSize: 11, color: T.text3, marginTop: 8, fontStyle: "italic" }}>
+                      {a.notes}
+                    </div>
+                  )}
+
+                  {/* Action */}
+                  <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => openUpdateModal(a)}
+                    >
+                      ✏️ Update Value
+                    </Button>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
       )}
 
-      {/* ── LIABILITIES ── */}
-      {subTab==="liabilities" && (
-        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-          <div style={{ textAlign:"right" }}>
-            <button className="btn btn-primary" onClick={()=>setShowPayForm(true)}>💳 Make Payment</button>
+      {/* ══════════════════════════════════════════════════ */}
+      {/* ── LIABILITIES TAB ──────────────────────────── */}
+      {/* ══════════════════════════════════════════════════ */}
+      {subTab === "liabilities" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <Button variant="primary" size="sm" onClick={() => openPayModal()}>
+              + Make Payment
+            </Button>
           </div>
-          {liabilities.length===0
-            ? <Empty icon="📉" message="No liabilities. Add them from Accounts." th={th}/>
-            : liabilities.map(l=>{
-                const paid = Number(l.original_amount||0)-Number(l.outstanding_amount||0);
-                const pct = l.original_amount>0?(paid/l.original_amount)*100:0;
-                return(
-                  <div key={l.id} style={{ background:th.sur, border:`1px solid ${th.bor}`, borderRadius:13, padding:"14px 16px" }}>
-                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
-                      <div>
-                        <div style={{ fontSize:14, fontWeight:700, color:th.tx }}>{l.name}</div>
-                        <div style={{ fontSize:11, color:th.tx3, marginTop:2 }}>
-                          {l.creditor} · {l.subtype}
-                          {l.interest_rate>0&&` · ${l.interest_rate}% p.a.`}
-                        </div>
-                      </div>
-                      <div style={{ textAlign:"right" }}>
-                        <div style={{ fontSize:11, color:th.tx3 }}>Outstanding</div>
-                        <div className="num" style={{ fontSize:16, fontWeight:800, color:"#e67700" }}>{fmtIDR(Number(l.outstanding_amount||0),true)}</div>
-                        {l.monthly_payment>0&&<div style={{ fontSize:10, color:th.tx3 }}>{fmtIDR(l.monthly_payment,true)}/mo</div>}
+
+          {liabilities.length === 0 ? (
+            <EmptyState icon="📉" message="No liabilities. Add them from Accounts." />
+          ) : (
+            liabilities.map(l => {
+              const outstanding = Number(l.outstanding_amount || 0);
+              const original    = Number(l.original_amount || 0);
+              const paid        = original > 0 ? original - outstanding : 0;
+              const pct         = original > 0 ? (paid / original) * 100 : 0;
+
+              return (
+                <div key={l.id} style={card}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                    {/* Left */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: T.text }}>{l.name}</div>
+                      <div style={{ fontSize: 11, color: T.text3, marginTop: 2 }}>
+                        {[l.creditor, l.subtype, l.interest_rate > 0 && `${l.interest_rate}% p.a.`]
+                          .filter(Boolean).join(" · ")}
                       </div>
                     </div>
-                    {l.original_amount>0&&(
-                      <>
-                        <ProgressBar value={paid} max={Number(l.original_amount)} color="#0ca678" height={6} th={th}/>
-                        <div style={{ fontSize:10, color:th.tx3, marginTop:3 }}>
-                          {pct.toFixed(1)}% paid · {fmtIDR(paid,true)} of {fmtIDR(l.original_amount,true)}
+
+                    {/* Right */}
+                    <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 12 }}>
+                      <div style={{ fontSize: 10, color: T.text3, marginBottom: 2 }}>Outstanding</div>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: "#e67700" }}>
+                        {fmtIDR(outstanding, true)}
+                      </div>
+                      {l.monthly_payment > 0 && (
+                        <div style={{ fontSize: 10, color: T.text3 }}>
+                          {fmtIDR(l.monthly_payment, true)}/mo
                         </div>
-                      </>
-                    )}
-                    {l.end_date&&<div style={{ fontSize:10, color:th.tx3, marginTop:4 }}>Ends: {l.end_date}</div>}
-                    <button onClick={()=>{setPayForm(p=>({...p,liabId:l.id}));setShowPayForm(true);}}
-                      className="btn btn-primary" style={{ marginTop:10, fontSize:11, padding:"6px 14px" }}>
-                      Make Payment →
-                    </button>
+                      )}
+                    </div>
                   </div>
-                );
-              })
-          }
+
+                  {original > 0 && (
+                    <>
+                      <ProgressBar value={paid} max={original} color="#059669" height={6} />
+                      <div style={{ fontSize: 10, color: T.text3, marginTop: 4 }}>
+                        {pct.toFixed(1)}% paid &nbsp;·&nbsp;
+                        {fmtIDR(paid, true)} of {fmtIDR(original, true)}
+                      </div>
+                    </>
+                  )}
+
+                  {l.end_date && (
+                    <div style={{ fontSize: 10, color: T.text3, marginTop: 4 }}>
+                      Ends: {l.end_date}
+                    </div>
+                  )}
+
+                  <div style={{ marginTop: 12 }}>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => openPayModal(l.id)}
+                    >
+                      Make Payment →
+                    </Button>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
       )}
 
-      {/* ── UPDATE VALUE MODAL ── */}
-      {showUpdateForm&&selectedAsset&&(
-        <Overlay onClose={()=>setShowUpdateForm(false)} th={th} title="Update Asset Value" sub={selectedAsset.name}>
-          <div style={{ display:"flex", flexDirection:"column", gap:11 }}>
-            <div style={{ padding:"10px 14px", background:th.sur2, borderRadius:10, display:"flex", justifyContent:"space-between" }}>
-              <div style={{ fontSize:12, color:th.tx3 }}>Current Value</div>
-              <div className="num" style={{ fontWeight:800 }}>{fmtIDR(Number(selectedAsset.current_value||0))}</div>
+      {/* ══════════════════════════════════════════════════ */}
+      {/* ── UPDATE VALUE MODAL ───────────────────────── */}
+      {/* ══════════════════════════════════════════════════ */}
+      <Modal
+        isOpen={updateModal}
+        onClose={() => setUpdateModal(false)}
+        title="Update Asset Value"
+        footer={
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <Button variant="secondary" size="md" onClick={() => setUpdateModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
+              busy={saving}
+              disabled={!updateForm.value}
+              onClick={handleUpdateValue}
+            >
+              Update Value
+            </Button>
+          </div>
+        }
+      >
+        {selectedAsset && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {/* Current value banner */}
+            <div style={{
+              background: T.sur2, borderRadius: 10,
+              padding: "10px 14px",
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+            }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: T.text }}>{selectedAsset.name}</div>
+                <div style={{ fontSize: 11, color: T.text3 }}>{selectedAsset.subtype}</div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ fontSize: 10, color: T.text3 }}>Current</div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: T.text }}>
+                  {fmtIDR(Number(selectedAsset.current_value || 0))}
+                </div>
+              </div>
             </div>
-            <R2>
-              <F label="New Value (IDR)" th={th} required><Input type="number" value={updateVal.value} onChange={e=>setUpdateVal(v=>({...v,value:e.target.value}))} placeholder="0" th={th} style={{ fontFamily:"'JetBrains Mono',monospace" }}/></F>
-              <F label="Date" th={th}><Input type="date" value={updateVal.date} onChange={e=>setUpdateVal(v=>({...v,date:e.target.value}))} th={th}/></F>
-            </R2>
-            <F label="Notes" th={th}><Input value={updateVal.notes} onChange={e=>setUpdateVal(v=>({...v,notes:e.target.value}))} placeholder="e.g. Annual appraisal" th={th}/></F>
-            {updateVal.value&&(
-              <div style={{ fontSize:11, color:Number(updateVal.value)>Number(selectedAsset.current_value||0)?"#0ca678":"#e03131" }}>
-                Change: {Number(updateVal.value)>Number(selectedAsset.current_value||0)?"+":""}{fmtIDR(Number(updateVal.value)-Number(selectedAsset.current_value||0),true)}
+
+            <FormRow>
+              <AmountInput
+                label="New Value (IDR)"
+                value={updateForm.value}
+                onChange={v => setUpdateForm(f => ({ ...f, value: v }))}
+                currency="IDR"
+              />
+              <Field label="Date">
+                <Input
+                  type="date"
+                  value={updateForm.date}
+                  onChange={e => setUpdateForm(f => ({ ...f, date: e.target.value }))}
+                />
+              </Field>
+            </FormRow>
+
+            <Field label="Notes">
+              <Input
+                value={updateForm.notes}
+                onChange={e => setUpdateForm(f => ({ ...f, notes: e.target.value }))}
+                placeholder="e.g. Annual appraisal"
+              />
+            </Field>
+
+            {/* Change preview */}
+            {updateForm.value && (
+              <div style={{
+                fontSize: 12, fontWeight: 700,
+                color: Number(updateForm.value) >= Number(selectedAsset.current_value || 0)
+                  ? "#059669" : "#dc2626",
+                padding: "6px 10px", borderRadius: 8, background: T.sur2,
+              }}>
+                Change: {Number(updateForm.value) >= Number(selectedAsset.current_value || 0) ? "+" : ""}
+                {fmtIDR(Number(updateForm.value) - Number(selectedAsset.current_value || 0), true)}
               </div>
             )}
-            <BtnRow onCancel={()=>setShowUpdateForm(false)} onOk={updateValue} label="Update Value" th={th} saving={saving}/>
           </div>
-        </Overlay>
-      )}
+        )}
+      </Modal>
 
-      {/* ── PAY LIABILITY MODAL ── */}
-      {showPayForm&&(
-        <Overlay onClose={()=>setShowPayForm(false)} th={th} title="Pay Liability">
-          <div style={{ display:"flex", flexDirection:"column", gap:11 }}>
-            <F label="Liability" th={th}>
-              <Select value={payForm.liabId} onChange={e=>setPayForm(f=>({...f,liabId:e.target.value}))} th={th}>
-                <option value="">Select liability…</option>
-                {liabilities.map(l=><option key={l.id} value={l.id}>{l.name} — {fmtIDR(l.outstanding_amount||0,true)}</option>)}
-              </Select>
-            </F>
-            <F label="From Bank Account" th={th}>
-              <Select value={payForm.bankId} onChange={e=>setPayForm(f=>({...f,bankId:e.target.value}))} th={th}>
-                <option value="">Select bank…</option>
-                {bankAccounts.map(b=><option key={b.id} value={b.id}>{b.name} — {fmtIDR(b.current_balance||0,true)}</option>)}
-              </Select>
-            </F>
-            <R2>
-              <F label="Amount (IDR)" th={th}><Input type="number" value={payForm.amount} onChange={e=>setPayForm(f=>({...f,amount:e.target.value}))} placeholder="0" th={th} style={{ fontFamily:"'JetBrains Mono',monospace" }}/></F>
-              <F label="Date" th={th}><Input type="date" value={payForm.date} onChange={e=>setPayForm(f=>({...f,date:e.target.value}))} th={th}/></F>
-            </R2>
-            <F label="Notes" th={th}><Input value={payForm.notes} onChange={e=>setPayForm(f=>({...f,notes:e.target.value}))} placeholder="Optional" th={th}/></F>
-            <BtnRow onCancel={()=>setShowPayForm(false)} onOk={payLiability} label="Record Payment →" th={th} saving={saving}/>
+      {/* ══════════════════════════════════════════════════ */}
+      {/* ── PAY LIABILITY MODAL ──────────────────────── */}
+      {/* ══════════════════════════════════════════════════ */}
+      <Modal
+        isOpen={payModal}
+        onClose={() => setPayModal(false)}
+        title="Make Liability Payment"
+        footer={
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <Button variant="secondary" size="md" onClick={() => setPayModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              size="md"
+              busy={saving}
+              disabled={!payForm.liabId || !payForm.bankId || !payForm.amount}
+              onClick={handlePayLiability}
+            >
+              Record Payment
+            </Button>
           </div>
-        </Overlay>
-      )}
+        }
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <Field label="Liability *">
+            <Select
+              value={payForm.liabId}
+              onChange={e => {
+                const liab = accounts.find(a => a.id === e.target.value);
+                setPayForm(f => ({
+                  ...f,
+                  liabId: e.target.value,
+                  amount: liab ? String(liab.monthly_payment || "") : f.amount,
+                }));
+              }}
+              options={liabilities.map(l => ({
+                value: l.id,
+                label: `${l.name} — ${fmtIDR(l.outstanding_amount || 0, true)} remaining`,
+              }))}
+              placeholder="Select liability…"
+            />
+          </Field>
+
+          <Field label="From Account *">
+            <Select
+              value={payForm.bankId}
+              onChange={e => setPayForm(f => ({ ...f, bankId: e.target.value }))}
+              options={bankAccounts.map(b => ({
+                value: b.id,
+                label: `${b.name} — ${fmtIDR(b.current_balance || 0, true)}`,
+              }))}
+              placeholder="Select account…"
+            />
+          </Field>
+
+          <FormRow>
+            <AmountInput
+              label="Amount (IDR) *"
+              value={payForm.amount}
+              onChange={v => setPayForm(f => ({ ...f, amount: v }))}
+              currency="IDR"
+            />
+            <Field label="Date">
+              <Input
+                type="date"
+                value={payForm.date}
+                onChange={e => setPayForm(f => ({ ...f, date: e.target.value }))}
+              />
+            </Field>
+          </FormRow>
+
+          <Field label="Notes">
+            <Input
+              value={payForm.notes}
+              onChange={e => setPayForm(f => ({ ...f, notes: e.target.value }))}
+              placeholder="Optional"
+            />
+          </Field>
+        </div>
+      </Modal>
+
     </div>
   );
 }

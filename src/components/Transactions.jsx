@@ -1,663 +1,766 @@
-import { useState, useMemo, useRef } from "react";
-import { ledgerApi, gmailApi, merchantApi, aiCall, parseJSON, fmtIDR, todayStr, ym, toIDR, agingLabel } from "../api";
-import { EXPENSE_CATEGORIES, ENTITIES, TX_TYPES, CURRENCIES } from "../constants";
-import { Overlay, F, R2, BtnRow, SubTabs, Input, Select, Textarea, Tag, EntityTag, TxTypeTag, Amount,
-         CatPill, Empty, SectionHeader, Spinner, showToast, confirmDelete, MonthSelect } from "./shared";
+import { useState, useMemo } from "react";
+import { ledgerApi, merchantApi, gmailApi } from "../api";
+import { EXPENSE_CATEGORIES, ENTITIES, TX_TYPES } from "../constants";
+import { fmtIDR, todayStr, ym, toIDR, groupByDate, fmtDateLabel } from "../utils";
+import Modal, { ConfirmModal } from "./shared/Modal";
+import Button from "./shared/Button";
+import Input, { Field, AmountInput, FormRow, Toggle, Textarea } from "./shared/Input";
+import Select from "./shared/Select";
+import { EmptyState, showToast } from "./shared/Card";
 
-const SUBTABS_BASE = [
-  { id:"all",       label:"All" },
-  { id:"expense",   label:"Expenses" },
-  { id:"income",    label:"Income" },
-  { id:"transfer",  label:"Transfers" },
-  { id:"reimburse", label:"Reimburse" },
+// ─── CONSTANTS ───────────────────────────────────────────────
+const SUBTABS = [
+  { id: "all",       label: "All" },
+  { id: "expense",   label: "Expenses" },
+  { id: "income",    label: "Income" },
+  { id: "transfer",  label: "Transfers" },
+  { id: "reimburse", label: "Reimburse" },
 ];
 
-// Type choices for step-1 grid (2 per row)
 const TYPE_CHOICES = [
-  { id:"expense",       label:"Expense",       icon:"↑",  color:"#dc2626", desc:"Spending money" },
-  { id:"income",        label:"Income",        icon:"↓",  color:"#059669", desc:"Receiving money" },
-  { id:"transfer",      label:"Transfer",      icon:"↔",  color:"#3b5bdb", desc:"Between accounts" },
-  { id:"pay_cc",        label:"Pay CC",        icon:"▭",  color:"#7048e8", desc:"Credit card payment" },
-  { id:"buy_asset",     label:"Buy Asset",     icon:"▲",  color:"#0c8599", desc:"Purchase asset" },
-  { id:"sell_asset",    label:"Sell Asset",    icon:"▽",  color:"#059669", desc:"Sell asset" },
-  { id:"reimburse_out", label:"Reimburse",     icon:"↗",  color:"#d97706", desc:"Paid on behalf" },
-  { id:"reimburse_in",  label:"Recv. Reimb",  icon:"↙",  color:"#059669", desc:"Get reimbursed" },
-  { id:"give_loan",     label:"Give Loan",     icon:"↗",  color:"#d97706", desc:"Lend money" },
-  { id:"collect_loan",  label:"Collect Loan",  icon:"↙",  color:"#059669", desc:"Receive repayment" },
-  { id:"pay_liability", label:"Pay Liability", icon:"▼",  color:"#d97706", desc:"Pay off a debt" },
-  { id:"fx_exchange",   label:"FX Exchange",   icon:"⇄",  color:"#0c8599", desc:"Currency exchange" },
+  { id: "expense",       label: "Expense",       icon: "↑",  color: "#dc2626", desc: "Spending" },
+  { id: "income",        label: "Income",        icon: "↓",  color: "#059669", desc: "Receiving" },
+  { id: "transfer",      label: "Transfer",      icon: "↔",  color: "#3b5bdb", desc: "Move funds" },
+  { id: "pay_cc",        label: "Pay CC",        icon: "💳", color: "#7c3aed", desc: "CC payment" },
+  { id: "buy_asset",     label: "Buy Asset",     icon: "📈", color: "#0891b2", desc: "Purchase asset" },
+  { id: "sell_asset",    label: "Sell Asset",    icon: "💰", color: "#059669", desc: "Sell asset" },
+  { id: "reimburse_out", label: "Reimburse Out", icon: "↗",  color: "#d97706", desc: "Paid for others" },
+  { id: "reimburse_in",  label: "Reimburse In",  icon: "↙",  color: "#059669", desc: "Got reimbursed" },
+  { id: "give_loan",     label: "Give Loan",     icon: "↗",  color: "#d97706", desc: "Lend money" },
+  { id: "collect_loan",  label: "Collect Loan",  icon: "↙",  color: "#059669", desc: "Receive repay" },
+  { id: "pay_liability", label: "Pay Liability", icon: "📉", color: "#d97706", desc: "Pay off debt" },
+  { id: "fx_exchange",   label: "FX Exchange",   icon: "💱", color: "#0891b2", desc: "Currency swap" },
 ];
 
-const EMPTY_ENTRY = {
-  date: todayStr(), description:"", merchant_name:"", amount:"", currency:"IDR",
-  type:"expense", from_account_id:"", to_account_id:"", category_id:"", category_label:"",
-  entity:"Personal", notes:"", is_reimburse:false,
+const EMPTY = {
+  date: todayStr(), description: "", amount: "", currency: "IDR",
+  type: "expense", from_account_id: "", to_account_id: "",
+  category_id: "", category_label: "", entity: "Personal",
+  notes: "", is_reimburse: false,
 };
 
-function dateLabel(d) {
-  const today = new Date().toISOString().slice(0,10);
-  const yest  = new Date(Date.now()-864e5).toISOString().slice(0,10);
-  if (d === today) return "Today";
-  if (d === yest)  return "Yesterday";
-  return new Date(d+"T12:00:00").toLocaleDateString("en-US", { weekday:"short", day:"numeric", month:"long", year:"numeric" });
-}
-
+// ─── MAIN COMPONENT ──────────────────────────────────────────
 export default function Transactions({
-  th, user, accounts, ledger, categories, fxRates, CURRENCIES: C,
+  user, accounts, ledger, categories, fxRates, CURRENCIES: C,
   bankAccounts, creditCards, assets, liabilities, receivables,
-  onRefresh, setLedger, pendingSyncs, setPendingSyncs,
+  onRefresh, setLedger, pendingSyncs, setPendingSyncs, incomeSrcs,
 }) {
-  const pendingCount = pendingSyncs?.length || 0;
-  const SUBTABS = pendingCount > 0
-    ? [...SUBTABS_BASE, { id:"pending", label:`Pending (${pendingCount})` }]
-    : SUBTABS_BASE;
+  const allCurrencies = C || [];
+  const pendingCount  = pendingSyncs?.length || 0;
 
-  const [subTab, setSubTab]         = useState("all");
-  const [showForm, setShowForm]     = useState(false);
-  const [formStep, setFormStep]     = useState(1);   // 1=type selection, 2=fields
-  const [editId, setEditId]         = useState(null);
-  const [form, setForm]             = useState(EMPTY_ENTRY);
-  const [saving, setSaving]         = useState(false);
-  const [filterMonth, setFilterMonth] = useState("all");
-  const [search, setSearch]         = useState("");
-  const [selected, setSelected]     = useState({});
-  const [showAI, setShowAI]         = useState(false);
-  const fileRef = useRef(null);
+  // ── UI state ──
+  const [subTab,  setSubTab]  = useState("all");
+  const [modal,   setModal]   = useState(null); // "add" | "edit" | "delete" | null
+  const [step,    setStep]    = useState(1);
+  const [form,    setForm]    = useState({ ...EMPTY });
+  const [editEntry, setEditEntry] = useState(null);
+  const [deleteEntry, setDeleteEntry] = useState(null);
+  const [saving,  setSaving]  = useState(false);
 
-  const allCurrencies = C || CURRENCIES;
+  // ── Filters ──
+  const [filterMonth,  setFilterMonth]  = useState("");
+  const [filterEntity, setFilterEntity] = useState("");
+  const [filterAccId,  setFilterAccId]  = useState("");
+  const [search,       setSearch]       = useState("");
 
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  // ── Account options per tx type ──
+  const fromOptions = useMemo(() => ({
+    expense:       [...bankAccounts, ...creditCards],
+    income:        [],
+    transfer:      [...bankAccounts],
+    pay_cc:        [...bankAccounts],
+    buy_asset:     [...bankAccounts, ...creditCards],
+    sell_asset:    [...assets],
+    pay_liability: [...bankAccounts],
+    reimburse_out: [...bankAccounts, ...creditCards],
+    reimburse_in:  [...receivables],
+    give_loan:     [...bankAccounts],
+    collect_loan:  [...receivables],
+    fx_exchange:   [...bankAccounts],
+  })[form.type] || accounts, [form.type, bankAccounts, creditCards, assets, liabilities, receivables, accounts]);
+
+  const toOptions = useMemo(() => ({
+    expense:       [],
+    income:        [...bankAccounts],
+    transfer:      [...bankAccounts],
+    pay_cc:        [...creditCards],
+    buy_asset:     [...assets],
+    sell_asset:    [...bankAccounts],
+    pay_liability: [...liabilities],
+    reimburse_out: [...receivables],
+    reimburse_in:  [...bankAccounts],
+    give_loan:     [...receivables],
+    collect_loan:  [...bankAccounts],
+    fx_exchange:   [...bankAccounts],
+  })[form.type] || [], [form.type, bankAccounts, creditCards, assets, liabilities, receivables]);
+
+  const amtIDR = toIDR(Number(form.amount || 0), form.currency || "IDR", fxRates, allCurrencies);
+
+  // ── Filtering ──
   const filtered = useMemo(() => {
     let list = [...ledger];
-    if (subTab === "reimburse") list = list.filter(e => e.is_reimburse);
-    else if (subTab === "expense") list = list.filter(e => e.type === "expense");
-    else if (subTab === "income")  list = list.filter(e => e.type === "income");
-    else if (subTab === "transfer") list = list.filter(e => ["transfer","pay_cc","fx_exchange"].includes(e.type));
-    if (filterMonth !== "all") list = list.filter(e => ym(e.date) === filterMonth);
-    if (search) list = list.filter(e =>
-      e.description?.toLowerCase().includes(search.toLowerCase()) ||
-      e.merchant_name?.toLowerCase().includes(search.toLowerCase()));
+    if (subTab === "expense")   list = list.filter(e => e.type === "expense");
+    else if (subTab === "income")    list = list.filter(e => e.type === "income");
+    else if (subTab === "transfer")  list = list.filter(e => ["transfer","pay_cc","fx_exchange"].includes(e.type));
+    else if (subTab === "reimburse") list = list.filter(e => e.is_reimburse || e.type === "reimburse_out" || e.type === "reimburse_in");
+    if (filterMonth)  list = list.filter(e => ym(e.date) === filterMonth);
+    if (filterEntity) list = list.filter(e => e.entity === filterEntity);
+    if (filterAccId)  list = list.filter(e => e.from_account_id === filterAccId || e.to_account_id === filterAccId);
+    if (search) {
+      const q = search.toLowerCase();
+      list = list.filter(e =>
+        e.description?.toLowerCase().includes(q) ||
+        e.merchant_name?.toLowerCase().includes(q) ||
+        e.category_label?.toLowerCase().includes(q));
+    }
     return list;
-  }, [ledger, subTab, filterMonth, search]);
+  }, [ledger, subTab, filterMonth, filterEntity, filterAccId, search]);
 
-  // Group by date for display
-  const grouped = useMemo(() => {
-    const map = {};
-    filtered.forEach(e => { if (!map[e.date]) map[e.date]=[]; map[e.date].push(e); });
-    return Object.entries(map).sort(([a],[b]) => b.localeCompare(a));
-  }, [filtered]);
+  const grouped = useMemo(() => groupByDate(filtered), [filtered]);
 
-  const fromOptions = useMemo(() => {
-    const maps = {
-      expense:      [...bankAccounts,...creditCards],
-      income:       accounts,
-      transfer:     bankAccounts,
-      pay_cc:       bankAccounts,
-      buy_asset:    [...bankAccounts,...creditCards],
-      sell_asset:   assets,
-      pay_liability:bankAccounts,
-      reimburse_out:[...bankAccounts,...creditCards],
-      reimburse_in: receivables,
-      give_loan:    bankAccounts,
-      collect_loan: receivables,
-      fx_exchange:  bankAccounts,
-    };
-    return maps[form.type] || accounts;
-  }, [form.type, accounts, bankAccounts, creditCards, assets, liabilities, receivables]);
+  // ── Totals ──
+  const outTotal = useMemo(() =>
+    filtered.filter(e => ["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan"].includes(e.type))
+      .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0),
+  [filtered]);
 
-  const toOptions = useMemo(() => {
-    const maps = {
-      expense:      [],
-      income:       bankAccounts,
-      transfer:     bankAccounts,
-      pay_cc:       creditCards,
-      buy_asset:    assets,
-      sell_asset:   bankAccounts,
-      pay_liability:liabilities,
-      reimburse_out:receivables,
-      reimburse_in: bankAccounts,
-      give_loan:    receivables,
-      collect_loan: bankAccounts,
-      fx_exchange:  bankAccounts,
-    };
-    return maps[form.type] || [];
-  }, [form.type, bankAccounts, creditCards, assets, liabilities, receivables]);
+  const inTotal = useMemo(() =>
+    filtered.filter(e => ["income","sell_asset","reimburse_in","collect_loan"].includes(e.type))
+      .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0),
+  [filtered]);
 
-  const needsCategory  = ["expense","reimburse_out"].includes(form.type);
-  const needsToAccount = toOptions.length > 0;
-  const amtIDR = toIDR(Number(form.amount||0), form.currency||"IDR", fxRates, allCurrencies);
-
-  const openNew = () => { setForm({...EMPTY_ENTRY}); setEditId(null); setFormStep(1); setShowForm(true); };
-  const openEdit = (e) => {
-    setForm({ date:e.date, description:e.description, merchant_name:e.merchant_name||"",
-      amount:e.amount, currency:e.currency||"IDR", type:e.type,
-      from_account_id:e.from_account_id||"", to_account_id:e.to_account_id||"",
-      category_id:e.category_id||"", category_label:e.category_label||"",
-      entity:e.entity||"Personal", notes:e.notes||"", is_reimburse:e.is_reimburse||false });
-    setEditId(e.id); setFormStep(2); setShowForm(true);
+  // ── Open add ──
+  const openAdd = () => {
+    setForm({ ...EMPTY });
+    setEditEntry(null);
+    setStep(1);
+    setModal("add");
   };
 
+  // ── Open edit ──
+  const openEdit = (e) => {
+    setForm({
+      date:            e.date,
+      description:     e.description || "",
+      amount:          e.amount,
+      currency:        e.currency || "IDR",
+      type:            e.type,
+      from_account_id: e.from_account_id || "",
+      to_account_id:   e.to_account_id   || "",
+      category_id:     e.category_id     || "",
+      category_label:  e.category_label  || "",
+      entity:          e.entity          || "Personal",
+      notes:           e.notes           || "",
+      is_reimburse:    e.is_reimburse     || false,
+    });
+    setEditEntry(e);
+    setStep(2);
+    setModal("edit");
+  };
+
+  // ── Save ──
   const save = async () => {
-    if (!form.description || !form.amount) return showToast("Fill in description and amount","error");
+    if (!form.description || !form.amount) {
+      showToast("Description and amount are required", "error");
+      return;
+    }
     setSaving(true);
     try {
-      const cat = categories.find(c=>c.id===form.category_id);
-      const entry = { ...form, amount:Number(form.amount), amount_idr:amtIDR,
-        category_label: cat?.name||form.category_label||"" };
-      if (editId) {
-        const updated = await ledgerApi.update(editId, entry);
-        setLedger(p => p.map(e => e.id===editId ? updated : e));
+      const cat   = categories.find(c => c.id === form.category_id);
+      const entry = {
+        ...form,
+        amount:         Number(form.amount),
+        amount_idr:     amtIDR,
+        category_label: cat?.name || form.category_label || "",
+      };
+      if (editEntry) {
+        const updated = await ledgerApi.update(editEntry.id, entry);
+        setLedger(p => p.map(e => e.id === editEntry.id ? updated : e));
         showToast("Transaction updated");
       } else {
         const created = await ledgerApi.create(user.id, entry, accounts);
-        setLedger(p => [created,...p]);
+        setLedger(p => [created, ...p]);
         showToast("Transaction added");
         await onRefresh();
       }
-      if (form.merchant_name && form.category_id)
-        merchantApi.upsertMapping(user.id, form.merchant_name, form.category_id, form.category_label).catch(()=>{});
-      setShowForm(false);
-    } catch (e) { showToast(e.message,"error"); }
+      // Save merchant mapping
+      if (form.description && form.category_id) {
+        merchantApi.upsert(user.id, form.description, form.category_id, cat?.name || "").catch(() => {});
+      }
+      setModal(null);
+    } catch (e) {
+      showToast(e.message, "error");
+    }
     setSaving(false);
   };
 
-  const del = async (entry) => {
-    if (!confirmDelete(entry.description)) return;
+  // ── Delete ──
+  const confirmDelete = async () => {
+    if (!deleteEntry) return;
     try {
-      await ledgerApi.delete(entry.id, entry, accounts);
-      setLedger(p => p.filter(e => e.id!==entry.id));
-      showToast("Deleted"); await onRefresh();
-    } catch (e) { showToast(e.message,"error"); }
+      await ledgerApi.delete(deleteEntry.id, deleteEntry, accounts);
+      setLedger(p => p.filter(e => e.id !== deleteEntry.id));
+      showToast("Deleted");
+      await onRefresh();
+    } catch (e) { showToast(e.message, "error"); }
+    setDeleteEntry(null);
   };
 
-  const bulkDelete = async () => {
-    const ids = Object.keys(selected).filter(k=>selected[k]);
-    if (!ids.length || !window.confirm(`Delete ${ids.length} transactions?`)) return;
-    for (const id of ids) { const e=ledger.find(x=>x.id===id); if(e) await ledgerApi.delete(id,e,accounts); }
-    setLedger(p=>p.filter(e=>!ids.includes(e.id))); setSelected({});
-    showToast(`${ids.length} deleted`); await onRefresh();
-  };
+  // ── Months for filter ──
+  const monthOptions = useMemo(() => {
+    const seen = new Set();
+    ledger.forEach(e => seen.add(ym(e.date)));
+    return Array.from(seen).sort((a, b) => b.localeCompare(a)).slice(0, 12).map(m => ({
+      value: m,
+      label: new Date(m + "-01").toLocaleDateString("en-US", { month: "short", year: "numeric" }),
+    }));
+  }, [ledger]);
 
-  const selCount = Object.values(selected).filter(Boolean).length;
-  const outTotal = filtered.filter(e=>["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan"].includes(e.type)).reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0);
-  const inTotal  = filtered.filter(e=>["income","sell_asset","reimburse_in","collect_loan"].includes(e.type)).reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0);
-
+  // ─── RENDER ───────────────────────────────────────────────
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:0 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
-      {/* ── Action bar ── */}
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
-        <div style={{ display:"flex", gap:8, flex:1 }}>
-          <MonthSelect value={filterMonth} onChange={setFilterMonth} th={th} style={{ maxWidth:160 }}/>
-          <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search transactions…" th={th} style={{ flex:1 }}/>
+      {/* ── ACTION BAR ── */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ flex: 1, position: "relative" }}>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search transactions…"
+            style={{
+              width: "100%", height: 36, padding: "0 12px 0 32px",
+              border: "1.5px solid #e5e7eb", borderRadius: 10,
+              fontFamily: "Figtree, sans-serif", fontSize: 13, fontWeight: 500,
+              color: "#111827", background: "#fff", outline: "none", boxSizing: "border-box",
+            }}
+          />
+          <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", fontSize: 12, color: "#9ca3af" }}>🔍</span>
         </div>
-        <div style={{ display:"flex", gap:8, marginLeft:12 }}>
-          <button className="btn btn-ghost btn-sm" onClick={()=>setShowAI(true)}>AI Import</button>
-          <button className="btn btn-primary btn-sm" onClick={openNew}>+ Add</button>
-        </div>
+        <button onClick={openAdd} style={BTN_PRIMARY}>+ Add</button>
       </div>
 
-      {/* ── Sub-tabs ── */}
-      <SubTabs tabs={SUBTABS} active={subTab} onChange={setSubTab}/>
+      {/* ── FILTERS ROW ── */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <select value={filterMonth} onChange={e => setFilterMonth(e.target.value)} style={FILTER_SELECT}>
+          <option value="">All months</option>
+          {monthOptions.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+        </select>
+        <select value={filterEntity} onChange={e => setFilterEntity(e.target.value)} style={FILTER_SELECT}>
+          <option value="">All entities</option>
+          {ENTITIES.map(en => <option key={en} value={en}>{en}</option>)}
+        </select>
+        <select value={filterAccId} onChange={e => setFilterAccId(e.target.value)} style={FILTER_SELECT}>
+          <option value="">All accounts</option>
+          {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+        {(filterMonth || filterEntity || filterAccId || search) && (
+          <button
+            onClick={() => { setFilterMonth(""); setFilterEntity(""); setFilterAccId(""); setSearch(""); }}
+            style={{ ...FILTER_SELECT, background: "#fee2e2", color: "#dc2626", border: "1.5px solid #fecaca", cursor: "pointer" }}
+          >
+            ✕ Clear
+          </button>
+        )}
+      </div>
 
-      {/* ── Summary strip ── */}
+      {/* ── SUBTABS ── */}
+      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+        {[...SUBTABS, ...(pendingCount > 0 ? [{ id: "pending", label: `Pending (${pendingCount})` }] : [])].map(t => {
+          const active = subTab === t.id;
+          return (
+            <button key={t.id} onClick={() => setSubTab(t.id)} style={{
+              height: 30, padding: "0 12px", borderRadius: 20,
+              border: `1.5px solid ${active ? "#111827" : "#e5e7eb"}`,
+              background: active ? "#111827" : "#fff",
+              color: active ? "#fff" : "#6b7280",
+              fontSize: 12, fontWeight: active ? 700 : 500,
+              cursor: "pointer", fontFamily: "Figtree, sans-serif",
+            }}>
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── SUMMARY STRIP ── */}
       {subTab !== "pending" && (
-        <div style={{ display:"flex", gap:16, padding:"10px 0", borderBottom:`1px solid ${th.bor}`, marginBottom:4, fontSize:12 }}>
-          <span style={{ color:th.tx3 }}>{filtered.length} items</span>
-          <span className="num" style={{ color:th.rd }}>−{fmtIDR(outTotal,true)}</span>
-          <span className="num" style={{ color:th.gr }}>+{fmtIDR(inTotal,true)}</span>
-          {selCount>0 && <>
-            <span style={{ marginLeft:"auto", color:th.ac, fontWeight:600 }}>{selCount} selected</span>
-            <button onClick={bulkDelete} style={{ background:"none", border:"none", color:th.rd, cursor:"pointer", fontSize:12, fontWeight:600, fontFamily:"'Sora',sans-serif" }}>Delete</button>
-            <button onClick={()=>setSelected({})} style={{ background:"none", border:"none", color:th.tx3, cursor:"pointer", fontSize:12, fontFamily:"'Sora',sans-serif" }}>Clear</button>
-          </>}
+        <div style={{
+          display: "flex", gap: 16, alignItems: "center",
+          padding: "8px 0", borderBottom: "1px solid #f3f4f6",
+          fontSize: 12, fontFamily: "Figtree, sans-serif",
+        }}>
+          <span style={{ color: "#9ca3af" }}>{filtered.length} transactions</span>
+          <span style={{ color: "#dc2626", fontWeight: 700 }}>−{fmtIDR(outTotal, true)}</span>
+          <span style={{ color: "#059669", fontWeight: 700 }}>+{fmtIDR(inTotal, true)}</span>
+          <span style={{ color: inTotal - outTotal >= 0 ? "#059669" : "#dc2626", fontWeight: 700, marginLeft: "auto" }}>
+            Net: {inTotal - outTotal >= 0 ? "+" : ""}{fmtIDR(inTotal - outTotal, true)}
+          </span>
         </div>
       )}
 
-      {/* ── Pending tab ── */}
+      {/* ── PENDING TAB ── */}
       {subTab === "pending" && (
-        <PendingReview th={th} user={user} accounts={accounts} categories={categories}
+        <PendingTab
           pendingSyncs={pendingSyncs} setPendingSyncs={setPendingSyncs}
-          ledger={ledger} setLedger={setLedger} onRefresh={onRefresh}/>
+          accounts={accounts} categories={categories} user={user}
+          ledger={ledger} setLedger={setLedger} onRefresh={onRefresh}
+        />
       )}
 
-      {/* ── Transaction list grouped by date ── */}
+      {/* ── TRANSACTION LIST ── */}
       {subTab !== "pending" && (
         grouped.length === 0
-          ? <Empty icon="◎" message="No transactions found" th={th}/>
-          : grouped.map(([date, rows]) => (
-              <div key={date}>
-                <div className="tx-date-header" style={{ color:th.tx3 }}>{dateLabel(date)}</div>
-                {rows.map(e => {
-                  const isOut = ["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan"].includes(e.type);
-                  const isIn  = ["income","sell_asset","reimburse_in","collect_loan"].includes(e.type);
-                  const amt   = Number(e.amount_idr||e.amount||0);
-                  const fromAcc = accounts.find(a=>a.id===e.from_account_id);
-                  const toAcc   = accounts.find(a=>a.id===e.to_account_id);
-                  const catDef  = EXPENSE_CATEGORIES.find(c=>c.id===e.category_id||c.label===e.category_label);
-                  const iconBg  = catDef ? catDef.color+"22" : isOut ? th.rdBg : isIn ? th.grBg : th.acBg;
-                  const iconCol = catDef ? catDef.color : isOut ? th.rd : isIn ? th.gr : th.ac;
-                  const icon    = catDef?.icon || (isOut?"↑":isIn?"↓":"↔");
-                  return (
-                    <div key={e.id} className="tx-row"
-                      style={{ background:selected[e.id]?th.acBg:"transparent" }}
-                      onClick={()=>setSelected(s=>({...s,[e.id]:!s[e.id]}))}>
-                      {/* Category icon */}
-                      <div style={{ width:36,height:36,borderRadius:"50%",background:iconBg,
-                        display:"flex",alignItems:"center",justifyContent:"center",
-                        fontSize:16,flexShrink:0,color:iconCol }}>{icon}</div>
-                      {/* Description + meta */}
-                      <div style={{ flex:1, minWidth:0 }}>
-                        <div style={{ fontSize:14, fontWeight:500, color:th.tx, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{e.description}</div>
-                        <div style={{ fontSize:12, color:th.tx3, marginTop:1, display:"flex", gap:6, flexWrap:"wrap" }}>
-                          {fromAcc && <span>{fromAcc.name}{toAcc&&<> → {toAcc.name}</>}</span>}
-                          {catDef && <span>{catDef.label}</span>}
-                          {e.entity&&e.entity!=="Personal" && <span style={{ color:th.ac }}>{e.entity}</span>}
-                        </div>
-                      </div>
-                      {/* Amount */}
-                      <div className="num" style={{ fontSize:14, fontWeight:700, color:isOut?th.rd:isIn?th.gr:th.ac, flexShrink:0 }}>
-                        {isOut?"−":isIn?"+":""}{fmtIDR(amt,true)}
-                      </div>
-                      {/* Actions */}
-                      <div style={{ display:"flex", gap:4, flexShrink:0 }} onClick={ev=>ev.stopPropagation()}>
-                        <button className="btn-icon" onClick={()=>openEdit(e)} style={{ color:th.tx3 }}>✎</button>
-                        <button className="btn-icon" onClick={()=>del(e)} style={{ color:th.rd, borderColor:th.rdBg }}>✕</button>
-                      </div>
+          ? <EmptyState icon="📋" title="No transactions" message="Add your first transaction or adjust the filters." />
+          : grouped.map(([date, rows]) => {
+              const dayNet = rows.reduce((sum, e) => {
+                const a = Number(e.amount_idr || e.amount || 0);
+                if (["income","reimburse_in","collect_loan","sell_asset"].includes(e.type)) return sum + a;
+                if (["transfer","pay_cc","fx_exchange","opening_balance"].includes(e.type)) return sum;
+                return sum - a;
+              }, 0);
+
+              return (
+                <div key={date}>
+                  {/* Date header */}
+                  <div style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                    padding: "10px 0 6px",
+                  }}>
+                    <div style={{
+                      fontSize: 11, fontWeight: 700, color: "#9ca3af",
+                      textTransform: "uppercase", letterSpacing: "0.5px",
+                      fontFamily: "Figtree, sans-serif",
+                    }}>
+                      {fmtDateLabel(date)}
                     </div>
-                  );
-                })}
-              </div>
-            ))
-      )}
-
-      {/* ── ADD/EDIT FORM ── */}
-      {showForm && (
-        <Overlay onClose={()=>setShowForm(false)} th={th}
-          title={editId ? "Edit Transaction" : formStep===1 ? "Add Transaction" : TYPE_CHOICES.find(t=>t.id===form.type)?.label||"Add Transaction"}
-          sub={formStep===2 ? "Step 2 of 2" : !editId ? "Step 1 of 2" : undefined}>
-
-          {/* Step 1: type grid */}
-          {formStep === 1 && !editId && (
-            <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
-              <div style={{ fontSize:13, color:th.tx3 }}>What type of transaction?</div>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-                {TYPE_CHOICES.map(t => (
-                  <button key={t.id} onClick={()=>{ setForm(f=>({...f,type:t.id,from_account_id:"",to_account_id:"",category_id:""})); setFormStep(2); }}
-                    style={{ display:"flex", alignItems:"center", gap:10, padding:"12px 14px",
-                      border:`1px solid ${th.bor}`, borderRadius:10, background:th.sur,
-                      cursor:"pointer", textAlign:"left", transition:"all .12s", fontFamily:"'Sora',sans-serif" }}>
-                    <div style={{ width:32,height:32,borderRadius:8,background:t.color+"18",
-                      display:"flex",alignItems:"center",justifyContent:"center",
-                      fontSize:16,color:t.color,flexShrink:0 }}>{t.icon}</div>
-                    <div>
-                      <div style={{ fontSize:13, fontWeight:600, color:th.tx }}>{t.label}</div>
-                      <div style={{ fontSize:11, color:th.tx3 }}>{t.desc}</div>
+                    <div style={{
+                      fontSize: 11, fontWeight: 600, fontFamily: "Figtree, sans-serif",
+                      color: dayNet >= 0 ? "#059669" : "#dc2626",
+                    }}>
+                      {dayNet >= 0 ? "+" : ""}{fmtIDR(dayNet, true)}
                     </div>
-                  </button>
-                ))}
-              </div>
-              <div style={{ paddingBottom:8 }}>
-                <button className="btn btn-ghost" onClick={()=>setShowForm(false)} style={{ width:"100%", height:40 }}>Cancel</button>
-              </div>
-            </div>
-          )}
+                  </div>
 
-          {/* Step 2: form fields */}
-          {(formStep === 2 || editId) && (
-            <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
-              {/* Back to type selection (new only) */}
-              {!editId && (
-                <button onClick={()=>setFormStep(1)} style={{ background:"none", border:"none", cursor:"pointer", color:th.tx3, fontSize:12, fontFamily:"'Sora',sans-serif", textAlign:"left", padding:0, display:"flex", alignItems:"center", gap:4 }}>
-                  ← Back to type
-                </button>
-              )}
-
-              <R2>
-                <F label="Date" th={th}><Input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} th={th}/></F>
-                <F label="Currency" th={th}>
-                  <Select value={form.currency} onChange={e=>setForm(f=>({...f,currency:e.target.value}))} th={th}>
-                    {allCurrencies.map(c=><option key={c.code} value={c.code}>{c.flag} {c.code}</option>)}
-                  </Select>
-                </F>
-              </R2>
-
-              <F label="Description" th={th} required>
-                <Input value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} placeholder="What was this for?" th={th}/>
-              </F>
-
-              <R2>
-                <F label="Amount" th={th} required>
-                  <Input type="number" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))} placeholder="0" th={th}
-                    style={{ fontFamily:"'JetBrains Mono',monospace" }}/>
-                </F>
-                <F label="Entity" th={th}>
-                  <Select value={form.entity} onChange={e=>setForm(f=>({...f,entity:e.target.value}))} th={th}>
-                    {ENTITIES.map(e=><option key={e}>{e}</option>)}
-                  </Select>
-                </F>
-              </R2>
-
-              {fromOptions.length > 0 && (
-                <F label={["income","sell_asset","reimburse_in","collect_loan"].includes(form.type)?"Source":"From Account"} th={th}>
-                  <Select value={form.from_account_id} onChange={e=>setForm(f=>({...f,from_account_id:e.target.value}))} th={th}>
-                    <option value="">Select account…</option>
-                    {fromOptions.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
-                  </Select>
-                </F>
-              )}
-
-              {needsToAccount && (
-                <F label={form.type==="income"?"To Account":"Destination"} th={th}>
-                  <Select value={form.to_account_id} onChange={e=>setForm(f=>({...f,to_account_id:e.target.value}))} th={th}>
-                    <option value="">Select account…</option>
-                    {toOptions.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
-                  </Select>
-                </F>
-              )}
-
-              {needsCategory && (
-                <F label="Category" th={th}>
-                  <Select value={form.category_id} onChange={e=>{
-                    const cat=categories.find(c=>c.id===e.target.value);
-                    setForm(f=>({...f,category_id:e.target.value,category_label:cat?.name||""}));
-                  }} th={th}>
-                    <option value="">Select category…</option>
-                    {categories.map(c=><option key={c.id} value={c.id}>{c.icon||""} {c.name}</option>)}
-                  </Select>
-                </F>
-              )}
-
-              {form.type==="expense" && (
-                <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", fontSize:13, color:th.tx2 }}>
-                  <input type="checkbox" checked={form.is_reimburse} onChange={e=>setForm(f=>({...f,is_reimburse:e.target.checked}))}
-                    style={{ accentColor:th.am, width:16, height:16 }}/>
-                  Mark as reimbursable
-                </label>
-              )}
-
-              <F label="Notes" th={th}>
-                <Input value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} placeholder="Optional notes" th={th}/>
-              </F>
-
-              {form.currency !== "IDR" && (
-                <div style={{ fontSize:12, color:th.tx3, textAlign:"right" }}>≈ {fmtIDR(amtIDR)} IDR</div>
-              )}
-
-              <BtnRow onCancel={()=>setShowForm(false)} onOk={save} label={editId?"Save Changes":"Add Transaction"} th={th} saving={saving}/>
-            </div>
-          )}
-        </Overlay>
+                  {/* Rows */}
+                  {rows.map(e => (
+                    <TxRow
+                      key={e.id}
+                      entry={e}
+                      accounts={accounts}
+                      onEdit={() => openEdit(e)}
+                      onDelete={() => setDeleteEntry(e)}
+                    />
+                  ))}
+                </div>
+              );
+            })
       )}
 
-      {/* ── AI IMPORT ── */}
-      {showAI && (
-        <AIImportPanel th={th} user={user} accounts={accounts} categories={categories}
-          fxRates={fxRates} CURRENCIES={allCurrencies}
-          onClose={()=>setShowAI(false)}
-          onImported={(rows)=>{ setLedger(p=>[...rows,...p]); onRefresh(); }}/>
-      )}
+      {/* ── ADD / EDIT MODAL ── */}
+      <Modal
+        isOpen={modal === "add" || modal === "edit"}
+        onClose={() => setModal(null)}
+        title={
+          modal === "edit"
+            ? "Edit Transaction"
+            : step === 1 ? "Add Transaction" : TYPE_CHOICES.find(t => t.id === form.type)?.label || "Add"
+        }
+        footer={
+          step === 2 && (
+            <div style={{ display: "flex", gap: 8 }}>
+              {modal === "add" && (
+                <Button variant="secondary" onClick={() => setStep(1)} style={{ flexShrink: 0 }}>
+                  ← Back
+                </Button>
+              )}
+              <Button fullWidth onClick={save} busy={saving}>
+                {modal === "edit" ? "Save Changes" : "Add Transaction"}
+              </Button>
+            </div>
+          )
+        }
+      >
+        {step === 1 ? (
+          <TypePickerGrid
+            types={TYPE_CHOICES}
+            onSelect={type => { set("type", type); setStep(2); }}
+          />
+        ) : (
+          <TxForm
+            form={form} set={set}
+            fromOptions={fromOptions} toOptions={toOptions}
+            accounts={accounts} categories={categories}
+            incomeSrcs={incomeSrcs} allCurrencies={allCurrencies}
+            amtIDR={amtIDR}
+          />
+        )}
+      </Modal>
+
+      {/* ── DELETE CONFIRM ── */}
+      <ConfirmModal
+        isOpen={!!deleteEntry}
+        onClose={() => setDeleteEntry(null)}
+        onConfirm={confirmDelete}
+        title="Delete Transaction"
+        message={`Delete "${deleteEntry?.description}"? This cannot be undone and will reverse the balance update.`}
+        danger
+      />
     </div>
   );
 }
 
-// ─── AI IMPORT PANEL ─────────────────────────────────────────
-function AIImportPanel({ th, user, accounts, categories, fxRates, CURRENCIES: C, onClose, onImported }) {
-  const [rows, setRows]       = useState([]);
-  const [sel, setSel]         = useState({});
-  const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState(null);
-  const [saving, setSaving]   = useState(false);
-  const fileRef = useRef(null);
+// ─── TRANSACTION ROW ─────────────────────────────────────────
+function TxRow({ entry: e, accounts, onEdit, onDelete }) {
+  const fromAcc = accounts.find(a => a.id === e.from_account_id);
+  const toAcc   = accounts.find(a => a.id === e.to_account_id);
+  const amt     = Number(e.amount_idr || e.amount || 0);
 
-  const bankAccounts = accounts.filter(a=>a.type==="bank");
-  const creditCards  = accounts.filter(a=>a.type==="credit_card");
+  const isOut    = ["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan"].includes(e.type);
+  const isIn     = ["income","sell_asset","reimburse_in","collect_loan"].includes(e.type);
+  const isMove   = ["transfer","fx_exchange"].includes(e.type);
 
-  const handleFile = async (e) => {
-    const file = e.target.files?.[0]; if (!file) return;
-    const mime = file.type || "image/jpeg";
-    setError(null); setRows([]); setSel({});
-    const reader = new FileReader();
-    reader.onload = async ev => {
-      const b64 = ev.target.result.split(",")[1];
-      setLoading(true);
-      try {
-        const isPdf = mime === "application/pdf";
-        const contentBlock = isPdf
-          ? { type:"document", source:{ type:"base64", media_type:"application/pdf", data:b64 } }
-          : { type:"image",    source:{ type:"base64", media_type:mime, data:b64 } };
-        const prompt = `You are a financial transaction extractor. Analyze this document and extract ALL transactions.
-Return ONLY a JSON array with objects:
-[{
-  "date": "YYYY-MM-DD",
-  "description": "merchant or description",
-  "merchant_name": "normalized merchant name",
-  "amount": number,
-  "currency": "IDR",
-  "type": "expense|income|transfer|pay_cc",
-  "card_last4": "1234 or null",
-  "from_account_no": "account number or null",
-  "to_account_no": "account number or null",
-  "from_bank_name": "bank name or null",
-  "to_bank_name": "bank name or null",
-  "is_qris": false,
-  "is_debit": false,
-  "is_transfer": false,
-  "is_cc_payment": false,
-  "suggested_category": "Food & Drinks|Transport|Shopping|etc",
-  "confidence": 0.9
-}]
-Rules: TRSF/Transfer→transfer, QRIS/QR→is_qris=true, CC/Credit Card payment→is_cc_payment=true, negative amount→expense. Return ONLY JSON array.`;
-        const d = await aiCall({ model:"claude-sonnet-4-20250514", max_tokens:8000, messages:[{ role:"user", content:[contentBlock,{type:"text",text:prompt}] }] });
-        const raw = parseJSON(d.content?.[0]?.text||"[]", []);
-        // Smart match
-        const enriched = raw.map(tx => {
-          let fromAcc = null, toAcc = null;
-          // Match by last4
-          if (tx.card_last4) {
-            const cc = creditCards.find(c=>c.last4===String(tx.card_last4));
-            if (cc) fromAcc = cc;
-          }
-          // Match by account number
-          if (!fromAcc && tx.from_account_no) {
-            const b = bankAccounts.find(b=>b.account_no&&b.account_no.includes(tx.from_account_no.slice(-4)));
-            if (b) fromAcc = b;
-          }
-          if (tx.to_account_no) {
-            const b = bankAccounts.find(b=>b.account_no&&b.account_no.includes(tx.to_account_no.slice(-4)));
-            if (b) toAcc = b;
-          }
-          // Resolve type
-          let type = tx.type;
-          if (fromAcc && toAcc) type = "transfer";
-          else if (tx.is_cc_payment) type = "pay_cc";
-          else if (tx.is_qris || tx.is_debit) type = "expense";
-          // Category match
-          const cat = categories.find(c=>c.name===tx.suggested_category);
-          return {
-            ...tx, type, amount_idr: tx.amount,
-            from_account_id: fromAcc?.id || bankAccounts[0]?.id || "",
-            to_account_id: toAcc?.id || (type==="pay_cc"?creditCards[0]?.id:"") || "",
-            category_id: cat?.id || "", category_label: cat?.name || tx.suggested_category || "Other",
-            entity: "Personal", _matched_from: fromAcc, _matched_to: toAcc,
-          };
-        });
-        setRows(enriched);
-        const s = {}; enriched.forEach((_,i)=>{ s[i]=true; }); setSel(s);
-      } catch(e) { setError(e.message||"AI failed to read file"); }
-      setLoading(false);
-    };
-    reader.readAsDataURL(file);
-  };
+  const catDef   = EXPENSE_CATEGORIES.find(c => c.id === e.category_id || c.id === e.category);
+  const amtColor = isOut ? "#dc2626" : isIn ? "#059669" : "#3b5bdb";
+  const prefix   = isOut ? "−" : isIn ? "+" : "";
 
-  const editRow = (i,k,v) => setRows(p=>p.map((r,idx)=>idx===i?{...r,[k]:v}:r));
+  const iconEmoji = catDef?.icon || (isOut ? "↑" : isIn ? "↓" : "↔");
+  const iconBg    = catDef ? catDef.color + "18" : isOut ? "#fee2e2" : isIn ? "#dcfce7" : "#dbeafe";
 
-  const doImport = async () => {
-    const toImport = rows.filter((_,i)=>sel[i]);
-    if (!toImport.length) return;
-    setSaving(true);
-    const created = [];
-    try {
-      for (const row of toImport) {
-        const entry = {
-          date: row.date||todayStr(), description: row.description, merchant_name: row.merchant_name||"",
-          amount: Number(row.amount||0), currency: row.currency||"IDR", amount_idr: Number(row.amount_idr||row.amount||0),
-          type: row.type||"expense", from_account_id: row.from_account_id||"", to_account_id: row.to_account_id||"",
-          category_id: row.category_id||"", category_label: row.category_label||"",
-          entity: row.entity||"Personal", notes:"AI Import", confidence: row.confidence||1,
-        };
-        const r = await ledgerApi.create(user.id, entry, accounts);
-        if (r) created.push(r);
-      }
-      onImported(created);
-      showToast(`✅ ${created.length} transactions imported`);
-      // Learn merchant → category for all confirmed imports
-      for (const row of toImport) {
-        if (row.merchant_name && row.category_id) {
-          merchantApi.upsertMapping(user.id, row.merchant_name, row.category_id, row.category_label).catch(()=>{});
-        }
-      }
-      onClose();
-    } catch(e) { showToast(e.message,"error"); }
-    setSaving(false);
-  };
+  const accLabel = isMove
+    ? `${fromAcc?.name || "?"} → ${toAcc?.name || "?"}`
+    : fromAcc?.name || toAcc?.name || "";
+
+  const meta = [
+    accLabel,
+    e.category_label || catDef?.label,
+    e.entity && e.entity !== "Personal" ? e.entity : null,
+  ].filter(Boolean).join(" · ");
 
   return (
-    <Overlay onClose={onClose} th={th} title="🤖 AI Smart Import" maxWidth={760}>
-      <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-        {rows.length===0&&!loading&&(
-          <>
-            <div onClick={()=>fileRef.current?.click()} style={{
-              border:`2px dashed ${th.ac}`, borderRadius:14, padding:"32px 20px",
-              textAlign:"center", cursor:"pointer", background:th.acBg,
-            }}>
-              <div style={{ fontSize:36, marginBottom:8 }}>🤖</div>
-              <div style={{ fontSize:14, fontWeight:700, color:th.ac }}>Upload photo or PDF</div>
-              <div style={{ fontSize:11, color:th.tx3, marginTop:4 }}>Receipt · Bank statement · CC bill · Screenshot</div>
-            </div>
-            <input ref={fileRef} type="file" accept="image/*,application/pdf" style={{ display:"none" }} onChange={handleFile}/>
-          </>
-        )}
-        {loading&&(
-          <div style={{ display:"flex", gap:12, alignItems:"center", padding:16, background:th.acBg, borderRadius:12 }}>
-            <Spinner size={24} color={th.ac}/>
-            <div style={{ fontSize:13, fontWeight:700, color:th.ac }}>AI extracting transactions… (10–30s)</div>
-          </div>
-        )}
-        {error&&(
-          <div style={{ padding:"12px 14px", background:th.rdBg, border:`1px solid ${th.rd}44`, borderRadius:10, fontSize:12, color:th.rd }}>
-            ⚠️ {error}
-            <button onClick={()=>fileRef.current?.click()} style={{ marginLeft:12, background:th.rd, color:"#fff", border:"none", padding:"4px 10px", borderRadius:6, fontSize:11, fontWeight:700, cursor:"pointer" }}>Retry</button>
-            <input ref={fileRef} type="file" accept="image/*,application/pdf" style={{ display:"none" }} onChange={handleFile}/>
-          </div>
-        )}
-        {rows.length>0&&(
-          <>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-              <div style={{ fontSize:12, fontWeight:700, color:th.tx }}>{rows.length} transactions extracted · <span style={{ color:th.ac }}>{Object.values(sel).filter(Boolean).length} selected</span></div>
-              <div style={{ display:"flex", gap:6 }}>
-                <button onClick={()=>{const s={};rows.forEach((_,i)=>s[i]=true);setSel(s);}} style={{ border:`1px solid ${th.ac}`, background:"none", color:th.ac, borderRadius:7, padding:"3px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"'Sora',sans-serif" }}>All</button>
-                <button onClick={()=>setSel({})} style={{ border:`1px solid ${th.bor}`, background:"none", color:th.tx3, borderRadius:7, padding:"3px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"'Sora',sans-serif" }}>None</button>
-                <button onClick={()=>fileRef.current?.click()} style={{ border:`1px solid ${th.bor}`, background:"none", color:th.tx3, borderRadius:7, padding:"3px 10px", fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"'Sora',sans-serif" }}>📁 Change</button>
-                <input ref={fileRef} type="file" accept="image/*,application/pdf" style={{ display:"none" }} onChange={handleFile}/>
-              </div>
-            </div>
-            {/* Header */}
-            <div style={{ display:"grid", gridTemplateColumns:"20px 88px 1fr 80px 88px 110px 110px", gap:4, fontSize:9, fontWeight:700, color:th.tx3, textTransform:"uppercase", letterSpacing:.5, padding:"2px 8px" }}>
-              <span/><span>Date</span><span>Description</span><span>Amount</span><span>Type</span><span>Account</span><span>Category</span>
-            </div>
-            <div style={{ maxHeight:360, overflowY:"auto", display:"flex", flexDirection:"column", gap:3 }}>
-              {rows.map((row,i)=>{
-                const lowConf=(row.confidence||1)<0.7;
-                const bg=lowConf?th.amBg:i%2===0?th.sur:th.sur2;
-                return(
-                  <div key={i} style={{ display:"grid", gridTemplateColumns:"20px 88px 1fr 80px 88px 110px 110px", gap:4, padding:"5px 8px", background:bg, borderRadius:8, alignItems:"center", opacity:sel[i]?1:.45 }}>
-                    <input type="checkbox" checked={!!sel[i]} onChange={e=>setSel(s=>({...s,[i]:e.target.checked}))} style={{ accentColor:th.ac }}/>
-                    <input className="inp" type="date" value={row.date||""} onChange={e=>editRow(i,"date",e.target.value)} style={{ padding:"2px 4px", fontSize:10, background:th.sur, borderColor:th.bor2, color:th.tx }}/>
-                    <input className="inp" value={row.description||""} onChange={e=>editRow(i,"description",e.target.value)} style={{ padding:"2px 4px", fontSize:11, background:th.sur, borderColor:th.bor2, color:th.tx }}/>
-                    <input className="inp" type="number" value={row.amount||""} onChange={e=>editRow(i,"amount",e.target.value)} style={{ padding:"2px 4px", fontSize:11, textAlign:"right", fontFamily:"'JetBrains Mono',monospace", background:th.sur, borderColor:th.bor2, color:th.tx }}/>
-                    <select className="inp" value={row.type||"expense"} onChange={e=>editRow(i,"type",e.target.value)} style={{ padding:"2px 4px", fontSize:10, background:th.sur, borderColor:th.bor2, color:th.tx }}>
-                      <option value="expense">↑ Out</option>
-                      <option value="income">↓ In</option>
-                      <option value="transfer">↔ Trf</option>
-                      <option value="pay_cc">💳 CC</option>
-                      <option value="expense">📱 QRIS</option>
-                    </select>
-                    <select className="inp" value={row.from_account_id||""} onChange={e=>editRow(i,"from_account_id",e.target.value)} style={{ padding:"2px 4px", fontSize:10, background:th.sur, borderColor:th.bor2, color:th.tx }}>
-                      <option value="">— Account —</option>
-                      {accounts.filter(a=>["bank","credit_card"].includes(a.type)).map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
-                    </select>
-                    <select className="inp" value={row.category_id||""} onChange={e=>{const cat=categories.find(c=>c.id===e.target.value);editRow(i,"category_id",e.target.value);editRow(i,"category_label",cat?.name||"");}}
-                      style={{ padding:"2px 4px", fontSize:10, background:lowConf&&row.category_label==="Other"?th.amBg:th.sur, borderColor:lowConf&&row.category_label==="Other"?th.am:th.bor2, color:th.tx }}>
-                      <option value="">— Category —</option>
-                      {categories.map(c=><option key={c.id} value={c.id}>{c.icon||""} {c.name}</option>)}
-                    </select>
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{ display:"flex", gap:16, padding:"8px 12px", background:th.sur2, borderRadius:9, fontSize:12 }}>
-              <span style={{ color:th.tx3 }}>Selected: <strong style={{ color:th.tx }}>{Object.values(sel).filter(Boolean).length}</strong></span>
-              {rows.some(r=>(r.confidence||1)<0.7)&&<span style={{ color:th.am }}>⚠️ {rows.filter(r=>(r.confidence||1)<0.7).length} need review</span>}
-            </div>
-            <BtnRow onCancel={onClose} onOk={doImport} label={`Import ${Object.values(sel).filter(Boolean).length} Transactions →`} th={th} saving={saving} disabled={Object.values(sel).filter(Boolean).length===0}/>
-          </>
-        )}
-        {rows.length===0&&!loading&&!error&&<button onClick={onClose} style={{ padding:10, borderRadius:9, border:`1px solid ${th.bor}`, background:th.sur2, color:th.tx3, fontFamily:"'Sora',sans-serif", fontWeight:600, fontSize:13, cursor:"pointer" }}>Cancel</button>}
+    <div style={{
+      display:      "flex",
+      alignItems:   "center",
+      gap:          12,
+      padding:      "10px 0",
+      borderBottom: "1px solid #f9fafb",
+    }}>
+      {/* Icon */}
+      <div style={{
+        width: 36, height: 36, borderRadius: 10,
+        background: iconBg,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 16, flexShrink: 0,
+      }}>
+        {iconEmoji}
       </div>
-    </Overlay>
+
+      {/* Center */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: 13, fontWeight: 600, color: "#111827",
+          fontFamily: "Figtree, sans-serif",
+          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+        }}>
+          {e.description || "—"}
+        </div>
+        {meta && (
+          <div style={{
+            fontSize: 11, color: "#9ca3af",
+            fontFamily: "Figtree, sans-serif",
+            marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+          }}>
+            {meta}
+          </div>
+        )}
+      </div>
+
+      {/* Amount */}
+      <div style={{
+        fontSize: 13, fontWeight: 700,
+        color: amtColor, fontFamily: "Figtree, sans-serif",
+        flexShrink: 0, textAlign: "right",
+      }}>
+        {prefix}{fmtIDR(amt)}
+      </div>
+
+      {/* Actions */}
+      <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+        <button onClick={onEdit} style={ROW_BTN}>✎</button>
+        <button onClick={onDelete} style={{ ...ROW_BTN, color: "#dc2626", borderColor: "#fecaca" }}>✕</button>
+      </div>
+    </div>
   );
 }
 
-// ─── PENDING REVIEW COMPONENT ─────────────────────────────────
-function PendingReview({
-  th, user, accounts, categories, pendingSyncs, setPendingSyncs,
-  ledger, setLedger, onRefresh,
-}) {
-  const [saving, setSaving] = useState(false);
+// ─── TYPE PICKER GRID ────────────────────────────────────────
+function TypePickerGrid({ types, onSelect }) {
+  return (
+    <div>
+      <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: 12 }}>
+        What kind of transaction?
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+        {types.map(t => (
+          <button key={t.id} onClick={() => onSelect(t.id)} style={{
+            padding:       "14px 8px",
+            borderRadius:  12,
+            border:        `1.5px solid ${t.color}22`,
+            background:    t.color + "0d",
+            cursor:        "pointer",
+            display:       "flex",
+            flexDirection: "column",
+            alignItems:    "center",
+            gap:           6,
+            transition:    "border-color 0.15s",
+          }}>
+            <span style={{ fontSize: 20 }}>{t.icon}</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
+              {t.label}
+            </span>
+            <span style={{ fontSize: 9, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+              {t.desc}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
-  const confirmOne = async (sync) => {
-    if (!sync.ai_raw_result) return showToast("No transaction data to import","error");
-    setSaving(true);
+// ─── TRANSACTION FORM ────────────────────────────────────────
+function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incomeSrcs = [], allCurrencies = [], amtIDR }) {
+  const type = form.type;
+
+  const catOptions = [
+    ...categories.filter(c => c.is_active !== false),
+  ].map(c => ({ value: c.id, label: `${c.icon || ""} ${c.name || c.label}` }));
+  if (!catOptions.length) {
+    EXPENSE_CATEGORIES.forEach(c => catOptions.push({ value: c.id, label: `${c.icon} ${c.label}` }));
+  }
+
+  const fromOpts = fromOptions.map(a => ({ value: a.id, label: a.name + (a.bank_name ? ` · ${a.bank_name}` : "") }));
+  const toOpts   = toOptions.map(a  => ({ value: a.id, label: a.name + (a.bank_name ? ` · ${a.bank_name}` : "") }));
+  const incOpts  = (incomeSrcs || []).map(s => ({ value: s.id, label: s.name }));
+
+  const needsFrom = fromOptions.length > 0;
+  const needsTo   = toOptions.length > 0;
+  const needsCat  = ["expense", "reimburse_out"].includes(type);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+      {/* Type badge */}
+      <div style={{
+        display:    "inline-flex",
+        alignItems: "center",
+        gap:        6,
+        padding:    "4px 10px",
+        borderRadius: 20,
+        background: (TYPE_CHOICES.find(t => t.id === type)?.color || "#9ca3af") + "18",
+        width:      "fit-content",
+      }}>
+        <span style={{ fontSize: 14 }}>{TYPE_CHOICES.find(t => t.id === type)?.icon}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
+          {TYPE_CHOICES.find(t => t.id === type)?.label}
+        </span>
+      </div>
+
+      {/* Date */}
+      <Input label="Date" type="date" value={form.date} onChange={e => set("date", e.target.value)} />
+
+      {/* Description — most types */}
+      {!["transfer","pay_cc","reimburse_in","collect_loan","pay_liability","fx_exchange"].includes(type) && (
+        <Input
+          label="Description"
+          value={form.description}
+          onChange={e => set("description", e.target.value)}
+          placeholder={type === "income" ? "e.g. Monthly salary" : "e.g. Lunch at Warung Makan"}
+        />
+      )}
+
+      {/* Description for some transfer types */}
+      {["transfer","pay_cc","fx_exchange"].includes(type) && (
+        <Input
+          label="Notes / Reference (optional)"
+          value={form.description}
+          onChange={e => set("description", e.target.value)}
+          placeholder="Optional"
+        />
+      )}
+
+      {/* Amount */}
+      <div style={{ display: "flex", gap: 8 }}>
+        <AmountInput
+          label="Amount"
+          value={form.amount}
+          onChange={v => set("amount", v)}
+          currency={form.currency}
+          style={{ flex: 1 }}
+        />
+        <Field label="Currency" style={{ width: 90, flexShrink: 0 }}>
+          <select value={form.currency} onChange={e => set("currency", e.target.value)} style={{
+            width: "100%", height: 44, border: "1.5px solid #e5e7eb", borderRadius: 10,
+            fontFamily: "Figtree, sans-serif", fontSize: 13, fontWeight: 600,
+            color: "#111827", background: "#fff", outline: "none",
+            appearance: "none", padding: "0 8px", cursor: "pointer",
+          }}>
+            {allCurrencies.map(c => <option key={c.code} value={c.code}>{c.flag} {c.code}</option>)}
+          </select>
+        </Field>
+      </div>
+
+      {/* Non-IDR amount conversion hint */}
+      {form.currency !== "IDR" && form.amount && (
+        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: -8 }}>
+          ≈ {fmtIDR(amtIDR)} IDR
+        </div>
+      )}
+
+      {/* From account */}
+      {needsFrom && (
+        <Select
+          label={type === "sell_asset" ? "Asset" : type === "collect_loan" || type === "reimburse_in" ? "Receivable" : "From Account"}
+          value={form.from_account_id}
+          onChange={e => set("from_account_id", e.target.value)}
+          options={fromOpts}
+          placeholder="Select…"
+        />
+      )}
+
+      {/* To account */}
+      {needsTo && (
+        <Select
+          label={type === "buy_asset" ? "Asset Account" : type === "reimburse_out" || type === "give_loan" ? "Receivable" : type === "pay_cc" ? "Credit Card" : type === "pay_liability" ? "Liability" : "To Account"}
+          value={form.to_account_id}
+          onChange={e => set("to_account_id", e.target.value)}
+          options={toOpts}
+          placeholder="Select…"
+        />
+      )}
+
+      {/* Income source */}
+      {type === "income" && incOpts.length > 0 && (
+        <Select
+          label="Income Source (optional)"
+          value={form.income_source_id || ""}
+          onChange={e => set("income_source_id", e.target.value)}
+          options={incOpts}
+          placeholder="Select source…"
+        />
+      )}
+
+      {/* Category */}
+      {needsCat && (
+        <Select
+          label="Category"
+          value={form.category_id}
+          onChange={e => {
+            const found = EXPENSE_CATEGORIES.find(c => c.id === e.target.value);
+            set("category_id", e.target.value);
+            set("category_label", found?.label || "");
+          }}
+          options={EXPENSE_CATEGORIES.map(c => ({ value: c.id, label: `${c.icon} ${c.label}` }))}
+          placeholder="Select category…"
+        />
+      )}
+
+      {/* Entity */}
+      <Select
+        label="Entity"
+        value={form.entity}
+        onChange={e => set("entity", e.target.value)}
+        options={ENTITIES}
+      />
+
+      {/* Is Reimburse toggle (expense only, non-Personal entity) */}
+      {type === "expense" && form.entity !== "Personal" && (
+        <Toggle
+          label="This is a reimbursable expense"
+          hint="Will be tracked as a receivable from the entity"
+          checked={form.is_reimburse}
+          onChange={v => set("is_reimburse", v)}
+        />
+      )}
+
+      {/* FX Exchange extra fields */}
+      {type === "fx_exchange" && (
+        <Input label="To Amount (received currency)" type="number" value={form.to_amount || ""}
+          onChange={e => set("to_amount", e.target.value)} placeholder="0" />
+      )}
+
+      {/* Optional fees for pay_cc */}
+      {type === "pay_cc" && (
+        <FormRow>
+          <AmountInput label="Admin Fee (optional)" value={form.admin_fee || ""}
+            onChange={v => set("admin_fee", v)} style={{ flex: 1 }} />
+          <AmountInput label="Materai (optional)" value={form.materai || ""}
+            onChange={v => set("materai", v)} style={{ flex: 1 }} />
+        </FormRow>
+      )}
+
+      {/* Transfer fee */}
+      {type === "transfer" && (
+        <AmountInput label="Transfer Fee (optional)" value={form.transfer_fee || ""}
+          onChange={v => set("transfer_fee", v)} />
+      )}
+
+      {/* Notes */}
+      <Field label="Notes (optional)">
+        <textarea
+          value={form.notes}
+          onChange={e => set("notes", e.target.value)}
+          placeholder="Any extra details…"
+          rows={2}
+          style={{
+            width: "100%", padding: "10px 14px", border: "1.5px solid #e5e7eb",
+            borderRadius: 10, fontFamily: "Figtree, sans-serif", fontSize: 14,
+            fontWeight: 500, color: "#111827", background: "#fff", outline: "none",
+            resize: "vertical", boxSizing: "border-box", lineHeight: 1.5,
+          }}
+        />
+      </Field>
+
+    </div>
+  );
+}
+
+// ─── PENDING TAB ─────────────────────────────────────────────
+function PendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, user, ledger, setLedger, onRefresh }) {
+
+  if (!pendingSyncs?.length) return (
+    <EmptyState icon="📧" title="No pending emails" message="Gmail sync will surface transactions here for review." />
+  );
+
+  const confirm = async (sync) => {
     try {
-      const txs = Array.isArray(sync.ai_raw_result) ? sync.ai_raw_result : [sync.ai_raw_result];
-      for (const tx of txs) {
-        const entry = {
-          date: tx.date || sync.received_at?.slice(0,10) || new Date().toISOString().slice(0,10),
-          description: tx.description || tx.merchant_name || sync.subject || "Email import",
-          merchant_name: tx.merchant_name || "",
-          amount: Number(tx.amount || 0),
-          currency: tx.currency || "IDR",
-          amount_idr: Number(tx.amount_idr || tx.amount || 0),
-          type: tx.suggested_tx_type || tx.type || "expense",
-          from_account_id: tx.from_account_id || "",
-          to_account_id: tx.to_account_id || "",
-          category_id: tx.category_id || "",
-          category_label: tx.category_label || tx.suggested_category || "",
-          entity: tx.suggested_entity || "Personal",
-          notes: `Imported from email (${sync.sender_email || "Gmail"})`,
-        };
-        const created = await ledgerApi.create(user.id, entry, accounts);
-        if (created) setLedger(p => [created, ...p]);
-      }
+      const entry = {
+        date:            sync.transaction_date || sync.received_at?.slice(0, 10) || todayStr(),
+        description:     sync.merchant_name || sync.subject || "Gmail transaction",
+        amount:          Number(sync.amount || 0),
+        currency:        sync.currency || "IDR",
+        amount_idr:      Number(sync.amount_idr || sync.amount || 0),
+        type:            sync.tx_type || "expense",
+        from_account_id: sync.matched_account_id || "",
+        to_account_id:   "",
+        category_id:     sync.suggested_category || "other",
+        category_label:  sync.suggested_category_label || "Other",
+        entity:          sync.entity || "Personal",
+        notes:           `Imported from Gmail: ${sync.subject || ""}`,
+        source:          "gmail",
+        email_sync_id:   sync.id,
+      };
+      const created = await ledgerApi.create(user.id, entry, accounts);
+      setLedger(p => [created, ...p]);
       await gmailApi.updateSync(sync.id, { status: "confirmed" });
       setPendingSyncs(p => p.filter(s => s.id !== sync.id));
-      showToast(`Imported from ${sync.sender_email || "email"}`);
-      // Learn merchant mappings from confirmed email transactions
-      for (const tx of txs) {
-        if (tx.merchant_name && (tx.category_id || tx.suggested_category)) {
-          merchantApi.upsertMapping(
-            user.id, tx.merchant_name,
-            tx.category_id || tx.suggested_category,
-            tx.category_label || tx.suggested_category
-          ).catch(()=>{});
-        }
-      }
-      await onRefresh();
+      showToast("Imported");
+      onRefresh();
     } catch (e) { showToast(e.message, "error"); }
-    setSaving(false);
   };
 
-  const skipOne = async (sync) => {
+  const skip = async (sync) => {
     try {
       await gmailApi.updateSync(sync.id, { status: "skipped" });
       setPendingSyncs(p => p.filter(s => s.id !== sync.id));
@@ -665,147 +768,68 @@ function PendingReview({
     } catch (e) { showToast(e.message, "error"); }
   };
 
-  const checkDuplicate = (sync) => {
-    const txs = Array.isArray(sync.ai_raw_result) ? sync.ai_raw_result : sync.ai_raw_result ? [sync.ai_raw_result] : [];
-    for (const tx of txs) {
-      const amt = Number(tx.amount_idr || tx.amount || 0);
-      const date = tx.date || sync.received_at?.slice(0,10);
-      const dupe = ledger.find(e => {
-        const dateDiff = date ? Math.abs(new Date(e.date) - new Date(date)) / 86400000 : 999;
-        return dateDiff <= 1 && Math.abs(Number(e.amount_idr || e.amount || 0) - amt) < 500;
-      });
-      if (dupe) return { isDuplicate: true, existingEntry: dupe };
-    }
-    return { isDuplicate: false };
-  };
-
-  const confirmAll = async () => {
-    const fresh = pendingSyncs.filter(s => !checkDuplicate(s).isDuplicate);
-    if (!fresh.length) return showToast("No new (non-duplicate) items", "error");
-    for (const s of fresh) await confirmOne(s);
-  };
-
-  const skipAllDupes = async () => {
-    const dupes = pendingSyncs.filter(s => checkDuplicate(s).isDuplicate);
-    for (const s of dupes) await skipOne(s);
-  };
-
-  const dupeCount = pendingSyncs.filter(s => checkDuplicate(s).isDuplicate).length;
-  const newCount  = pendingSyncs.filter(s => !checkDuplicate(s).isDuplicate).length;
-
-  if (!pendingSyncs?.length) {
-    return (
-      <div style={{ padding:"32px", textAlign:"center", background:th.sur, border:`1px solid ${th.bor}`, borderRadius:14 }}>
-        <div style={{ fontSize:32, marginBottom:8 }}>📭</div>
-        <div style={{ fontSize:14, fontWeight:700, color:th.tx }}>No pending email transactions</div>
-        <div style={{ fontSize:12, color:th.tx3, marginTop:4 }}>Connect Gmail in Settings → Email Sync to auto-import</div>
-      </div>
-    );
-  }
-
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-      {/* Stats + batch actions */}
-      <div style={{ padding:"12px 14px", background:th.sur, border:`1px solid ${th.bor}`, borderRadius:12, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8 }}>
-        <div style={{ fontSize:12, color:th.tx2 }}>
-          <span style={{ fontWeight:700, color:"#0ca678" }}>{newCount} new</span>
-          {dupeCount > 0 && <span style={{ color:"#e67700", marginLeft:10 }}>⚠️ {dupeCount} possible duplicates</span>}
-        </div>
-        <div style={{ display:"flex", gap:6 }}>
-          {newCount > 0 && (
-            <button className="btn btn-primary" onClick={confirmAll} disabled={saving}
-              style={{ fontSize:11, padding:"5px 12px" }}>
-              ✓ Confirm All New ({newCount})
-            </button>
-          )}
-          {dupeCount > 0 && (
-            <button className="btn btn-ghost" onClick={skipAllDupes}
-              style={{ fontSize:11, padding:"5px 12px", color:"#e67700", borderColor:"#ffd43b" }}>
-              Skip Duplicates ({dupeCount})
-            </button>
-          )}
-        </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+        {pendingSyncs.length} transaction{pendingSyncs.length !== 1 ? "s" : ""} from Gmail pending review
       </div>
-
-      {/* Individual cards */}
-      {pendingSyncs.map(sync => {
-        const txs = Array.isArray(sync.ai_raw_result) ? sync.ai_raw_result
-          : sync.ai_raw_result ? [sync.ai_raw_result] : [];
-        const { isDuplicate: isDupe, existingEntry } = checkDuplicate(sync);
-        const mainTx = txs[0] || {};
-        const fromAcc = accounts.find(a => a.id === mainTx.from_account_id);
-        const amt = Number(mainTx.amount_idr || mainTx.amount || 0);
-        const txDate = mainTx.date || sync.received_at?.slice(0,10) || "—";
-        const catDef = EXPENSE_CATEGORIES.find(c => c.id === mainTx.category_id || c.label === mainTx.suggested_category);
-
-        return (
-          <div key={sync.id} style={{
-            background: th.sur, borderRadius: 13, padding: "14px 16px",
-            border: `1px solid ${isDupe ? "#ffd43b" : th.bor}`,
-            borderLeft: `4px solid ${isDupe ? "#e67700" : "#0ca678"}`,
-          }}>
-            {/* Email source */}
-            <div style={{ fontSize:10, color:th.tx3, marginBottom:8, display:"flex", gap:8, flexWrap:"wrap" }}>
-              <span>📧 {sync.sender_email || "Gmail"}</span>
-              {sync.received_at && <span>· {sync.received_at.slice(0,10)}</span>}
-              {isDupe && <span style={{ color:"#e67700", fontWeight:700 }}>⚠️ Possible Duplicate</span>}
+      {pendingSyncs.map(s => (
+        <div key={s.id} style={{
+          background: "#fef9ec", border: "1.5px solid #fde68a",
+          borderRadius: 12, padding: "12px 14px",
+          display: "flex", alignItems: "center", gap: 12,
+        }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
+              {s.merchant_name || s.subject || "Gmail transaction"}
             </div>
-
-            {/* Tx info */}
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
-              <div>
-                <div style={{ fontSize:13, fontWeight:700, color:th.tx }}>
-                  {mainTx.description || mainTx.merchant_name || sync.subject || "Unknown transaction"}
-                </div>
-                <div style={{ fontSize:11, color:th.tx3, marginTop:2, display:"flex", gap:8, flexWrap:"wrap" }}>
-                  {catDef && <span>{catDef.icon} {catDef.label}</span>}
-                  {mainTx.suggested_entity && mainTx.suggested_entity !== "Personal" && <span>· {mainTx.suggested_entity}</span>}
-                  {fromAcc && <span>· {fromAcc.name}</span>}
-                </div>
-              </div>
-              <div style={{ textAlign:"right" }}>
-                <div className="num" style={{ fontSize:15, fontWeight:800, color:th.rd }}>{fmtIDR(amt,true)}</div>
-                <div style={{ fontSize:10, color:th.tx3 }}>{txDate}</div>
-              </div>
-            </div>
-
-            {/* Duplicate info */}
-            {isDupe && existingEntry && (
-              <div style={{ padding:"8px 10px", background:"#fff9db", border:"1px solid #ffd43b", borderRadius:8, marginBottom:10, fontSize:11 }}>
-                <div style={{ fontWeight:700, color:"#e67700", marginBottom:2 }}>Already in ledger:</div>
-                <div style={{ color:"#7c5800" }}>
-                  {existingEntry.date} · {existingEntry.description} · {fmtIDR(existingEntry.amount_idr || existingEntry.amount || 0, true)}
-                </div>
-              </div>
-            )}
-
-            {/* Actions */}
-            <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-              {!isDupe ? (
-                <button onClick={() => confirmOne(sync)} disabled={saving} className="btn btn-primary"
-                  style={{ fontSize:11, padding:"5px 12px" }}>
-                  ✓ Confirm
-                </button>
-              ) : (
-                <>
-                  <button onClick={() => skipOne(sync)} className="btn btn-ghost"
-                    style={{ fontSize:11, padding:"5px 12px", color:"#0ca678", borderColor:"#b2f2e8" }}>
-                    ↩ Skip — Already Exists
-                  </button>
-                  <button onClick={() => confirmOne(sync)} disabled={saving} className="btn btn-ghost"
-                    style={{ fontSize:11, padding:"5px 12px", color:th.tx2, borderColor:th.bor }}>
-                    Import Anyway
-                  </button>
-                </>
-              )}
-              <button onClick={() => skipOne(sync)} className="btn btn-ghost"
-                style={{ fontSize:11, padding:"5px 12px", color:"#e03131", borderColor:"#ffc9c9" }}>
-                ✗ Skip
-              </button>
+            <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
+              {s.transaction_date || s.received_at?.slice(0, 10)}
+              {s.amount && ` · ${fmtIDR(s.amount)}`}
             </div>
           </div>
-        );
-      })}
+          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+            <button onClick={() => confirm(s)} style={BTN_CONFIRM}>✓ Import</button>
+            <button onClick={() => skip(s)} style={BTN_SKIP}>Skip</button>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
+
+// ─── STYLES ──────────────────────────────────────────────────
+const BTN_PRIMARY = {
+  height: 36, padding: "0 14px", borderRadius: 10, border: "none",
+  background: "#111827", color: "#fff", fontSize: 13, fontWeight: 700,
+  cursor: "pointer", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", flexShrink: 0,
+};
+
+const FILTER_SELECT = {
+  height: 32, padding: "0 10px", borderRadius: 8,
+  border: "1.5px solid #e5e7eb", background: "#fff",
+  fontFamily: "Figtree, sans-serif", fontSize: 12, fontWeight: 500,
+  color: "#374151", outline: "none", cursor: "pointer",
+  appearance: "none", WebkitAppearance: "none",
+};
+
+const ROW_BTN = {
+  width: 26, height: 26, borderRadius: 6,
+  border: "1px solid #e5e7eb", background: "#f9fafb",
+  color: "#9ca3af", fontSize: 11, cursor: "pointer",
+  display: "flex", alignItems: "center", justifyContent: "center",
+  fontFamily: "Figtree, sans-serif",
+};
+
+const BTN_CONFIRM = {
+  height: 30, padding: "0 12px", borderRadius: 8, border: "none",
+  background: "#dcfce7", color: "#059669", fontSize: 11, fontWeight: 700,
+  cursor: "pointer", fontFamily: "Figtree, sans-serif",
+};
+
+const BTN_SKIP = {
+  height: 30, padding: "0 10px", borderRadius: 8,
+  border: "1px solid #e5e7eb", background: "#fff",
+  color: "#9ca3af", fontSize: 11, fontWeight: 600,
+  cursor: "pointer", fontFamily: "Figtree, sans-serif",
+};

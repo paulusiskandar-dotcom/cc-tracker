@@ -21,11 +21,11 @@
       "purpose": "any maskable"
     }
   ],
-  "start_url": ".",
+  "start_url": "/",
   "display": "standalone",
-  "orientation": "portrait",
-  "theme_color": "#3b5bdb",
-  "background_color": "#f5f6fa",
+  "orientation": "portrait-primary",
+  "theme_color": "#111827",
+  "background_color": "#f8f9fb",
   "lang": "en",
   "categories": ["finance", "productivity"]
 }
