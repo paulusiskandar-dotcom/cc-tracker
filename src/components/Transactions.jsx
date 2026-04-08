@@ -206,6 +206,14 @@ export default function Transactions({
         else if (type === "fx_exchange")   description = `FX Exchange`.trim();
       }
 
+      // ── DEBUG ──────────────────────────────────────────────
+      console.log("=== LEDGER INSERT DEBUG ===");
+      console.log("form state:", JSON.stringify(form, null, 2));
+      console.log("from_id:", form.from_id, typeof form.from_id);
+      console.log("to_id:", form.to_id, typeof form.to_id);
+      console.log("category_id:", form.category_id, typeof form.category_id);
+      // ────────────────────────────────────────────────────
+
       // Build explicit entry — never spread ...form to avoid leaking unknown UUID fields
       const entry = {
         tx_date:       form.tx_date,
