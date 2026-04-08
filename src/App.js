@@ -113,6 +113,18 @@ async function aiAdvisor(q,ctx) {
   if(!r.ok)return"Maaf, AI tidak bisa dijangkau sekarang.";
   const d=await r.json(); return d.content?.[0]?.text||"Maaf, tidak bisa menjawab.";
 }
+async function aiSmartImport(b64,mime,ctxHint="bank") {
+  const isPdf=mime==="application/pdf";
+  const contentBlock=isPdf?{type:"document",source:{type:"base64",media_type:"application/pdf",data:b64}}:{type:"image",source:{type:"base64",media_type:mime,data:b64}};
+  const ctxLabel=ctxHint==="cc"?"Tagihan/transaksi kartu kredit":ctxHint==="income"?"Pemasukan/income":"Mutasi rekening bank";
+  const prompt=`Ekstrak SEMUA transaksi dari ${isPdf?"dokumen mutasi/tagihan":"gambar struk/screenshot mutasi"} ini.\nKonteks: ${ctxLabel}.\n\nResponse HANYA JSON array tanpa markdown:\n[{"date":"YYYY-MM-DD","description":"keterangan transaksi","amount":<angka_positif>,"currency":"IDR","type":"out|in|transfer|cc_payment","category":"Belanja|Makan & Minum|Transport|Tagihan|Hotel/Travel|Gaji|Transfer Masuk|Investasi|Lainnya","from_account":"nama bank asal jika terdeteksi","to_account":"nama tujuan jika transfer","is_cc_payment":false,"is_transfer":false,"confidence":0.9}]\n\nRules:\n- TRSF/TRF/Transfer/TF/BG/OVERBOOKING → type=transfer, is_transfer=true\n- Nama kartu/CC/bayar tagihan → type=cc_payment, is_cc_payment=true\n- TOP UP/SETOR/KREDIT/CR/Gaji/Masuk → type=in\n- Jumlah negatif → type=out, pakai nilai absolut\n- confidence<0.7 = perlu review user\n- Ekstrak SEMUA transaksi, jangan lewatkan satu pun`;
+  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:AI_HEADERS,body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:8000,messages:[{role:"user",content:[contentBlock,{type:"text",text:prompt}]}]})});
+  if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error?.message||`HTTP ${r.status}`);}
+  const d=await r.json();
+  const text=(d.content?.[0]?.text||"[]").replace(/```json|```/g,"").trim();
+  console.log("[aiSmartImport] rows:",JSON.parse(text).length,"raw:",text.slice(0,200));
+  return JSON.parse(text);
+}
 async function aiAssetValuation(asset) {
   const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:AI_HEADERS,body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:400,messages:[{role:"user",content:`Estimasikan nilai pasar aset berikut dalam IDR (Rupiah Indonesia) berdasarkan kondisi pasar Indonesia saat ini.\n\nAset: ${asset.name}\nKategori: ${asset.category}\nNilai Beli: Rp ${Number(asset.purchase_value||0).toLocaleString("id-ID")}\nTanggal Beli: ${asset.purchase_date||"tidak diketahui"}\nNilai Tercatat: Rp ${Number(asset.current_value||0).toLocaleString("id-ID")}\nCatatan: ${asset.notes||"-"}\n\nJawab HANYA JSON: {"estimated_value":<angka_IDR>,"confidence":"low|medium|high","reasoning":"<max 60 kata>"}`}]})});
   if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error?.message||`HTTP ${r.status}`);}
@@ -378,6 +390,16 @@ function Finance({user,signOut}){
   const [pdfBankId,setPdfBankId]         = useState("");
   const [pdfError,setPdfError]           = useState(null);
   const pdfRef = useRef(null);
+  const smartFileRef = useRef(null);
+
+  // Smart Import
+  const [showSmartImport,setShowSmartImport] = useState(false);
+  const [smartCtx,setSmartCtx]   = useState("bank"); // bank|cc|income|transaksi
+  const [smartLoading,setSmartLoading] = useState(false);
+  const [smartRows,setSmartRows] = useState([]);
+  const [smartSel,setSmartSel]   = useState({});
+  const [smartError,setSmartError] = useState(null);
+  const [smartAccId,setSmartAccId] = useState("");   // default account id for import
 
   // AI
   const [aiMsgs,setAiMsgs]   = useState([]);
@@ -834,6 +856,71 @@ function Finance({user,signOut}){
     setShowPdfUpload(false);setPdfRows([]);setPdfSelRows({});setPdfBankId("");setSaving(false);
   };
 
+  // ── Smart Import Handlers
+  const openSmartImport=(ctx,defaultAccId="")=>{
+    setSmartCtx(ctx);setSmartAccId(defaultAccId||bankAccs[0]?.id||"");
+    setSmartRows([]);setSmartSel({});setSmartError(null);
+    setShowSmartImport(true);
+  };
+  const editSmartRow=(i,key,val)=>setSmartRows(p=>p.map((r,idx)=>idx===i?{...r,[key]:val}:r));
+  const handleSmartFile=e=>{
+    const f=e.target.files?.[0];if(!f)return;
+    const mime=f.type||"image/jpeg";
+    setSmartError(null);setSmartRows([]);setSmartSel({});
+    const reader=new FileReader();
+    reader.onload=async ev=>{
+      const b64=ev.target.result.split(",")[1];
+      setSmartLoading(true);
+      try{
+        const rows=await aiSmartImport(b64,mime,smartCtx);
+        const enriched=rows.map(row=>{
+          const matchBank=bankAccs.find(b=>
+            (row.from_account&&b.name.toLowerCase().includes(row.from_account.toLowerCase()))||
+            (row.from_account&&b.bank.toLowerCase().includes(row.from_account.toLowerCase()))
+          );
+          const matchCard=cards.find(c=>
+            (row.to_account&&c.name.toLowerCase().includes(row.to_account.toLowerCase()))||
+            (row.to_account&&(c.bank||"").toLowerCase().includes(row.to_account.toLowerCase()))
+          );
+          return{...row,_bank_id:matchBank?.id||smartAccId||bankAccs[0]?.id||"",_card_id:matchCard?.id||cards[0]?.id||"",entity:"Pribadi"};
+        });
+        setSmartRows(enriched);
+        const sel={};enriched.forEach((_,i)=>{sel[i]=true;});setSmartSel(sel);
+      }catch(e){
+        console.error("[SmartImport]",e);
+        setSmartError(e.message||"AI gagal membaca file. Coba upload ulang dengan gambar yang lebih jelas.");
+      }
+      setSmartLoading(false);
+    };
+    reader.readAsDataURL(f);
+  };
+  const importSmartRows=async()=>{
+    const selected=smartRows.filter((_,i)=>smartSel[i]);
+    if(!selected.length)return;
+    setSaving(true);let ok=0;
+    try{
+      for(const row of selected){
+        const amt=Number(row.amount||0);
+        if(smartCtx==="cc"){
+          const d={tx_date:row.date||today(),card_id:row._card_id||cards[0]?.id||"",description:row.description,amount:amt,currency:row.currency||"IDR",fee:0,category:row.category||"Lainnya",entity:row.entity||"Pribadi",reimbursed:false,notes:"AI Smart Import",tx_type:row.type==="in"?"in":"out",amount_idr:toIDR(amt,row.currency||"IDR",fxRates)};
+          const r=await api.tx.create(user.id,d);if(r)setTxList(p=>[r,...p]);
+        } else if(smartCtx==="income"){
+          const d={income_date:row.date||today(),category:row.category||"Lainnya",description:row.description,amount:amt,currency:row.currency||"IDR",amount_idr:toIDR(amt,row.currency||"IDR",fxRates),entity:row.entity||"Pribadi",bank_account_id:row._bank_id||"",notes:"AI Smart Import"};
+          const r=await api.income.create(user.id,d);if(r)setIncomes(p=>[r,...p]);
+        } else {
+          const isCC=row.is_cc_payment||row.type==="cc_payment";
+          const isT=row.is_transfer||row.type==="transfer";
+          const d={account_id:row._bank_id||bankAccs[0]?.id||"",mut_date:row.date||today(),description:row.description,amount:amt,type:isT?"transfer":row.type==="in"?"in":"out",category:row.category||"Lainnya",entity:row.entity||"Pribadi",notes:"AI Smart Import",is_cc_payment:isCC,cc_card_id:isCC?row._card_id:"",transfer_to_account_id:isT&&!isCC?row._card_id:""};
+          const r=await api.mut.create(user.id,d);if(r)setMuts(p=>[r,...p]);
+        }
+        ok++;
+      }
+      setShowSmartImport(false);setSmartRows([]);setSmartSel({});
+      alert(`✅ ${ok} transaksi berhasil diimport!`);
+    }catch(e){console.error("[importSmart]",e);alert(`⚠️ ${ok} berhasil, error: ${e.message}`);}
+    setSaving(false);
+  };
+
   // ── AI
   const sendAI=async()=>{
     if(!aiInput.trim())return;
@@ -964,7 +1051,7 @@ function Finance({user,signOut}){
           <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
             {saving&&<span style={{fontSize:10,color:th.tx3}}>Menyimpan...</span>}
             <button className="btn-ic" onClick={()=>setIsDark(d=>!d)}>{isDark?"☀️":"🌙"}</button>
-            <button className="btn btn-ghost" onClick={()=>{setScanImg(null);setScanResult(null);setScanTarget("cc");setShowScanner(true);}}>📷 Scan</button>
+            <button className="btn btn-ghost" onClick={()=>openSmartImport(tab==="income"?"income":tab==="cc"?"cc":"bank",bankAccs[0]?.id||"")}>🤖 Import</button>
             <button className="btn btn-ai" onClick={()=>setShowAIChat(true)}>🤖 AI</button>
             {tab==="cc"&&<button className="btn btn-primary" onClick={()=>{setEditTxId(null);setTxForm({...ET,card_id:cards[0]?.id||""});setShowTxForm(true);}}>+ Transaksi</button>}
             {tab==="bank"&&<button className="btn btn-primary" onClick={()=>{setEditBankId(null);setBankForm(EBA);setShowBankForm(true);}}>+ Rekening</button>}
@@ -1117,6 +1204,9 @@ function Finance({user,signOut}){
               </div>
 
               {ccSubTab==="transactions"&&<>
+                <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
+                  <button className="btn btn-ai" onClick={()=>openSmartImport("cc",cards[0]?.id||"")} style={{fontSize:11}}>🤖 AI Smart Import</button>
+                </div>
                 <div className="card anim" style={{marginBottom:12}}>
                   <input className="search-inp" placeholder="🔍 Cari transaksi..." value={searchQ} onChange={e=>setSearchQ(e.target.value)} style={{marginBottom:9}}/>
                   <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
@@ -1380,7 +1470,10 @@ function Finance({user,signOut}){
 
               <div className="sec-hd">
                 <div className="sec-title">Mutasi Terbaru</div>
-                <button className="btn btn-ghost" onClick={()=>{setScanTarget("bank");setScanImg(null);setScanResult(null);setShowScanner(true);}}>📷 Scan</button>
+                <div style={{display:"flex",gap:6}}>
+                  <button className="btn btn-ai" onClick={()=>openSmartImport("bank",bankAccs[0]?.id||"")} style={{fontSize:11}}>🤖 AI Import</button>
+                  <button className="btn btn-ghost" onClick={()=>{setScanTarget("bank");setScanImg(null);setScanResult(null);setShowScanner(true);}}>📷 Scan</button>
+                </div>
               </div>
               <div className="card anim" style={{marginBottom:12}}>
                 <input className="search-inp" placeholder="🔍 Cari mutasi..." value={searchMut} onChange={e=>setSearchMut(e.target.value)} style={{marginBottom:9}}/>
@@ -1424,6 +1517,9 @@ function Finance({user,signOut}){
           {/* ══ TRANSAKSI UNIVERSAL ══ */}
           {tab==="transaksi"&&(
             <>
+              <div style={{display:"flex",justifyContent:"flex-end",marginBottom:10}}>
+                <button className="btn btn-ai" onClick={()=>openSmartImport("transaksi",bankAccs[0]?.id||"")}>🤖 AI Smart Import</button>
+              </div>
               {/* Summary */}
               <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9,marginBottom:14}}>
                 {[["Semua",uniTxAll.length,th.ac],["Keluar",uniTxAll.filter(x=>x._type==="out").length,th.rd],["Masuk",uniTxAll.filter(x=>x._type==="in").length,th.gr]].map(([l,v,col])=>(
@@ -1916,6 +2012,9 @@ function Finance({user,signOut}){
 
               {/* Pemasukan */}
               {incomeSubTab==="pemasukan"&&<>
+                <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
+                  <button className="btn btn-ai" onClick={()=>openSmartImport("income",bankAccs[0]?.id||"")} style={{fontSize:11}}>🤖 AI Import Income</button>
+                </div>
                 {incomes.length===0?<Empty icon="💰" msg="Belum ada income. Catat gaji atau pemasukan pertamamu!" th={th} onAdd={()=>{setEditIncomeId(null);setIncomeForm(EIN);setShowIncomeForm(true);}}/>
                 :<div className="card anim">
                   {incomes.map((x,i)=>(
@@ -2565,6 +2664,128 @@ function Finance({user,signOut}){
         </div>
       </Overlay>}
 
+      {/* ══ AI SMART IMPORT MODAL ══ */}
+      {showSmartImport&&<Overlay onClose={()=>{setShowSmartImport(false);setSmartRows([]);setSmartSel({});setSmartError(null);}} th={th} title="🤖 AI Smart Import" sub={`Konteks: ${smartCtx==="cc"?"Credit Card":smartCtx==="income"?"Income":smartCtx==="transaksi"?"Transaksi Universal":"Bank Mutations"}`} maxWidth={740}>
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          {/* Context selector */}
+          <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+            {[["bank","🏦 Bank"],["cc","💳 CC"],["transaksi","🔄 Transaksi"],["income","💰 Income"]].map(([v,l])=>(
+              <button key={v} onClick={()=>setSmartCtx(v)} style={{padding:"6px 12px",borderRadius:8,border:`1px solid ${smartCtx===v?th.ac:th.bor}`,background:smartCtx===v?th.acBg:th.sur2,fontFamily:"'Sora',sans-serif",fontWeight:600,fontSize:11,cursor:"pointer",color:smartCtx===v?th.ac:th.tx3}}>{l}</button>
+            ))}
+          </div>
+
+          {/* Default account */}
+          {(smartCtx==="bank"||smartCtx==="transaksi")&&<F label="Rekening Default (untuk transaksi yang tidak terdeteksi)" th={th}>
+            <select className="inp" value={smartAccId} onChange={e=>setSmartAccId(e.target.value)}>
+              <option value="">Pilih rekening...</option>
+              {bankAccs.map(b=><option key={b.id} value={b.id}>{b.name} — {fmtIDR(bankBal[b.id]||0,true)}</option>)}
+            </select>
+          </F>}
+
+          {/* Upload area */}
+          {smartRows.length===0&&!smartLoading&&<>
+            <div onClick={()=>smartFileRef.current?.click()} style={{border:`2px dashed ${th.ac}`,borderRadius:14,padding:"28px 20px",textAlign:"center",cursor:"pointer",background:th.acBg,transition:"all .2s"}}>
+              <div style={{fontSize:34,marginBottom:8}}>🤖</div>
+              <div style={{fontSize:14,fontWeight:700,color:th.ac}}>Klik untuk upload foto atau PDF</div>
+              <div style={{fontSize:11,color:th.tx3,marginTop:4}}>Struk · Screenshot mutasi · PDF rekening koran · Tagihan CC</div>
+              <div style={{fontSize:10,color:th.tx3,marginTop:2}}>JPG · PNG · PDF · Heic — AI akan mengekstrak SEMUA transaksi otomatis</div>
+            </div>
+            <input ref={smartFileRef} type="file" accept="image/*,application/pdf" style={{display:"none"}} onChange={handleSmartFile}/>
+          </>}
+
+          {/* Loading */}
+          {smartLoading&&<div style={{display:"flex",alignItems:"center",gap:12,padding:"18px",background:th.acBg,border:`1px solid ${th.ac}44`,borderRadius:12}}>
+            <div style={{width:24,height:24,border:`2px solid ${th.ac}44`,borderTop:`2px solid ${th.ac}`,borderRadius:"50%",animation:"spin .7s linear infinite",flexShrink:0}}/>
+            <div>
+              <div style={{fontSize:13,fontWeight:700,color:th.ac}}>🤖 AI sedang membaca dan mengekstrak transaksi...</div>
+              <div style={{fontSize:10,color:th.tx3,marginTop:2}}>Bisa memakan 10–30 detik tergantung jumlah transaksi</div>
+            </div>
+          </div>}
+
+          {/* Error */}
+          {smartError&&<div style={{padding:"12px 14px",background:th.rdBg,border:`1px solid ${th.rd}44`,borderRadius:10,fontSize:12,color:th.rd}}>
+            ⚠️ {smartError}
+            <div style={{marginTop:8}}><button onClick={()=>smartFileRef.current?.click()} style={{background:th.rd,color:"#fff",border:"none",padding:"5px 12px",borderRadius:7,fontFamily:"'Sora',sans-serif",fontWeight:700,fontSize:11,cursor:"pointer"}}>Coba Upload Ulang</button></div>
+            <input ref={smartFileRef} type="file" accept="image/*,application/pdf" style={{display:"none"}} onChange={handleSmartFile}/>
+          </div>}
+
+          {/* Preview table */}
+          {smartRows.length>0&&<>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{fontSize:12,fontWeight:700,color:th.tx}}>{smartRows.length} transaksi terdeteksi · <span style={{color:th.ac}}>{Object.values(smartSel).filter(Boolean).length} dipilih</span></div>
+              <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                <button onClick={()=>{const s={};smartRows.forEach((_,i)=>{s[i]=true;});setSmartSel(s);}} style={{background:"none",border:`1px solid ${th.ac}`,color:th.ac,borderRadius:7,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"'Sora',sans-serif"}}>✓ Semua</button>
+                <button onClick={()=>setSmartSel({})} style={{background:"none",border:`1px solid ${th.bor}`,color:th.tx3,borderRadius:7,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"'Sora',sans-serif"}}>Batal Semua</button>
+                <button onClick={()=>smartFileRef.current?.click()} style={{background:"none",border:`1px solid ${th.bor}`,color:th.tx3,borderRadius:7,padding:"4px 10px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"'Sora',sans-serif"}}>📁 Ganti File</button>
+                <input ref={smartFileRef} type="file" accept="image/*,application/pdf" style={{display:"none"}} onChange={handleSmartFile}/>
+              </div>
+            </div>
+
+            {/* Legend */}
+            <div style={{display:"flex",gap:12,fontSize:10,color:th.tx3}}>
+              <span style={{background:th.amBg,color:th.am,padding:"2px 8px",borderRadius:4,fontWeight:600}}>⚠️ Kuning = confidence rendah, perlu review</span>
+              <span>Edit langsung di tabel sebelum import</span>
+            </div>
+
+            {/* Header row */}
+            <div style={{display:"grid",gridTemplateColumns:"24px 96px 1fr 84px 90px 120px 100px",gap:4,padding:"5px 8px",fontSize:9,fontWeight:700,color:th.tx3,textTransform:"uppercase",letterSpacing:.5}}>
+              <span/>
+              <span>Tanggal</span>
+              <span>Deskripsi</span>
+              <span>Jumlah</span>
+              <span>Tipe</span>
+              <span>Rekening</span>
+              <span>Kategori</span>
+            </div>
+
+            <div style={{maxHeight:360,overflowY:"auto",display:"flex",flexDirection:"column",gap:3}}>
+              {smartRows.map((row,i)=>{
+                const lowConf=(row.confidence||1)<0.7;
+                return(
+                  <div key={i} style={{display:"grid",gridTemplateColumns:"24px 96px 1fr 84px 90px 120px 100px",gap:4,padding:"6px 8px",background:lowConf?th.amBg:i%2===0?th.sur:th.sur2,borderRadius:8,alignItems:"center",border:lowConf?`1px solid ${th.am}55`:`1px solid transparent`,opacity:smartSel[i]?1:.45}}>
+                    <input type="checkbox" checked={!!smartSel[i]} onChange={e=>setSmartSel(s=>({...s,[i]:e.target.checked}))} style={{cursor:"pointer",width:15,height:15,accentColor:th.ac}}/>
+                    <input className="inp" type="date" value={row.date||""} onChange={e=>editSmartRow(i,"date",e.target.value)} style={{padding:"3px 5px",fontSize:10,background:th.sur,borderColor:th.bor2}}/>
+                    <input className="inp" value={row.description||""} onChange={e=>editSmartRow(i,"description",e.target.value)} style={{padding:"3px 5px",fontSize:11,background:th.sur,borderColor:th.bor2}}/>
+                    <input className="inp" type="number" value={row.amount||""} onChange={e=>editSmartRow(i,"amount",e.target.value)} style={{padding:"3px 5px",fontSize:11,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",background:th.sur,borderColor:th.bor2}}/>
+                    <select className="inp" value={row.type||"out"} onChange={e=>editSmartRow(i,"type",e.target.value)} style={{padding:"3px 4px",fontSize:10,background:th.sur,borderColor:th.bor2}}>
+                      <option value="out">↑ Keluar</option>
+                      <option value="in">↓ Masuk</option>
+                      <option value="transfer">↔ Transfer</option>
+                      <option value="cc_payment">💳 Bayar CC</option>
+                    </select>
+                    {smartCtx==="cc"
+                      ?<select className="inp" value={row._card_id||""} onChange={e=>editSmartRow(i,"_card_id",e.target.value)} style={{padding:"3px 4px",fontSize:10,background:th.sur,borderColor:th.bor2}}>
+                          <option value="">Pilih kartu...</option>
+                          {cards.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                      :<select className="inp" value={row._bank_id||""} onChange={e=>editSmartRow(i,"_bank_id",e.target.value)} style={{padding:"3px 4px",fontSize:10,background:th.sur,borderColor:th.bor2}}>
+                          <option value="">Pilih rekening...</option>
+                          {bankAccs.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+                        </select>
+                    }
+                    <select className="inp" value={row.category||"Lainnya"} onChange={e=>editSmartRow(i,"category",e.target.value)} style={{padding:"3px 4px",fontSize:10,background:th.sur,borderColor:th.bor2}}>
+                      {[...new Set([...BNK_CATS,...CC_CATS,...INCOME_CATS])].map(c=><option key={c}>{c}</option>)}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Summary */}
+            <div style={{display:"flex",gap:16,padding:"10px 13px",background:th.sur2,border:`1px solid ${th.bor}`,borderRadius:10,fontSize:12,flexWrap:"wrap"}}>
+              <span style={{color:th.tx3}}>Dipilih: <strong style={{color:th.tx}}>{Object.values(smartSel).filter(Boolean).length}</strong></span>
+              <span style={{color:th.rd}}>Keluar: <strong style={{fontFamily:"'JetBrains Mono',monospace"}}>{fmtIDR(smartRows.filter((_,i)=>smartSel[i]&&["out","cc_payment"].includes(smartRows[i]?.type||"out")).reduce((s,r)=>s+Number(r.amount||0),0),true)}</strong></span>
+              <span style={{color:th.gr}}>Masuk: <strong style={{fontFamily:"'JetBrains Mono',monospace"}}>{fmtIDR(smartRows.filter((_,i)=>smartSel[i]&&smartRows[i]?.type==="in").reduce((s,r)=>s+Number(r.amount||0),0),true)}</strong></span>
+              {smartRows.some(r=>(r.confidence||1)<0.7)&&<span style={{color:th.am}}>⚠️ {smartRows.filter(r=>(r.confidence||1)<0.7).length} perlu review</span>}
+            </div>
+
+            <BtnRow onCancel={()=>{setShowSmartImport(false);setSmartRows([]);setSmartSel({});}} onOk={importSmartRows} label={`Import ${Object.values(smartSel).filter(Boolean).length} Transaksi →`} th={th} saving={saving} disabled={Object.values(smartSel).filter(Boolean).length===0}/>
+          </>}
+
+          {smartRows.length===0&&!smartLoading&&!smartError&&<button onClick={()=>setShowSmartImport(false)} style={{padding:"10px",borderRadius:9,border:`1px solid ${th.bor}`,background:th.sur2,color:th.tx3,fontFamily:"'Sora',sans-serif",fontWeight:600,fontSize:13,cursor:"pointer"}}>Batal</button>}
+        </div>
+      </Overlay>}
+
       {/* Update Asset Value */}
       {showUpdateVal&&<Overlay onClose={()=>{setShowUpdateVal(false);setAiValResult(null);}} th={th} title="✏️ Update Nilai Aset" sub={selectedAsset?.name}>
         <div style={{display:"flex",flexDirection:"column",gap:11}}>
@@ -2614,9 +2835,9 @@ function Finance({user,signOut}){
 }
 
 // ─── SHARED COMPONENTS ────────────────────────────────────────
-const Overlay = ({children,onClose,title,sub,th})=>(
+const Overlay = ({children,onClose,title,sub,th,maxWidth=460})=>(
   <div style={{position:"fixed",inset:0,background:"rgba(15,17,23,.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,padding:14,overflow:"auto",backdropFilter:"blur(6px)"}} onClick={e=>{if(e.target===e.currentTarget)onClose();}}>
-    <div style={{background:th.sur,border:`1px solid ${th.bor}`,borderRadius:20,padding:22,width:"100%",maxWidth:460,maxHeight:"90vh",overflowY:"auto",boxShadow:th.sh2}}>
+    <div style={{background:th.sur,border:`1px solid ${th.bor}`,borderRadius:20,padding:22,width:"100%",maxWidth,maxHeight:"90vh",overflowY:"auto",boxShadow:th.sh2}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
         <div>
           <div style={{fontWeight:800,fontSize:16}}>{title}</div>
