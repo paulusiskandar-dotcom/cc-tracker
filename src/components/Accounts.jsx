@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { accountsApi, recurringApi } from "../api";
+import { accountsApi } from "../api";
 import {
   ENTITIES, BANKS_L, NETWORKS, ASSET_SUBTYPES, LIAB_SUBTYPES,
   ACC_TYPE_LABEL, ACC_TYPE_ICON,
@@ -42,7 +42,7 @@ const TYPE_COLOR = {
 
 export default function Accounts({
   user, accounts, ledger, onRefresh,
-  setAccounts, setRecurTemplates, CURRENCIES,
+  setAccounts, CURRENCIES,
 }) {
   const [subTab,   setSubTab]   = useState("all");
   const [modal,    setModal]    = useState(null); // null | "add" | "edit" | "history" | "delete"
@@ -130,32 +130,23 @@ export default function Accounts({
         setAccounts(p => p.map(a => a.id === editAcc.id ? updated : a));
         showToast("Account updated");
       } else {
-        const created = await accountsApi.create(user.id, {
-          ...clean, type: formType, is_active: true, sort_order: accounts.length,
-        });
-        setAccounts(p => [...p, created]);
+        // For receivable, build a targeted payload with only valid columns
+        const insertData = formType === "receivable"
+          ? {
+              name:                   form.name?.trim(),
+              type:                   "receivable",
+              subtype:                "reimburse",
+              entity:                 form.entity || "Hamasa",
+              notes:                  form.notes  || null,
+              include_networth:       true,
+              receivable_outstanding: 0,
+              sort_order:             accounts.length,
+            }
+          : { ...clean, type: formType, is_active: true, sort_order: accounts.length };
 
-        // Auto-create recurring template for employee loans
-        if (formType === "receivable" && form.receivable_type === "employee_loan" && sn(form.monthly_installment) > 0) {
-          try {
-            const bankAccounts = accounts.filter(a => a.type === "bank");
-            const tmpl = await recurringApi.createTemplate(user.id, {
-              name:            `Loan — ${form.contact_name || form.name}`,
-              type:            "collect_loan",
-              amount:          sn(form.monthly_installment),
-              currency:        "IDR",
-              frequency:       "Monthly",
-              entity:          "Personal",
-              notes:           `Auto-created for employee loan: ${form.contact_name || form.name}`,
-              from_id: created.id,
-              to_id:   form.default_bank_id || bankAccounts[0]?.id || "",
-            });
-            setRecurTemplates?.(p => [tmpl, ...p]);
-            showToast(`Account + monthly reminder created`);
-          } catch { /* non-fatal */ }
-        } else {
-          showToast("Account created");
-        }
+        const created = await accountsApi.create(user.id, insertData);
+        setAccounts(p => [...p, created]);
+        showToast("Account created");
       }
       setModal(null);
     } catch (e) { showToast(e.message, "error"); }
@@ -720,61 +711,15 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
         </FormRow>
       </>}
 
-      {/* RECEIVABLE */}
-      {type === "receivable" && <>
-        <FormRow>
-          <Select label="Type" value={form.receivable_type || "reimburse"}
-            onChange={e => set("receivable_type", e.target.value)}
-            options={[{ value: "reimburse", label: "Reimburse" }, { value: "employee_loan", label: "Employee Loan" }]}
-            style={{ flex: 1 }} />
-          <Select label="Entity" value={form.entity || "Hamasa"} onChange={e => set("entity", e.target.value)}
-            options={["Hamasa", "SDC", "Travelio", "Personal", "Other"]}
-            style={{ flex: 1 }} />
-        </FormRow>
-        <AmountInput label="Outstanding Amount" value={form.receivable_outstanding || ""}
-          onChange={v => set("receivable_outstanding", v)} />
-
-        {form.receivable_type === "employee_loan" && <>
-          <FormRow>
-            <Input label="Employee Name" value={form.contact_name || ""}
-              onChange={e => set("contact_name", e.target.value)} placeholder="Full name" style={{ flex: 1 }} />
-            <Input label="Department" value={form.contact_dept || ""}
-              onChange={e => set("contact_dept", e.target.value)} placeholder="e.g. Engineering" style={{ flex: 1 }} />
-          </FormRow>
-          <FormRow>
-            <AmountInput label="Monthly Installment" value={form.monthly_installment || ""}
-              onChange={v => set("monthly_installment", v)} style={{ flex: 1 }} />
-            <AmountInput label="Total Loan Amount" value={form.receivable_total || ""}
-              onChange={v => { set("receivable_total", v); set("receivable_outstanding", v); }} style={{ flex: 1 }} />
-          </FormRow>
-          <FormRow>
-            <Input label="Start Date" type="date" value={form.start_date || ""}
-              onChange={e => set("start_date", e.target.value)} style={{ flex: 1 }} />
-            <Select label="Deduction Method" value={form.deduction_method || "salary_deduction"}
-              onChange={e => set("deduction_method", e.target.value)}
-              options={[{ value: "salary_deduction", label: "Salary Deduction" }, { value: "direct_payment", label: "Direct Payment" }]}
-              style={{ flex: 1 }} />
-          </FormRow>
-          <Select label="Default Collection Account" value={form.default_bank_id || ""}
-            onChange={e => set("default_bank_id", e.target.value)}
-            placeholder="Select bank account…"
-            options={bankAccounts.map(b => ({ value: b.id, label: b.name }))} />
-
-          {form.monthly_installment && form.receivable_outstanding && Number(form.monthly_installment) > 0 && (
-            <div style={{
-              fontSize: 11, color: "#6b7280", padding: "10px 12px",
-              background: "#f9fafb", borderRadius: 8, fontFamily: "Figtree, sans-serif",
-            }}>
-              Duration: ~{Math.ceil(Number(form.receivable_outstanding) / Number(form.monthly_installment))} months
-              {form.start_date && (() => {
-                const end = new Date(form.start_date);
-                end.setMonth(end.getMonth() + Math.ceil(Number(form.receivable_outstanding) / Number(form.monthly_installment)));
-                return ` · Ends ${end.toLocaleDateString("en-US", { month: "short", year: "numeric" })}`;
-              })()}
-            </div>
-          )}
-        </>}
-      </>}
+      {/* RECEIVABLE — reimburse only (employee loans are managed in Receivables page) */}
+      {type === "receivable" && (
+        <Select
+          label="Entity"
+          value={form.entity || "Hamasa"}
+          onChange={e => set("entity", e.target.value)}
+          options={["Hamasa", "SDC", "Travelio"]}
+        />
+      )}
 
       {/* Color picker — bank + CC */}
       {(type === "bank" || type === "credit_card") && (
@@ -813,7 +758,7 @@ function emptyForm(type) {
     case "credit_card": return { ...base, bank_name: "BCA", last4: "", network: "Visa", card_limit: "", monthly_target: "", statement_day: 25, due_day: 17, current_balance: 0 };
     case "asset":       return { ...base, subtype: "Property", current_value: "", purchase_price: "", purchase_date: "" };
     case "liability":   return { ...base, subtype: "Mortgage", creditor: "", outstanding_amount: "", total_amount: "", monthly_payment: "", liability_interest_rate: "", start_date: "", end_date: "" };
-    case "receivable":  return { ...base, entity: "Hamasa", receivable_type: "reimburse", receivable_outstanding: "", contact_name: "", contact_dept: "", monthly_installment: "", receivable_total: "", start_date: todayStr(), deduction_method: "salary_deduction", default_bank_id: "" };
+    case "receivable":  return { ...base, entity: "Hamasa" };
     default:            return base;
   }
 }
