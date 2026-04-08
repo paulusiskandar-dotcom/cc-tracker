@@ -37,6 +37,7 @@ const LIAB_CATS = ["KPR","Kredit Kendaraan","Pinjaman"];
 const ASSET_ICON= {Properti:"🏠",Kendaraan:"🚗",Saham:"📈","Reksa Dana":"💼",Crypto:"🪙",Emas:"🏅",Deposito:"🏦","Barang Berharga":"💎","FX/Cash":"💵"};
 const ASSET_COL = {Properti:"#3b5bdb",Kendaraan:"#0c8599",Saham:"#0ca678","Reksa Dana":"#7048e8",Crypto:"#e67700",Emas:"#d4a017",Deposito:"#2563eb","Barang Berharga":"#9333ea","FX/Cash":"#0891b2"};
 const ASSET_BG  = {Properti:"#eef2ff",Kendaraan:"#e3fafc",Saham:"#e6fcf5","Reksa Dana":"#f3f0ff",Crypto:"#fff9db",Emas:"#fef9c3",Deposito:"#eff6ff","Barang Berharga":"#faf5ff","FX/Cash":"#ecfeff"};
+const INCOME_CATS=["Gaji","Sewa","Dividen","Bunga Deposito","Freelance","Bonus","Transfer Masuk","Lainnya"];
 
 // ─── HELPERS ──────────────────────────────────────────────────
 const getCur   = c => CURRENCIES.find(x=>x.code===c)||CURRENCIES[0];
@@ -129,8 +130,8 @@ const api = {
   },
   tx:{
     getAll: async u=>{const{data}=await supabase.from("transactions").select("*").eq("user_id",u).order("tx_date",{ascending:false});return data||[];},
-    create: async(u,d)=>{const{data}=await supabase.from("transactions").insert([{...d,user_id:u}]).select().single();return data;},
-    update: async(id,d)=>{const{data}=await supabase.from("transactions").update(d).eq("id",id).select().single();return data;},
+    create: async(u,d)=>{const{data,error}=await supabase.from("transactions").insert([{...d,user_id:u}]).select().single();if(error)throw new Error(error.message);return data;},
+    update: async(id,d)=>{const{data,error}=await supabase.from("transactions").update(d).eq("id",id).select().single();if(error)throw new Error(error.message);return data;},
     delete: async id=>supabase.from("transactions").delete().eq("id",id),
     toggleReimb: async(id,v)=>supabase.from("transactions").update({reimbursed:v}).eq("id",id),
   },
@@ -182,11 +183,17 @@ const api = {
   // Piutang karyawan
   empLoan:{
     getAll: async u=>{const{data}=await supabase.from("employee_loans").select("*").eq("user_id",u);return data||[];},
-    create: async(u,d)=>{const{data}=await supabase.from("employee_loans").insert([{...d,user_id:u}]).select().single();return data;},
-    update: async(id,d)=>{const{data}=await supabase.from("employee_loans").update(d).eq("id",id).select().single();return data;},
+    create: async(u,d)=>{const{data,error}=await supabase.from("employee_loans").insert([{...d,user_id:u}]).select().single();if(error)throw new Error(error.message);return data;},
+    update: async(id,d)=>{const{data,error}=await supabase.from("employee_loans").update(d).eq("id",id).select().single();if(error)throw new Error(error.message);return data;},
     delete: async id=>supabase.from("employee_loans").delete().eq("id",id),
     getPayments: async u=>{const{data}=await supabase.from("employee_loan_payments").select("*").eq("user_id",u);return data||[];},
-    addPayment: async(u,d)=>{const{data}=await supabase.from("employee_loan_payments").insert([{...d,user_id:u}]).select().single();return data;},
+    addPayment: async(u,d)=>{const{data,error}=await supabase.from("employee_loan_payments").insert([{...d,user_id:u}]).select().single();if(error)throw new Error(error.message);return data;},
+  },
+  income:{
+    getAll: async u=>{const{data}=await supabase.from("income_records").select("*").eq("user_id",u).order("income_date",{ascending:false});return data||[];},
+    create: async(u,d)=>{const{data,error}=await supabase.from("income_records").insert([{...d,user_id:u}]).select().single();if(error)throw new Error(error.message);return data;},
+    update: async(id,d)=>{const{data,error}=await supabase.from("income_records").update(d).eq("id",id).select().single();if(error)throw new Error(error.message);return data;},
+    delete: async id=>supabase.from("income_records").delete().eq("id",id),
   },
   asset:{
     getAll: async u=>{const{data}=await supabase.from("assets").select("*").eq("user_id",u).order("created_at",{ascending:false});return data||[];},
@@ -300,7 +307,17 @@ function Finance({user,signOut}){
   const [ccSubTab,setCCSubTab]   = useState("transactions");
   const [piSubTab,setPiSubTab]   = useState("reimburse");
   const [assetSubTab,setAssetSubTab] = useState("overview");
+  const [incomeSubTab,setIncomeSubTab] = useState("pemasukan");
   const [cardTargetDraft,setCardTargetDraft] = useState({});
+  const [incomes,setIncomes] = useState([]);
+  const [showIncomeForm,setShowIncomeForm] = useState(false);
+  const [editIncomeId,setEditIncomeId] = useState(null);
+  const [showUniTxForm,setShowUniTxForm] = useState(false);
+  const [filterUniMonth,setFilterUniMonth] = useState("all");
+  const [filterUniType,setFilterUniType] = useState("all");
+  const [filterUniSource,setFilterUniSource] = useState("all");
+  const [filterUniEnt,setFilterUniEnt] = useState("all");
+  const [searchUni,setSearchUni] = useState("");
   const [showTxForm,setShowTxForm]     = useState(false);
   const [showCardForm,setShowCardForm] = useState(false);
   const [showInstForm,setShowInstForm] = useState(false);
@@ -392,6 +409,8 @@ function Finance({user,signOut}){
   const EA = {name:"",category:"Properti",current_value:"",purchase_value:"",purchase_date:"",currency:"IDR",notes:"",linked_bank_id:""};
   const ELB= {name:"",category:"KPR",outstanding:"",original_amount:"",monthly_payment:"",interest_rate:"",start_date:today(),end_date:"",linked_asset_id:"",notes:""};
   const EUV= {value:"",date:today(),notes:""};
+  const EIN= {income_date:today(),category:"Gaji",description:"",amount:"",currency:"IDR",entity:"Pribadi",bank_account_id:"",is_recurring:false,recur_frequency:"Bulanan",notes:""};
+  const EUT= {type:"out",tx_date:today(),description:"",amount:"",currency:"IDR",source_type:"bank",source_id:"",dest_type:"bank",dest_id:"",category:"Lainnya",entity:"Pribadi",notes:"",is_reimb:false};
 
   const [txForm,setTxForm]     = useState(ET);
   const [cardForm,setCardForm] = useState(EC);
@@ -406,12 +425,14 @@ function Finance({user,signOut}){
   const [assetForm,setAssetForm]   = useState(EA);
   const [liabForm,setLiabForm]     = useState(ELB);
   const [updateValForm,setUpdateValForm] = useState(EUV);
+  const [incomeForm,setIncomeForm] = useState(EIN);
+  const [uniTxForm,setUniTxForm]   = useState(EUT);
 
   // Load all data
   useEffect(()=>{
     (async()=>{
       setLoading(true);
-      const [c,t,i,b,r,fx,ba,mu,ra,rt,el,ep,dark,as,ls,ah]=await Promise.all([
+      const [c,t,i,b,r,fx,ba,mu,ra,rt,el,ep,dark,as,ls,ah,inc]=await Promise.all([
         api.cards.getAll(user.id),api.tx.getAll(user.id),api.inst.getAll(user.id),
         api.budgets.getMonth(user.id,curMonth),api.recur.getAll(user.id),
         api.fx.getAll(user.id),api.bank.getAll(user.id),api.mut.getAll(user.id),
@@ -419,12 +440,13 @@ function Finance({user,signOut}){
         api.empLoan.getAll(user.id),api.empLoan.getPayments(user.id),
         api.settings.get(user.id,"isDark",false),
         api.asset.getAll(user.id),api.liab.getAll(user.id),api.assetHist.getAll(user.id),
+        api.income.getAll(user.id),
       ]);
       setCards(c);setTxList(t);setInstList(i);setBudgets(b);setRecur(r);
       if(Object.keys(fx).length)setFxRates(fx);
       setBankAccs(ba);setMuts(mu);setReimbAccs(ra);setReimbTx(rt);
       setEmpLoans(el);setEmpPayments(ep);setIsDark(dark);
-      setAssets(as);setLiabilities(ls);setAssetHistory(ah);
+      setAssets(as);setLiabilities(ls);setAssetHistory(ah);setIncomes(inc);
       setLoading(false);
     })();
   },[user.id]);
@@ -550,12 +572,16 @@ function Finance({user,signOut}){
 
   // ── CC Handlers
   const submitTx=async()=>{
-    if(!txForm.description||!txForm.amount||!txForm.card_id)return;
+    console.log("submitTx called",txForm);
+    if(!txForm.description||!txForm.amount||!txForm.card_id){console.warn("submitTx: validasi gagal",{desc:txForm.description,amt:txForm.amount,card:txForm.card_id});return;}
     setSaving(true);
-    const d={...txForm,amount:Number(txForm.amount),fee:Number(txForm.fee||0),amount_idr:toIDR(Number(txForm.amount),txForm.currency,fxRates)};
-    if(editTxId){const r=await api.tx.update(editTxId,d);setTxList(p=>p.map(t=>t.id===editTxId?r:t));setEditTxId(null);}
-    else{const r=await api.tx.create(user.id,d);setTxList(p=>[r,...p]);}
-    setTxForm({...ET,card_id:cards[0]?.id||""});setShowTxForm(false);setSaving(false);setScanResult(null);
+    try{
+      const d={...txForm,amount:Number(txForm.amount),fee:Number(txForm.fee||0),amount_idr:toIDR(Number(txForm.amount),txForm.currency,fxRates)};
+      if(editTxId){const r=await api.tx.update(editTxId,d);if(r)setTxList(p=>p.map(t=>t.id===editTxId?r:t));setEditTxId(null);}
+      else{const r=await api.tx.create(user.id,d);if(r)setTxList(p=>[r,...p]);}
+      setTxForm({...ET,card_id:cards[0]?.id||""});setShowTxForm(false);setScanResult(null);
+    }catch(e){console.error("submitTx error:",e);alert("Gagal simpan transaksi: "+e.message);}
+    finally{setSaving(false);}
   };
   const submitCard=async()=>{
     if(!cardForm.name||!cardForm.last4)return;
@@ -649,12 +675,16 @@ function Finance({user,signOut}){
     setShowSettlePiu(false);setSelectedReimbTx(null);setSaving(false);
   };
   const submitLoan=async()=>{
-    if(!loanForm.employee_name||!loanForm.total_amount)return;
+    console.log("submitLoan called",loanForm);
+    if(!loanForm.employee_name||!loanForm.total_amount){console.warn("submitLoan: validasi gagal",loanForm);return;}
     setSaving(true);
-    const d={...loanForm,total_amount:Number(loanForm.total_amount),monthly_installment:Number(loanForm.monthly_installment),paid_months:0,status:"active"};
-    if(editLoanId){const r=await api.empLoan.update(editLoanId,d);setEmpLoans(p=>p.map(l=>l.id===editLoanId?r:l));setEditLoanId(null);}
-    else{const r=await api.empLoan.create(user.id,d);setEmpLoans(p=>[...p,r]);}
-    setLoanForm(EL);setShowLoanForm(false);setSaving(false);
+    try{
+      const d={...loanForm,total_amount:Number(loanForm.total_amount),monthly_installment:Number(loanForm.monthly_installment||0),paid_months:0,status:"active"};
+      if(editLoanId){const r=await api.empLoan.update(editLoanId,d);if(r)setEmpLoans(p=>p.map(l=>l.id===editLoanId?r:l));setEditLoanId(null);}
+      else{const r=await api.empLoan.create(user.id,d);if(r)setEmpLoans(p=>[...p,r]);}
+      setLoanForm(EL);setShowLoanForm(false);
+    }catch(e){console.error("submitLoan error:",e);alert("Gagal simpan piutang karyawan: "+e.message);}
+    finally{setSaving(false);}
   };
   const submitLoanPay=async()=>{
     if(!selectedLoan||!loanPay.amount)return;
@@ -664,6 +694,40 @@ function Finance({user,signOut}){
     setLoanPay({amount:"",date:today(),notes:""});setShowPayLoan(false);setSaving(false);
   };
   const delLoan=async id=>{if(window.confirm("Hapus piutang karyawan?")){await api.empLoan.delete(id);setEmpLoans(p=>p.filter(l=>l.id!==id));}};
+
+  // ── Income Handlers
+  const submitIncome=async()=>{
+    if(!incomeForm.amount||!incomeForm.category)return;
+    setSaving(true);
+    try{
+      const d={...incomeForm,amount:Number(incomeForm.amount),amount_idr:toIDR(Number(incomeForm.amount),incomeForm.currency,fxRates)};
+      if(editIncomeId){const r=await api.income.update(editIncomeId,d);if(r)setIncomes(p=>p.map(x=>x.id===editIncomeId?r:x));setEditIncomeId(null);}
+      else{const r=await api.income.create(user.id,d);if(r)setIncomes(p=>[r,...p]);}
+      setIncomeForm(EIN);setShowIncomeForm(false);
+    }catch(e){console.error("submitIncome:",e);alert("Gagal simpan income: "+e.message);}
+    finally{setSaving(false);}
+  };
+  const delIncome=async id=>{await api.income.delete(id);setIncomes(p=>p.filter(x=>x.id!==id));};
+
+  // ── Universal TX Handler
+  const submitUniTx=async()=>{
+    if(!uniTxForm.description||!uniTxForm.amount||!uniTxForm.source_id)return;
+    setSaving(true);
+    try{
+      const amt=Number(uniTxForm.amount);
+      const amtIDR=toIDR(amt,uniTxForm.currency,fxRates);
+      if(uniTxForm.source_type==="cc"){
+        const d={tx_date:uniTxForm.tx_date,card_id:uniTxForm.source_id,description:uniTxForm.description,amount:amt,currency:uniTxForm.currency,fee:0,category:uniTxForm.category,entity:uniTxForm.entity,reimbursed:uniTxForm.is_reimb,notes:uniTxForm.notes,tx_type:uniTxForm.type,amount_idr:amtIDR};
+        const r=await api.tx.create(user.id,d);if(r)setTxList(p=>[r,...p]);
+      } else {
+        const isTransferToCC=uniTxForm.type==="transfer"&&uniTxForm.dest_type==="cc";
+        const d={account_id:uniTxForm.source_id,mut_date:uniTxForm.tx_date,description:uniTxForm.description,amount:amt,type:uniTxForm.type==="transfer"?"transfer":uniTxForm.type,category:uniTxForm.category,entity:uniTxForm.entity,notes:uniTxForm.notes,is_cc_payment:isTransferToCC,cc_card_id:isTransferToCC?uniTxForm.dest_id:"",transfer_to_account_id:(uniTxForm.type==="transfer"&&uniTxForm.dest_type==="bank")?uniTxForm.dest_id:"",is_piutang:uniTxForm.is_reimb};
+        const r=await api.mut.create(user.id,d);if(r)setMuts(p=>[r,...p]);
+      }
+      setUniTxForm({...EUT,source_id:bankAccs[0]?.id||""});setShowUniTxForm(false);
+    }catch(e){console.error("submitUniTx:",e);alert("Gagal simpan transaksi: "+e.message);}
+    finally{setSaving(false);}
+  };
 
   // ── Asset Handlers
   const submitAsset=async()=>{
@@ -788,10 +852,41 @@ function Finance({user,signOut}){
     return{...i,monthly:m,remaining:rem,remainingAmt:m*rem,pct:((i.paid_months||0)/(i.months||1))*100};
   }),[instList]);
 
+  // Income stats
+  const incomeStats=useMemo(()=>{
+    const totalThisMonth=incomes.filter(x=>ym(x.income_date)===curMonth).reduce((s,x)=>s+Number(x.amount_idr||x.amount||0),0);
+    const last6=[...new Set([...incomes.map(x=>ym(x.income_date)),...muts.map(m=>ym(m.mut_date)),...txList.map(t=>ym(t.tx_date))].filter(Boolean))].sort().slice(-6);
+    const chartData=last6.map(m=>({
+      month:mlShort(m),
+      income:incomes.filter(x=>ym(x.income_date)===m).reduce((s,x)=>s+Number(x.amount_idr||x.amount||0),0),
+      expense:txList.filter(t=>ym(t.tx_date)===m).reduce((s,t)=>s+txIDR(t),0)+muts.filter(mu=>ym(mu.mut_date)===m&&mu.type==="out").reduce((s,mu)=>s+Number(mu.amount||0),0),
+    }));
+    const byCat=INCOME_CATS.map(cat=>({name:cat,value:incomes.filter(x=>x.category===cat).reduce((s,x)=>s+Number(x.amount_idr||x.amount||0),0)})).filter(x=>x.value>0);
+    const expenseThisMonth=txList.filter(t=>ym(t.tx_date)===curMonth).reduce((s,t)=>s+txIDR(t),0)+muts.filter(m=>ym(m.mut_date)===curMonth&&m.type==="out").reduce((s,m)=>s+Number(m.amount||0),0);
+    const avg3=()=>{const r=last6.slice(-3);return r.length?r.reduce((s,m)=>s+incomes.filter(x=>ym(x.income_date)===m).reduce((ss,x)=>ss+Number(x.amount_idr||x.amount||0),0),0)/r.length:0;};
+    return{totalThisMonth,chartData,byCat,expenseThisMonth,surplus:totalThisMonth-expenseThisMonth,avg3Income:avg3()};
+  },[incomes,txList,muts,curMonth,txIDR]);
+
+  // Universal transactions (combined muts + txList)
+  const uniTxAll=useMemo(()=>{
+    const bankRows=muts.map(m=>({...m,_src:"bank",_date:m.mut_date,_type:m.type,_id:m.id,_desc:m.description,_amt:Number(m.amount||0),_ent:m.entity,_cat:m.category}));
+    const ccRows=txList.map(t=>({...t,_src:"cc",_date:t.tx_date,_type:t.tx_type||"out",_id:t.id,_desc:t.description,_amt:txIDR(t),_ent:t.entity,_cat:t.category}));
+    return [...bankRows,...ccRows].sort((a,b)=>b._date.localeCompare(a._date));
+  },[muts,txList,txIDR]);
+
+  const filteredUni=useMemo(()=>uniTxAll
+    .filter(x=>filterUniMonth==="all"||ym(x._date)===filterUniMonth)
+    .filter(x=>filterUniType==="all"||x._type===filterUniType)
+    .filter(x=>filterUniSource==="all"||x._src===filterUniSource)
+    .filter(x=>filterUniEnt==="all"||x._ent===filterUniEnt)
+    .filter(x=>!searchUni||x._desc?.toLowerCase().includes(searchUni.toLowerCase()))
+  ,[uniTxAll,filterUniMonth,filterUniType,filterUniSource,filterUniEnt,searchUni]);
+
   const TABS=[
     {id:"dashboard",icon:"◈",label:"Dashboard"},
     {id:"cc",icon:"💳",label:"Credit Card"},
     {id:"bank",icon:"🏦",label:"Bank"},
+    {id:"transaksi",icon:"🔄",label:"Transaksi"},
     {id:"piutang",icon:"📋",label:"Piutang"},
     {id:"asset",icon:"📈",label:"Asset"},
     {id:"income",icon:"💰",label:"Income"},
@@ -822,16 +917,17 @@ function Finance({user,signOut}){
             </div>
           </div>
           <div className="nav-sec">Menu Utama</div>
-          {TABS.slice(0,5).map(t=>(
+          {TABS.slice(0,7).map(t=>(
             <button key={t.id} className={`nb ${tab===t.id?"on":""}`} onClick={()=>setTab(t.id)}>
               <div className="nb-ic">{t.icon}</div>{t.label}
               {t.id==="dashboard"&&alerts.length>0&&<span className="n-badge">{alerts.length}</span>}
               {t.id==="piutang"&&piutangStats.grandTotal>0&&<span className="n-badge" style={{background:th.am}}>{fmtIDR(piutangStats.grandTotal,true)}</span>}
               {t.id==="asset"&&assets.length>0&&<span className="n-badge" style={{background:th.te,fontSize:8}}>{fmtIDR(totalAssets,true)}</span>}
+              {t.id==="income"&&incomeStats.totalThisMonth>0&&<span className="n-badge" style={{background:th.gr,fontSize:8}}>{fmtIDR(incomeStats.totalThisMonth,true)}</span>}
             </button>
           ))}
           <div className="nav-sec">Segera Hadir</div>
-          {TABS.slice(5,7).map(t=>(
+          {[TABS[7]].map(t=>(
             <button key={t.id} className="nb" onClick={()=>setTab(t.id)}>
               <div className="nb-ic">{t.icon}</div>{t.label}
               <span className="n-soon">Soon</span>
@@ -849,7 +945,7 @@ function Finance({user,signOut}){
 
       {/* BOTTOM NAV */}
       <div className="bottom-nav">
-        {[...TABS.slice(0,3),{id:"piutang",icon:"📋",label:"Piutang"},{id:"settings",icon:"⚙️",label:"Settings"}].map(t=>(
+        {[TABS[0],TABS[1],TABS[2],TABS[5],TABS[6]].map(t=>(
           <button key={t.id} className={`bot-btn ${tab===t.id?"on":""}`} onClick={()=>setTab(t.id)}>
             <span style={{fontSize:18}}>{t.icon}</span>
             <span>{t.label}</span>
@@ -872,8 +968,10 @@ function Finance({user,signOut}){
             <button className="btn btn-ai" onClick={()=>setShowAIChat(true)}>🤖 AI</button>
             {tab==="cc"&&<button className="btn btn-primary" onClick={()=>{setEditTxId(null);setTxForm({...ET,card_id:cards[0]?.id||""});setShowTxForm(true);}}>+ Transaksi</button>}
             {tab==="bank"&&<button className="btn btn-primary" onClick={()=>{setEditBankId(null);setBankForm(EBA);setShowBankForm(true);}}>+ Rekening</button>}
+            {tab==="transaksi"&&<button className="btn btn-primary" onClick={()=>{setUniTxForm({...EUT,source_id:bankAccs[0]?.id||""});setShowUniTxForm(true);}}>+ Transaksi</button>}
             {tab==="piutang"&&<button className="btn btn-primary" onClick={()=>{setShowReimbTx(true);setReimbTxForm({...ERT,account_id:reimbAccs[0]?.id||""});}}>+ Piutang</button>}
             {tab==="asset"&&<button className="btn btn-primary" onClick={()=>{setEditAssetId(null);setAssetForm(EA);setShowAssetForm(true);}}>+ Aset</button>}
+            {tab==="income"&&<button className="btn btn-primary" onClick={()=>{setEditIncomeId(null);setIncomeForm(EIN);setShowIncomeForm(true);}}>+ Income</button>}
           </div>
         </div>
 
@@ -1323,6 +1421,74 @@ function Finance({user,signOut}){
             </>
           )}
 
+          {/* ══ TRANSAKSI UNIVERSAL ══ */}
+          {tab==="transaksi"&&(
+            <>
+              {/* Summary */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9,marginBottom:14}}>
+                {[["Semua",uniTxAll.length,th.ac],["Keluar",uniTxAll.filter(x=>x._type==="out").length,th.rd],["Masuk",uniTxAll.filter(x=>x._type==="in").length,th.gr]].map(([l,v,col])=>(
+                  <div key={l} className="stat-card anim" style={{borderTop:`2px solid ${col}`}}>
+                    <div style={{fontSize:9,fontWeight:700,color:th.tx3,textTransform:"uppercase",letterSpacing:.6,marginBottom:4}}>{l}</div>
+                    <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:17,fontWeight:800,color:col}}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              {/* Filters */}
+              <div className="card anim" style={{marginBottom:12}}>
+                <input className="search-inp" placeholder="🔍 Cari transaksi..." value={searchUni} onChange={e=>setSearchUni(e.target.value)} style={{marginBottom:9}}/>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  <select className="mini-sel" value={filterUniMonth} onChange={e=>setFilterUniMonth(e.target.value)}>
+                    <option value="all">Semua Bulan</option>
+                    {[...new Set(uniTxAll.map(x=>ym(x._date)))].sort().reverse().map(m=><option key={m} value={m}>{mlFull(m)}</option>)}
+                  </select>
+                  <select className="mini-sel" value={filterUniType} onChange={e=>setFilterUniType(e.target.value)}>
+                    <option value="all">Semua Tipe</option>
+                    <option value="out">↑ Keluar</option>
+                    <option value="in">↓ Masuk</option>
+                    <option value="transfer">↔ Transfer</option>
+                  </select>
+                  <select className="mini-sel" value={filterUniSource} onChange={e=>setFilterUniSource(e.target.value)}>
+                    <option value="all">Semua Sumber</option>
+                    <option value="bank">🏦 Bank</option>
+                    <option value="cc">💳 CC</option>
+                  </select>
+                  <select className="mini-sel" value={filterUniEnt} onChange={e=>setFilterUniEnt(e.target.value)}>
+                    <option value="all">Semua Entitas</option>
+                    {ENTITIES.map(e=><option key={e}>{e}</option>)}
+                  </select>
+                </div>
+                <div style={{fontSize:11,color:th.tx3,marginTop:8}}>{filteredUni.length} transaksi · Keluar: <span style={{color:th.rd,fontWeight:700}}>{fmtIDR(filteredUni.filter(x=>x._type==="out"||x._type==="transfer").reduce((s,x)=>s+x._amt,0),true)}</span> · Masuk: <span style={{color:th.gr,fontWeight:700}}>{fmtIDR(filteredUni.filter(x=>x._type==="in").reduce((s,x)=>s+x._amt,0),true)}</span></div>
+              </div>
+              {filteredUni.length===0?<Empty icon="🔄" msg="Belum ada transaksi" th={th} onAdd={()=>{setUniTxForm({...EUT,source_id:bankAccs[0]?.id||""});setShowUniTxForm(true);}}/>
+              :<div className="card anim">
+                {filteredUni.map((x,i)=>{
+                  const isIn=x._type==="in",isT=x._type==="transfer";
+                  const acc=x._src==="bank"?bankMap[x.account_id]:cardMap[x.card_id];
+                  const toAcc=x.transfer_to_account_id?bankMap[x.transfer_to_account_id]:x.is_cc_payment&&x.cc_card_id?cardMap[x.cc_card_id]:null;
+                  return(
+                    <div key={x._id} className="tx-row" style={{animationDelay:`${Math.min(i,8)*.02}s`}}>
+                      <div className="tx-ic" style={{background:isIn?th.grBg:isT?th.acBg:th.rdBg,color:isIn?th.gr:isT?th.ac:th.rd,fontSize:16}}>{isIn?"↓":isT?"↔":"↑"}</div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontWeight:600,fontSize:13,marginBottom:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{x._desc}</div>
+                        <div className="tag-row">
+                          <Tag bg={th.sur3} color={th.tx3}>{x._date}</Tag>
+                          <Tag bg={x._src==="cc"?th.acBg:th.grBg} color={x._src==="cc"?th.ac:th.gr}>{x._src==="cc"?"💳 CC":"🏦 Bank"}</Tag>
+                          {acc&&<Tag bg={(acc.color||"#1d4ed8")+"22"} color={acc.color||th.ac}>{acc.name}</Tag>}
+                          {toAcc&&<Tag bg={th.acBg} color={th.ac}>→ {toAcc.name}</Tag>}
+                          {x._cat&&<Tag bg={th.sur3} color={th.tx3}>{x._cat}</Tag>}
+                          {x._ent&&<Tag bg={ENT_BG[x._ent]||th.sur3} color={ENT_COL[x._ent]||th.tx3}>{x._ent}</Tag>}
+                        </div>
+                      </div>
+                      <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
+                        <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:700,color:isIn?th.gr:isT?th.ac:th.rd}}>{isIn?"+":"-"}{fmtIDR(x._amt,true)}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>}
+            </>
+          )}
+
           {/* ══ PIUTANG ══ */}
           {tab==="piutang"&&(
             <>
@@ -1728,14 +1894,166 @@ function Finance({user,signOut}){
             </>
           )}
 
+          {/* ══ INCOME ══ */}
+          {tab==="income"&&(
+            <>
+              {/* Summary */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:9,marginBottom:14}}>
+                {[["Pemasukan Bulan Ini",incomeStats.totalThisMonth,th.gr],["Pengeluaran Bulan Ini",incomeStats.expenseThisMonth,th.rd],["Surplus / Defisit",incomeStats.surplus,incomeStats.surplus>=0?th.gr:th.rd]].map(([l,v,col])=>(
+                  <div key={l} className="stat-card anim" style={{borderTop:`2px solid ${col}`}}>
+                    <div style={{fontSize:9,fontWeight:700,color:th.tx3,textTransform:"uppercase",letterSpacing:.6,marginBottom:4}}>{l}</div>
+                    <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:800,color:col}}>{fmtIDR(v,true)}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Subtabs */}
+              <div className="subtabs anim">
+                {[["pemasukan","💰 Pemasukan"],["cashflow","📊 Cash Flow"],["proyeksi","🔮 Proyeksi"]].map(([id,label])=>(
+                  <button key={id} className={`stab ${incomeSubTab===id?"on":""}`} onClick={()=>setIncomeSubTab(id)}>{label}</button>
+                ))}
+              </div>
+
+              {/* Pemasukan */}
+              {incomeSubTab==="pemasukan"&&<>
+                {incomes.length===0?<Empty icon="💰" msg="Belum ada income. Catat gaji atau pemasukan pertamamu!" th={th} onAdd={()=>{setEditIncomeId(null);setIncomeForm(EIN);setShowIncomeForm(true);}}/>
+                :<div className="card anim">
+                  {incomes.map((x,i)=>(
+                    <div key={x.id} className="tx-row" style={{animationDelay:`${Math.min(i,8)*.02}s`}}>
+                      <div className="tx-ic" style={{background:th.grBg,color:th.gr,fontSize:15}}>💰</div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontWeight:600,fontSize:13,marginBottom:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{x.description||x.category}</div>
+                        <div className="tag-row">
+                          <Tag bg={th.sur3} color={th.tx3}>{x.income_date}</Tag>
+                          <Tag bg={th.grBg} color={th.gr}>{x.category}</Tag>
+                          <Tag bg={ENT_BG[x.entity]||th.sur3} color={ENT_COL[x.entity]||th.tx3}>{x.entity}</Tag>
+                          {x.bank_account_id&&bankMap[x.bank_account_id]&&<Tag bg={th.acBg} color={th.ac}>→ {bankMap[x.bank_account_id].name}</Tag>}
+                          {x.is_recurring&&<Tag bg={th.puBg} color={th.pu}>↺ Rutin</Tag>}
+                        </div>
+                      </div>
+                      <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
+                        <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:700,color:th.gr}}>+{fmtIDR(Number(x.amount_idr||x.amount||0),true)}</div>
+                        {x.currency!=="IDR"&&<div style={{fontSize:10,color:th.tx3}}>{fmtCur(x.amount,x.currency)}</div>}
+                        <div className="act-row" style={{marginTop:4}}>
+                          <button className="act-btn" onClick={()=>{setIncomeForm({...x,amount:String(x.amount)});setEditIncomeId(x.id);setShowIncomeForm(true);}} style={{borderColor:th.bor,color:th.tx3}}>✏️</button>
+                          <button className="act-btn" onClick={()=>delIncome(x.id)} style={{borderColor:th.bor,color:th.rd}}>🗑</button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>}
+              </>}
+
+              {/* Cash Flow */}
+              {incomeSubTab==="cashflow"&&<>
+                <div className="sec-hd"><div className="sec-title">Income vs Expense 6 Bulan</div></div>
+                <div className="card anim" style={{marginBottom:14}}>
+                  <ResponsiveContainer width="100%" height={180}>
+                    <BarChart data={incomeStats.chartData} barSize={14} margin={{left:-15,right:5}}>
+                      <XAxis dataKey="month" tick={{fill:th.tx3,fontSize:10}} axisLine={false} tickLine={false}/>
+                      <YAxis tick={{fill:th.tx3,fontSize:10}} axisLine={false} tickLine={false} tickFormatter={v=>fmtIDR(v,true)}/>
+                      <Tooltip contentStyle={{background:th.sur,border:`1px solid ${th.bor}`,borderRadius:10,fontSize:11}}/>
+                      <Bar dataKey="income" name="Pemasukan" fill={th.gr} radius={[4,4,0,0]}/>
+                      <Bar dataKey="expense" name="Pengeluaran" fill={th.rd} radius={[4,4,0,0]}/>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                {incomeStats.byCat.length>0&&<>
+                  <div className="sec-hd"><div className="sec-title">Breakdown Income</div></div>
+                  <div className="card anim" style={{marginBottom:14}}>
+                    <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+                      <div style={{flex:"0 0 130px"}}>
+                        <ResponsiveContainer width={130} height={130}>
+                          <PieChart>
+                            <Pie data={incomeStats.byCat} cx={60} cy={60} innerRadius={35} outerRadius={60} paddingAngle={2} dataKey="value">
+                              {incomeStats.byCat.map((_,idx)=>{const cols=["#0ca678","#3b5bdb","#7048e8","#e67700","#0c8599","#e03131","#d4a017","#9333ea"];return<Cell key={idx} fill={cols[idx%cols.length]}/>;})}</Pie>
+                            <Tooltip contentStyle={{background:th.sur,border:`1px solid ${th.bor}`,borderRadius:8,fontSize:10}} formatter={v=>fmtIDR(v,true)}/>
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                      <div style={{flex:1}}>
+                        {incomeStats.byCat.map((c,idx)=>{
+                          const cols=["#0ca678","#3b5bdb","#7048e8","#e67700","#0c8599","#e03131","#d4a017","#9333ea"];
+                          const total=incomeStats.byCat.reduce((s,x)=>s+x.value,0);
+                          return(
+                            <div key={c.name} style={{display:"flex",alignItems:"center",gap:7,marginBottom:6}}>
+                              <div style={{width:8,height:8,borderRadius:"50%",background:cols[idx%cols.length],flexShrink:0}}/>
+                              <span style={{fontSize:11,flex:1}}>{c.name}</span>
+                              <span style={{fontSize:10,fontFamily:"'JetBrains Mono',monospace",color:th.tx3}}>{total>0?(c.value/total*100).toFixed(0):0}%</span>
+                              <span style={{fontSize:10,fontFamily:"'JetBrains Mono',monospace",color:th.gr,fontWeight:600}}>{fmtIDR(c.value,true)}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </>}
+                {incomeStats.chartData.map((m,i)=>{
+                  const surplus=m.income-m.expense;
+                  return(
+                    <div key={i} className="card anim" style={{marginBottom:8,borderLeft:`3px solid ${surplus>=0?th.gr:th.rd}`,animationDelay:`${i*.04}s`}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                        <div style={{fontWeight:700,fontSize:13}}>{m.month}</div>
+                        <div style={{textAlign:"right"}}>
+                          <div style={{fontSize:10,color:th.tx3}}>Surplus / Defisit</div>
+                          <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:800,color:surplus>=0?th.gr:th.rd}}>{surplus>=0?"+":""}{fmtIDR(surplus,true)}</div>
+                        </div>
+                      </div>
+                      <div style={{display:"flex",gap:16,marginTop:7,fontSize:11}}>
+                        <span>💰 In: <span style={{color:th.gr,fontWeight:700,fontFamily:"'JetBrains Mono',monospace"}}>{fmtIDR(m.income,true)}</span></span>
+                        <span>💸 Out: <span style={{color:th.rd,fontWeight:700,fontFamily:"'JetBrains Mono',monospace"}}>{fmtIDR(m.expense,true)}</span></span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </>}
+
+              {/* Proyeksi */}
+              {incomeSubTab==="proyeksi"&&<>
+                <div className="card anim" style={{marginBottom:12,borderLeft:`3px solid ${th.te}`}}>
+                  <div style={{fontSize:12,fontWeight:700,marginBottom:10}}>🔮 Proyeksi Berdasarkan Rata-rata 3 Bulan Terakhir</div>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginBottom:6}}>
+                    <span style={{color:th.tx3}}>Rata-rata pemasukan</span>
+                    <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:th.gr}}>{fmtIDR(incomeStats.avg3Income,true)}</span>
+                  </div>
+                  {[1,2,3].map(n=>{
+                    const d=new Date();d.setMonth(d.getMonth()+n);
+                    const label=d.toLocaleDateString("id-ID",{month:"long",year:"numeric"});
+                    return(
+                      <div key={n} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderTop:`1px solid ${th.bor}`,fontSize:12}}>
+                        <span style={{color:th.tx2}}>{label}</span>
+                        <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:th.te}}>{fmtIDR(incomeStats.avg3Income,true)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+                {incomes.filter(x=>x.is_recurring).length>0&&<>
+                  <div className="sec-hd"><div className="sec-title">Income Rutin</div></div>
+                  {incomes.filter(x=>x.is_recurring).map((x,i)=>(
+                    <div key={x.id} className="card anim" style={{marginBottom:8,animationDelay:`${i*.04}s`,borderLeft:`3px solid ${th.gr}`}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                        <div>
+                          <div style={{fontWeight:600,fontSize:13}}>{x.description||x.category}</div>
+                          <div style={{fontSize:10,color:th.tx3,marginTop:2}}>{x.category} · {x.recur_frequency||"Bulanan"}</div>
+                        </div>
+                        <div style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:th.gr}}>{fmtIDR(Number(x.amount_idr||x.amount||0),true)}</div>
+                      </div>
+                    </div>
+                  ))}
+                </>}
+                {incomes.filter(x=>x.is_recurring).length===0&&<div style={{textAlign:"center",padding:"20px",color:th.tx3,fontSize:12}}>Belum ada income rutin. Tandai income sebagai "Rutin" untuk proyeksi yang lebih akurat.</div>}
+              </>}
+            </>
+          )}
+
           {/* Coming Soon tabs */}
-          {["income","calendar"].includes(tab)&&(
+          {tab==="calendar"&&(
             <div style={{textAlign:"center",padding:"60px 20px"}}>
               <div style={{fontSize:48,marginBottom:14}}>🚧</div>
               <div style={{fontSize:20,fontWeight:800,marginBottom:8}}>Coming Soon</div>
-              <div style={{fontSize:13,color:th.tx3,marginBottom:22}}>Modul <strong>{TABS.find(t=>t.id===tab)?.label}</strong> akan hadir di sesi berikutnya!</div>
+              <div style={{fontSize:13,color:th.tx3,marginBottom:22}}>Modul <strong>Calendar</strong> akan hadir di sesi berikutnya!</div>
               <div style={{display:"inline-flex",flexDirection:"column",gap:7,textAlign:"left"}}>
-                {(tab==="income"?["Income: gaji, sewa, dividen","Expense: sync CC + bank","Cash flow prediction","Surplus/deficit bulanan"]:["Monthly calendar view","Upcoming transactions","Reminder H-7, H-3, H-1","Browser push notification"]).map(f=>(
+                {["Monthly calendar view","Upcoming transactions","Reminder H-7, H-3, H-1","Browser push notification"].map(f=>(
                   <div key={f} style={{display:"flex",gap:9,fontSize:12,color:th.tx2}}>
                     <span style={{color:th.ac,fontWeight:700}}>→</span>{f}
                   </div>
@@ -2156,6 +2474,94 @@ function Finance({user,signOut}){
           {liabForm.outstanding&&liabForm.original_amount&&<div style={{padding:"8px 12px",background:th.rdBg,border:`1px solid ${th.rd}44`,borderRadius:9,fontSize:12,color:th.rd,fontWeight:700}}>Sudah dibayar: {fmtIDR(Number(liabForm.original_amount)-Number(liabForm.outstanding),true)} ({((1-Number(liabForm.outstanding)/Number(liabForm.original_amount))*100).toFixed(0)}%)</div>}
           <F label="Catatan" th={th}><input className="inp" placeholder="Bank pemberi, nomor akun..." value={liabForm.notes} onChange={e=>setLiabForm(f=>({...f,notes:e.target.value}))}/></F>
           <BtnRow onCancel={()=>setShowLiabForm(false)} onOk={submitLiab} label={editLiabId?"Simpan":"Tambah Liabilitas"} th={th} saving={saving}/>
+        </div>
+      </Overlay>}
+
+      {/* Income Form */}
+      {showIncomeForm&&<Overlay onClose={()=>setShowIncomeForm(false)} th={th} title={editIncomeId?"✏️ Edit Income":"💰 Tambah Income"}>
+        <div style={{display:"flex",flexDirection:"column",gap:11}}>
+          <R2>
+            <F label="Tanggal" th={th}><input className="inp" type="date" value={incomeForm.income_date} onChange={e=>setIncomeForm(f=>({...f,income_date:e.target.value}))}/></F>
+            <F label="Kategori" th={th}><select className="inp" value={incomeForm.category} onChange={e=>setIncomeForm(f=>({...f,category:e.target.value}))}>{INCOME_CATS.map(c=><option key={c}>{c}</option>)}</select></F>
+          </R2>
+          <F label="Keterangan" th={th}><input className="inp" placeholder="Gaji April, Dividen BBCA..." value={incomeForm.description} onChange={e=>setIncomeForm(f=>({...f,description:e.target.value}))}/></F>
+          <R2>
+            <F label="Jumlah" th={th}>
+              <div style={{display:"flex",gap:5}}>
+                <select className="inp" value={incomeForm.currency} onChange={e=>setIncomeForm(f=>({...f,currency:e.target.value}))} style={{width:80,flexShrink:0}}>{CURRENCIES.map(c=><option key={c.code} value={c.code}>{c.flag} {c.code}</option>)}</select>
+                <input className="inp" type="number" placeholder="0" value={incomeForm.amount} onChange={e=>setIncomeForm(f=>({...f,amount:e.target.value}))}/>
+              </div>
+              {incomeForm.currency!=="IDR"&&incomeForm.amount&&<div style={{fontSize:10,color:th.tx3,marginTop:3}}>≈ {fmtIDR(toIDR(Number(incomeForm.amount),incomeForm.currency,fxRates))}</div>}
+            </F>
+            <F label="Entitas" th={th}><select className="inp" value={incomeForm.entity} onChange={e=>setIncomeForm(f=>({...f,entity:e.target.value}))}>{ENTITIES.map(e=><option key={e}>{e}</option>)}</select></F>
+          </R2>
+          <F label="Masuk ke Rekening (Opsional)" th={th}><select className="inp" value={incomeForm.bank_account_id} onChange={e=>setIncomeForm(f=>({...f,bank_account_id:e.target.value}))}><option value="">— Tidak di-link —</option>{bankAccs.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}</select></F>
+          <div className="tog-row" onClick={()=>setIncomeForm(f=>({...f,is_recurring:!f.is_recurring}))} style={{borderColor:incomeForm.is_recurring?th.gr:th.bor,background:incomeForm.is_recurring?th.grBg:th.sur2}}>
+            <div className="tog-dot" style={{background:incomeForm.is_recurring?th.gr:th.bor}}>{incomeForm.is_recurring?"✓":""}</div>
+            <div><div style={{fontSize:12,color:incomeForm.is_recurring?th.gr:th.tx3,fontWeight:600}}>Income Rutin / Recurring</div><div style={{fontSize:10,color:th.tx3}}>Masuk ke proyeksi bulanan</div></div>
+          </div>
+          {incomeForm.is_recurring&&<F label="Frekuensi" th={th}><select className="inp" value={incomeForm.recur_frequency} onChange={e=>setIncomeForm(f=>({...f,recur_frequency:e.target.value}))}>{["Bulanan","Mingguan","Tahunan"].map(f=><option key={f}>{f}</option>)}</select></F>}
+          <F label="Catatan" th={th}><input className="inp" placeholder="Opsional..." value={incomeForm.notes} onChange={e=>setIncomeForm(f=>({...f,notes:e.target.value}))}/></F>
+          <BtnRow onCancel={()=>setShowIncomeForm(false)} onOk={submitIncome} label={editIncomeId?"Simpan":"Tambah Income"} th={th} saving={saving}/>
+        </div>
+      </Overlay>}
+
+      {/* Universal TX Form */}
+      {showUniTxForm&&<Overlay onClose={()=>setShowUniTxForm(false)} th={th} title="🔄 Tambah Transaksi">
+        <div style={{display:"flex",flexDirection:"column",gap:11}}>
+          {/* Tipe */}
+          <F label="Tipe Transaksi" th={th}>
+            <div style={{display:"flex",gap:6}}>
+              {[["out","↑ Keluar",th.rd,th.rdBg],["in","↓ Masuk",th.gr,th.grBg],["transfer","↔ Transfer",th.ac,th.acBg]].map(([v,l,col,bg])=>(
+                <button key={v} onClick={()=>setUniTxForm(f=>({...f,type:v}))} style={{flex:1,padding:"8px 4px",borderRadius:9,border:`1px solid ${uniTxForm.type===v?col:th.bor}`,background:uniTxForm.type===v?bg:th.sur2,fontFamily:"'Sora',sans-serif",fontWeight:600,fontSize:11,cursor:"pointer",color:uniTxForm.type===v?col:th.tx3}}>{l}</button>
+              ))}
+            </div>
+          </F>
+          <R2>
+            <F label="Tanggal" th={th}><input className="inp" type="date" value={uniTxForm.tx_date} onChange={e=>setUniTxForm(f=>({...f,tx_date:e.target.value}))}/></F>
+            <F label="Entitas" th={th}><select className="inp" value={uniTxForm.entity} onChange={e=>setUniTxForm(f=>({...f,entity:e.target.value}))}>{ENTITIES.map(e=><option key={e}>{e}</option>)}</select></F>
+          </R2>
+          <F label="Keterangan" th={th}><input className="inp" placeholder="Makan siang, transfer, gaji..." value={uniTxForm.description} onChange={e=>setUniTxForm(f=>({...f,description:e.target.value}))}/></F>
+          <R2>
+            <F label="Jumlah" th={th}>
+              <div style={{display:"flex",gap:5}}>
+                <select className="inp" value={uniTxForm.currency} onChange={e=>setUniTxForm(f=>({...f,currency:e.target.value}))} style={{width:80,flexShrink:0}}>{CURRENCIES.map(c=><option key={c.code} value={c.code}>{c.flag} {c.code}</option>)}</select>
+                <input className="inp" type="number" placeholder="0" value={uniTxForm.amount} onChange={e=>setUniTxForm(f=>({...f,amount:e.target.value}))}/>
+              </div>
+              {uniTxForm.currency!=="IDR"&&uniTxForm.amount&&<div style={{fontSize:10,color:th.tx3,marginTop:3}}>≈ {fmtIDR(toIDR(Number(uniTxForm.amount),uniTxForm.currency,fxRates))}</div>}
+            </F>
+            <F label="Kategori" th={th}><select className="inp" value={uniTxForm.category} onChange={e=>setUniTxForm(f=>({...f,category:e.target.value}))}>{[...BNK_CATS,...CC_CATS.filter(c=>!BNK_CATS.includes(c))].map(c=><option key={c}>{c}</option>)}</select></F>
+          </R2>
+          {/* Dari (Source) */}
+          <F label="Dari (Sumber)" th={th}>
+            <div style={{display:"flex",gap:6,marginBottom:6}}>
+              {[["bank","🏦 Bank"],["cc","💳 CC"]].map(([v,l])=>(
+                <button key={v} onClick={()=>setUniTxForm(f=>({...f,source_type:v,source_id:""}))} style={{flex:1,padding:"6px",borderRadius:8,border:`1px solid ${uniTxForm.source_type===v?th.ac:th.bor}`,background:uniTxForm.source_type===v?th.acBg:th.sur2,fontFamily:"'Sora',sans-serif",fontWeight:600,fontSize:11,cursor:"pointer",color:uniTxForm.source_type===v?th.ac:th.tx3}}>{l}</button>
+              ))}
+            </div>
+            <select className="inp" value={uniTxForm.source_id} onChange={e=>setUniTxForm(f=>({...f,source_id:e.target.value}))}>
+              <option value="">Pilih...</option>
+              {uniTxForm.source_type==="bank"?bankAccs.map(b=><option key={b.id} value={b.id}>{b.name} — {fmtIDR(bankBal[b.id]||0,true)}</option>):cards.map(c=><option key={c.id} value={c.id}>{c.name} ···· {c.last4}</option>)}
+            </select>
+          </F>
+          {/* Ke (Destination) — hanya kalau Transfer */}
+          {uniTxForm.type==="transfer"&&<F label="Ke (Tujuan)" th={th}>
+            <div style={{display:"flex",gap:6,marginBottom:6}}>
+              {[["bank","🏦 Bank"],["cc","💳 Bayar CC"]].map(([v,l])=>(
+                <button key={v} onClick={()=>setUniTxForm(f=>({...f,dest_type:v,dest_id:""}))} style={{flex:1,padding:"6px",borderRadius:8,border:`1px solid ${uniTxForm.dest_type===v?th.te:th.bor}`,background:uniTxForm.dest_type===v?th.teBg:th.sur2,fontFamily:"'Sora',sans-serif",fontWeight:600,fontSize:11,cursor:"pointer",color:uniTxForm.dest_type===v?th.te:th.tx3}}>{l}</button>
+              ))}
+            </div>
+            <select className="inp" value={uniTxForm.dest_id} onChange={e=>setUniTxForm(f=>({...f,dest_id:e.target.value}))}>
+              <option value="">Pilih...</option>
+              {uniTxForm.dest_type==="bank"?bankAccs.filter(b=>b.id!==uniTxForm.source_id).map(b=><option key={b.id} value={b.id}>{b.name}</option>):cards.map(c=><option key={c.id} value={c.id}>{c.name} — Tagihan: {fmtIDR(ccStats.cardStats.find(x=>x.id===c.id)?.spent||0,true)}</option>)}
+            </select>
+          </F>}
+          <div className="tog-row" onClick={()=>setUniTxForm(f=>({...f,is_reimb:!f.is_reimb}))} style={{borderColor:uniTxForm.is_reimb?th.te:th.bor,background:uniTxForm.is_reimb?th.teBg:th.sur2}}>
+            <div className="tog-dot" style={{background:uniTxForm.is_reimb?th.te:th.bor}}>{uniTxForm.is_reimb?"✓":""}</div>
+            <div><div style={{fontSize:12,color:uniTxForm.is_reimb?th.te:th.tx3,fontWeight:600}}>Ini piutang reimburse</div><div style={{fontSize:10,color:th.tx3}}>Tidak masuk expense pribadi</div></div>
+          </div>
+          <F label="Catatan" th={th}><input className="inp" placeholder="Opsional..." value={uniTxForm.notes} onChange={e=>setUniTxForm(f=>({...f,notes:e.target.value}))}/></F>
+          <BtnRow onCancel={()=>setShowUniTxForm(false)} onOk={submitUniTx} label="Simpan" th={th} saving={saving}/>
         </div>
       </Overlay>}
 
