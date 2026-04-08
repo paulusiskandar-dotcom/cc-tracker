@@ -300,6 +300,7 @@ function Finance({user,signOut}){
   const [ccSubTab,setCCSubTab]   = useState("transactions");
   const [piSubTab,setPiSubTab]   = useState("reimburse");
   const [assetSubTab,setAssetSubTab] = useState("overview");
+  const [cardTargetDraft,setCardTargetDraft] = useState({});
   const [showTxForm,setShowTxForm]     = useState(false);
   const [showCardForm,setShowCardForm] = useState(false);
   const [showInstForm,setShowInstForm] = useState(false);
@@ -380,7 +381,7 @@ function Finance({user,signOut}){
 
   // Empty forms
   const ET = {tx_date:today(),card_id:"",description:"",amount:"",currency:"IDR",fee:"",category:"Belanja",entity:"Pribadi",reimbursed:false,notes:"",tx_type:"out"};
-  const EC = {name:"",bank:"BCA",last4:"",color:"#1d4ed8",accent:"#60a5fa",card_limit:"",statement_day:25,due_day:17,target_pct:30,network:"Visa"};
+  const EC = {name:"",bank:"BCA",last4:"",color:"#1d4ed8",accent:"#60a5fa",card_limit:"",statement_day:25,due_day:17,monthly_target:"",network:"Visa"};
   const EI = {card_id:"",description:"",total_amount:"",months:12,start_date:today(),currency:"IDR",entity:"Pribadi"};
   const ER = {card_id:"",description:"",amount:"",currency:"IDR",fee:"",category:"Tagihan",entity:"Pribadi",frequency:"Bulanan",day_of_month:1,active:true};
   const EBA= {name:"",bank:"BCA",account_no:"",type:"pribadi",owner_entity:"",currency:"IDR",initial_balance:"",color:"#1d4ed8",accent:"#60a5fa",include_networth:true};
@@ -458,7 +459,9 @@ function Finance({user,signOut}){
     const cardStats=cards.map(c=>{
       const thisTx=txList.filter(t=>t.card_id===c.id&&ym(t.tx_date)===curMonth);
       const spent=thisTx.reduce((s,t)=>s+txIDR(t),0);
-      return{...c,thisTx,spent,avail:(c.card_limit||0)-spent,pct:c.card_limit>0?spent/c.card_limit*100:0,dueIn:daysUntil(c.due_day),statIn:daysUntil(c.statement_day)};
+      const mt=Number(c.monthly_target||0);
+      const targetPct=mt>0?spent/mt*100:0;
+      return{...c,thisTx,spent,avail:(c.card_limit||0)-spent,pct:c.card_limit>0?spent/c.card_limit*100:0,dueIn:daysUntil(c.due_day),statIn:daysUntil(c.statement_day),monthly_target:mt,targetPct,targetOver:mt>0&&spent>mt,targetRemaining:Math.max(0,mt-spent)};
     });
     const totalCC=cardStats.reduce((s,c)=>s+c.spent,0);
     return{cardStats,totalCC};
@@ -557,7 +560,7 @@ function Finance({user,signOut}){
   const submitCard=async()=>{
     if(!cardForm.name||!cardForm.last4)return;
     setSaving(true);
-    const d={...cardForm,card_limit:Number(cardForm.card_limit),statement_day:Number(cardForm.statement_day),due_day:Number(cardForm.due_day),target_pct:Number(cardForm.target_pct)};
+    const d={...cardForm,card_limit:Number(cardForm.card_limit),statement_day:Number(cardForm.statement_day),due_day:Number(cardForm.due_day),monthly_target:Number(cardForm.monthly_target||0)};
     if(editCardId){const r=await api.cards.update(editCardId,d);setCards(p=>p.map(c=>c.id===editCardId?r:c));setEditCardId(null);}
     else{const r=await api.cards.create(user.id,d);setCards(p=>[...p,r]);}
     setCardForm(EC);setShowCardForm(false);setSaving(false);
@@ -958,7 +961,7 @@ function Finance({user,signOut}){
               {/* Cards quick */}
               <div className="sec-hd"><div className="sec-title">Kartu Kredit</div><button className="sec-link" onClick={()=>setTab("cc")}>Semua →</button></div>
               {ccStats.cardStats.slice(0,3).map((c,i)=>{
-                const sc=c.pct>80?th.rd:c.pct>c.target_pct?th.am:th.gr;
+                const sc=c.targetOver?th.rd:c.targetPct>=80?th.am:th.gr;
                 return(
                   <div key={c.id} className="card card-hover anim" style={{marginBottom:9,animationDelay:`${i*.04}s`}}>
                     <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:9}}>
@@ -974,11 +977,11 @@ function Finance({user,signOut}){
                     </div>
                     <div style={{position:"relative",height:5,background:th.sur3,borderRadius:3,marginBottom:5}}>
                       <div style={{height:"100%",width:`${Math.min(c.pct,100)}%`,background:`linear-gradient(90deg,${c.color||"#1d4ed8"},${c.accent||"#60a5fa"})`,borderRadius:3}}/>
-                      <div style={{position:"absolute",top:-3,left:`${c.target_pct}%`,width:2,height:11,background:th.am,borderRadius:1}}/>
+                      {c.monthly_target>0&&<div style={{position:"absolute",top:-3,left:`${Math.min(c.monthly_target/(c.card_limit||1)*100,100)}%`,width:2,height:11,background:th.am,borderRadius:1}}/>}
                     </div>
                     <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:th.tx3}}>
-                      <span style={{color:sc,fontWeight:600}}>{c.pct.toFixed(1)}%</span>
-                      <span>Target {c.target_pct}% · Sisa {fmtIDR(c.avail,true)}</span>
+                      <span style={{color:sc,fontWeight:600}}>{c.monthly_target>0?`${c.targetPct.toFixed(0)}% target`:`${c.pct.toFixed(1)}% limit`}</span>
+                      <span>{c.monthly_target>0?(c.targetOver?`Over ${fmtIDR(c.spent-c.monthly_target,true)}`:`Sisa ${fmtIDR(c.targetRemaining,true)}`):(`Sisa ${fmtIDR(c.avail,true)}`)}</span>
                     </div>
                   </div>
                 );
@@ -1072,7 +1075,7 @@ function Finance({user,signOut}){
                     </div>
                     <div style={{fontFamily:"'JetBrains Mono',monospace",letterSpacing:4,fontSize:14,opacity:.7,marginBottom:14}}>•••• •••• •••• {c.last4}</div>
                     <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:5,marginBottom:11}}>
-                      {[["Limit",fmtIDR(c.card_limit,true)],["Terpakai",fmtIDR(c.spent,true)],["Tersedia",fmtIDR(c.avail,true)],["Tgl Cetak","Tgl "+c.statement_day],["Jatuh Tempo",`Tgl ${c.due_day} (${c.dueIn}h)`],["Target",c.target_pct+"%"]].map(([l,v])=>(
+                      {[["Limit",fmtIDR(c.card_limit,true)],["Terpakai",fmtIDR(c.spent,true)],["Tersedia",fmtIDR(c.avail,true)],["Tgl Cetak","Tgl "+c.statement_day],["Jatuh Tempo",`Tgl ${c.due_day} (${c.dueIn}h)`],["Target/Bln",c.monthly_target>0?fmtIDR(c.monthly_target,true):"—"]].map(([l,v])=>(
                         <div key={l} style={{background:"rgba(255,255,255,.12)",borderRadius:7,padding:"6px 8px"}}>
                           <div style={{fontSize:8,opacity:.45,fontWeight:600,textTransform:"uppercase"}}>{l}</div>
                           <div style={{fontSize:10,fontWeight:600,fontFamily:"'JetBrains Mono',monospace",marginTop:1}}>{v}</div>
@@ -1153,33 +1156,83 @@ function Finance({user,signOut}){
               </>}
 
               {ccSubTab==="target"&&<>
-                <div style={{display:"flex",justifyContent:"flex-end",marginBottom:12}}>
-                  <button className="btn btn-primary" onClick={()=>{setBudForm({...budgets});setShowBudForm(true);}}>Edit Target</button>
+                <div style={{fontSize:11,color:th.tx3,marginBottom:14,padding:"9px 12px",background:th.acBg,border:`1px solid ${th.ac}33`,borderRadius:9}}>
+                  💡 Set target pengeluaran nominal per kartu. Edit langsung di kolom "Target/Bln" — tekan Enter atau klik di luar untuk simpan.
                 </div>
-                {budgetStats.map((b,i)=>{
-                  const over=b.pct>=100,warn=b.pct>=80;
-                  const bc=over?th.rd:warn?th.am:ENT_COL[b.entity];
-                  const icons={Pribadi:"🏠",Hamasa:"🏭",SDC:"🔧",Travelio:"🏢",Lainnya:"📁"};
+                {ccStats.cardStats.length===0?
+                  <Empty icon="💳" msg="Belum ada kartu kredit" th={th} onAdd={()=>{setEditCardId(null);setCardForm(EC);setShowCardForm(true);}}/>
+                :ccStats.cardStats.map((c,i)=>{
+                  const bc=c.targetOver?th.rd:c.targetPct>=80?th.am:th.gr;
+                  const draftVal=cardTargetDraft[c.id]??String(c.monthly_target||"");
+                  const saveTarget=async()=>{
+                    const val=Number(draftVal||0);
+                    if(val!==(c.monthly_target||0)){
+                      const r=await api.cards.update(c.id,{monthly_target:val});
+                      setCards(p=>p.map(x=>x.id===c.id?r:x));
+                    }
+                  };
                   return(
-                    <div key={b.entity} className="card anim" style={{marginBottom:12,animationDelay:`${i*.05}s`}}>
-                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                    <div key={c.id} className="card anim" style={{marginBottom:12,animationDelay:`${i*.05}s`,borderLeft:`3px solid ${c.color||th.ac}`}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:c.monthly_target>0?12:0}}>
                         <div style={{display:"flex",alignItems:"center",gap:10}}>
-                          <div style={{width:40,height:40,borderRadius:11,background:ENT_BG[b.entity],display:"flex",alignItems:"center",justifyContent:"center",fontSize:19}}>{icons[b.entity]}</div>
-                          <div><div style={{fontWeight:700,fontSize:14}}>{b.entity}</div><div style={{fontSize:11,color:th.tx3,marginTop:1}}>{b.pct.toFixed(0)}% terpakai{over?" 🚨":warn?" ⚠️":""}</div></div>
+                          <div style={{width:40,height:40,borderRadius:11,background:`linear-gradient(135deg,${c.color||"#1d4ed8"},${c.accent||"#60a5fa"})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,flexShrink:0}}>💳</div>
+                          <div>
+                            <div style={{fontWeight:700,fontSize:14}}>{c.name}</div>
+                            <div style={{fontSize:11,color:th.tx3,marginTop:1}}>···· {c.last4}{c.monthly_target>0?(c.targetOver?" · 🚨 Over!":c.targetPct>=80?" · ⚠️ "+c.targetPct.toFixed(0)+"%":" · "+c.targetPct.toFixed(0)+"%"):" · Belum ada target"}</div>
+                          </div>
                         </div>
-                        <div style={{textAlign:"right"}}><div style={{fontSize:10,color:th.tx3}}>Target</div><div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:14,fontWeight:700}}>{fmtIDR(b.budget,true)}</div></div>
+                        <div style={{textAlign:"right",flexShrink:0}}>
+                          <div style={{fontSize:9,color:th.tx3,marginBottom:3}}>Target / Bulan</div>
+                          <div style={{display:"flex",alignItems:"center",gap:5}}>
+                            <span style={{fontSize:11,color:th.tx3}}>Rp</span>
+                            <input
+                              className="inp"
+                              type="number"
+                              placeholder="0"
+                              value={draftVal}
+                              onChange={e=>setCardTargetDraft(d=>({...d,[c.id]:e.target.value}))}
+                              onBlur={saveTarget}
+                              onKeyDown={e=>e.key==="Enter"&&e.target.blur()}
+                              style={{width:130,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",fontWeight:700,fontSize:13,padding:"6px 10px"}}
+                            />
+                          </div>
+                        </div>
                       </div>
-                      <div style={{height:8,background:th.sur3,borderRadius:4,overflow:"hidden",marginBottom:9}}>
-                        <div style={{height:"100%",width:`${Math.min(b.pct,100)}%`,background:bc,borderRadius:4}}/>
-                      </div>
-                      <div style={{display:"flex",justifyContent:"space-between"}}>
-                        <div><div style={{fontSize:10,color:th.tx3}}>Terpakai</div><div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:14,fontWeight:700,color:bc}}>{fmtIDR(b.spent,true)}</div></div>
-                        <div style={{textAlign:"center"}}><div style={{fontSize:10,color:th.tx3}}>%</div><div style={{fontSize:18,fontWeight:800,color:bc}}>{b.pct.toFixed(0)}%</div></div>
-                        <div style={{textAlign:"right"}}><div style={{fontSize:10,color:th.tx3}}>Sisa</div><div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:14,fontWeight:700,color:th.gr}}>{fmtIDR(b.remaining,true)}</div></div>
-                      </div>
+                      {c.monthly_target>0&&<>
+                        <div style={{height:8,background:th.sur3,borderRadius:4,overflow:"hidden",marginBottom:8}}>
+                          <div style={{height:"100%",width:`${Math.min(c.targetPct,100)}%`,background:`linear-gradient(90deg,${bc},${bc}dd)`,borderRadius:4,transition:"width .4s"}}/>
+                        </div>
+                        <div style={{display:"flex",justifyContent:"space-between"}}>
+                          <div>
+                            <div style={{fontSize:9,color:th.tx3}}>Terpakai</div>
+                            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:700,color:bc}}>{fmtIDR(c.spent,true)}</div>
+                          </div>
+                          <div style={{textAlign:"center"}}>
+                            <div style={{fontSize:9,color:th.tx3}}>Progres</div>
+                            <div style={{fontSize:17,fontWeight:800,color:bc}}>{c.targetPct.toFixed(0)}%</div>
+                          </div>
+                          <div style={{textAlign:"right"}}>
+                            <div style={{fontSize:9,color:th.tx3}}>{c.targetOver?"Over":"Sisa"}</div>
+                            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:700,color:c.targetOver?th.rd:th.gr}}>{fmtIDR(c.targetOver?c.spent-c.monthly_target:c.targetRemaining,true)}</div>
+                          </div>
+                        </div>
+                      </>}
                     </div>
                   );
                 })}
+                {/* Summary */}
+                {ccStats.cardStats.some(c=>c.monthly_target>0)&&(
+                  <div className="card anim" style={{background:th.sur2,borderTop:`2px solid ${th.ac}`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12}}>
+                      <span style={{color:th.tx3}}>Total Target Bulan Ini</span>
+                      <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700}}>{fmtIDR(ccStats.cardStats.reduce((s,c)=>s+c.monthly_target,0))}</span>
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:12,marginTop:6}}>
+                      <span style={{color:th.tx3}}>Total Terpakai</span>
+                      <span style={{fontFamily:"'JetBrains Mono',monospace",fontWeight:700,color:th.rd}}>{fmtIDR(ccStats.totalCC)}</span>
+                    </div>
+                  </div>
+                )}
               </>}
             </>
           )}
@@ -1850,7 +1903,7 @@ function Finance({user,signOut}){
           <R2><F label="4 Digit Terakhir" th={th}><input className="inp" placeholder="1234" maxLength={4} value={cardForm.last4} onChange={e=>setCardForm(f=>({...f,last4:e.target.value}))}/></F><F label="Network" th={th}><select className="inp" value={cardForm.network} onChange={e=>setCardForm(f=>({...f,network:e.target.value}))}>{NETWORKS.map(n=><option key={n}>{n}</option>)}</select></F></R2>
           <F label="Limit (Rp)" th={th}><input className="inp" type="number" value={cardForm.card_limit} onChange={e=>setCardForm(f=>({...f,card_limit:e.target.value}))}/></F>
           <R2><F label="Tgl Cetak" th={th}><input className="inp" type="number" min={1} max={31} value={cardForm.statement_day} onChange={e=>setCardForm(f=>({...f,statement_day:e.target.value}))}/></F><F label="Tgl Jatuh Tempo" th={th}><input className="inp" type="number" min={1} max={31} value={cardForm.due_day} onChange={e=>setCardForm(f=>({...f,due_day:e.target.value}))}/></F></R2>
-          <F label={`Target Pemakaian: ${cardForm.target_pct}%`} th={th}><input type="range" min={5} max={100} step={5} value={cardForm.target_pct} onChange={e=>setCardForm(f=>({...f,target_pct:Number(e.target.value)}))} style={{width:"100%",accentColor:th.ac}}/></F>
+          <F label="Target Pengeluaran / Bulan (Rp)" th={th}><input className="inp" type="number" placeholder="0 = tidak ada target" value={cardForm.monthly_target} onChange={e=>setCardForm(f=>({...f,monthly_target:e.target.value}))}/>{Number(cardForm.monthly_target)>0&&<div style={{fontSize:10,color:th.ac,marginTop:3}}>{fmtIDR(Number(cardForm.monthly_target))} / bulan</div>}</F>
           <R2><F label="Warna Utama" th={th}><input type="color" value={cardForm.color} onChange={e=>setCardForm(f=>({...f,color:e.target.value}))} style={{width:44,height:36,border:"none",borderRadius:8,cursor:"pointer"}}/></F><F label="Warna Aksen" th={th}><input type="color" value={cardForm.accent} onChange={e=>setCardForm(f=>({...f,accent:e.target.value}))} style={{width:44,height:36,border:"none",borderRadius:8,cursor:"pointer"}}/></F></R2>
           {/* Preview */}
           <div style={{background:`linear-gradient(135deg,${cardForm.color},${cardForm.accent})`,borderRadius:12,padding:"13px 15px",color:"white"}}>
