@@ -185,38 +185,35 @@ function Finance({ user, signOut }) {
 
   // ── Load all data ──
   const loadData = useCallback(async () => {
-    try {
-      const [
-        acc, led, cats, inc, inst, rtempl, rem,
-        merch, fx, dark, pending,
-      ] = await Promise.all([
-        accountsApi.getAll(user.id),
-        ledgerApi.getAll(user.id, { limit: 500 }),
-        categoriesApi.getAll(user.id),
-        incomeSrcApi.getAll(user.id),
-        installmentsApi.getAll(user.id),
-        recurringApi.getTemplates(user.id),
-        recurringApi.getReminders(user.id),
-        merchantApi.getMappings(user.id),
-        fxApi.getAll(user.id),
-        settingsApi.get(user.id, "isDark", false),
-        gmailApi.getPending(user.id).catch(() => []),
-      ]);
+    const safe = (p, fallback) => p.catch(e => { console.warn("[loadData]", e.message); return fallback; });
 
-      setAccounts(acc);
-      setLedger(led);
-      setCategories(cats);
-      setIncomeSrcs(inc);
-      setInstallments(inst);
-      setRecurTemplates(rtempl);
-      setReminders(rem);
-      setMerchantMaps(merch);
-      if (Object.keys(fx).length) setFxRates(fx);
-      setIsDark(dark);
-      setPendingSyncs(pending);
-    } catch (e) {
-      console.error("[loadData]", e);
-    }
+    const [acc, led, cats, inc, inst, rtempl, rem, merch, fx, dark, pending] = await Promise.all([
+      safe(accountsApi.getAll(user.id),                      []),
+      safe(ledgerApi.getAll(user.id, { limit: 500 }),        []),
+      safe(categoriesApi.getAll(user.id),                    []),
+      safe(incomeSrcApi.getAll(user.id),                     []),
+      safe(installmentsApi.getAll(user.id),                  []),
+      safe(recurringApi.getTemplates(user.id),               []),
+      safe(recurringApi.getReminders(user.id),               []),
+      safe(merchantApi.getMappings(user.id),                 []),
+      safe(fxApi.getAll(user.id),                            {}),
+      safe(settingsApi.get(user.id, "isDark", false),        false),
+      safe(gmailApi.getPending(user.id),                     []),
+    ]);
+
+    console.log("[loadData] accounts:", acc.length, "ledger:", led.length);
+
+    setAccounts(acc);
+    setLedger(led);
+    setCategories(cats);
+    setIncomeSrcs(inc);
+    setInstallments(inst);
+    setRecurTemplates(rtempl);
+    setReminders(rem);
+    setMerchantMaps(merch);
+    if (Object.keys(fx).length) setFxRates(fx);
+    setIsDark(dark);
+    setPendingSyncs(pending);
     setLoading(false);
   }, [user.id]);
 

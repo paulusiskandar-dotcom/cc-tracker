@@ -57,6 +57,7 @@ async function applyBalanceDelta(accountId, accountType, delta) {
 // ─── ACCOUNTS ─────────────────────────────────────────────────
 export const accountsApi = {
   getAll: async (userId) => {
+    console.log("[accountsApi.getAll] fetching for user:", userId);
     const { data, error } = await supabase
       .from("accounts")
       .select("*")
@@ -64,6 +65,7 @@ export const accountsApi = {
       .neq("is_active", false)
       .order("sort_order", { nullsLast: true })
       .order("created_at", { ascending: false });
+    console.log("[accountsApi.getAll] result:", data?.length ?? 0, "error:", error?.message);
     if (error) throw new Error(error.message);
     return data || [];
   },
