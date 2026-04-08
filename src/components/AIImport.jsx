@@ -49,14 +49,14 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
       const parsed = await scanApi.scan(user.id, file);
       const items = (parsed || []).map((r, i) => ({
         _id: i,
-        date:            r.date || todayStr(),
+        tx_date:         r.date || todayStr(),
         description:     r.description || "",
         amount:          String(r.amount || ""),
         currency:        r.currency || "IDR",
         amount_idr:      r.amount_idr || r.amount || "",
-        type:            r.type || "expense",
-        from_account_id: r.from_account_id || spendAccounts[0]?.id || "",
-        to_account_id:   r.to_account_id || "",
+        tx_type:         r.type || "expense",
+        from_id:         r.from_account_id || spendAccounts[0]?.id || "",
+        to_id:           r.to_account_id || "",
         entity:          r.entity || "Personal",
         category:        r.category || "other",
         notes:           r.notes || "",
@@ -90,14 +90,14 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
     for (const r of toImport) {
       try {
         const entry = {
-          date:            r.date,
+          tx_date:         r.tx_date,
           description:     r.description,
           amount:          Number(r.amount),
           currency:        r.currency || "IDR",
           amount_idr:      Number(r.amount_idr || r.amount),
-          type:            r.type,
-          from_account_id: r.from_account_id || null,
-          to_account_id:   r.to_account_id || null,
+          tx_type:         r.tx_type,
+          from_id:         r.from_id || null,
+          to_id:           r.to_id || null,
           entity:          r.entity || "Personal",
           category:        r.category || "other",
           notes:           r.notes || "",
@@ -117,14 +117,14 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
   const importGmailItem = async (item) => {
     try {
       const entry = {
-        date:            item.date || todayStr(),
+        tx_date:         item.date || todayStr(),
         description:     item.description,
         amount:          Number(item.amount),
         currency:        "IDR",
         amount_idr:      Number(item.amount),
-        type:            "expense",
-        from_account_id: ccAccounts[0]?.id || spendAccounts[0]?.id || null,
-        to_account_id:   null,
+        tx_type:         "expense",
+        from_id:         ccAccounts[0]?.id || spendAccounts[0]?.id || null,
+        to_id:           null,
         entity:          "Personal",
         category:        item.category || "other",
         notes:           item.email_subject || "",
@@ -259,7 +259,7 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{r.description || "—"}</div>
                         <div style={{ fontSize: 11, color: T.text3, marginTop: 2 }}>
-                          {r.date} · {r.type} · {r.entity}
+                          {r.tx_date} · {r.tx_type} · {r.entity}
                         </div>
                       </div>
                     </div>
@@ -345,14 +345,14 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
               currency="IDR"
             />
             <Field label="Date">
-              <Input type="date" value={editForm.date || ""} onChange={e => setEditForm(f => ({ ...f, date: e.target.value }))} />
+              <Input type="date" value={editForm.tx_date || ""} onChange={e => setEditForm(f => ({ ...f, tx_date: e.target.value }))} />
             </Field>
           </FormRow>
           <FormRow>
             <Field label="Type">
               <Select
-                value={editForm.type || "expense"}
-                onChange={e => setEditForm(f => ({ ...f, type: e.target.value }))}
+                value={editForm.tx_type || "expense"}
+                onChange={e => setEditForm(f => ({ ...f, tx_type: e.target.value }))}
                 options={TX_TYPES.map(t => ({ value: t.id, label: t.label }))}
               />
             </Field>
@@ -373,8 +373,8 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
           </Field>
           <Field label="From Account">
             <Select
-              value={editForm.from_account_id || ""}
-              onChange={e => setEditForm(f => ({ ...f, from_account_id: e.target.value }))}
+              value={editForm.from_id || ""}
+              onChange={e => setEditForm(f => ({ ...f, from_id: e.target.value }))}
               options={spendAccounts.map(a => ({ value: a.id, label: a.name }))}
               placeholder="Select…"
             />

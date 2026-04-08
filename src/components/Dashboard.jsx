@@ -19,13 +19,13 @@ export default function Dashboard({
 
   const thisMonthIncome = useMemo(() =>
     thisMonthLedger
-      .filter(e => e.type === "income")
+      .filter(e => e.tx_type === "income")
       .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0),
   [thisMonthLedger]);
 
   const thisMonthExpense = useMemo(() =>
     thisMonthLedger
-      .filter(e => e.type === "expense")
+      .filter(e => e.tx_type === "expense")
       .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0),
   [thisMonthLedger]);
 
@@ -37,7 +37,7 @@ export default function Dashboard({
 
   const thisMonthCCSpend = useMemo(() =>
     thisMonthLedger
-      .filter(e => e.type === "expense" && creditCards.some(c => c.id === e.from_account_id))
+      .filter(e => e.tx_type === "expense" && creditCards.some(c => c.id === e.from_id))
       .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0),
   [thisMonthLedger, creditCards]);
 
@@ -56,9 +56,9 @@ export default function Dashboard({
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const m = d.toISOString().slice(0, 7);
-      const income  = ledger.filter(e => ym(e.date) === m && e.type === "income")
+      const income  = ledger.filter(e => ym(e.tx_date) === m && e.tx_type === "income")
         .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
-      const expense = ledger.filter(e => ym(e.date) === m && e.type === "expense")
+      const expense = ledger.filter(e => ym(e.tx_date) === m && e.tx_type === "expense")
         .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
       months.push({ month: mlShort(m), income, expense, m });
     }
@@ -93,12 +93,12 @@ export default function Dashboard({
   const prevMonthLedger = useMemo(() => {
     const now = new Date();
     const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 7);
-    return ledger.filter(e => ym(e.date) === prev);
+    return ledger.filter(e => ym(e.tx_date) === prev);
   }, [ledger]);
 
   const monthlyChange = useMemo(() => {
-    const inc  = thisMonthLedger.filter(e => e.type === "income").reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
-    const exp  = thisMonthLedger.filter(e => e.type === "expense").reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
+    const inc  = thisMonthLedger.filter(e => e.tx_type === "income").reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
+    const exp  = thisMonthLedger.filter(e => e.tx_type === "expense").reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
     return inc - exp;
   }, [thisMonthLedger]);
 

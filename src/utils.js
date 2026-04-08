@@ -128,7 +128,7 @@ export const suggestCategory = (description, merchantMaps, EXPENSE_CATEGORIES) =
 export const groupByDate = (entries) => {
   const groups = {};
   for (const e of entries) {
-    const key = e.date;
+    const key = e.tx_date;
     if (!groups[key]) groups[key] = [];
     groups[key].push(e);
   }

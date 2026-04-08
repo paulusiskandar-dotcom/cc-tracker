@@ -60,12 +60,12 @@ export default function TransactionRow({
   onDelete,
   compact = false,
 }) {
-  const fromAcc = accounts.find(a => a.id === entry.from_account_id);
-  const toAcc   = accounts.find(a => a.id === entry.to_account_id);
+  const fromAcc = accounts.find(a => a.id === entry.from_id);
+  const toAcc   = accounts.find(a => a.id === entry.to_id);
 
   // Account display: "from → to" for transfers, else whichever exists
   const accLabel = (() => {
-    if (entry.type === "transfer" || entry.type === "pay_cc" || entry.type === "fx_exchange") {
+    if (entry.tx_type === "transfer" || entry.tx_type === "pay_cc" || entry.tx_type === "fx_exchange") {
       const from = fromAcc?.name || "?";
       const to   = toAcc?.name   || "?";
       return `${from} → ${to}`;
@@ -73,14 +73,14 @@ export default function TransactionRow({
     return fromAcc?.name || toAcc?.name || "";
   })();
 
-  const color  = amountColor(entry.type);
-  const prefix = amountPrefix(entry.type);
+  const color  = amountColor(entry.tx_type);
+  const prefix = amountPrefix(entry.tx_type);
   const amount = fmtIDR(entry.amount_idr || entry.amount);
 
   // Meta line: account · category · entity
   const meta = [
     accLabel,
-    entry.category_label || entry.category,
+    entry.category_name || entry.category,
     entry.entity !== "Personal" ? entry.entity : null,
   ].filter(Boolean).join(" · ");
 
@@ -97,7 +97,7 @@ export default function TransactionRow({
         position:     "relative",
       }}
     >
-      <CategoryIcon categoryId={entry.category} txType={entry.type} size={compact ? 32 : 36} />
+      <CategoryIcon categoryId={entry.category} txType={entry.tx_type} size={compact ? 32 : 36} />
 
       {/* Center: name + meta */}
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -197,8 +197,8 @@ export function GroupedTransactionList({ groups, accounts, onRowClick, compact =
         // Net for the day (income - expense)
         const dayNet = entries.reduce((sum, e) => {
           const a = Number(e.amount_idr || e.amount || 0);
-          if (["income","reimburse_in","collect_loan","sell_asset"].includes(e.type)) return sum + a;
-          if (["transfer","pay_cc","fx_exchange","opening_balance"].includes(e.type)) return sum;
+          if (["income","reimburse_in","collect_loan","sell_asset"].includes(e.tx_type)) return sum + a;
+          if (["transfer","pay_cc","fx_exchange","opening_balance"].includes(e.tx_type)) return sum;
           return sum - a;
         }, 0);
 

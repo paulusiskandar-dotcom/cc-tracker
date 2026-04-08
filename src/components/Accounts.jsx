@@ -147,8 +147,8 @@ export default function Accounts({
               frequency:       "Monthly",
               entity:          "Personal",
               notes:           `Auto-created for employee loan: ${form.contact_name || form.name}`,
-              from_account_id: created.id,
-              to_account_id:   form.default_bank_id || bankAccounts[0]?.id || "",
+              from_id: created.id,
+              to_id:   form.default_bank_id || bankAccounts[0]?.id || "",
             });
             setRecurTemplates?.(p => [tmpl, ...p]);
             showToast(`Account + monthly reminder created`);
@@ -366,7 +366,7 @@ function AccountCard({ account: a, ledger, accounts, onEdit, onDelete, onHistory
   const bg    = TYPE_BG[a.type]    || "#f9fafb";
   const color = TYPE_COLOR[a.type] || "#6b7280";
   const icon  = ACC_TYPE_ICON[a.type] || "🏦";
-  const txCount = ledger.filter(e => e.from_account_id === a.id || e.to_account_id === a.id).length;
+  const txCount = ledger.filter(e => e.from_id === a.id || e.to_id === a.id).length;
 
   // Balance display per type
   const bal = (() => {
@@ -550,7 +550,7 @@ function ProgressBar({ value, max, color = "#059669", height = 5 }) {
 // ─── ACCOUNT HISTORY ─────────────────────────────────────────
 function AccountHistory({ account, ledger, accounts }) {
   const entries = ledger
-    .filter(e => e.from_account_id === account.id || e.to_account_id === account.id)
+    .filter(e => e.from_id === account.id || e.to_id === account.id)
     .slice(0, 50);
 
   if (entries.length === 0) return (
@@ -560,9 +560,9 @@ function AccountHistory({ account, ledger, accounts }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       {entries.map(e => {
-        const isFrom = e.from_account_id === account.id;
+        const isFrom = e.from_id === account.id;
         const amt    = Number(e.amount_idr || e.amount || 0);
-        const other  = accounts.find(a => a.id === (isFrom ? e.to_account_id : e.from_account_id));
+        const other  = accounts.find(a => a.id === (isFrom ? e.to_id : e.from_id));
         return (
           <div key={e.id} style={{
             display:        "flex",
@@ -577,7 +577,7 @@ function AccountHistory({ account, ledger, accounts }) {
                 {e.description || "—"}
               </div>
               <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
-                {e.date}
+                {e.tx_date}
                 {other && ` · ${isFrom ? "→" : "←"} ${other.name}`}
               </div>
             </div>

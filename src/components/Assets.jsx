@@ -156,14 +156,14 @@ export default function Assets({ user, accounts, ledger, onRefresh, setAccounts,
       const amt  = sn(payForm.amount);
       const liab = accounts.find(a => a.id === payForm.liabId);
       const entry = {
-        date:            payForm.date,
+        tx_date:         payForm.date,
         description:     `Pay ${liab?.name || "Liability"}`,
         amount:          amt,
         currency:        "IDR",
         amount_idr:      amt,
-        type:            "pay_liability",
-        from_account_id: payForm.bankId,
-        to_account_id:   payForm.liabId,
+        tx_type:         "pay_liability",
+        from_id:         payForm.bankId,
+        to_id:           payForm.liabId,
         entity:          liab?.entity || "Personal",
         notes:           payForm.notes || "",
       };

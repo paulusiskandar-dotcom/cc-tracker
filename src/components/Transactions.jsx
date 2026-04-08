@@ -33,9 +33,9 @@ const TYPE_CHOICES = [
 ];
 
 const EMPTY = {
-  date: todayStr(), description: "", amount: "", currency: "IDR",
-  type: "expense", from_account_id: "", to_account_id: "",
-  category_id: "", category_label: "", entity: "Personal",
+  tx_date: todayStr(), description: "", amount: "", currency: "IDR",
+  tx_type: "expense", from_id: "", to_id: "",
+  category_id: "", category_name: "", entity: "Personal",
   notes: "", is_reimburse: false,
 };
 
@@ -79,7 +79,7 @@ export default function Transactions({
     give_loan:     [...bankAccounts],
     collect_loan:  [...receivables],
     fx_exchange:   [...bankAccounts],
-  })[form.type] || accounts, [form.type, bankAccounts, creditCards, assets, liabilities, receivables, accounts]);
+  })[form.tx_type] || accounts, [form.tx_type, bankAccounts, creditCards, assets, liabilities, receivables, accounts]);
 
   const toOptions = useMemo(() => ({
     expense:       [],
@@ -94,26 +94,26 @@ export default function Transactions({
     give_loan:     [...receivables],
     collect_loan:  [...bankAccounts],
     fx_exchange:   [...bankAccounts],
-  })[form.type] || [], [form.type, bankAccounts, creditCards, assets, liabilities, receivables]);
+  })[form.tx_type] || [], [form.tx_type, bankAccounts, creditCards, assets, liabilities, receivables]);
 
   const amtIDR = toIDR(Number(form.amount || 0), form.currency || "IDR", fxRates, allCurrencies);
 
   // ── Filtering ──
   const filtered = useMemo(() => {
     let list = [...ledger];
-    if (subTab === "expense")   list = list.filter(e => e.type === "expense");
-    else if (subTab === "income")    list = list.filter(e => e.type === "income");
-    else if (subTab === "transfer")  list = list.filter(e => ["transfer","pay_cc","fx_exchange"].includes(e.type));
-    else if (subTab === "reimburse") list = list.filter(e => e.is_reimburse || e.type === "reimburse_out" || e.type === "reimburse_in");
-    if (filterMonth)  list = list.filter(e => ym(e.date) === filterMonth);
+    if (subTab === "expense")   list = list.filter(e => e.tx_type === "expense");
+    else if (subTab === "income")    list = list.filter(e => e.tx_type === "income");
+    else if (subTab === "transfer")  list = list.filter(e => ["transfer","pay_cc","fx_exchange"].includes(e.tx_type));
+    else if (subTab === "reimburse") list = list.filter(e => e.is_reimburse || e.tx_type === "reimburse_out" || e.tx_type === "reimburse_in");
+    if (filterMonth)  list = list.filter(e => ym(e.tx_date) === filterMonth);
     if (filterEntity) list = list.filter(e => e.entity === filterEntity);
-    if (filterAccId)  list = list.filter(e => e.from_account_id === filterAccId || e.to_account_id === filterAccId);
+    if (filterAccId)  list = list.filter(e => e.from_id === filterAccId || e.to_id === filterAccId);
     if (search) {
       const q = search.toLowerCase();
       list = list.filter(e =>
         e.description?.toLowerCase().includes(q) ||
         e.merchant_name?.toLowerCase().includes(q) ||
-        e.category_label?.toLowerCase().includes(q));
+        e.category_name?.toLowerCase().includes(q));
     }
     return list;
   }, [ledger, subTab, filterMonth, filterEntity, filterAccId, search]);
@@ -122,12 +122,12 @@ export default function Transactions({
 
   // ── Totals ──
   const outTotal = useMemo(() =>
-    filtered.filter(e => ["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan"].includes(e.type))
+    filtered.filter(e => ["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan"].includes(e.tx_type))
       .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0),
   [filtered]);
 
   const inTotal = useMemo(() =>
-    filtered.filter(e => ["income","sell_asset","reimburse_in","collect_loan"].includes(e.type))
+    filtered.filter(e => ["income","sell_asset","reimburse_in","collect_loan"].includes(e.tx_type))
       .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0),
   [filtered]);
 
@@ -142,15 +142,15 @@ export default function Transactions({
   // ── Open edit ──
   const openEdit = (e) => {
     setForm({
-      date:            e.date,
+      tx_date:         e.tx_date,
       description:     e.description || "",
       amount:          e.amount,
       currency:        e.currency || "IDR",
-      type:            e.type,
-      from_account_id: e.from_account_id || "",
-      to_account_id:   e.to_account_id   || "",
+      tx_type:         e.tx_type,
+      from_id:         e.from_id || "",
+      to_id:           e.to_id   || "",
       category_id:     e.category_id     || "",
-      category_label:  e.category_label  || "",
+      category_name:   e.category_name  || "",
       entity:          e.entity          || "Personal",
       notes:           e.notes           || "",
       is_reimburse:    e.is_reimburse     || false,
@@ -174,7 +174,7 @@ export default function Transactions({
         ...form,
         amount:         sn(form.amount),
         amount_idr:     sn(amtIDR),
-        category_label: cat?.name || form.category_label || "",
+        category_name: cat?.name || form.category_name || "",
       };
       if (editEntry) {
         const updated = await ledgerApi.update(editEntry.id, entry);
@@ -212,7 +212,7 @@ export default function Transactions({
   // ── Months for filter ──
   const monthOptions = useMemo(() => {
     const seen = new Set();
-    ledger.forEach(e => seen.add(ym(e.date)));
+    ledger.forEach(e => seen.add(ym(e.tx_date)));
     return Array.from(seen).sort((a, b) => b.localeCompare(a)).slice(0, 12).map(m => ({
       value: m,
       label: new Date(m + "-01").toLocaleDateString("en-US", { month: "short", year: "numeric" }),
@@ -317,8 +317,8 @@ export default function Transactions({
           : grouped.map(([date, rows]) => {
               const dayNet = rows.reduce((sum, e) => {
                 const a = Number(e.amount_idr || e.amount || 0);
-                if (["income","reimburse_in","collect_loan","sell_asset"].includes(e.type)) return sum + a;
-                if (["transfer","pay_cc","fx_exchange","opening_balance"].includes(e.type)) return sum;
+                if (["income","reimburse_in","collect_loan","sell_asset"].includes(e.tx_type)) return sum + a;
+                if (["transfer","pay_cc","fx_exchange","opening_balance"].includes(e.tx_type)) return sum;
                 return sum - a;
               }, 0);
 
@@ -366,7 +366,7 @@ export default function Transactions({
         title={
           modal === "edit"
             ? "Edit Transaction"
-            : step === 1 ? "Add Transaction" : TYPE_CHOICES.find(t => t.id === form.type)?.label || "Add"
+            : step === 1 ? "Add Transaction" : TYPE_CHOICES.find(t => t.id === form.tx_type)?.label || "Add"
         }
         footer={
           step === 2 && (
@@ -386,7 +386,7 @@ export default function Transactions({
         {step === 1 ? (
           <TypePickerGrid
             types={TYPE_CHOICES}
-            onSelect={type => { set("type", type); setStep(2); }}
+            onSelect={type => { set("tx_type", type); setStep(2); }}
           />
         ) : (
           <TxForm
@@ -414,13 +414,13 @@ export default function Transactions({
 
 // ─── TRANSACTION ROW ─────────────────────────────────────────
 function TxRow({ entry: e, accounts, onEdit, onDelete }) {
-  const fromAcc = accounts.find(a => a.id === e.from_account_id);
-  const toAcc   = accounts.find(a => a.id === e.to_account_id);
+  const fromAcc = accounts.find(a => a.id === e.from_id);
+  const toAcc   = accounts.find(a => a.id === e.to_id);
   const amt     = Number(e.amount_idr || e.amount || 0);
 
-  const isOut    = ["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan"].includes(e.type);
-  const isIn     = ["income","sell_asset","reimburse_in","collect_loan"].includes(e.type);
-  const isMove   = ["transfer","fx_exchange"].includes(e.type);
+  const isOut    = ["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan"].includes(e.tx_type);
+  const isIn     = ["income","sell_asset","reimburse_in","collect_loan"].includes(e.tx_type);
+  const isMove   = ["transfer","fx_exchange"].includes(e.tx_type);
 
   const catDef   = EXPENSE_CATEGORIES.find(c => c.id === e.category_id || c.id === e.category);
   const amtColor = isOut ? "#dc2626" : isIn ? "#059669" : "#3b5bdb";
@@ -435,7 +435,7 @@ function TxRow({ entry: e, accounts, onEdit, onDelete }) {
 
   const meta = [
     accLabel,
-    e.category_label || catDef?.label,
+    e.category_name || catDef?.label,
     e.entity && e.entity !== "Personal" ? e.entity : null,
   ].filter(Boolean).join(" · ");
 
@@ -532,7 +532,7 @@ function TypePickerGrid({ types, onSelect }) {
 
 // ─── TRANSACTION FORM ────────────────────────────────────────
 function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incomeSrcs = [], allCurrencies = [], amtIDR }) {
-  const type = form.type;
+  const type = form.tx_type;
 
   const catOptions = [
     ...categories.filter(c => c.is_active !== false),
@@ -569,7 +569,7 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
       </div>
 
       {/* Date */}
-      <Input label="Date" type="date" value={form.date} onChange={e => set("date", e.target.value)} />
+      <Input label="Date" type="date" value={form.tx_date} onChange={e => set("tx_date", e.target.value)} />
 
       {/* Description — most types */}
       {!["transfer","pay_cc","reimburse_in","collect_loan","pay_liability","fx_exchange"].includes(type) && (
@@ -623,8 +623,8 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
       {needsFrom && (
         <Select
           label={type === "sell_asset" ? "Asset" : type === "collect_loan" || type === "reimburse_in" ? "Receivable" : "From Account"}
-          value={form.from_account_id}
-          onChange={e => set("from_account_id", e.target.value)}
+          value={form.from_id}
+          onChange={e => set("from_id", e.target.value)}
           options={fromOpts}
           placeholder="Select…"
         />
@@ -634,8 +634,8 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
       {needsTo && (
         <Select
           label={type === "buy_asset" ? "Asset Account" : type === "reimburse_out" || type === "give_loan" ? "Receivable" : type === "pay_cc" ? "Credit Card" : type === "pay_liability" ? "Liability" : "To Account"}
-          value={form.to_account_id}
-          onChange={e => set("to_account_id", e.target.value)}
+          value={form.to_id}
+          onChange={e => set("to_id", e.target.value)}
           options={toOpts}
           placeholder="Select…"
         />
@@ -660,7 +660,7 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
           onChange={e => {
             const found = EXPENSE_CATEGORIES.find(c => c.id === e.target.value);
             set("category_id", e.target.value);
-            set("category_label", found?.label || "");
+            set("category_name", found?.label || "");
           }}
           options={EXPENSE_CATEGORIES.map(c => ({ value: c.id, label: `${c.icon} ${c.label}` }))}
           placeholder="Select category…"
@@ -737,16 +737,16 @@ function PendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, user,
   const confirm = async (sync) => {
     try {
       const entry = {
-        date:            sync.transaction_date || sync.received_at?.slice(0, 10) || todayStr(),
+        tx_date:         sync.transaction_date || sync.received_at?.slice(0, 10) || todayStr(),
         description:     sync.merchant_name || sync.subject || "Gmail transaction",
         amount:          Number(sync.amount || 0),
         currency:        sync.currency || "IDR",
         amount_idr:      Number(sync.amount_idr || sync.amount || 0),
-        type:            sync.tx_type || "expense",
-        from_account_id: sync.matched_account_id || "",
-        to_account_id:   "",
+        tx_type:         sync.tx_type || "expense",
+        from_id:         sync.matched_account_id || "",
+        to_id:           "",
         category_id:     sync.suggested_category || "other",
-        category_label:  sync.suggested_category_label || "Other",
+        category_name:   sync.suggested_category_label || "Other",
         entity:          sync.entity || "Personal",
         notes:           `Imported from Gmail: ${sync.subject || ""}`,
         source:          "gmail",

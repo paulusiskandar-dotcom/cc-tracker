@@ -33,15 +33,15 @@ export default function Income({
   const [srcModal, setSrcModal]     = useState(false);
   const [editSrcId, setEditSrcId]   = useState(null);
   const [srcForm, setSrcForm]       = useState({
-    name: "", category: "Salary", expected_amount: "",
+    name: "", type: "Salary", expected_amount: "",
     currency: "IDR", frequency: "Monthly",
-    destination_account_id: "", entity: "Personal", is_active: true,
+    to_account_id: "", entity: "Personal", is_active: true,
   });
 
   // Record income modal
   const [incModal, setIncModal]     = useState(false);
   const [incForm, setIncForm]       = useState({
-    income_source_id: "", date: todayStr(), description: "",
+    income_source_id: "", tx_date: todayStr(), description: "",
     amount: "", currency: "IDR", to_account_id: "", entity: "Personal", notes: "",
   });
 
@@ -51,10 +51,10 @@ export default function Income({
   , [accounts]);
 
   const totalLoanRecovery = loanAccs.reduce((s, l) => s + Number(l.monthly_installment || 0), 0);
-  const incomeLedger      = useMemo(() => ledger.filter(e => e.type === "income"), [ledger]);
+  const incomeLedger      = useMemo(() => ledger.filter(e => e.tx_type === "income"), [ledger]);
 
   const thisMonthIncome   = useMemo(() =>
-    incomeLedger.filter(e => ym(e.date) === filterMonth)
+    incomeLedger.filter(e => ym(e.tx_date) === filterMonth)
   , [incomeLedger, filterMonth]);
 
   const totalThisMonth    = thisMonthIncome.reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
@@ -67,8 +67,8 @@ export default function Income({
     return Array.from({ length: 12 }, (_, i) => {
       const d = new Date(now.getFullYear(), now.getMonth() - (11 - i), 1);
       const m = d.toISOString().slice(0, 7);
-      const income  = incomeLedger.filter(e => ym(e.date) === m).reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
-      const expense = ledger.filter(e => ym(e.date) === m && e.type === "expense").reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
+      const income  = incomeLedger.filter(e => ym(e.tx_date) === m).reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
+      const expense = ledger.filter(e => ym(e.tx_date) === m && e.tx_type === "expense").reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
       return { month: mlShort(m), income, expense, surplus: income - expense };
     });
   }, [ledger, incomeLedger]);
@@ -80,7 +80,7 @@ export default function Income({
       setSrcForm({ ...src, expected_amount: String(src.expected_amount || "") });
     } else {
       setEditSrcId(null);
-      setSrcForm({ name: "", category: "Salary", expected_amount: "", currency: "IDR", frequency: "Monthly", destination_account_id: "", entity: "Personal", is_active: true });
+      setSrcForm({ name: "", type: "Salary", expected_amount: "", currency: "IDR", frequency: "Monthly", to_account_id: "", entity: "Personal", is_active: true });
     }
     setSrcModal(true);
   };
@@ -116,7 +116,7 @@ export default function Income({
 
   const openIncModal = () => {
     setIncForm({
-      income_source_id: "", date: todayStr(), description: "",
+      income_source_id: "", tx_date: todayStr(), description: "",
       amount: "", currency: "IDR",
       to_account_id: bankAccounts[0]?.id || "",
       entity: "Personal", notes: "",
@@ -133,17 +133,17 @@ export default function Income({
       const amt = sn2(incForm.amount);
       const src = incomeSrcs.find(s => s.id === incForm.income_source_id);
       const entry = {
-        date:             incForm.date,
+        tx_date:          incForm.tx_date,
         description:      incForm.description,
         amount:           amt,
         currency:         incForm.currency || "IDR",
         amount_idr:       amt,
-        type:             "income",
-        from_account_id:  null,
-        to_account_id:    incForm.to_account_id,
+        tx_type:          "income",
+        from_id:          null,
+        to_id:            incForm.to_account_id,
         entity:           incForm.entity || "Personal",
         notes:            incForm.notes || "",
-        category_label:   src?.category || "Salary",
+        category_name:    src?.type || "Salary",
       };
       const r = await ledgerApi.create(user.id, entry, accounts);
       if (r) setLedger(prev => [r, ...prev]);
@@ -267,7 +267,7 @@ export default function Income({
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 700, color: T.text }}>{src.name}</div>
                     <div style={{ fontSize: 11, color: T.text3, marginTop: 2 }}>
-                      {src.category} · {src.frequency}
+                      {src.type} · {src.frequency}
                       {src.entity && src.entity !== "Personal" && (
                         <span style={{ marginLeft: 6, background: T.sur2, borderRadius: 4, padding: "1px 5px", fontSize: 10, fontWeight: 600, color: T.text2 }}>
                           {src.entity}
@@ -343,7 +343,7 @@ export default function Income({
             <EmptyState icon="💰" message="No income recorded this month." />
           ) : (
             thisMonthIncome.map(e => {
-              const dest = accounts.find(a => a.id === e.to_account_id);
+              const dest = accounts.find(a => a.id === e.to_id);
               return (
                 <div key={e.id} style={{
                   display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -352,7 +352,7 @@ export default function Income({
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{e.description}</div>
                     <div style={{ fontSize: 11, color: T.text3, marginTop: 2 }}>
-                      {e.date}{dest && ` → ${dest.name}`}
+                      {e.tx_date}{dest && ` → ${dest.name}`}
                     </div>
                   </div>
                   <div style={{ fontSize: 14, fontWeight: 800, color: "#059669" }}>
@@ -445,8 +445,8 @@ export default function Income({
           <FormRow>
             <Field label="Category">
               <Select
-                value={srcForm.category}
-                onChange={e => setSrcForm(f => ({ ...f, category: e.target.value }))}
+                value={srcForm.type}
+                onChange={e => setSrcForm(f => ({ ...f, type: e.target.value }))}
                 options={INCOME_CATEGORIES.map(c => ({ value: c, label: c }))}
               />
             </Field>
@@ -477,8 +477,8 @@ export default function Income({
 
           <Field label="Destination Account">
             <Select
-              value={srcForm.destination_account_id}
-              onChange={e => setSrcForm(f => ({ ...f, destination_account_id: e.target.value }))}
+              value={srcForm.to_account_id}
+              onChange={e => setSrcForm(f => ({ ...f, to_account_id: e.target.value }))}
               options={bankAccounts.map(b => ({ value: b.id, label: b.name }))}
               placeholder="Select…"
             />
@@ -535,7 +535,7 @@ export default function Income({
                   description:    src?.name || f.description,
                   amount:         src?.expected_amount ? String(src.expected_amount) : f.amount,
                   entity:         src?.entity || f.entity,
-                  to_account_id:  src?.destination_account_id || f.to_account_id,
+                  to_account_id:  src?.to_account_id || f.to_account_id,
                 }));
               }}
               options={incomeSrcs.filter(s => s.is_active).map(s => ({ value: s.id, label: s.name }))}
@@ -545,7 +545,7 @@ export default function Income({
 
           <FormRow>
             <Field label="Date">
-              <Input type="date" value={incForm.date} onChange={e => setIncForm(f => ({ ...f, date: e.target.value }))} />
+              <Input type="date" value={incForm.tx_date} onChange={e => setIncForm(f => ({ ...f, tx_date: e.target.value }))} />
             </Field>
             <Field label="Entity">
               <Select

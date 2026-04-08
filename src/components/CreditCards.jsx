@@ -72,7 +72,7 @@ export default function CreditCards({
     const util   = limit > 0 ? (debt / limit) * 100 : 0;
     const target = Number(cc.monthly_target || 0);
     const monthSpent = ledger
-      .filter(e => ym(e.date) === filterMonth && e.from_account_id === cc.id && e.type === "expense")
+      .filter(e => ym(e.tx_date) === filterMonth && e.from_id === cc.id && e.tx_type === "expense")
       .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
     const dueIn  = cc.due_day       ? daysUntil(cc.due_day)       : null;
     const stmtIn = cc.statement_day ? daysUntil(cc.statement_day) : null;
@@ -81,9 +81,9 @@ export default function CreditCards({
 
   const ccLedger = useMemo(() =>
     ledger.filter(e => {
-      const isCC   = creditCards.some(c => c.id === e.from_account_id || c.id === e.to_account_id);
-      const inMon  = !filterMonth || ym(e.date) === filterMonth;
-      const forCard= !selectedCard || e.from_account_id === selectedCard || e.to_account_id === selectedCard;
+      const isCC   = creditCards.some(c => c.id === e.from_id || c.id === e.to_id);
+      const inMon  = !filterMonth || ym(e.tx_date) === filterMonth;
+      const forCard= !selectedCard || e.from_id === selectedCard || e.to_id === selectedCard;
       return isCC && inMon && forCard;
     }),
   [ledger, creditCards, filterMonth, selectedCard]);
@@ -93,7 +93,7 @@ export default function CreditCards({
   [installments, creditCards]);
 
   const ccRecurring = useMemo(() =>
-    recurTemplates.filter(r => creditCards.some(c => c.id === r.from_account_id)),
+    recurTemplates.filter(r => creditCards.some(c => c.id === r.from_id)),
   [recurTemplates, creditCards]);
 
   // ── Pay CC ──
@@ -108,14 +108,14 @@ export default function CreditCards({
       const cc   = accounts.find(a => a.id === payForm.cardId);
       const total = amt + sn(payForm.admin_fee) + sn(payForm.materai);
       const entry = {
-        date:            todayStr(),
+        tx_date:         todayStr(),
         description:     `Pay ${cc?.name || "CC"} bill`,
         amount:          total,
         currency:        "IDR",
         amount_idr:      total,
-        type:            "pay_cc",
-        from_account_id: payForm.bankId,
-        to_account_id:   payForm.cardId,
+        tx_type:         "pay_cc",
+        from_id:         payForm.bankId,
+        to_id:           payForm.cardId,
         entity:          "Personal",
         notes:           payForm.notes || "",
       };
@@ -161,13 +161,13 @@ export default function CreditCards({
       setInstallments(p => p.map(x => x.id === inst.id ? { ...x, paid_months: newPaid } : x));
       const sn2 = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
       const entry = {
-        date:            todayStr(),
+        tx_date:         todayStr(),
         description:     `${inst.description} — Month ${newPaid}/${inst.months}`,
         amount:          sn2(inst.monthly_amount),
         currency:        inst.currency || "IDR",
         amount_idr:      sn2(inst.monthly_amount),
-        type:            "cc_installment",
-        from_account_id: inst.account_id,
+        tx_type:         "cc_installment",
+        from_id:         inst.account_id,
         entity:          inst.entity || "Personal",
         notes:           "CC Installment",
       };
@@ -199,18 +199,18 @@ export default function CreditCards({
   // ── Apply recurring now ──
   const applyRecurringNow = async (r) => {
     try {
-      const cc = accounts.find(a => a.id === r.from_account_id);
+      const cc = accounts.find(a => a.id === r.from_id);
       const sn3 = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
       const entry = {
-        date:            todayStr(),
+        tx_date:         todayStr(),
         description:     r.name,
         amount:          sn3(r.amount),
         currency:        r.currency || "IDR",
         amount_idr:      sn3(r.amount),
-        type:            r.type || "expense",
-        from_account_id: r.from_account_id || "",
-        to_account_id:   r.to_account_id   || "",
-        entity:          r.entity          || "Personal",
+        tx_type:         r.tx_type || "expense",
+        from_id:         r.from_id || "",
+        to_id:           r.to_id   || "",
+        entity:          r.entity  || "Personal",
         notes:           `Applied from recurring template`,
       };
       const created = await ledgerApi.create(user.id, entry, accounts);
@@ -286,9 +286,9 @@ export default function CreditCards({
           {ccLedger.length === 0
             ? <EmptyState icon="📋" message="No CC transactions found" />
             : ccLedger.map(e => {
-                const cc  = creditCards.find(c => c.id === e.from_account_id);
+                const cc  = creditCards.find(c => c.id === e.from_id);
                 const cat = categories.find(c => c.id === e.category_id);
-                const isPayment = e.type === "pay_cc";
+                const isPayment = e.tx_type === "pay_cc";
                 return (
                   <div key={e.id} style={{
                     display: "flex", alignItems: "center", gap: 12,
@@ -306,9 +306,9 @@ export default function CreditCards({
                         {e.description}
                       </div>
                       <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
-                        {e.date}
+                        {e.tx_date}
                         {cc && <span style={{ color: cc.color || "#3b5bdb" }}> · ····{cc.last4}</span>}
-                        {(cat || e.category_label) && ` · ${cat?.name || e.category_label}`}
+                        {(cat || e.category_name) && ` · ${cat?.name || e.category_name}`}
                         {e.entity && e.entity !== "Personal" && ` · ${e.entity}`}
                         {e.is_reimburse && <span style={{ color: "#d97706" }}> · ↗ Reimb</span>}
                       </div>
@@ -416,7 +416,7 @@ export default function CreditCards({
           {ccRecurring.length === 0
             ? <EmptyState icon="🔄" title="No recurring templates" message="Add recurring CC templates in Settings → Recurring." />
             : ccRecurring.map(r => {
-                const cc = creditCards.find(c => c.id === r.from_account_id);
+                const cc = creditCards.find(c => c.id === r.from_id);
                 return (
                   <div key={r.id} style={{
                     background: "#ffffff", borderRadius: 12,

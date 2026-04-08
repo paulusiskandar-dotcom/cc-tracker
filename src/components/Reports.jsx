@@ -53,10 +53,10 @@ export default function Reports({ user, ledger, accounts, dark }) {
 
   // ── Cash Flow ───────────────────────────────────────────────
   const cashFlowData = useMemo(() => months.map(mo => {
-    const entries = ledger.filter(e => e.date?.slice(0, 7) === mo);
+    const entries = ledger.filter(e => e.tx_date?.slice(0, 7) === mo);
     const filt    = entityFilter === "All" ? entries : entries.filter(e => e.entity === entityFilter);
-    const income  = filt.filter(e => e.type === "income").reduce((s, e) => s + Number(e.amount_idr || 0), 0);
-    const expense = filt.filter(e => e.type === "expense").reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+    const income  = filt.filter(e => e.tx_type === "income").reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+    const expense = filt.filter(e => e.tx_type === "expense").reduce((s, e) => s + Number(e.amount_idr || 0), 0);
     return { month: mlShort(mo), income, expense, surplus: income - expense };
   }), [ledger, months, entityFilter]);
 
@@ -68,7 +68,7 @@ export default function Reports({ user, ledger, accounts, dark }) {
   // ── Expense by category ─────────────────────────────────────
   const catData = useMemo(() => {
     const filtered = entityFilter === "All" ? ledger : ledger.filter(e => e.entity === entityFilter);
-    const expEntries = filtered.filter(e => e.type === "expense");
+    const expEntries = filtered.filter(e => e.tx_type === "expense");
     const map = {};
     expEntries.forEach(e => {
       const cat = e.category || "other";
@@ -91,13 +91,13 @@ export default function Reports({ user, ledger, accounts, dark }) {
     const recvNow  = accounts.filter(a => a.type === "receivable").reduce((s, a) => s + Number(a.receivable_outstanding || 0), 0);
 
     return months.map(mo => {
-      const futureEntries = ledger.filter(e => e.date?.slice(0, 7) > mo);
+      const futureEntries = ledger.filter(e => e.tx_date?.slice(0, 7) > mo);
       let bankAdj = 0, ccAdj = 0;
       futureEntries.forEach(e => {
         const amt = Number(e.amount_idr || 0);
-        if (e.type === "income")  bankAdj -= amt;
-        if (e.type === "expense") bankAdj += amt;
-        if (e.type === "pay_cc")  { bankAdj += amt; ccAdj += amt; }
+        if (e.tx_type === "income")  bankAdj -= amt;
+        if (e.tx_type === "expense") bankAdj += amt;
+        if (e.tx_type === "pay_cc")  { bankAdj += amt; ccAdj += amt; }
       });
       const net = (bankNow + bankAdj) + assetNow + recvNow - Math.max(0, ccNow + ccAdj) - liabNow;
       return { month: mlShort(mo), net: Math.max(0, net) };
@@ -109,13 +109,13 @@ export default function Reports({ user, ledger, accounts, dark }) {
     const recvAccts = accounts.filter(a => a.type === "receivable" && Number(a.receivable_outstanding || 0) > 0);
     return recvAccts.map(r => {
       const lastEntry = ledger.filter(e =>
-        (e.from_account_id === r.id || e.to_account_id === r.id) &&
-        ["reimburse_out", "give_loan"].includes(e.type)
-      ).sort((a, b) => b.date.localeCompare(a.date))[0];
+        (e.from_id === r.id || e.to_id === r.id) &&
+        ["reimburse_out", "give_loan"].includes(e.tx_type)
+      ).sort((a, b) => b.tx_date.localeCompare(a.tx_date))[0];
       const daysSince = lastEntry
-        ? Math.floor((Date.now() - new Date(lastEntry.date).getTime()) / 86400000)
+        ? Math.floor((Date.now() - new Date(lastEntry.tx_date).getTime()) / 86400000)
         : null;
-      return { ...r, daysSince, lastDate: lastEntry?.date };
+      return { ...r, daysSince, lastDate: lastEntry?.tx_date };
     }).sort((a, b) => Number(b.receivable_outstanding || 0) - Number(a.receivable_outstanding || 0));
   }, [accounts, ledger]);
 
@@ -134,7 +134,7 @@ export default function Reports({ user, ledger, accounts, dark }) {
       csv = "Date,Type,Description,Category,Entity,Amount IDR,Currency\n";
       const src = entityFilter === "All" ? ledger : ledger.filter(e => e.entity === entityFilter);
       src.forEach(e => {
-        csv += `${e.date},${e.type},"${(e.description || "").replace(/"/g, '""')}",${e.category || ""},${e.entity || ""},${e.amount_idr || e.amount || 0},${e.currency || "IDR"}\n`;
+        csv += `${e.tx_date},${e.tx_type},"${(e.description || "").replace(/"/g, '""')}",${e.category || ""},${e.entity || ""},${e.amount_idr || e.amount || 0},${e.currency || "IDR"}\n`;
       });
     }
     const blob = new Blob([csv], { type: "text/csv" });

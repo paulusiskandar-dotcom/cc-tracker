@@ -246,7 +246,7 @@ function Finance({ user, signOut }) {
   const receivables   = useMemo(() => accounts.filter(a => a.type === "receivable"), [accounts]);
   const netWorth      = useMemo(() => calcNetWorth(accounts), [accounts]);
   const thisMonthLedger = useMemo(
-    () => ledger.filter(e => ym(e.date) === curMonth),
+    () => ledger.filter(e => ym(e.tx_date) === curMonth),
     [ledger, curMonth]
   );
 

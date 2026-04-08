@@ -62,16 +62,16 @@ export default function Receivables({ user, accounts, ledger, onRefresh, setAcco
 
   const recStats = useMemo(() => receivables.map(r => {
     const entries = ledger
-      .filter(e => e.from_account_id === r.id || e.to_account_id === r.id)
-      .sort((a, b) => b.date.localeCompare(a.date));
+      .filter(e => e.from_id === r.id || e.to_id === r.id)
+      .sort((a, b) => b.tx_date.localeCompare(a.tx_date));
     const firstEntry = entries[entries.length - 1];
-    const aging = firstEntry ? agingLabel(firstEntry.date) : null;
+    const aging = firstEntry ? agingLabel(firstEntry.tx_date) : null;
     return { ...r, entries, aging };
   }), [receivables, ledger]);
 
   const settledEntries = useMemo(() =>
-    ledger.filter(e => e.type === "reimburse_in" || e.type === "collect_loan")
-      .sort((a, b) => b.date.localeCompare(a.date))
+    ledger.filter(e => e.tx_type === "reimburse_in" || e.tx_type === "collect_loan")
+      .sort((a, b) => b.tx_date.localeCompare(a.tx_date))
   , [ledger]);
 
   // ── ACTIONS ───────────────────────────────────────────────
@@ -91,14 +91,14 @@ export default function Receivables({ user, accounts, ledger, onRefresh, setAcco
       const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
       const amt = sn(outForm.amount);
       const entry = {
-        date:            outForm.date,
+        tx_date:         outForm.date,
         description:     outForm.description,
         amount:          amt,
         currency:        "IDR",
         amount_idr:      amt,
-        type:            "reimburse_out",
-        from_account_id: outForm.from_id,
-        to_account_id:   rec.id,
+        tx_type:         "reimburse_out",
+        from_id:         outForm.from_id,
+        to_id:           rec.id,
         entity:          outForm.entity,
         notes:           outForm.notes || "",
         is_reimburse:    true,
@@ -120,14 +120,14 @@ export default function Receivables({ user, accounts, ledger, onRefresh, setAcco
       const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
       const amt = sn(inForm.amount);
       const entry = {
-        date:            inForm.date || todayStr(),
+        tx_date:         inForm.date || todayStr(),
         description:     `${selectedRec.entity} reimburse received`,
         amount:          amt,
         currency:        "IDR",
         amount_idr:      amt,
-        type:            "reimburse_in",
-        from_account_id: selectedRec.id,
-        to_account_id:   inForm.bank_id,
+        tx_type:         "reimburse_in",
+        from_id:         selectedRec.id,
+        to_id:           inForm.bank_id,
         entity:          selectedRec.entity,
         notes:           inForm.notes || "",
       };
@@ -148,14 +148,14 @@ export default function Receivables({ user, accounts, ledger, onRefresh, setAcco
       const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
       const amt = sn(loanForm.amount);
       const entry = {
-        date:            loanForm.date,
+        tx_date:         loanForm.date,
         description:     `Loan to ${selectedRec.contact_name || selectedRec.name}`,
         amount:          amt,
         currency:        "IDR",
         amount_idr:      amt,
-        type:            "give_loan",
-        from_account_id: loanForm.bank_id,
-        to_account_id:   selectedRec.id,
+        tx_type:         "give_loan",
+        from_id:         loanForm.bank_id,
+        to_id:           selectedRec.id,
         entity:          "Personal",
         notes:           loanForm.notes || "",
       };
@@ -176,14 +176,14 @@ export default function Receivables({ user, accounts, ledger, onRefresh, setAcco
       const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
       const amt = sn(loanForm.amount);
       const entry = {
-        date:            loanForm.date,
+        tx_date:         loanForm.date,
         description:     `Loan repayment — ${selectedRec.contact_name || selectedRec.name}`,
         amount:          amt,
         currency:        "IDR",
         amount_idr:      amt,
-        type:            "collect_loan",
-        from_account_id: selectedRec.id,
-        to_account_id:   loanForm.bank_id,
+        tx_type:         "collect_loan",
+        from_id:         selectedRec.id,
+        to_id:           loanForm.bank_id,
         entity:          "Personal",
         notes:           loanForm.notes || "",
       };
@@ -332,9 +332,9 @@ export default function Receivables({ user, accounts, ledger, onRefresh, setAcco
                           display: "flex", justifyContent: "space-between",
                           fontSize: 11, color: T.text3, marginBottom: 4,
                         }}>
-                          <span>{e.date} · {e.description}</span>
-                          <span style={{ fontWeight: 700, color: e.type === "reimburse_in" ? "#059669" : "#dc2626" }}>
-                            {e.type === "reimburse_in" ? "−" : "+"}{fmtIDR(Number(e.amount || 0), true)}
+                          <span>{e.tx_date} · {e.description}</span>
+                          <span style={{ fontWeight: 700, color: e.tx_type === "reimburse_in" ? "#059669" : "#dc2626" }}>
+                            {e.tx_type === "reimburse_in" ? "−" : "+"}{fmtIDR(Number(e.amount || 0), true)}
                           </span>
                         </div>
                       ))}
@@ -511,9 +511,9 @@ export default function Receivables({ user, accounts, ledger, onRefresh, setAcco
                           display: "flex", justifyContent: "space-between",
                           fontSize: 11, color: T.text3, marginBottom: 3,
                         }}>
-                          <span>{e.date} · {e.description}</span>
-                          <span style={{ fontWeight: 700, color: e.type === "collect_loan" ? "#059669" : "#d97706" }}>
-                            {e.type === "collect_loan" ? "−" : "+"}{fmtIDR(Number(e.amount || 0), true)}
+                          <span>{e.tx_date} · {e.description}</span>
+                          <span style={{ fontWeight: 700, color: e.tx_type === "collect_loan" ? "#059669" : "#d97706" }}>
+                            {e.tx_type === "collect_loan" ? "−" : "+"}{fmtIDR(Number(e.amount || 0), true)}
                           </span>
                         </div>
                       ))}
@@ -538,7 +538,7 @@ export default function Receivables({ user, accounts, ledger, onRefresh, setAcco
             <EmptyState icon="📜" message="No settled receivables yet." />
           ) : (
             settledEntries.map(e => {
-              const rec = accounts.find(a => a.id === e.from_account_id);
+              const rec = accounts.find(a => a.id === e.from_id);
               return (
                 <div key={e.id} style={{
                   display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -547,7 +547,7 @@ export default function Receivables({ user, accounts, ledger, onRefresh, setAcco
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 600, color: T.text }}>{e.description}</div>
                     <div style={{ fontSize: 10, color: T.text3 }}>
-                      {e.date} · {rec?.entity || rec?.contact_name || "—"}
+                      {e.tx_date} · {rec?.entity || rec?.contact_name || "—"}
                     </div>
                   </div>
                   <div style={{ fontSize: 13, fontWeight: 800, color: "#059669" }}>

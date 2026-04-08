@@ -165,10 +165,10 @@ export default function Settings({
   const openRecurModal = (t = null) => {
     if (t) {
       setEditRecur(t);
-      setRecurForm({ name: t.name, type: t.type, amount: String(t.amount), currency: t.currency || "IDR", frequency: t.frequency || "Monthly", category: t.category || "", entity: t.entity || "Personal", notes: t.notes || "" });
+      setRecurForm({ name: t.name, tx_type: t.tx_type, amount: String(t.amount), currency: t.currency || "IDR", frequency: t.frequency || "Monthly", category: t.category || "", entity: t.entity || "Personal", notes: t.notes || "" });
     } else {
       setEditRecur(null);
-      setRecurForm({ name: "", type: "expense", amount: "", currency: "IDR", frequency: "Monthly", category: "", entity: "Personal", notes: "" });
+      setRecurForm({ name: "", tx_type: "expense", amount: "", currency: "IDR", frequency: "Monthly", category: "", entity: "Personal", notes: "" });
     }
     setRecurModal(true);
   };
@@ -209,7 +209,7 @@ export default function Settings({
       await merchantApi.upsert(user.id, editMerchant.merchant_name, merchantCat, catDef?.label || merchantCat);
       setMerchantMaps(prev => prev.map(m =>
         m.merchant_name === editMerchant.merchant_name
-          ? { ...m, category_id: merchantCat, category_label: catDef?.label || merchantCat }
+          ? { ...m, category_id: merchantCat, category_name: catDef?.label || merchantCat }
           : m
       ));
       showToast("Merchant mapping saved");
@@ -449,14 +449,14 @@ export default function Settings({
             <EmptyState icon="🔄" message="No recurring templates yet." />
           ) : (
             recurTemplates.map(t => {
-              const txDef = TX_TYPES.find(x => x.id === t.type);
+              const txDef = TX_TYPES.find(x => x.id === t.tx_type);
               return (
                 <div key={t.id} style={card}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                     <div>
                       <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{t.name}</div>
                       <div style={{ fontSize: 11, color: T.text3, marginTop: 3 }}>
-                        {t.frequency} · {txDef?.label || t.type}
+                        {t.frequency} · {txDef?.label || t.tx_type}
                         {t.category && ` · ${t.category}`}
                         {t.entity && t.entity !== "Personal" && ` · ${t.entity}`}
                       </div>
@@ -501,7 +501,7 @@ export default function Settings({
                   <div>
                     <div style={{ fontSize: 12, fontWeight: 600, color: T.text }}>{m.merchant_name}</div>
                     <div style={{ fontSize: 10, color: T.text3 }}>
-                      {cat ? `${cat.icon} ${cat.label}` : m.category_label || m.category_id}
+                      {cat ? `${cat.icon} ${cat.label}` : m.category_name || m.category_id}
                     </div>
                   </div>
                   <Button
@@ -638,8 +638,8 @@ export default function Settings({
           <FormRow>
             <Field label="Type">
               <Select
-                value={recurForm.type}
-                onChange={e => setRecurForm(f => ({ ...f, type: e.target.value }))}
+                value={recurForm.tx_type}
+                onChange={e => setRecurForm(f => ({ ...f, tx_type: e.target.value }))}
                 options={TX_TYPES.filter(t => ["expense", "income"].includes(t.id)).map(t => ({ value: t.id, label: t.label }))}
               />
             </Field>

@@ -120,14 +120,14 @@ export const ledgerApi = {
       .from("ledger")
       .select("*")
       .eq("user_id", userId)
-      .order("date", { ascending: false })
+      .order("tx_date", { ascending: false })
       .order("created_at", { ascending: false });
 
-    if (filters.from)      q = q.gte("date", filters.from);
-    if (filters.to)        q = q.lte("date", filters.to);
-    if (filters.type)      q = q.eq("type", filters.type);
+    if (filters.from)      q = q.gte("tx_date", filters.from);
+    if (filters.to)        q = q.lte("tx_date", filters.to);
+    if (filters.type)      q = q.eq("tx_type", filters.type);
     if (filters.entity)    q = q.eq("entity", filters.entity);
-    if (filters.accountId) q = q.or(`from_account_id.eq.${filters.accountId},to_account_id.eq.${filters.accountId}`);
+    if (filters.accountId) q = q.or(`from_id.eq.${filters.accountId},to_id.eq.${filters.accountId}`);
     if (filters.search)    q = q.ilike("description", `%${filters.search}%`);
     if (filters.limit)     q = q.limit(filters.limit);
 
@@ -141,8 +141,8 @@ export const ledgerApi = {
       .from("ledger")
       .select("*")
       .eq("user_id", userId)
-      .or(`from_account_id.eq.${accountId},to_account_id.eq.${accountId}`)
-      .order("date", { ascending: false });
+      .or(`from_id.eq.${accountId},to_id.eq.${accountId}`)
+      .order("tx_date", { ascending: false });
     if (error) throw new Error(error.message);
     return data || [];
   },
@@ -157,9 +157,9 @@ export const ledgerApi = {
     if (error) throw new Error(error.message);
 
     const amount  = Number(entry.amount_idr || entry.amount || 0);
-    const deltas  = getDeltas(entry.type, amount);
-    const fromAcc = accounts.find(a => a.id === entry.from_account_id);
-    const toAcc   = accounts.find(a => a.id === entry.to_account_id);
+    const deltas  = getDeltas(entry.tx_type, amount);
+    const fromAcc = accounts.find(a => a.id === entry.from_id);
+    const toAcc   = accounts.find(a => a.id === entry.to_id);
 
     if (fromAcc && deltas.from?.[fromAcc.type] !== undefined)
       await applyBalanceDelta(fromAcc.id, fromAcc.type, deltas.from[fromAcc.type]);
@@ -187,9 +187,9 @@ export const ledgerApi = {
 
     if (entry) {
       const amount  = Number(entry.amount_idr || entry.amount || 0);
-      const deltas  = getDeltas(entry.type, amount);
-      const fromAcc = accounts.find(a => a.id === entry.from_account_id);
-      const toAcc   = accounts.find(a => a.id === entry.to_account_id);
+      const deltas  = getDeltas(entry.tx_type, amount);
+      const fromAcc = accounts.find(a => a.id === entry.from_id);
+      const toAcc   = accounts.find(a => a.id === entry.to_id);
 
       if (fromAcc && deltas.from?.[fromAcc.type] !== undefined)
         await applyBalanceDelta(fromAcc.id, fromAcc.type, -deltas.from[fromAcc.type]);
@@ -331,7 +331,7 @@ export const recurringApi = {
   getReminders: async (userId) => {
     const { data, error } = await supabase
       .from("recurring_reminders")
-      .select("*, recurring_templates(name, type, amount, currency, entity)")
+      .select("*, recurring_templates(name, tx_type, amount, currency, entity)")
       .eq("user_id", userId)
       .eq("status", "pending")
       .order("due_date");
@@ -399,7 +399,7 @@ export const merchantApi = {
         user_id:        userId,
         merchant_name:  merchantName.toLowerCase(),
         category_id:    categoryId,
-        category_label: categoryLabel,
+        category_name:  categoryLabel,
       },
       { onConflict: "user_id,merchant_name" }
     );
@@ -412,7 +412,7 @@ export const merchantApi = {
       user_id:        userId,
       merchant_name:  m.merchant.toLowerCase(),
       category_id:    m.categoryId,
-      category_label: m.categoryLabel,
+      category_name:  m.categoryLabel,
     }));
     const { error } = await supabase
       .from("merchant_mappings")
