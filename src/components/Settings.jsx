@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { supabase } from "../lib/supabase";
+import PILogo from "./PILogo";
 import { fxApi, merchantApi, settingsApi, recurringApi, gmailApi } from "../api";
 import { fmtIDR } from "../utils";
 import { CURRENCIES, EXPENSE_CATEGORIES, ENTITIES, FREQUENCIES, TX_TYPES, APP_VERSION, APP_BUILD } from "../constants";
@@ -260,10 +261,10 @@ export default function Settings({
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
               <div style={{
                 width: 48, height: 48, borderRadius: 14,
-                background: "linear-gradient(135deg, #3b5bdb, #7048e8)",
-                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22,
+                background: "linear-gradient(135deg, #1e3a5f 0%, #4338ca 100%)",
+                display: "flex", alignItems: "center", justifyContent: "center",
               }}>
-                💎
+                <PILogo size={28} white />
               </div>
               <div>
                 <div style={{ fontSize: 14, fontWeight: 700, color: T.text }}>{profileName || "Paulus"}</div>

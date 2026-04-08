@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
+import PILogo from "./components/PILogo";
 import { supabase } from "./lib/supabase";
 import { TABS, MOBILE_MAIN_TABS, MOBILE_MORE_TABS, CURRENCIES, APP_VERSION, APP_BUILD } from "./constants";
 import {
@@ -74,7 +75,7 @@ function AuthGate({ children }) {
       <div style={S.authCard}>
         {/* Logo */}
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 28 }}>
-          <div style={S.logoIcon}>💎</div>
+          <div style={S.logoIcon}><PILogo size={18} white /></div>
           <div>
             <div style={S.logoName}>Paulus Finance</div>
             <div style={S.logoSub}>Personal Financial OS</div>
@@ -308,7 +309,7 @@ function Finance({ user, signOut }) {
       <aside className="sidebar" style={S.sidebar}>
         {/* Logo */}
         <div style={S.sidebarLogo}>
-          <div style={S.logoIcon}>💎</div>
+          <div style={S.logoIcon}><PILogo size={18} white /></div>
           <div style={S.logoName}>Paulus Finance</div>
         </div>
 
@@ -362,7 +363,7 @@ function Finance({ user, signOut }) {
         <header style={S.topBar}>
           {/* Left: logo on mobile, title on desktop */}
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div className="mobile-only" style={{ ...S.logoIcon, width: 28, height: 28, fontSize: 14 }}>💎</div>
+            <div className="mobile-only" style={{ ...S.logoIcon, width: 28, height: 28 }}><PILogo size={16} white /></div>
             <div style={{ fontSize: 20, fontWeight: 900, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
               {pageLabel}
             </div>

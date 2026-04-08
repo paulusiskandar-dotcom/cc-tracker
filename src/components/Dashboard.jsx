@@ -521,7 +521,7 @@ const BENTO_WHITE = {
 
 const BENTO_DARK = {
   ...BENTO_BASE,
-  background: "#111827",
+  background: "linear-gradient(135deg, #1e3a5f 0%, #4338ca 100%)",
 };
 
 const DARK_LABEL = {
