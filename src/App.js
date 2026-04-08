@@ -85,21 +85,36 @@ const DARK = {
 };
 
 // ─── AI ───────────────────────────────────────────────────────
+const AI_HEADERS={"Content-Type":"application/json","anthropic-version":"2023-06-01","x-api-key":process.env.REACT_APP_ANTHROPIC_KEY||""};
 async function aiScanReceipt(b64,mime) {
-  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:800,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:mime,data:b64}},{type:"text",text:`Ekstrak data struk/nota ini. Response HANYA JSON:\n{"amount":<angka>,"currency":"IDR","date":"YYYY-MM-DD","merchant":"<nama>","last4":null,"category":"<kategori>","fee":0,"type":"out","notes":""}`}]}]})});
+  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:AI_HEADERS,body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:800,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:mime,data:b64}},{type:"text",text:`Ekstrak data struk/nota/invoice ini. Response HANYA JSON tanpa markdown:\n{"amount":<angka>,"currency":"IDR","date":"YYYY-MM-DD","merchant":"<nama toko/vendor>","category":"<Belanja|Makan & Minum|Transport|Tagihan|Hotel/Travel|Elektronik|Kesehatan|Hiburan|Lainnya>","fee":0,"type":"out","notes":""}`}]}]})});
+  if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error?.message||`HTTP ${r.status}`);}
   const d=await r.json();
-  return JSON.parse((d.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim());
+  const text=(d.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim();
+  console.log("[aiScanReceipt] raw:",text);
+  return JSON.parse(text);
+}
+async function aiParsePDF(b64) {
+  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:AI_HEADERS,body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:4000,messages:[{role:"user",content:[{type:"document",source:{type:"base64",media_type:"application/pdf",data:b64}},{type:"text",text:`Ekstrak SEMUA transaksi dari mutasi rekening koran/bank statement ini.\nResponse HANYA JSON array tanpa markdown:\n[{"date":"YYYY-MM-DD","description":"<keterangan transaksi>","amount":<angka_positif>,"type":"in|out","balance":<saldo_atau_null>}]\nUrutkan dari terlama ke terbaru. Jika tidak bisa baca saldo pakai null.`}]}]})});
+  if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error?.message||`HTTP ${r.status}`);}
+  const d=await r.json();
+  const text=(d.content?.[0]?.text||"[]").replace(/```json|```/g,"").trim();
+  console.log("[aiParsePDF] raw preview:",text.slice(0,200));
+  return JSON.parse(text);
 }
 async function aiCategorize(desc) {
-  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:50,messages:[{role:"user",content:`Kategorikan transaksi bank: "${desc}"\nPilih: Gaji|Transfer Masuk|Tarik Tunai|Belanja|Makan & Minum|Transport|Tagihan|Investasi|Lainnya\nJawab nama kategori saja.`}]})});
+  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:AI_HEADERS,body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:50,messages:[{role:"user",content:`Kategorikan transaksi bank: "${desc}"\nPilih: Gaji|Transfer Masuk|Tarik Tunai|Belanja|Makan & Minum|Transport|Tagihan|Investasi|Lainnya\nJawab nama kategori saja.`}]})});
+  if(!r.ok)return"Lainnya";
   const d=await r.json(); return d.content?.[0]?.text?.trim()||"Lainnya";
 }
 async function aiAdvisor(q,ctx) {
-  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,messages:[{role:"user",content:`Kamu financial advisor pribadi.\nData: saldo bank ${fmtIDR(ctx.bank)}, hutang CC ${fmtIDR(ctx.cc)}, piutang ${fmtIDR(ctx.piutang)}.\nPertanyaan: ${q}\nJawab Bahasa Indonesia, singkat & actionable. Max 150 kata.`}]})});
+  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:AI_HEADERS,body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,messages:[{role:"user",content:`Kamu financial advisor pribadi.\nData: saldo bank ${fmtIDR(ctx.bank)}, hutang CC ${fmtIDR(ctx.cc)}, piutang ${fmtIDR(ctx.piutang)}.\nPertanyaan: ${q}\nJawab Bahasa Indonesia, singkat & actionable. Max 150 kata.`}]})});
+  if(!r.ok)return"Maaf, AI tidak bisa dijangkau sekarang.";
   const d=await r.json(); return d.content?.[0]?.text||"Maaf, tidak bisa menjawab.";
 }
 async function aiAssetValuation(asset) {
-  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","anthropic-version":"2023-06-01"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:400,messages:[{role:"user",content:`Estimasikan nilai pasar aset berikut dalam IDR (Rupiah Indonesia) berdasarkan kondisi pasar Indonesia saat ini.\n\nAset: ${asset.name}\nKategori: ${asset.category}\nNilai Beli: Rp ${Number(asset.purchase_value||0).toLocaleString("id-ID")}\nTanggal Beli: ${asset.purchase_date||"tidak diketahui"}\nNilai Tercatat: Rp ${Number(asset.current_value||0).toLocaleString("id-ID")}\nCatatan: ${asset.notes||"-"}\n\nJawab HANYA JSON: {"estimated_value":<angka_IDR>,"confidence":"low|medium|high","reasoning":"<max 60 kata>"}`}]})});
+  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:AI_HEADERS,body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:400,messages:[{role:"user",content:`Estimasikan nilai pasar aset berikut dalam IDR (Rupiah Indonesia) berdasarkan kondisi pasar Indonesia saat ini.\n\nAset: ${asset.name}\nKategori: ${asset.category}\nNilai Beli: Rp ${Number(asset.purchase_value||0).toLocaleString("id-ID")}\nTanggal Beli: ${asset.purchase_date||"tidak diketahui"}\nNilai Tercatat: Rp ${Number(asset.current_value||0).toLocaleString("id-ID")}\nCatatan: ${asset.notes||"-"}\n\nJawab HANYA JSON: {"estimated_value":<angka_IDR>,"confidence":"low|medium|high","reasoning":"<max 60 kata>"}`}]})});
+  if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error?.message||`HTTP ${r.status}`);}
   const d=await r.json();
   return JSON.parse((d.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim());
 }
@@ -333,8 +348,18 @@ function Finance({user,signOut}){
   const [scanMime,setScanMime]   = useState("image/jpeg");
   const [scanLoading,setScanLoading] = useState(false);
   const [scanResult,setScanResult]   = useState(null);
+  const [scanError,setScanError]     = useState(null);
   const [scanTarget,setScanTarget]   = useState("cc");
   const fileRef = useRef(null);
+
+  // PDF Upload
+  const [showPdfUpload,setShowPdfUpload] = useState(false);
+  const [pdfLoading,setPdfLoading]       = useState(false);
+  const [pdfRows,setPdfRows]             = useState([]);
+  const [pdfSelRows,setPdfSelRows]       = useState({});
+  const [pdfBankId,setPdfBankId]         = useState("");
+  const [pdfError,setPdfError]           = useState(null);
+  const pdfRef = useRef(null);
 
   // AI
   const [aiMsgs,setAiMsgs]   = useState([]);
@@ -354,7 +379,7 @@ function Finance({user,signOut}){
   const curMonth = ym(today());
 
   // Empty forms
-  const ET = {tx_date:today(),card_id:"",description:"",amount:"",currency:"IDR",fee:"",category:"Belanja",entity:"Pribadi",reimbursed:false,notes:""};
+  const ET = {tx_date:today(),card_id:"",description:"",amount:"",currency:"IDR",fee:"",category:"Belanja",entity:"Pribadi",reimbursed:false,notes:"",tx_type:"out"};
   const EC = {name:"",bank:"BCA",last4:"",color:"#1d4ed8",accent:"#60a5fa",card_limit:"",statement_day:25,due_day:17,target_pct:30,network:"Visa"};
   const EI = {card_id:"",description:"",total_amount:"",months:12,start_date:today(),currency:"IDR",entity:"Pribadi"};
   const ER = {card_id:"",description:"",amount:"",currency:"IDR",fee:"",category:"Tagihan",entity:"Pribadi",frequency:"Bulanan",day_of_month:1,active:true};
@@ -686,15 +711,61 @@ function Finance({user,signOut}){
     reader.readAsDataURL(f);
   };
   const runScan=async()=>{
-    if(!scanImg)return;setScanLoading(true);
+    if(!scanImg)return;setScanLoading(true);setScanError(null);
     try{
-      const r=await aiScanReceipt(scanImg,scanMime);setScanResult(r);
-      if(scanTarget==="cc"){setTxForm(f=>({...f,description:r.merchant||f.description,amount:r.amount?String(r.amount):f.amount,currency:r.currency||"IDR",tx_date:r.date||today(),category:r.category||"Lainnya",fee:r.fee?String(r.fee):""}));}
-      else{setMutForm(f=>({...f,description:r.merchant||f.description,amount:r.amount?String(r.amount):f.amount,mut_date:r.date||today(),type:r.type||"out",category:r.category||"Lainnya"}));}
-    }catch{}
+      const r=await aiScanReceipt(scanImg,scanMime);
+      console.log("[Scan] result:",r);
+      setScanResult(r);
+      if(scanTarget==="cc"){
+        setTxForm(f=>({...f,description:r.merchant||f.description,amount:r.amount?String(r.amount):f.amount,currency:r.currency||"IDR",tx_date:r.date||today(),category:r.category||"Lainnya",fee:r.fee?String(r.fee):"",tx_type:r.type==="in"?"in":"out"}));
+      } else if(scanTarget==="bank"){
+        setMutForm(f=>({...f,description:r.merchant||f.description,amount:r.amount?String(r.amount):f.amount,mut_date:r.date||today(),type:r.type||"out",category:r.category||"Lainnya"}));
+      } else if(scanTarget==="asset"){
+        setAssetForm(f=>({...f,name:r.merchant||f.name,purchase_value:r.amount?String(r.amount):f.purchase_value,purchase_date:r.date||f.purchase_date,notes:r.notes||f.notes}));
+      }
+    }catch(e){
+      console.error("[Scan] error:",e);
+      setScanError(e.message||"Gagal menghubungi AI. Pastikan REACT_APP_ANTHROPIC_KEY sudah di-set.");
+    }
     setScanLoading(false);
   };
-  const confirmScan=()=>{setShowScanner(false);setScanImg(null);if(scanTarget==="cc")setShowTxForm(true);else setShowMutForm(true);};
+  const confirmScan=()=>{
+    setShowScanner(false);setScanImg(null);setScanError(null);
+    if(scanTarget==="cc")setShowTxForm(true);
+    else if(scanTarget==="bank")setShowMutForm(true);
+    else if(scanTarget==="asset")setShowAssetForm(true);
+  };
+  const handlePdfFile=e=>{
+    const f=e.target.files?.[0];if(!f)return;
+    setPdfError(null);setPdfRows([]);setPdfSelRows({});
+    const reader=new FileReader();
+    reader.onload=async ev=>{
+      const b64=ev.target.result.split(",")[1];
+      setPdfLoading(true);
+      try{
+        const rows=await aiParsePDF(b64);
+        console.log("[PDF] parsed rows:",rows.length);
+        setPdfRows(rows);
+        const sel={};rows.forEach((_,i)=>{sel[i]=true;});setPdfSelRows(sel);
+      }catch(e){
+        console.error("[PDF] error:",e);
+        setPdfError(e.message||"Gagal parse PDF. Pastikan file adalah mutasi rekening koran.");
+      }
+      setPdfLoading(false);
+    };
+    reader.readAsDataURL(f);
+  };
+  const importPdfRows=async()=>{
+    if(!pdfBankId)return;
+    setSaving(true);
+    const selected=pdfRows.filter((_,i)=>pdfSelRows[i]);
+    for(const row of selected){
+      const d={account_id:pdfBankId,mut_date:row.date||today(),description:row.description||"Import PDF",amount:Number(row.amount||0),type:row.type||"out",category:"Lainnya",entity:"Pribadi",notes:"Import dari PDF"};
+      const r=await api.mut.create(user.id,d);
+      setMuts(p=>[r,...p]);
+    }
+    setShowPdfUpload(false);setPdfRows([]);setPdfSelRows({});setPdfBankId("");setSaving(false);
+  };
 
   // ── AI
   const sendAI=async()=>{
@@ -716,7 +787,7 @@ function Finance({user,signOut}){
 
   const TABS=[
     {id:"dashboard",icon:"◈",label:"Dashboard"},
-    {id:"cc",icon:"💳",label:"CC Tracker"},
+    {id:"cc",icon:"💳",label:"Credit Card"},
     {id:"bank",icon:"🏦",label:"Bank"},
     {id:"piutang",icon:"📋",label:"Piutang"},
     {id:"asset",icon:"📈",label:"Asset"},
@@ -939,7 +1010,7 @@ function Finance({user,signOut}){
           {tab==="cc"&&(
             <>
               <div className="subtabs anim">
-                {[["transactions","≡ Transaksi"],["cards","💳 Kartu"],["installments","⟳ Cicilan"],["recurring","↺ Recurring"],["budget","◎ Budget"]].map(([id,label])=>(
+                {[["transactions","≡ Transaksi"],["cards","💳 Kartu"],["installments","⟳ Cicilan"],["recurring","↺ Recurring"],["target","◎ Target"]].map(([id,label])=>(
                   <button key={id} className={`stab ${ccSubTab===id?"on":""}`} onClick={()=>setCCSubTab(id)}>{label}</button>
                 ))}
               </div>
@@ -1081,9 +1152,9 @@ function Finance({user,signOut}){
                 {recurList.length===0&&<Empty icon="↺" msg="Belum ada recurring" th={th} onAdd={()=>{setEditRecurId(null);setRecurForm({...ER,card_id:cards[0]?.id||""});setShowRecur2(true);}}/>}
               </>}
 
-              {ccSubTab==="budget"&&<>
+              {ccSubTab==="target"&&<>
                 <div style={{display:"flex",justifyContent:"flex-end",marginBottom:12}}>
-                  <button className="btn btn-primary" onClick={()=>{setBudForm({...budgets});setShowBudForm(true);}}>Edit Budget</button>
+                  <button className="btn btn-primary" onClick={()=>{setBudForm({...budgets});setShowBudForm(true);}}>Edit Target</button>
                 </div>
                 {budgetStats.map((b,i)=>{
                   const over=b.pct>=100,warn=b.pct>=80;
@@ -1096,7 +1167,7 @@ function Finance({user,signOut}){
                           <div style={{width:40,height:40,borderRadius:11,background:ENT_BG[b.entity],display:"flex",alignItems:"center",justifyContent:"center",fontSize:19}}>{icons[b.entity]}</div>
                           <div><div style={{fontWeight:700,fontSize:14}}>{b.entity}</div><div style={{fontSize:11,color:th.tx3,marginTop:1}}>{b.pct.toFixed(0)}% terpakai{over?" 🚨":warn?" ⚠️":""}</div></div>
                         </div>
-                        <div style={{textAlign:"right"}}><div style={{fontSize:10,color:th.tx3}}>Budget</div><div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:14,fontWeight:700}}>{fmtIDR(b.budget,true)}</div></div>
+                        <div style={{textAlign:"right"}}><div style={{fontSize:10,color:th.tx3}}>Target</div><div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:14,fontWeight:700}}>{fmtIDR(b.budget,true)}</div></div>
                       </div>
                       <div style={{height:8,background:th.sur3,borderRadius:4,overflow:"hidden",marginBottom:9}}>
                         <div style={{height:"100%",width:`${Math.min(b.pct,100)}%`,background:bc,borderRadius:4}}/>
@@ -1127,8 +1198,9 @@ function Finance({user,signOut}){
 
               <div className="sec-hd">
                 <div className="sec-title">Rekening Bank</div>
-                <div style={{display:"flex",gap:6}}>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                   <button className="btn btn-ghost" onClick={()=>setShowPayCC(true)}>💳 Bayar CC</button>
+                  <button className="btn btn-ghost" onClick={()=>{setPdfRows([]);setPdfSelRows({});setPdfBankId(bankAccs[0]?.id||"");setPdfError(null);setShowPdfUpload(true);}}>📄 Upload PDF</button>
                   <button className="btn btn-primary" onClick={()=>{setEditBankId(null);setBankForm(EBA);setShowBankForm(true);}}>+ Rekening</button>
                 </div>
               </div>
@@ -1679,23 +1751,30 @@ function Finance({user,signOut}){
       </Overlay>}
 
       {/* Scanner */}
-      {showScanner&&<Overlay onClose={()=>setShowScanner(false)} th={th} title="📷 Scan Struk / Nota">
+      {showScanner&&<Overlay onClose={()=>{setShowScanner(false);setScanImg(null);setScanResult(null);setScanError(null);}} th={th} title="📷 Scan Struk / Nota">
         <div style={{marginBottom:12}}>
-          <div style={{display:"flex",gap:6,marginBottom:12}}>
-            {[["cc","CC Transaksi"],["bank","Mutasi Bank"]].map(([v,l])=>(
-              <button key={v} onClick={()=>setScanTarget(v)} className="btn" style={{flex:1,background:scanTarget===v?th.acBg:"transparent",border:`1px solid ${scanTarget===v?th.ac:th.bor}`,color:scanTarget===v?th.ac:th.tx3}}>{l}</button>
+          <div style={{display:"flex",gap:6,marginBottom:12,flexWrap:"wrap"}}>
+            {[["cc","💳 CC"],["bank","🏦 Bank"],["asset","📈 Aset"]].map(([v,l])=>(
+              <button key={v} onClick={()=>setScanTarget(v)} className="btn" style={{flex:1,background:scanTarget===v?th.acBg:"transparent",border:`1px solid ${scanTarget===v?th.ac:th.bor}`,color:scanTarget===v?th.ac:th.tx3,fontWeight:scanTarget===v?700:500}}>{l}</button>
             ))}
           </div>
-          <div onClick={()=>fileRef.current?.click()} style={{border:`2px dashed ${scanImg?th.ac:th.bor}`,borderRadius:14,padding:"36px 20px",textAlign:"center",cursor:"pointer",background:th.sur2,transition:"all .2s"}}>
-            {!scanImg?<><div style={{fontSize:32,marginBottom:8}}>📷</div><div style={{fontSize:13,fontWeight:600,color:th.tx2}}>Klik untuk upload foto</div><div style={{fontSize:11,color:th.tx3,marginTop:3}}>JPG, PNG, HEIC</div></>
-            :<div style={{fontSize:13,color:th.gr,fontWeight:600}}>✓ Foto dipilih · Siap scan</div>}
+          <div onClick={()=>fileRef.current?.click()} style={{border:`2px dashed ${scanImg?th.ac:th.bor}`,borderRadius:14,padding:"28px 20px",textAlign:"center",cursor:"pointer",background:th.sur2,transition:"all .2s"}}>
+            {!scanImg?<>
+              <div style={{fontSize:32,marginBottom:8}}>📷</div>
+              <div style={{fontSize:13,fontWeight:600,color:th.tx2}}>Klik untuk pilih foto</div>
+              <div style={{fontSize:11,color:th.tx3,marginTop:3}}>Dari galeri atau kamera · JPG, PNG, HEIC</div>
+            </>:<>
+              <div style={{fontSize:13,color:th.gr,fontWeight:700,marginBottom:4}}>✓ Foto dipilih</div>
+              <div style={{fontSize:10,color:th.tx3}}>Klik untuk ganti foto</div>
+            </>}
           </div>
-          <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleFile} capture="environment"/>
+          <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleFile}/>
         </div>
-        {scanResult&&<div style={{padding:14,background:th.acBg,border:`1px solid ${th.ac}44`,borderRadius:12,marginBottom:12}}>
+        {scanError&&<div style={{padding:"10px 13px",background:th.rdBg,border:`1px solid ${th.rd}44`,borderRadius:10,marginBottom:12,fontSize:12,color:th.rd}}>⚠️ {scanError}</div>}
+        {scanResult&&!scanResult.error&&<div style={{padding:14,background:th.acBg,border:`1px solid ${th.ac}44`,borderRadius:12,marginBottom:12}}>
           <div style={{fontSize:10,color:th.ac,fontWeight:700,textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>✨ Hasil AI Scan</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
-            {[["Merchant",scanResult.merchant||"-"],["Nominal",scanResult.amount?fmtIDR(scanResult.amount):"-"],["Tanggal",scanResult.date||"-"],["Kategori",scanResult.category||"-"]].map(([l,v])=>(
+            {[["Merchant / Nama",scanResult.merchant||"-"],["Nominal",scanResult.amount?fmtIDR(scanResult.amount):"-"],["Tanggal",scanResult.date||"-"],["Kategori",scanResult.category||"-"],["Tipe",scanResult.type==="in"?"↓ Masuk":"↑ Keluar"],["Fee",scanResult.fee>0?fmtIDR(scanResult.fee):"-"]].map(([l,v])=>(
               <div key={l} style={{background:th.sur2,borderRadius:8,padding:"7px 9px"}}>
                 <div style={{fontSize:9,color:th.tx3,fontWeight:700,textTransform:"uppercase"}}>{l}</div>
                 <div style={{fontSize:12,fontWeight:700,marginTop:1}}>{v}</div>
@@ -1703,7 +1782,11 @@ function Finance({user,signOut}){
             ))}
           </div>
         </div>}
-        <BtnRow onCancel={()=>setShowScanner(false)} onOk={scanResult?confirmScan:runScan} label={scanResult?"✅ Lanjut Isi Form":scanLoading?"🔄 Scanning...":"✨ Scan dengan AI"} th={th} disabled={!scanImg||scanLoading}/>
+        {scanLoading&&<div style={{display:"flex",alignItems:"center",gap:10,padding:"12px 14px",background:th.acBg,border:`1px solid ${th.ac}44`,borderRadius:10,marginBottom:12}}>
+          <div style={{width:20,height:20,border:`2px solid ${th.ac}44`,borderTop:`2px solid ${th.ac}`,borderRadius:"50%",animation:"spin .7s linear infinite",flexShrink:0}}/>
+          <div style={{fontSize:12,color:th.ac,fontWeight:600}}>AI sedang menganalisis foto...</div>
+        </div>}
+        <BtnRow onCancel={()=>{setShowScanner(false);setScanImg(null);setScanResult(null);setScanError(null);}} onOk={scanResult&&!scanResult.error?confirmScan:runScan} label={scanResult&&!scanResult.error?"✅ Lanjut Isi Form":scanLoading?"🔄 Scanning...":"✨ Scan dengan AI"} th={th} disabled={!scanImg||scanLoading}/>
       </Overlay>}
 
       {/* Pay CC */}
@@ -1723,7 +1806,15 @@ function Finance({user,signOut}){
       {/* TX Form */}
       {showTxForm&&<Overlay onClose={()=>setShowTxForm(false)} th={th} title={editTxId?"✏️ Edit Transaksi":"➕ Tambah Transaksi CC"}>
         <div style={{display:"flex",flexDirection:"column",gap:11}}>
-          {scanResult&&<div style={{padding:"8px 12px",background:th.acBg,border:`1px solid ${th.ac}44`,borderRadius:9,fontSize:11,color:th.ac}}>✨ Data dari AI scan</div>}
+          {scanResult&&!scanResult.error&&<div style={{padding:"8px 12px",background:th.acBg,border:`1px solid ${th.ac}44`,borderRadius:9,fontSize:11,color:th.ac}}>✨ Data dari AI scan · <button onClick={()=>{setScanImg(null);setScanResult(null);setScanError(null);setScanTarget("cc");setShowScanner(true);setShowTxForm(false);}} style={{background:"none",border:"none",color:th.ac,fontWeight:700,cursor:"pointer",fontFamily:"'Sora',sans-serif",fontSize:11}}>Scan ulang →</button></div>}
+          {/* Tipe */}
+          <F label="Tipe Transaksi" th={th}>
+            <div style={{display:"flex",gap:7}}>
+              {[["out","↑ Keluar (Charge)"],["in","↓ Masuk (Refund)"]].map(([v,l])=>(
+                <button key={v} onClick={()=>setTxForm(f=>({...f,tx_type:v}))} style={{flex:1,padding:"8px",borderRadius:9,border:`1px solid ${txForm.tx_type===v?(v==="out"?th.rd:th.gr):th.bor}`,background:txForm.tx_type===v?(v==="out"?th.rdBg:th.grBg):th.sur2,fontFamily:"'Sora',sans-serif",fontWeight:600,fontSize:11,cursor:"pointer",color:txForm.tx_type===v?(v==="out"?th.rd:th.gr):th.tx3}}>{l}</button>
+              ))}
+            </div>
+          </F>
           <R2>
             <F label="Tanggal" th={th}><input className="inp" type="date" value={txForm.tx_date} onChange={e=>setTxForm(f=>({...f,tx_date:e.target.value}))}/></F>
             <F label="Kartu" th={th}><select className="inp" value={txForm.card_id} onChange={e=>setTxForm(f=>({...f,card_id:e.target.value}))}><option value="">Pilih...</option>{cards.map(c=><option key={c.id} value={c.id}>{c.name} ···· {c.last4}</option>)}</select></F>
@@ -1747,6 +1838,7 @@ function Finance({user,signOut}){
             <div className="tog-dot" style={{background:txForm.reimbursed?th.gr:th.bor}}>{txForm.reimbursed?"✓":""}</div>
             <div style={{fontSize:12,color:txForm.reimbursed?th.gr:th.tx3,fontWeight:600}}>Sudah Direimburse</div>
           </div>
+          <button onClick={()=>{setShowTxForm(false);setScanImg(null);setScanResult(null);setScanError(null);setScanTarget("cc");setShowScanner(true);}} style={{background:th.sur2,border:`1px solid ${th.bor}`,borderRadius:9,padding:"8px",fontFamily:"'Sora',sans-serif",fontWeight:600,fontSize:12,cursor:"pointer",color:th.tx3}}>📷 Scan Struk</button>
           <BtnRow onCancel={()=>setShowTxForm(false)} onOk={submitTx} label={editTxId?"Simpan":"Tambah"} th={th} saving={saving}/>
         </div>
       </Overlay>}
@@ -1796,8 +1888,8 @@ function Finance({user,signOut}){
       </Overlay>}
 
       {/* Budget Form */}
-      {showBudForm&&<Overlay onClose={()=>setShowBudForm(false)} th={th} title="◎ Edit Budget Bulanan">
-        <div style={{fontSize:11,color:th.tx3,marginBottom:14}}>Set budget pengeluaran CC per entitas bulan ini.</div>
+      {showBudForm&&<Overlay onClose={()=>setShowBudForm(false)} th={th} title="◎ Edit Target Bulanan">
+        <div style={{fontSize:11,color:th.tx3,marginBottom:14}}>Set target pengeluaran CC per entitas bulan ini.</div>
         {ENTITIES.map(e=>(
           <div key={e} style={{marginBottom:12}}>
             <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}><div style={{width:7,height:7,borderRadius:"50%",background:ENT_COL[e]}}/><span style={{fontSize:13,fontWeight:600}}>{e}</span></div>
@@ -1805,7 +1897,7 @@ function Finance({user,signOut}){
             {budForm[e]>0&&<div style={{fontSize:10,color:ENT_COL[e],marginTop:3}}>{fmtIDR(budForm[e])} / bulan</div>}
           </div>
         ))}
-        <BtnRow onCancel={()=>setShowBudForm(false)} onOk={saveBudgets} label="Simpan Budget" th={th} saving={saving}/>
+        <BtnRow onCancel={()=>setShowBudForm(false)} onOk={saveBudgets} label="Simpan Target" th={th} saving={saving}/>
       </Overlay>}
 
       {/* Bank Form */}
@@ -1840,6 +1932,7 @@ function Finance({user,signOut}){
             <div><div style={{fontSize:12,color:mutForm.is_piutang?th.te:th.tx3,fontWeight:600}}>Ini adalah piutang reimburse</div><div style={{fontSize:10,color:th.tx3}}>Tidak masuk expense pribadi</div></div>
           </div>
           {mutForm.is_piutang&&<R2><F label="Entitas Piutang" th={th}><select className="inp" value={mutForm.piutang_entity} onChange={e=>setMutForm(f=>({...f,piutang_entity:e.target.value}))}><option value="">Pilih...</option>{["Hamasa","SDC","Travelio"].map(e=><option key={e}>{e}</option>)}</select></F><F label="Keterangan Piutang" th={th}><input className="inp" placeholder="Billing listrik..." value={mutForm.piutang_description} onChange={e=>setMutForm(f=>({...f,piutang_description:e.target.value}))}/></F></R2>}
+          <button onClick={()=>{setShowMutForm(false);setScanImg(null);setScanResult(null);setScanError(null);setScanTarget("bank");setShowScanner(true);}} style={{background:th.sur2,border:`1px solid ${th.bor}`,borderRadius:9,padding:"8px",fontFamily:"'Sora',sans-serif",fontWeight:600,fontSize:12,cursor:"pointer",color:th.tx3}}>📷 Scan Struk / Nota</button>
           <BtnRow onCancel={()=>setShowMutForm(false)} onOk={submitMut} label={editMutId?"Simpan":"Tambah"} th={th} saving={saving}/>
         </div>
       </Overlay>}
@@ -1863,6 +1956,64 @@ function Finance({user,signOut}){
           <R2><F label="Jumlah (Rp)" th={th}><input className="inp" type="number" placeholder="0" value={reimbTxForm.amount} onChange={e=>setReimbTxForm(f=>({...f,amount:e.target.value}))}/></F><F label="Sumber" th={th}><select className="inp" value={reimbTxForm.source} onChange={e=>setReimbTxForm(f=>({...f,source:e.target.value}))}><option value="cc">Via CC</option><option value="bank">Via Bank</option></select></F></R2>
           <F label="Catatan" th={th}><input className="inp" placeholder="Opsional..." value={reimbTxForm.notes} onChange={e=>setReimbTxForm(f=>({...f,notes:e.target.value}))}/></F>
           <BtnRow onCancel={()=>setShowReimbTx(false)} onOk={submitReimbTx} label="Tambah" th={th} saving={saving}/>
+        </div>
+      </Overlay>}
+
+      {/* PDF Upload Mutasi */}
+      {showPdfUpload&&<Overlay onClose={()=>{setShowPdfUpload(false);setPdfRows([]);setPdfError(null);}} th={th} title="📄 Upload PDF Mutasi Bank" sub="Ekstrak transaksi otomatis dari rekening koran">
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <F label="Rekening Tujuan" th={th}>
+            <select className="inp" value={pdfBankId} onChange={e=>setPdfBankId(e.target.value)}>
+              <option value="">Pilih rekening...</option>
+              {bankAccs.map(b=><option key={b.id} value={b.id}>{b.name} ({b.bank})</option>)}
+            </select>
+          </F>
+          {pdfRows.length===0&&!pdfLoading&&<>
+            <div onClick={()=>pdfRef.current?.click()} style={{border:`2px dashed ${th.bor}`,borderRadius:14,padding:"32px 20px",textAlign:"center",cursor:"pointer",background:th.sur2,transition:"all .2s"}}>
+              <div style={{fontSize:32,marginBottom:8}}>📄</div>
+              <div style={{fontSize:13,fontWeight:600,color:th.tx2}}>Klik untuk upload PDF</div>
+              <div style={{fontSize:11,color:th.tx3,marginTop:3}}>Rekening koran / bank statement · PDF</div>
+            </div>
+            <input ref={pdfRef} type="file" accept="application/pdf" style={{display:"none"}} onChange={handlePdfFile}/>
+          </>}
+          {pdfLoading&&<div style={{display:"flex",alignItems:"center",gap:10,padding:"16px",background:th.acBg,border:`1px solid ${th.ac}44`,borderRadius:12}}>
+            <div style={{width:22,height:22,border:`2px solid ${th.ac}44`,borderTop:`2px solid ${th.ac}`,borderRadius:"50%",animation:"spin .7s linear infinite",flexShrink:0}}/>
+            <div>
+              <div style={{fontSize:13,fontWeight:700,color:th.ac}}>AI sedang membaca PDF...</div>
+              <div style={{fontSize:10,color:th.tx3,marginTop:2}}>Ini mungkin membutuhkan 10–30 detik</div>
+            </div>
+          </div>}
+          {pdfError&&<div style={{padding:"10px 13px",background:th.rdBg,border:`1px solid ${th.rd}44`,borderRadius:10,fontSize:12,color:th.rd}}>⚠️ {pdfError}</div>}
+          {pdfRows.length>0&&<>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{fontSize:12,fontWeight:700,color:th.tx}}>{pdfRows.length} transaksi ditemukan · {Object.values(pdfSelRows).filter(Boolean).length} dipilih</div>
+              <div style={{display:"flex",gap:6}}>
+                <button onClick={()=>{const s={};pdfRows.forEach((_,i)=>{s[i]=true;});setPdfSelRows(s);}} style={{background:"none",border:`1px solid ${th.ac}`,color:th.ac,borderRadius:7,padding:"4px 9px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"'Sora',sans-serif"}}>Pilih Semua</button>
+                <button onClick={()=>setPdfSelRows({})} style={{background:"none",border:`1px solid ${th.bor}`,color:th.tx3,borderRadius:7,padding:"4px 9px",fontSize:11,fontWeight:600,cursor:"pointer",fontFamily:"'Sora',sans-serif"}}>Batal Semua</button>
+              </div>
+            </div>
+            <div style={{maxHeight:320,overflowY:"auto",border:`1px solid ${th.bor}`,borderRadius:12}}>
+              {pdfRows.map((row,i)=>(
+                <div key={i} onClick={()=>setPdfSelRows(s=>({...s,[i]:!s[i]}))} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 13px",borderBottom:i<pdfRows.length-1?`1px solid ${th.bor}`:"none",cursor:"pointer",background:pdfSelRows[i]?(row.type==="in"?th.grBg:th.rdBg):"transparent",transition:"background .1s"}}>
+                  <div style={{width:18,height:18,borderRadius:5,border:`2px solid ${pdfSelRows[i]?th.ac:th.bor}`,background:pdfSelRows[i]?th.ac:"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,color:"white",fontSize:11}}>{pdfSelRows[i]?"✓":""}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{row.description}</div>
+                    <div style={{fontSize:10,color:th.tx3,marginTop:2}}>{row.date}</div>
+                  </div>
+                  <div style={{textAlign:"right",flexShrink:0}}>
+                    <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:12,fontWeight:700,color:row.type==="in"?th.gr:th.rd}}>{row.type==="in"?"+":"-"}{fmtIDR(Number(row.amount||0),true)}</div>
+                    {row.balance!=null&&<div style={{fontSize:9,color:th.tx3}}>Saldo: {fmtIDR(row.balance,true)}</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div style={{padding:"10px 13px",background:th.sur2,border:`1px solid ${th.bor}`,borderRadius:10,display:"flex",justifyContent:"space-between",fontSize:12}}>
+              <span style={{color:th.tx3}}>Total masuk</span>
+              <span style={{color:th.gr,fontWeight:700,fontFamily:"'JetBrains Mono',monospace"}}>{fmtIDR(pdfRows.filter((_,i)=>pdfSelRows[i]&&pdfRows[i].type==="in").reduce((s,r)=>s+Number(r.amount||0),0),true)}</span>
+            </div>
+            <BtnRow onCancel={()=>{setShowPdfUpload(false);setPdfRows([]);setPdfError(null);}} onOk={importPdfRows} label={`Import ${Object.values(pdfSelRows).filter(Boolean).length} Transaksi`} th={th} saving={saving} disabled={!pdfBankId||Object.values(pdfSelRows).filter(Boolean).length===0}/>
+          </>}
+          {pdfRows.length===0&&!pdfLoading&&<button onClick={()=>setShowPdfUpload(false)} style={{padding:"10px",borderRadius:9,border:`1px solid ${th.bor}`,background:th.sur2,color:th.tx3,fontFamily:"'Sora',sans-serif",fontWeight:600,fontSize:13,cursor:"pointer"}}>Batal</button>}
         </div>
       </Overlay>}
 
@@ -1925,6 +2076,7 @@ function Finance({user,signOut}){
               {Number(assetForm.current_value)>=Number(assetForm.purchase_value)?"▲":"▼"} {Math.abs(((Number(assetForm.current_value)-Number(assetForm.purchase_value))/Number(assetForm.purchase_value))*100).toFixed(1)}% dari harga beli · {fmtIDR(Number(assetForm.current_value)-Number(assetForm.purchase_value),true)}
             </div>
           )}
+          {!editAssetId&&<button onClick={()=>{setShowAssetForm(false);setScanImg(null);setScanResult(null);setScanError(null);setScanTarget("asset");setShowScanner(true);}} style={{background:th.sur2,border:`1px solid ${th.bor}`,borderRadius:9,padding:"8px",fontFamily:"'Sora',sans-serif",fontWeight:600,fontSize:12,cursor:"pointer",color:th.tx3}}>📷 Scan Nota Pembelian</button>}
           <BtnRow onCancel={()=>setShowAssetForm(false)} onOk={submitAsset} label={editAssetId?"Simpan":"Tambah Aset"} th={th} saving={saving}/>
         </div>
       </Overlay>}
