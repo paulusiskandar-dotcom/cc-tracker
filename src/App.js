@@ -85,51 +85,65 @@ const DARK = {
   sh2:"0 4px 24px rgba(0,0,0,.4)",
 };
 
-// ─── AI ───────────────────────────────────────────────────────
-const AI_HEADERS={"Content-Type":"application/json","anthropic-version":"2023-06-01","x-api-key":process.env.REACT_APP_ANTHROPIC_KEY||""};
-async function aiScanReceipt(b64,mime) {
-  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:AI_HEADERS,body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:800,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:mime,data:b64}},{type:"text",text:`Ekstrak data struk/nota/invoice ini. Response HANYA JSON tanpa markdown:\n{"amount":<angka>,"currency":"IDR","date":"YYYY-MM-DD","merchant":"<nama toko/vendor>","category":"<Belanja|Makan & Minum|Transport|Tagihan|Hotel/Travel|Elektronik|Kesehatan|Hiburan|Lainnya>","fee":0,"type":"out","notes":""}`}]}]})});
-  if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error?.message||`HTTP ${r.status}`);}
+// ─── AI PROXY (via Supabase Edge Function — avoids CORS) ─────
+const AI_PROXY=`${process.env.REACT_APP_SUPABASE_URL}/functions/v1/ai-proxy`;
+const AI_ANON_KEY=process.env.REACT_APP_SUPABASE_ANON_KEY||"";
+console.log("[AI] proxy url:",AI_PROXY,"anon key present:",!!AI_ANON_KEY);
+
+async function aiCall(body) {
+  const r=await fetch(AI_PROXY,{
+    method:"POST",
+    headers:{"Content-Type":"application/json","apikey":AI_ANON_KEY,"Authorization":`Bearer ${AI_ANON_KEY}`},
+    body:JSON.stringify(body),
+  });
+  if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error?.message||e.error||`HTTP ${r.status}`);}
   const d=await r.json();
-  const text=(d.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim();
+  if(d.error){throw new Error(typeof d.error==="string"?d.error:d.error.message||"AI error");}
+  return d;
+}
+function parseJSON(text,fallback){
+  try{return JSON.parse((text||"").replace(/```json|```/g,"").trim());}
+  catch{return fallback;}
+}
+
+async function aiScanReceipt(b64,mime) {
+  const d=await aiCall({model:"claude-sonnet-4-20250514",max_tokens:800,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:mime,data:b64}},{type:"text",text:`Ekstrak data struk/nota/invoice ini. Response HANYA JSON tanpa markdown:\n{"amount":<angka>,"currency":"IDR","date":"YYYY-MM-DD","merchant":"<nama toko/vendor>","category":"<Belanja|Makan & Minum|Transport|Tagihan|Hotel/Travel|Elektronik|Kesehatan|Hiburan|Lainnya>","fee":0,"type":"out","notes":""}`}]}]});
+  const text=d.content?.[0]?.text||"{}";
   console.log("[aiScanReceipt] raw:",text);
-  return JSON.parse(text);
+  return parseJSON(text,{});
 }
 async function aiParsePDF(b64) {
-  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:AI_HEADERS,body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:4000,messages:[{role:"user",content:[{type:"document",source:{type:"base64",media_type:"application/pdf",data:b64}},{type:"text",text:`Ekstrak SEMUA transaksi dari mutasi rekening koran/bank statement ini.\nResponse HANYA JSON array tanpa markdown:\n[{"date":"YYYY-MM-DD","description":"<keterangan transaksi>","amount":<angka_positif>,"type":"in|out","balance":<saldo_atau_null>}]\nUrutkan dari terlama ke terbaru. Jika tidak bisa baca saldo pakai null.`}]}]})});
-  if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error?.message||`HTTP ${r.status}`);}
-  const d=await r.json();
-  const text=(d.content?.[0]?.text||"[]").replace(/```json|```/g,"").trim();
+  const d=await aiCall({model:"claude-sonnet-4-20250514",max_tokens:4000,messages:[{role:"user",content:[{type:"document",source:{type:"base64",media_type:"application/pdf",data:b64}},{type:"text",text:`Ekstrak SEMUA transaksi dari mutasi rekening koran/bank statement ini.\nResponse HANYA JSON array tanpa markdown:\n[{"date":"YYYY-MM-DD","description":"<keterangan transaksi>","amount":<angka_positif>,"type":"in|out","balance":<saldo_atau_null>}]\nUrutkan dari terlama ke terbaru. Jika tidak bisa baca saldo pakai null.`}]}]});
+  const text=d.content?.[0]?.text||"[]";
   console.log("[aiParsePDF] raw preview:",text.slice(0,200));
-  return JSON.parse(text);
+  return parseJSON(text,[]);
 }
 async function aiCategorize(desc) {
-  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:AI_HEADERS,body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:50,messages:[{role:"user",content:`Kategorikan transaksi bank: "${desc}"\nPilih: Gaji|Transfer Masuk|Tarik Tunai|Belanja|Makan & Minum|Transport|Tagihan|Investasi|Lainnya\nJawab nama kategori saja.`}]})});
-  if(!r.ok)return"Lainnya";
-  const d=await r.json(); return d.content?.[0]?.text?.trim()||"Lainnya";
+  try{
+    const d=await aiCall({model:"claude-sonnet-4-20250514",max_tokens:50,messages:[{role:"user",content:`Kategorikan transaksi bank: "${desc}"\nPilih: Gaji|Transfer Masuk|Tarik Tunai|Belanja|Makan & Minum|Transport|Tagihan|Investasi|Lainnya\nJawab nama kategori saja.`}]});
+    return d.content?.[0]?.text?.trim()||"Lainnya";
+  }catch{return"Lainnya";}
 }
 async function aiAdvisor(q,ctx) {
-  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:AI_HEADERS,body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,messages:[{role:"user",content:`Kamu financial advisor pribadi.\nData: saldo bank ${fmtIDR(ctx.bank)}, hutang CC ${fmtIDR(ctx.cc)}, piutang ${fmtIDR(ctx.piutang)}.\nPertanyaan: ${q}\nJawab Bahasa Indonesia, singkat & actionable. Max 150 kata.`}]})});
-  if(!r.ok)return"Maaf, AI tidak bisa dijangkau sekarang.";
-  const d=await r.json(); return d.content?.[0]?.text||"Maaf, tidak bisa menjawab.";
+  try{
+    const d=await aiCall({model:"claude-sonnet-4-20250514",max_tokens:600,messages:[{role:"user",content:`Kamu financial advisor pribadi.\nData: saldo bank ${fmtIDR(ctx.bank)}, hutang CC ${fmtIDR(ctx.cc)}, piutang ${fmtIDR(ctx.piutang)}.\nPertanyaan: ${q}\nJawab Bahasa Indonesia, singkat & actionable. Max 150 kata.`}]});
+    return d.content?.[0]?.text||"Maaf, tidak bisa menjawab.";
+  }catch{return"Maaf, AI tidak bisa dijangkau sekarang.";}
 }
 async function aiSmartImport(b64,mime,ctxHint="bank") {
   const isPdf=mime==="application/pdf";
   const contentBlock=isPdf?{type:"document",source:{type:"base64",media_type:"application/pdf",data:b64}}:{type:"image",source:{type:"base64",media_type:mime,data:b64}};
   const ctxLabel=ctxHint==="cc"?"Tagihan/transaksi kartu kredit":ctxHint==="income"?"Pemasukan/income":"Mutasi rekening bank";
   const prompt=`Ekstrak SEMUA transaksi dari ${isPdf?"dokumen mutasi/tagihan":"gambar struk/screenshot mutasi"} ini.\nKonteks: ${ctxLabel}.\n\nResponse HANYA JSON array tanpa markdown:\n[{"date":"YYYY-MM-DD","description":"keterangan transaksi","amount":<angka_positif>,"currency":"IDR","type":"out|in|transfer|cc_payment","category":"Belanja|Makan & Minum|Transport|Tagihan|Hotel/Travel|Gaji|Transfer Masuk|Investasi|Lainnya","from_account":"nama bank asal jika terdeteksi","to_account":"nama tujuan jika transfer","is_cc_payment":false,"is_transfer":false,"confidence":0.9}]\n\nRules:\n- TRSF/TRF/Transfer/TF/BG/OVERBOOKING → type=transfer, is_transfer=true\n- Nama kartu/CC/bayar tagihan → type=cc_payment, is_cc_payment=true\n- TOP UP/SETOR/KREDIT/CR/Gaji/Masuk → type=in\n- Jumlah negatif → type=out, pakai nilai absolut\n- confidence<0.7 = perlu review user\n- Ekstrak SEMUA transaksi, jangan lewatkan satu pun`;
-  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:AI_HEADERS,body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:8000,messages:[{role:"user",content:[contentBlock,{type:"text",text:prompt}]}]})});
-  if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error?.message||`HTTP ${r.status}`);}
-  const d=await r.json();
-  const text=(d.content?.[0]?.text||"[]").replace(/```json|```/g,"").trim();
-  console.log("[aiSmartImport] rows:",JSON.parse(text).length,"raw:",text.slice(0,200));
-  return JSON.parse(text);
+  const d=await aiCall({model:"claude-sonnet-4-20250514",max_tokens:8000,messages:[{role:"user",content:[contentBlock,{type:"text",text:prompt}]}]});
+  const text=d.content?.[0]?.text||"[]";
+  const rows=parseJSON(text,[]);
+  console.log("[aiSmartImport] rows:",rows.length,"raw:",text.slice(0,200));
+  return rows;
 }
 async function aiAssetValuation(asset) {
-  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:AI_HEADERS,body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:400,messages:[{role:"user",content:`Estimasikan nilai pasar aset berikut dalam IDR (Rupiah Indonesia) berdasarkan kondisi pasar Indonesia saat ini.\n\nAset: ${asset.name}\nKategori: ${asset.category}\nNilai Beli: Rp ${Number(asset.purchase_value||0).toLocaleString("id-ID")}\nTanggal Beli: ${asset.purchase_date||"tidak diketahui"}\nNilai Tercatat: Rp ${Number(asset.current_value||0).toLocaleString("id-ID")}\nCatatan: ${asset.notes||"-"}\n\nJawab HANYA JSON: {"estimated_value":<angka_IDR>,"confidence":"low|medium|high","reasoning":"<max 60 kata>"}`}]})});
-  if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.error?.message||`HTTP ${r.status}`);}
-  const d=await r.json();
-  return JSON.parse((d.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim());
+  const d=await aiCall({model:"claude-sonnet-4-20250514",max_tokens:400,messages:[{role:"user",content:`Estimasikan nilai pasar aset berikut dalam IDR (Rupiah Indonesia) berdasarkan kondisi pasar Indonesia saat ini.\n\nAset: ${asset.name}\nKategori: ${asset.category}\nNilai Beli: Rp ${Number(asset.purchase_value||0).toLocaleString("id-ID")}\nTanggal Beli: ${asset.purchase_date||"tidak diketahui"}\nNilai Tercatat: Rp ${Number(asset.current_value||0).toLocaleString("id-ID")}\nCatatan: ${asset.notes||"-"}\n\nJawab HANYA JSON: {"estimated_value":<angka_IDR>,"confidence":"low|medium|high","reasoning":"<max 60 kata>"}`}]});
+  return parseJSON(d.content?.[0]?.text||"{}",{});
 }
 
 // ─── SUPABASE API ─────────────────────────────────────────────
