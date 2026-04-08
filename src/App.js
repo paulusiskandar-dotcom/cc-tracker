@@ -32,6 +32,11 @@ const BANKS_L   = ["BCA","Mandiri","BNI","CIMB","BRI","Permata","Danamon","OCBC"
 const NETWORKS  = ["Visa","Mastercard","JCB","Amex"];
 const ENT_COL   = {Pribadi:"#3b5bdb",Hamasa:"#0ca678",SDC:"#e67700",Travelio:"#0c8599",Lainnya:"#8a90aa"};
 const ENT_BG    = {Pribadi:"#eef2ff",Hamasa:"#e6fcf5",SDC:"#fff9db",Travelio:"#e3fafc",Lainnya:"#f0f1f7"};
+const ASSET_CATS= ["Properti","Kendaraan","Saham","Reksa Dana","Crypto","Emas","Deposito","Barang Berharga","FX/Cash"];
+const LIAB_CATS = ["KPR","Kredit Kendaraan","Pinjaman"];
+const ASSET_ICON= {Properti:"🏠",Kendaraan:"🚗",Saham:"📈","Reksa Dana":"💼",Crypto:"🪙",Emas:"🏅",Deposito:"🏦","Barang Berharga":"💎","FX/Cash":"💵"};
+const ASSET_COL = {Properti:"#3b5bdb",Kendaraan:"#0c8599",Saham:"#0ca678","Reksa Dana":"#7048e8",Crypto:"#e67700",Emas:"#d4a017",Deposito:"#2563eb","Barang Berharga":"#9333ea","FX/Cash":"#0891b2"};
+const ASSET_BG  = {Properti:"#eef2ff",Kendaraan:"#e3fafc",Saham:"#e6fcf5","Reksa Dana":"#f3f0ff",Crypto:"#fff9db",Emas:"#fef9c3",Deposito:"#eff6ff","Barang Berharga":"#faf5ff","FX/Cash":"#ecfeff"};
 
 // ─── HELPERS ──────────────────────────────────────────────────
 const getCur   = c => CURRENCIES.find(x=>x.code===c)||CURRENCIES[0];
@@ -92,6 +97,11 @@ async function aiCategorize(desc) {
 async function aiAdvisor(q,ctx) {
   const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,messages:[{role:"user",content:`Kamu financial advisor pribadi.\nData: saldo bank ${fmtIDR(ctx.bank)}, hutang CC ${fmtIDR(ctx.cc)}, piutang ${fmtIDR(ctx.piutang)}.\nPertanyaan: ${q}\nJawab Bahasa Indonesia, singkat & actionable. Max 150 kata.`}]})});
   const d=await r.json(); return d.content?.[0]?.text||"Maaf, tidak bisa menjawab.";
+}
+async function aiAssetValuation(asset) {
+  const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","anthropic-version":"2023-06-01"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:400,messages:[{role:"user",content:`Estimasikan nilai pasar aset berikut dalam IDR (Rupiah Indonesia) berdasarkan kondisi pasar Indonesia saat ini.\n\nAset: ${asset.name}\nKategori: ${asset.category}\nNilai Beli: Rp ${Number(asset.purchase_value||0).toLocaleString("id-ID")}\nTanggal Beli: ${asset.purchase_date||"tidak diketahui"}\nNilai Tercatat: Rp ${Number(asset.current_value||0).toLocaleString("id-ID")}\nCatatan: ${asset.notes||"-"}\n\nJawab HANYA JSON: {"estimated_value":<angka_IDR>,"confidence":"low|medium|high","reasoning":"<max 60 kata>"}`}]})});
+  const d=await r.json();
+  return JSON.parse((d.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim());
 }
 
 // ─── SUPABASE API ─────────────────────────────────────────────
@@ -162,6 +172,22 @@ const api = {
     delete: async id=>supabase.from("employee_loans").delete().eq("id",id),
     getPayments: async u=>{const{data}=await supabase.from("employee_loan_payments").select("*").eq("user_id",u);return data||[];},
     addPayment: async(u,d)=>{const{data}=await supabase.from("employee_loan_payments").insert([{...d,user_id:u}]).select().single();return data;},
+  },
+  asset:{
+    getAll: async u=>{const{data}=await supabase.from("assets").select("*").eq("user_id",u).order("created_at",{ascending:false});return data||[];},
+    create: async(u,d)=>{const{data}=await supabase.from("assets").insert([{...d,user_id:u}]).select().single();return data;},
+    update: async(id,d)=>{const{data}=await supabase.from("assets").update(d).eq("id",id).select().single();return data;},
+    delete: async id=>supabase.from("assets").delete().eq("id",id),
+  },
+  liab:{
+    getAll: async u=>{const{data}=await supabase.from("liabilities").select("*").eq("user_id",u).order("created_at",{ascending:false});return data||[];},
+    create: async(u,d)=>{const{data}=await supabase.from("liabilities").insert([{...d,user_id:u}]).select().single();return data;},
+    update: async(id,d)=>{const{data}=await supabase.from("liabilities").update(d).eq("id",id).select().single();return data;},
+    delete: async id=>supabase.from("liabilities").delete().eq("id",id),
+  },
+  assetHist:{
+    getAll: async u=>{const{data}=await supabase.from("asset_price_history").select("*").eq("user_id",u).order("recorded_date",{ascending:false});return data||[];},
+    create: async(u,d)=>{const{data}=await supabase.from("asset_price_history").insert([{...d,user_id:u}]).select().single();return data;},
   },
   settings:{
     get: async(u,k,def)=>{const{data}=await supabase.from("app_settings").select("value").eq("user_id",u).eq("key",k).single();return data?.value!==undefined?JSON.parse(data.value):def;},
@@ -250,9 +276,15 @@ function Finance({user,signOut}){
   const [empLoans,setEmpLoans]     = useState([]);
   const [empPayments,setEmpPayments] = useState([]);
 
+  // Assets
+  const [assets,setAssets]           = useState([]);
+  const [liabilities,setLiabilities] = useState([]);
+  const [assetHistory,setAssetHistory] = useState([]);
+
   // UI
   const [ccSubTab,setCCSubTab]   = useState("transactions");
   const [piSubTab,setPiSubTab]   = useState("reimburse");
+  const [assetSubTab,setAssetSubTab] = useState("overview");
   const [showTxForm,setShowTxForm]     = useState(false);
   const [showCardForm,setShowCardForm] = useState(false);
   const [showInstForm,setShowInstForm] = useState(false);
@@ -268,6 +300,11 @@ function Finance({user,signOut}){
   const [showLoanForm,setShowLoanForm] = useState(false);
   const [showPayLoan,setShowPayLoan]   = useState(false);
   const [showSettlePiu,setShowSettlePiu] = useState(false);
+  const [showAssetForm,setShowAssetForm] = useState(false);
+  const [showLiabForm,setShowLiabForm]   = useState(false);
+  const [showUpdateVal,setShowUpdateVal] = useState(false);
+  const [aiValLoading,setAiValLoading]   = useState(false);
+  const [aiValResult,setAiValResult]     = useState(null);
 
   const [editTxId,setEditTxId]     = useState(null);
   const [editCardId,setEditCardId] = useState(null);
@@ -278,6 +315,9 @@ function Finance({user,signOut}){
   const [editLoanId,setEditLoanId] = useState(null);
   const [selectedLoan,setSelectedLoan] = useState(null);
   const [selectedReimbTx,setSelectedReimbTx] = useState(null);
+  const [editAssetId,setEditAssetId]   = useState(null);
+  const [editLiabId,setEditLiabId]     = useState(null);
+  const [selectedAsset,setSelectedAsset] = useState(null);
 
   const [filterCard,setFilterCard]     = useState("all");
   const [filterMonth,setFilterMonth]   = useState("all");
@@ -323,6 +363,9 @@ function Finance({user,signOut}){
   const ERA= {entity:"Hamasa",description:"",color:"#0ca678"};
   const ERT= {account_id:"",tx_date:today(),description:"",amount:"",type:"out",source:"cc",notes:""};
   const EL = {employee_name:"",employee_dept:"",total_amount:"",monthly_installment:"",start_date:today(),notes:""};
+  const EA = {name:"",category:"Properti",current_value:"",purchase_value:"",purchase_date:"",currency:"IDR",notes:"",linked_bank_id:""};
+  const ELB= {name:"",category:"KPR",outstanding:"",original_amount:"",monthly_payment:"",interest_rate:"",start_date:today(),end_date:"",linked_asset_id:"",notes:""};
+  const EUV= {value:"",date:today(),notes:""};
 
   const [txForm,setTxForm]     = useState(ET);
   const [cardForm,setCardForm] = useState(EC);
@@ -334,23 +377,28 @@ function Finance({user,signOut}){
   const [reimbAccForm,setReimbAccForm] = useState(ERA);
   const [reimbTxForm,setReimbTxForm]   = useState(ERT);
   const [loanForm,setLoanForm] = useState(EL);
+  const [assetForm,setAssetForm]   = useState(EA);
+  const [liabForm,setLiabForm]     = useState(ELB);
+  const [updateValForm,setUpdateValForm] = useState(EUV);
 
   // Load all data
   useEffect(()=>{
     (async()=>{
       setLoading(true);
-      const [c,t,i,b,r,fx,ba,mu,ra,rt,el,ep,dark]=await Promise.all([
+      const [c,t,i,b,r,fx,ba,mu,ra,rt,el,ep,dark,as,ls,ah]=await Promise.all([
         api.cards.getAll(user.id),api.tx.getAll(user.id),api.inst.getAll(user.id),
         api.budgets.getMonth(user.id,curMonth),api.recur.getAll(user.id),
         api.fx.getAll(user.id),api.bank.getAll(user.id),api.mut.getAll(user.id),
         api.reimb.getAccounts(user.id),api.reimb.getTx(user.id),
         api.empLoan.getAll(user.id),api.empLoan.getPayments(user.id),
         api.settings.get(user.id,"isDark",false),
+        api.asset.getAll(user.id),api.liab.getAll(user.id),api.assetHist.getAll(user.id),
       ]);
       setCards(c);setTxList(t);setInstList(i);setBudgets(b);setRecur(r);
       if(Object.keys(fx).length)setFxRates(fx);
       setBankAccs(ba);setMuts(mu);setReimbAccs(ra);setReimbTx(rt);
       setEmpLoans(el);setEmpPayments(ep);setIsDark(dark);
+      setAssets(as);setLiabilities(ls);setAssetHistory(ah);
       setLoading(false);
     })();
   },[user.id]);
@@ -429,7 +477,9 @@ function Finance({user,signOut}){
     return{byEntity,totalOut,totalSettled,loanStats,totalLoans,grandTotal:totalOut+totalLoans};
   },[reimbAccs,reimbTx,empLoans,empPayments]);
 
-  const netWorth=bankStats.private-ccStats.totalCC;
+  const totalAssets=assets.reduce((s,a)=>s+Number(a.current_value||0),0);
+  const totalLiabs=liabilities.reduce((s,l)=>s+Number(l.outstanding||0),0);
+  const netWorth=bankStats.private+totalAssets-ccStats.totalCC-totalLiabs;
 
   // Alerts
   const alerts=useMemo(()=>{
@@ -587,6 +637,46 @@ function Finance({user,signOut}){
   };
   const delLoan=async id=>{if(window.confirm("Hapus piutang karyawan?")){await api.empLoan.delete(id);setEmpLoans(p=>p.filter(l=>l.id!==id));}};
 
+  // ── Asset Handlers
+  const submitAsset=async()=>{
+    if(!assetForm.name||!assetForm.category)return;
+    setSaving(true);
+    const d={...assetForm,current_value:Number(assetForm.current_value||0),purchase_value:Number(assetForm.purchase_value||0)};
+    if(editAssetId){const r=await api.asset.update(editAssetId,d);setAssets(p=>p.map(a=>a.id===editAssetId?r:a));setEditAssetId(null);}
+    else{const r=await api.asset.create(user.id,d);setAssets(p=>[r,...p]);}
+    setAssetForm(EA);setShowAssetForm(false);setSaving(false);
+  };
+  const deleteAsset=async id=>{if(window.confirm("Hapus aset?")){await api.asset.delete(id);setAssets(p=>p.filter(a=>a.id!==id));}};
+  const submitLiab=async()=>{
+    if(!liabForm.name||!liabForm.category)return;
+    setSaving(true);
+    const d={...liabForm,outstanding:Number(liabForm.outstanding||0),original_amount:Number(liabForm.original_amount||0),monthly_payment:Number(liabForm.monthly_payment||0),interest_rate:Number(liabForm.interest_rate||0)};
+    if(editLiabId){const r=await api.liab.update(editLiabId,d);setLiabilities(p=>p.map(l=>l.id===editLiabId?r:l));setEditLiabId(null);}
+    else{const r=await api.liab.create(user.id,d);setLiabilities(p=>[r,...p]);}
+    setLiabForm(ELB);setShowLiabForm(false);setSaving(false);
+  };
+  const deleteLiab=async id=>{if(window.confirm("Hapus liabilitas?")){await api.liab.delete(id);setLiabilities(p=>p.filter(l=>l.id!==id));}};
+  const submitUpdateVal=async()=>{
+    if(!selectedAsset||!updateValForm.value)return;
+    setSaving(true);
+    const newVal=Number(updateValForm.value);
+    await api.asset.update(selectedAsset.id,{current_value:newVal});
+    setAssets(p=>p.map(a=>a.id===selectedAsset.id?{...a,current_value:newVal}:a));
+    await api.assetHist.create(user.id,{asset_id:selectedAsset.id,recorded_date:updateValForm.date,value:newVal,notes:updateValForm.notes||""});
+    setAssetHistory(p=>[{asset_id:selectedAsset.id,recorded_date:updateValForm.date,value:newVal},...p]);
+    setShowUpdateVal(false);setSelectedAsset(null);setUpdateValForm(EUV);setAiValResult(null);setSaving(false);
+  };
+  const runAIValuation=async()=>{
+    if(!selectedAsset)return;
+    setAiValLoading(true);setAiValResult(null);
+    try{
+      const r=await aiAssetValuation(selectedAsset);
+      setAiValResult(r);
+      if(r.estimated_value)setUpdateValForm(f=>({...f,value:String(r.estimated_value)}));
+    }catch{setAiValResult({error:"Gagal mendapat estimasi AI"});}
+    setAiValLoading(false);
+  };
+
   // ── Scanner
   const handleFile=e=>{
     const f=e.target.files?.[0];if(!f)return;
@@ -658,15 +748,16 @@ function Finance({user,signOut}){
             </div>
           </div>
           <div className="nav-sec">Menu Utama</div>
-          {TABS.slice(0,4).map(t=>(
+          {TABS.slice(0,5).map(t=>(
             <button key={t.id} className={`nb ${tab===t.id?"on":""}`} onClick={()=>setTab(t.id)}>
               <div className="nb-ic">{t.icon}</div>{t.label}
               {t.id==="dashboard"&&alerts.length>0&&<span className="n-badge">{alerts.length}</span>}
               {t.id==="piutang"&&piutangStats.grandTotal>0&&<span className="n-badge" style={{background:th.am}}>{fmtIDR(piutangStats.grandTotal,true)}</span>}
+              {t.id==="asset"&&assets.length>0&&<span className="n-badge" style={{background:th.te,fontSize:8}}>{fmtIDR(totalAssets,true)}</span>}
             </button>
           ))}
           <div className="nav-sec">Segera Hadir</div>
-          {TABS.slice(4,7).map(t=>(
+          {TABS.slice(5,7).map(t=>(
             <button key={t.id} className="nb" onClick={()=>setTab(t.id)}>
               <div className="nb-ic">{t.icon}</div>{t.label}
               <span className="n-soon">Soon</span>
@@ -708,6 +799,7 @@ function Finance({user,signOut}){
             {tab==="cc"&&<button className="btn btn-primary" onClick={()=>{setEditTxId(null);setTxForm({...ET,card_id:cards[0]?.id||""});setShowTxForm(true);}}>+ Transaksi</button>}
             {tab==="bank"&&<button className="btn btn-primary" onClick={()=>{setEditBankId(null);setBankForm(EBA);setShowBankForm(true);}}>+ Rekening</button>}
             {tab==="piutang"&&<button className="btn btn-primary" onClick={()=>{setShowReimbTx(true);setReimbTxForm({...ERT,account_id:reimbAccs[0]?.id||""});}}>+ Piutang</button>}
+            {tab==="asset"&&<button className="btn btn-primary" onClick={()=>{setEditAssetId(null);setAssetForm(EA);setShowAssetForm(true);}}>+ Aset</button>}
           </div>
         </div>
 
@@ -728,7 +820,7 @@ function Finance({user,signOut}){
                 <div style={{fontSize:10,fontWeight:700,opacity:.6,textTransform:"uppercase",letterSpacing:1.5,marginBottom:5}}>Estimasi Net Worth</div>
                 <div style={{fontSize:28,fontWeight:800,fontFamily:"'JetBrains Mono',monospace",letterSpacing:"-1px",marginBottom:14}}>{fmtIDR(netWorth)}</div>
                 <div style={{display:"flex",gap:20,flexWrap:"wrap"}}>
-                  {[["Saldo Pribadi",bankStats.private,"rgba(255,255,255,.9)"],["Hutang CC",ccStats.totalCC,"#ffa8a8"],["Piutang",piutangStats.grandTotal,"#ffd43b"]].map(([l,v,c])=>(
+                  {[["Saldo Bank",bankStats.private,"rgba(255,255,255,.9)"],["Total Aset",totalAssets,"#a5f3fc"],["Hutang CC",ccStats.totalCC,"#ffa8a8"],["Liabilitas",totalLiabs,"#fca5a5"]].map(([l,v,c])=>(
                     <div key={l}>
                       <div style={{fontSize:9,opacity:.5,marginBottom:2,textTransform:"uppercase",letterSpacing:.5}}>{l}</div>
                       <div style={{fontSize:13,fontWeight:700,fontFamily:"'JetBrains Mono',monospace",color:c}}>{fmtIDR(v,true)}</div>
@@ -742,7 +834,7 @@ function Finance({user,signOut}){
                 {[
                   ["CC Bulan Ini","💳",fmtIDR(ccStats.totalCC,true),`${cards.length} kartu`,th.acBg,th.ac],
                   ["Saldo Bank","🏦",fmtIDR(bankStats.private,true),`${bankAccs.filter(b=>b.include_networth).length} rekening`,th.grBg,th.gr],
-                  ["Piutang","📋",fmtIDR(piutangStats.grandTotal,true),"belum lunas",th.amBg,th.am],
+                  ["Total Aset","📈",fmtIDR(totalAssets,true),`${assets.length} aset`,th.teBg,th.te],
                   ["Net Worth","💎",fmtIDR(netWorth,true),"estimasi",th.puBg,th.pu],
                 ].map(([l,ic,v,sub,bg,col])=>(
                   <div key={l} className="stat-card" style={{background:bg,borderColor:col+"44"}}>
@@ -1272,14 +1364,253 @@ function Finance({user,signOut}){
             </>
           )}
 
+          {/* ══ ASSET TRACKER ══ */}
+          {tab==="asset"&&(
+            <>
+              {/* Summary Hero */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginBottom:14}}>
+                {[["Total Aset",totalAssets,th.te,th.teBg,"📈"],["Total Liabilitas",totalLiabs,th.rd,th.rdBg,"📉"],["Aset Bersih",totalAssets-totalLiabs,totalAssets-totalLiabs>=0?th.gr:th.rd,totalAssets-totalLiabs>=0?th.grBg:th.rdBg,"💎"]].map(([l,v,col,bg,ic])=>(
+                  <div key={l} className="card anim" style={{background:bg,borderColor:col+"33",border:`1px solid ${col}33`,textAlign:"center",padding:"12px 10px"}}>
+                    <div style={{fontSize:18,marginBottom:4}}>{ic}</div>
+                    <div style={{fontSize:9,fontWeight:700,color:col,textTransform:"uppercase",letterSpacing:.8,marginBottom:3}}>{l}</div>
+                    <div style={{fontSize:13,fontWeight:800,fontFamily:"'JetBrains Mono',monospace",color:col}}>{fmtIDR(v,true)}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Subtabs */}
+              <div className="subtabs anim">
+                {[["overview","◎ Overview"],["assets","📊 Aset"],["liabilitas","📉 Liabilitas"]].map(([id,label])=>(
+                  <button key={id} className={`stab ${assetSubTab===id?"on":""}`} onClick={()=>setAssetSubTab(id)}>{label}</button>
+                ))}
+              </div>
+
+              {/* ── Overview ── */}
+              {assetSubTab==="overview"&&(
+                <>
+                  {assets.length===0&&liabilities.length===0?
+                    <Empty icon="📈" msg="Belum ada aset atau liabilitas. Mulai tambah aset kamu!" th={th} onAdd={()=>{setEditAssetId(null);setAssetForm(EA);setShowAssetForm(true);}}/>
+                  :<>
+                    {/* Allocation by Category */}
+                    {assets.length>0&&(
+                      <>
+                        <div className="sec-hd"><div className="sec-title">Alokasi Aset</div></div>
+                        <div className="card anim" style={{marginBottom:14}}>
+                          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
+                            <div style={{flex:"0 0 140px"}}>
+                              <ResponsiveContainer width={140} height={140}>
+                                <PieChart>
+                                  <Pie data={ASSET_CATS.map(cat=>({name:cat,value:assets.filter(a=>a.category===cat).reduce((s,a)=>s+Number(a.current_value||0),0)})).filter(d=>d.value>0)} cx={65} cy={65} innerRadius={40} outerRadius={65} paddingAngle={2} dataKey="value">
+                                    {ASSET_CATS.map(cat=><Cell key={cat} fill={ASSET_COL[cat]||th.ac}/>)}
+                                  </Pie>
+                                  <Tooltip contentStyle={{background:th.sur,border:`1px solid ${th.bor}`,borderRadius:8,fontSize:10}} formatter={v=>fmtIDR(v,true)}/>
+                                </PieChart>
+                              </ResponsiveContainer>
+                            </div>
+                            <div style={{flex:1,minWidth:120}}>
+                              {ASSET_CATS.map(cat=>{
+                                const val=assets.filter(a=>a.category===cat).reduce((s,a)=>s+Number(a.current_value||0),0);
+                                if(!val)return null;
+                                const pct=totalAssets>0?(val/totalAssets*100).toFixed(1):0;
+                                return(
+                                  <div key={cat} style={{display:"flex",alignItems:"center",gap:7,marginBottom:6}}>
+                                    <div style={{width:8,height:8,borderRadius:"50%",background:ASSET_COL[cat],flexShrink:0}}/>
+                                    <span style={{fontSize:11,flex:1}}>{ASSET_ICON[cat]} {cat}</span>
+                                    <span style={{fontSize:10,fontFamily:"'JetBrains Mono',monospace",color:th.tx2,fontWeight:600}}>{pct}%</span>
+                                    <span style={{fontSize:10,fontFamily:"'JetBrains Mono',monospace",color:th.tx3}}>{fmtIDR(val,true)}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    {/* Category Summary Cards */}
+                    {ASSET_CATS.map(cat=>{
+                      const items=assets.filter(a=>a.category===cat);
+                      if(!items.length)return null;
+                      const total=items.reduce((s,a)=>s+Number(a.current_value||0),0);
+                      const totalBuy=items.reduce((s,a)=>s+Number(a.purchase_value||0),0);
+                      const gain=total-totalBuy;
+                      const gainPct=totalBuy>0?(gain/totalBuy*100):0;
+                      return(
+                        <div key={cat} className="card anim" style={{marginBottom:10,borderLeft:`3px solid ${ASSET_COL[cat]}`}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                            <div style={{display:"flex",alignItems:"center",gap:8}}>
+                              <div style={{width:32,height:32,borderRadius:9,background:ASSET_BG[cat],display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>{ASSET_ICON[cat]}</div>
+                              <div>
+                                <div style={{fontWeight:700,fontSize:13}}>{cat}</div>
+                                <div style={{fontSize:10,color:th.tx3}}>{items.length} item</div>
+                              </div>
+                            </div>
+                            <div style={{textAlign:"right"}}>
+                              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:14,fontWeight:800}}>{fmtIDR(total,true)}</div>
+                              {totalBuy>0&&<div style={{fontSize:10,color:gain>=0?th.gr:th.rd,fontWeight:600}}>{gain>=0?"+":""}{gainPct.toFixed(1)}%</div>}
+                            </div>
+                          </div>
+                          {items.map(a=>(
+                            <div key={a.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderTop:`1px solid ${th.bor}`}}>
+                              <div style={{flex:1,minWidth:0}}>
+                                <div style={{fontSize:12,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{a.name}</div>
+                                {a.purchase_date&&<div style={{fontSize:10,color:th.tx3}}>Beli: {a.purchase_date}</div>}
+                              </div>
+                              <div style={{textAlign:"right",marginLeft:10,flexShrink:0}}>
+                                <div style={{fontSize:12,fontWeight:700,fontFamily:"'JetBrains Mono',monospace"}}>{fmtIDR(Number(a.current_value||0),true)}</div>
+                                <div style={{display:"flex",gap:4,justifyContent:"flex-end",marginTop:4}}>
+                                  <button className="act-btn" onClick={()=>{setSelectedAsset(a);setUpdateValForm({...EUV,value:String(a.current_value||"")});setAiValResult(null);setShowUpdateVal(true);}} style={{borderColor:th.te,color:th.te,fontSize:9}}>✏️ Nilai</button>
+                                  <button className="act-btn" onClick={()=>{setAssetForm({...a,current_value:String(a.current_value||""),purchase_value:String(a.purchase_value||"")});setEditAssetId(a.id);setShowAssetForm(true);}} style={{borderColor:th.bor,color:th.tx3}}>⚙️</button>
+                                  <button className="act-btn" onClick={()=>deleteAsset(a.id)} style={{borderColor:th.bor,color:th.rd}}>🗑</button>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })}
+
+                    {/* Liabilities quick */}
+                    {liabilities.length>0&&(
+                      <>
+                        <div className="sec-hd" style={{marginTop:4}}><div className="sec-title">Liabilitas</div><button className="sec-link" onClick={()=>setAssetSubTab("liabilitas")}>Semua →</button></div>
+                        <div className="card anim" style={{borderLeft:`3px solid ${th.rd}`}}>
+                          {liabilities.map((l,i)=>{
+                            const pct=Number(l.original_amount)>0?(1-Number(l.outstanding)/Number(l.original_amount))*100:0;
+                            return(
+                              <div key={l.id} style={{padding:"8px 0",borderBottom:i<liabilities.length-1?`1px solid ${th.bor}`:"none"}}>
+                                <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+                                  <div>
+                                    <span style={{fontSize:12,fontWeight:600}}>{l.name}</span>
+                                    <Tag bg={th.rdBg} color={th.rd} style={{marginLeft:6}}>{l.category}</Tag>
+                                  </div>
+                                  <span style={{fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:700,color:th.rd}}>{fmtIDR(Number(l.outstanding),true)}</span>
+                                </div>
+                                {Number(l.original_amount)>0&&<div style={{height:4,background:th.sur3,borderRadius:2}}><div style={{height:"100%",width:`${pct}%`,background:th.gr,borderRadius:2}}/></div>}
+                              </div>
+                            );
+                          })}
+                          <div style={{display:"flex",justifyContent:"space-between",paddingTop:8,fontWeight:700,fontSize:12}}>
+                            <span>Total Liabilitas</span>
+                            <span style={{fontFamily:"'JetBrains Mono',monospace",color:th.rd}}>{fmtIDR(totalLiabs)}</span>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </>}
+                </>
+              )}
+
+              {/* ── Aset Detail ── */}
+              {assetSubTab==="assets"&&(
+                <>
+                  <div className="sec-hd">
+                    <div className="sec-title">Semua Aset ({assets.length})</div>
+                    <button className="btn btn-primary" onClick={()=>{setEditAssetId(null);setAssetForm(EA);setShowAssetForm(true);}}>+ Tambah</button>
+                  </div>
+                  {assets.length===0?<Empty icon="📈" msg="Belum ada aset" th={th} onAdd={()=>{setEditAssetId(null);setAssetForm(EA);setShowAssetForm(true);}}/>
+                  :<div className="card anim">
+                    {assets.map((a,i)=>{
+                      const gain=Number(a.current_value||0)-Number(a.purchase_value||0);
+                      const gainPct=Number(a.purchase_value)>0?(gain/Number(a.purchase_value)*100):null;
+                      const lastH=assetHistory.filter(h=>h.asset_id===a.id)[0];
+                      return(
+                        <div key={a.id} className="tx-row" style={{animationDelay:`${Math.min(i,8)*.02}s`}}>
+                          <div className="tx-ic" style={{background:ASSET_BG[a.category]||th.sur2,color:ASSET_COL[a.category]||th.ac,fontSize:16}}>{ASSET_ICON[a.category]||"💼"}</div>
+                          <div style={{flex:1,minWidth:0}}>
+                            <div style={{fontWeight:600,fontSize:13,marginBottom:4,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{a.name}</div>
+                            <div className="tag-row">
+                              <Tag bg={ASSET_BG[a.category]||th.sur3} color={ASSET_COL[a.category]||th.tx3}>{a.category}</Tag>
+                              {a.currency&&a.currency!=="IDR"&&<Tag bg={th.amBg} color={th.am}>🌏 {a.currency}</Tag>}
+                              {a.purchase_date&&<Tag bg={th.sur3} color={th.tx3}>{a.purchase_date}</Tag>}
+                              {lastH&&<Tag bg={th.sur3} color={th.tx3}>Update: {lastH.recorded_date}</Tag>}
+                            </div>
+                          </div>
+                          <div style={{textAlign:"right",flexShrink:0,marginLeft:8}}>
+                            <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:13,fontWeight:700}}>{fmtIDR(Number(a.current_value||0),true)}</div>
+                            {gainPct!==null&&<div style={{fontSize:10,color:gain>=0?th.gr:th.rd,fontWeight:600}}>{gain>=0?"+":""}{gainPct.toFixed(1)}%</div>}
+                            <div className="act-row">
+                              <button className="act-btn" onClick={()=>{setSelectedAsset(a);setUpdateValForm({...EUV,value:String(a.current_value||"")});setAiValResult(null);setShowUpdateVal(true);}} style={{borderColor:th.te,color:th.te}}>✏️ Nilai</button>
+                              <button className="act-btn" onClick={()=>{setAssetForm({...a,current_value:String(a.current_value||""),purchase_value:String(a.purchase_value||"")});setEditAssetId(a.id);setShowAssetForm(true);}} style={{borderColor:th.bor,color:th.tx3}}>⚙️</button>
+                              <button className="act-btn" onClick={()=>deleteAsset(a.id)} style={{borderColor:th.bor,color:th.rd}}>🗑</button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>}
+                </>
+              )}
+
+              {/* ── Liabilitas ── */}
+              {assetSubTab==="liabilitas"&&(
+                <>
+                  <div className="sec-hd">
+                    <div className="sec-title">Liabilitas ({liabilities.length})</div>
+                    <button className="btn btn-primary" onClick={()=>{setEditLiabId(null);setLiabForm(ELB);setShowLiabForm(true);}}>+ Tambah</button>
+                  </div>
+                  {liabilities.length===0?<Empty icon="📉" msg="Belum ada liabilitas" th={th} onAdd={()=>{setEditLiabId(null);setLiabForm(ELB);setShowLiabForm(true);}}/>
+                  :<>
+                    {liabilities.map((l,i)=>{
+                      const orig=Number(l.original_amount||0);
+                      const out=Number(l.outstanding||0);
+                      const paid=orig-out;
+                      const pct=orig>0?(paid/orig*100):0;
+                      return(
+                        <div key={l.id} className="card anim" style={{marginBottom:10,animationDelay:`${i*.04}s`,borderLeft:`3px solid ${th.rd}`}}>
+                          <div style={{display:"flex",justifyContent:"space-between",marginBottom:10}}>
+                            <div>
+                              <div style={{fontWeight:700,fontSize:14}}>{l.name}</div>
+                              <div style={{fontSize:10,color:th.tx3,marginTop:2,display:"flex",gap:6}}>
+                                <Tag bg={th.rdBg} color={th.rd}>{l.category}</Tag>
+                                {l.interest_rate>0&&<Tag bg={th.amBg} color={th.am}>{l.interest_rate}% p.a.</Tag>}
+                                {l.monthly_payment>0&&<Tag bg={th.sur3} color={th.tx3}>{fmtIDR(l.monthly_payment,true)}/bln</Tag>}
+                              </div>
+                            </div>
+                            <div style={{textAlign:"right"}}>
+                              <div style={{fontSize:9,color:th.tx3}}>Outstanding</div>
+                              <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:15,fontWeight:800,color:th.rd}}>{fmtIDR(out,true)}</div>
+                            </div>
+                          </div>
+                          {orig>0&&(
+                            <>
+                              <div style={{height:7,background:th.sur3,borderRadius:4,overflow:"hidden",marginBottom:6}}>
+                                <div style={{height:"100%",width:`${Math.min(pct,100)}%`,background:`linear-gradient(90deg,${th.gr},#059669)`,borderRadius:4}}/>
+                              </div>
+                              <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:th.tx3,marginBottom:8}}>
+                                <span>Dibayar: {fmtIDR(paid,true)}</span>
+                                <span>Total: {fmtIDR(orig,true)} · {pct.toFixed(0)}%</span>
+                              </div>
+                            </>
+                          )}
+                          {(l.start_date||l.end_date)&&<div style={{fontSize:10,color:th.tx3,marginBottom:8}}>{l.start_date&&`Mulai: ${l.start_date}`}{l.end_date&&` · Selesai: ${l.end_date}`}</div>}
+                          <div style={{display:"flex",gap:6}}>
+                            <button className="btn btn-ghost" style={{fontSize:11,padding:"5px 12px"}} onClick={()=>{setLiabForm({...l,outstanding:String(l.outstanding||""),original_amount:String(l.original_amount||""),monthly_payment:String(l.monthly_payment||""),interest_rate:String(l.interest_rate||"")});setEditLiabId(l.id);setShowLiabForm(true);}}>✏️ Edit</button>
+                            <button className="btn btn-ghost" style={{fontSize:11,padding:"5px 12px",color:th.rd}} onClick={()=>deleteLiab(l.id)}>🗑 Hapus</button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div className="card anim" style={{background:th.rdBg,border:`1px solid ${th.rd}33`}}>
+                      <div style={{display:"flex",justifyContent:"space-between",fontWeight:700,fontSize:13}}>
+                        <span>Total Outstanding</span>
+                        <span style={{fontFamily:"'JetBrains Mono',monospace",color:th.rd}}>{fmtIDR(totalLiabs)}</span>
+                      </div>
+                    </div>
+                  </>}
+                </>
+              )}
+            </>
+          )}
+
           {/* Coming Soon tabs */}
-          {["asset","income","calendar"].includes(tab)&&(
+          {["income","calendar"].includes(tab)&&(
             <div style={{textAlign:"center",padding:"60px 20px"}}>
               <div style={{fontSize:48,marginBottom:14}}>🚧</div>
               <div style={{fontSize:20,fontWeight:800,marginBottom:8}}>Coming Soon</div>
               <div style={{fontSize:13,color:th.tx3,marginBottom:22}}>Modul <strong>{TABS.find(t=>t.id===tab)?.label}</strong> akan hadir di sesi berikutnya!</div>
               <div style={{display:"inline-flex",flexDirection:"column",gap:7,textAlign:"left"}}>
-                {(tab==="asset"?["Deposito + rollover + pajak","Saham IDX & US","Reksa dana","Properti + sewa Travelio","Cash FX real-time"]:tab==="income"?["Income: gaji, sewa, dividen","Expense: sync CC + bank","Cash flow prediction","Surplus/deficit bulanan"]:["Monthly calendar view","Upcoming transactions","Reminder H-7, H-3, H-1","Browser push notification"]).map(f=>(
+                {(tab==="income"?["Income: gaji, sewa, dividen","Expense: sync CC + bank","Cash flow prediction","Surplus/deficit bulanan"]:["Monthly calendar view","Upcoming transactions","Reminder H-7, H-3, H-1","Browser push notification"]).map(f=>(
                   <div key={f} style={{display:"flex",gap:9,fontSize:12,color:th.tx2}}>
                     <span style={{color:th.ac,fontWeight:700}}>→</span>{f}
                   </div>
@@ -1569,6 +1900,102 @@ function Finance({user,signOut}){
           <R2><F label="Tanggal Bayar" th={th}><input className="inp" type="date" value={loanPay.date} onChange={e=>setLoanPay(p=>({...p,date:e.target.value}))}/></F><F label="Jumlah (Rp)" th={th}><input className="inp" type="number" placeholder="0" value={loanPay.amount} onChange={e=>setLoanPay(p=>({...p,amount:e.target.value}))}/></F></R2>
           <F label="Catatan" th={th}><input className="inp" placeholder="Opsional..." value={loanPay.notes} onChange={e=>setLoanPay(p=>({...p,notes:e.target.value}))}/></F>
           <BtnRow onCancel={()=>setShowPayLoan(false)} onOk={submitLoanPay} label="Catat Pembayaran" th={th} saving={saving}/>
+        </div>
+      </Overlay>}
+
+      {/* Asset Form */}
+      {showAssetForm&&<Overlay onClose={()=>setShowAssetForm(false)} th={th} title={editAssetId?"✏️ Edit Aset":"📈 Tambah Aset"}>
+        <div style={{display:"flex",flexDirection:"column",gap:11}}>
+          <R2>
+            <F label="Nama Aset" th={th}><input className="inp" placeholder="Rumah Cipete, BBCA 100 lot..." value={assetForm.name} onChange={e=>setAssetForm(f=>({...f,name:e.target.value}))}/></F>
+            <F label="Kategori" th={th}><select className="inp" value={assetForm.category} onChange={e=>setAssetForm(f=>({...f,category:e.target.value}))}>{ASSET_CATS.map(c=><option key={c}>{c}</option>)}</select></F>
+          </R2>
+          <R2>
+            <F label="Nilai Sekarang (Rp)" th={th}><input className="inp" type="number" placeholder="0" value={assetForm.current_value} onChange={e=>setAssetForm(f=>({...f,current_value:e.target.value}))}/></F>
+            <F label="Nilai Beli (Rp)" th={th}><input className="inp" type="number" placeholder="0" value={assetForm.purchase_value} onChange={e=>setAssetForm(f=>({...f,purchase_value:e.target.value}))}/></F>
+          </R2>
+          <R2>
+            <F label="Tanggal Beli" th={th}><input className="inp" type="date" value={assetForm.purchase_date} onChange={e=>setAssetForm(f=>({...f,purchase_date:e.target.value}))}/></F>
+            <F label="Mata Uang" th={th}><select className="inp" value={assetForm.currency} onChange={e=>setAssetForm(f=>({...f,currency:e.target.value}))}>{CURRENCIES.map(c=><option key={c.code} value={c.code}>{c.flag} {c.code}</option>)}</select></F>
+          </R2>
+          {assetForm.category==="Deposito"&&<F label="Link Rekening Bank (Opsional)" th={th}><select className="inp" value={assetForm.linked_bank_id} onChange={e=>setAssetForm(f=>({...f,linked_bank_id:e.target.value}))}><option value="">— Tidak di-link —</option>{bankAccs.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}</select></F>}
+          <F label="Catatan" th={th}><input className="inp" placeholder="Detail, lokasi, ticker symbol..." value={assetForm.notes} onChange={e=>setAssetForm(f=>({...f,notes:e.target.value}))}/></F>
+          {assetForm.current_value&&assetForm.purchase_value&&(
+            <div style={{padding:"8px 12px",background:Number(assetForm.current_value)>=Number(assetForm.purchase_value)?th.grBg:th.rdBg,border:`1px solid ${Number(assetForm.current_value)>=Number(assetForm.purchase_value)?th.gr:th.rd}44`,borderRadius:9,fontSize:12,fontWeight:700,color:Number(assetForm.current_value)>=Number(assetForm.purchase_value)?th.gr:th.rd}}>
+              {Number(assetForm.current_value)>=Number(assetForm.purchase_value)?"▲":"▼"} {Math.abs(((Number(assetForm.current_value)-Number(assetForm.purchase_value))/Number(assetForm.purchase_value))*100).toFixed(1)}% dari harga beli · {fmtIDR(Number(assetForm.current_value)-Number(assetForm.purchase_value),true)}
+            </div>
+          )}
+          <BtnRow onCancel={()=>setShowAssetForm(false)} onOk={submitAsset} label={editAssetId?"Simpan":"Tambah Aset"} th={th} saving={saving}/>
+        </div>
+      </Overlay>}
+
+      {/* Liability Form */}
+      {showLiabForm&&<Overlay onClose={()=>setShowLiabForm(false)} th={th} title={editLiabId?"✏️ Edit Liabilitas":"📉 Tambah Liabilitas"}>
+        <div style={{display:"flex",flexDirection:"column",gap:11}}>
+          <R2>
+            <F label="Nama" th={th}><input className="inp" placeholder="KPR Cipete, Kredit Mobil..." value={liabForm.name} onChange={e=>setLiabForm(f=>({...f,name:e.target.value}))}/></F>
+            <F label="Kategori" th={th}><select className="inp" value={liabForm.category} onChange={e=>setLiabForm(f=>({...f,category:e.target.value}))}>{LIAB_CATS.map(c=><option key={c}>{c}</option>)}</select></F>
+          </R2>
+          <R2>
+            <F label="Sisa Hutang (Rp)" th={th}><input className="inp" type="number" placeholder="0" value={liabForm.outstanding} onChange={e=>setLiabForm(f=>({...f,outstanding:e.target.value}))}/></F>
+            <F label="Total Awal (Rp)" th={th}><input className="inp" type="number" placeholder="0" value={liabForm.original_amount} onChange={e=>setLiabForm(f=>({...f,original_amount:e.target.value}))}/></F>
+          </R2>
+          <R2>
+            <F label="Cicilan/Bulan (Rp)" th={th}><input className="inp" type="number" placeholder="0" value={liabForm.monthly_payment} onChange={e=>setLiabForm(f=>({...f,monthly_payment:e.target.value}))}/></F>
+            <F label="Bunga (% p.a.)" th={th}><input className="inp" type="number" placeholder="0" step="0.1" value={liabForm.interest_rate} onChange={e=>setLiabForm(f=>({...f,interest_rate:e.target.value}))}/></F>
+          </R2>
+          <R2>
+            <F label="Tanggal Mulai" th={th}><input className="inp" type="date" value={liabForm.start_date} onChange={e=>setLiabForm(f=>({...f,start_date:e.target.value}))}/></F>
+            <F label="Tanggal Selesai" th={th}><input className="inp" type="date" value={liabForm.end_date} onChange={e=>setLiabForm(f=>({...f,end_date:e.target.value}))}/></F>
+          </R2>
+          {liabForm.outstanding&&liabForm.original_amount&&<div style={{padding:"8px 12px",background:th.rdBg,border:`1px solid ${th.rd}44`,borderRadius:9,fontSize:12,color:th.rd,fontWeight:700}}>Sudah dibayar: {fmtIDR(Number(liabForm.original_amount)-Number(liabForm.outstanding),true)} ({((1-Number(liabForm.outstanding)/Number(liabForm.original_amount))*100).toFixed(0)}%)</div>}
+          <F label="Catatan" th={th}><input className="inp" placeholder="Bank pemberi, nomor akun..." value={liabForm.notes} onChange={e=>setLiabForm(f=>({...f,notes:e.target.value}))}/></F>
+          <BtnRow onCancel={()=>setShowLiabForm(false)} onOk={submitLiab} label={editLiabId?"Simpan":"Tambah Liabilitas"} th={th} saving={saving}/>
+        </div>
+      </Overlay>}
+
+      {/* Update Asset Value */}
+      {showUpdateVal&&<Overlay onClose={()=>{setShowUpdateVal(false);setAiValResult(null);}} th={th} title="✏️ Update Nilai Aset" sub={selectedAsset?.name}>
+        <div style={{display:"flex",flexDirection:"column",gap:11}}>
+          {selectedAsset&&<div style={{padding:"10px 13px",background:th.sur2,border:`1px solid ${th.bor}`,borderRadius:9}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={{fontSize:11,color:th.tx3}}>Nilai Saat Ini</div>
+                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:15,fontWeight:800}}>{fmtIDR(Number(selectedAsset.current_value||0))}</div>
+              </div>
+              <Tag bg={ASSET_BG[selectedAsset.category]||th.sur3} color={ASSET_COL[selectedAsset.category]||th.ac}>{ASSET_ICON[selectedAsset.category]} {selectedAsset.category}</Tag>
+            </div>
+          </div>}
+
+          {/* AI Valuation Button */}
+          <button onClick={runAIValuation} disabled={aiValLoading} style={{width:"100%",padding:"10px",borderRadius:9,border:`1px solid ${th.te}`,background:th.teBg,color:th.te,fontFamily:"'Sora',sans-serif",fontWeight:700,fontSize:12,cursor:"pointer",opacity:aiValLoading?.7:1,transition:"all .2s"}}>
+            {aiValLoading?"🔄 AI sedang mengestimasi...":"✨ Estimasi Nilai dengan AI"}
+          </button>
+
+          {aiValResult&&!aiValResult.error&&<div style={{padding:"12px 14px",background:th.acBg,border:`1px solid ${th.ac}44`,borderRadius:10}}>
+            <div style={{fontSize:10,color:th.ac,fontWeight:700,textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>✨ Estimasi AI</div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <div>
+                <div style={{fontFamily:"'JetBrains Mono',monospace",fontSize:16,fontWeight:800,color:th.ac}}>{fmtIDR(aiValResult.estimated_value)}</div>
+                <div style={{fontSize:10,color:th.tx3,marginTop:2}}>Confidence: <span style={{fontWeight:700,color:aiValResult.confidence==="high"?th.gr:aiValResult.confidence==="medium"?th.am:th.rd}}>{aiValResult.confidence}</span></div>
+              </div>
+              <button onClick={()=>setUpdateValForm(f=>({...f,value:String(aiValResult.estimated_value)}))} style={{padding:"6px 12px",borderRadius:8,border:`1px solid ${th.ac}`,background:"transparent",color:th.ac,fontFamily:"'Sora',sans-serif",fontWeight:700,fontSize:11,cursor:"pointer"}}>Pakai Nilai Ini →</button>
+            </div>
+            <div style={{fontSize:11,color:th.tx2,lineHeight:1.5}}>{aiValResult.reasoning}</div>
+          </div>}
+          {aiValResult?.error&&<div style={{padding:"9px 12px",background:th.rdBg,border:`1px solid ${th.rd}44`,borderRadius:9,fontSize:12,color:th.rd}}>{aiValResult.error}</div>}
+
+          <R2>
+            <F label="Nilai Baru (Rp)" th={th}><input className="inp" type="number" placeholder="0" value={updateValForm.value} onChange={e=>setUpdateValForm(f=>({...f,value:e.target.value}))}/></F>
+            <F label="Tanggal" th={th}><input className="inp" type="date" value={updateValForm.date} onChange={e=>setUpdateValForm(f=>({...f,date:e.target.value}))}/></F>
+          </R2>
+          <F label="Catatan (Opsional)" th={th}><input className="inp" placeholder="Sumber harga, keterangan..." value={updateValForm.notes} onChange={e=>setUpdateValForm(f=>({...f,notes:e.target.value}))}/></F>
+          {updateValForm.value&&selectedAsset&&(
+            <div style={{padding:"8px 12px",background:Number(updateValForm.value)>=Number(selectedAsset.current_value)?th.grBg:th.rdBg,border:`1px solid ${Number(updateValForm.value)>=Number(selectedAsset.current_value)?th.gr:th.rd}44`,borderRadius:9,fontSize:12,fontWeight:700,color:Number(updateValForm.value)>=Number(selectedAsset.current_value)?th.gr:th.rd}}>
+              Perubahan: {Number(updateValForm.value)>=Number(selectedAsset.current_value)?"▲":"▼"} {fmtIDR(Math.abs(Number(updateValForm.value)-Number(selectedAsset.current_value||0)),true)}
+            </div>
+          )}
+          <BtnRow onCancel={()=>{setShowUpdateVal(false);setAiValResult(null);}} onOk={submitUpdateVal} label="Simpan Nilai" th={th} saving={saving} disabled={!updateValForm.value}/>
         </div>
       </Overlay>}
     </div>
