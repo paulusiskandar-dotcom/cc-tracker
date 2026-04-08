@@ -365,7 +365,7 @@ export default function Receivables({ user, accounts, ledger, onRefresh, setAcco
           ) : (
             recStats.filter(r => r.receivable_type === "employee_loan").map(r => {
               const outstanding = Number(r.outstanding_amount || 0);
-              const total       = Number(r.total_loan_amount || r.outstanding_amount || 0);
+              const total       = Number(r.receivable_total || r.outstanding_amount || 0);
               const paid        = Math.max(0, total - outstanding);
               const pct         = total > 0 ? (paid / total) * 100 : 0;
               const monthly     = Number(r.monthly_installment || 0);

@@ -217,7 +217,7 @@ function Finance({ user, signOut }) {
     setLoading(false);
   }, [user.id]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { if (user?.id) loadData(); }, [user?.id, loadData]);
 
   // Persist dark mode preference
   useEffect(() => {

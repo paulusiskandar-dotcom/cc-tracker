@@ -100,7 +100,7 @@ export default function Assets({ user, accounts, ledger, onRefresh, setAccounts,
   const totalAssets   = assets.reduce((s, a) => s + Number(a.current_value || 0), 0);
   const totalLiab     = liabilities.reduce((s, l) => s + Number(l.outstanding_amount || 0), 0);
   const netAssets     = totalAssets - totalLiab;
-  const totalPurchase = assets.reduce((s, a) => s + Number(a.purchase_value || 0), 0);
+  const totalPurchase = assets.reduce((s, a) => s + Number(a.purchase_price || 0), 0);
   const totalGain     = totalAssets - totalPurchase;
 
   // Breakdown by category for donut
@@ -315,7 +315,7 @@ export default function Assets({ user, accounts, ledger, onRefresh, setAccounts,
           ) : (
             assets.map(a => {
               const cur     = Number(a.current_value || 0);
-              const bought  = Number(a.purchase_value || 0);
+              const bought  = Number(a.purchase_price || 0);
               const gain    = cur - bought;
               const gainPct = bought > 0 ? (gain / bought) * 100 : 0;
               const col     = ASSET_COL[a.subtype] || T.ac;
@@ -419,7 +419,7 @@ export default function Assets({ user, accounts, ledger, onRefresh, setAccounts,
           ) : (
             liabilities.map(l => {
               const outstanding = Number(l.outstanding_amount || 0);
-              const original    = Number(l.original_amount || 0);
+              const original    = Number(l.total_amount || 0);
               const paid        = original > 0 ? original - outstanding : 0;
               const pct         = original > 0 ? (paid / original) * 100 : 0;
 
@@ -430,7 +430,7 @@ export default function Assets({ user, accounts, ledger, onRefresh, setAccounts,
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 14, fontWeight: 700, color: T.text }}>{l.name}</div>
                       <div style={{ fontSize: 11, color: T.text3, marginTop: 2 }}>
-                        {[l.creditor, l.subtype, l.interest_rate > 0 && `${l.interest_rate}% p.a.`]
+                        {[l.creditor, l.subtype, l.liability_interest_rate > 0 && `${l.liability_interest_rate}% p.a.`]
                           .filter(Boolean).join(" · ")}
                       </div>
                     </div>

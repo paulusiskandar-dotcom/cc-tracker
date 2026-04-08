@@ -109,17 +109,18 @@ export default function Accounts({
         current_balance:    sn(form.current_balance),
         initial_balance:    sn(form.initial_balance),
         current_value:      sn(form.current_value),
-        purchase_value:     sn(form.purchase_value),
+        purchase_price:     sn(form.purchase_price),
         card_limit:         sn(form.card_limit),
         monthly_target:     sn(form.monthly_target),
         statement_day:      sn(form.statement_day),
         due_day:            sn(form.due_day),
         outstanding_amount: sn(form.outstanding_amount),
-        original_amount:    sn(form.original_amount),
+        total_amount:    sn(form.total_amount),
         monthly_payment:    sn(form.monthly_payment),
+        liability_interest_rate: sn(form.liability_interest_rate),
         interest_rate:      sn(form.interest_rate),
         monthly_installment:sn(form.monthly_installment),
-        total_loan_amount:  sn(form.total_loan_amount),
+        receivable_total:  sn(form.receivable_total),
         sort_order:         sn(form.sort_order),
       };
 
@@ -380,14 +381,14 @@ function AccountCard({ account: a, ledger, accounts, onEdit, onDelete, onHistory
     }
     if (a.type === "asset") {
       const v    = Number(a.current_value || 0);
-      const cost = Number(a.purchase_value || 0);
+      const cost = Number(a.purchase_price || 0);
       const gain = cost > 0 ? v - cost : null;
       const pct  = cost > 0 ? ((v - cost) / cost) * 100 : null;
       return { label: "Value", value: v, color: "#059669", gain, pct };
     }
     if (a.type === "liability") {
       const v    = Number(a.outstanding_amount || 0);
-      const orig = Number(a.original_amount || 0);
+      const orig = Number(a.total_amount || 0);
       const paid = orig > 0 ? orig - v : null;
       const pct  = orig > 0 ? ((orig - v) / orig) * 100 : null;
       return { label: "Outstanding", value: v, color: "#dc2626", paid, pct, orig };
@@ -682,8 +683,8 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
         </FormRow>
         <AmountInput label="Current Value" value={form.current_value || ""}
           onChange={v => set("current_value", v)} />
-        <AmountInput label="Purchase Price (optional)" value={form.purchase_value || ""}
-          onChange={v => set("purchase_value", v)} />
+        <AmountInput label="Purchase Price (optional)" value={form.purchase_price || ""}
+          onChange={v => set("purchase_price", v)} />
         <Input label="Purchase Date (optional)" type="date" value={form.purchase_date || ""}
           onChange={e => set("purchase_date", e.target.value)} />
       </>}
@@ -701,14 +702,14 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
         <FormRow>
           <AmountInput label="Outstanding Balance" value={form.outstanding_amount || ""}
             onChange={v => set("outstanding_amount", v)} style={{ flex: 1 }} />
-          <AmountInput label="Original Amount" value={form.original_amount || ""}
-            onChange={v => set("original_amount", v)} style={{ flex: 1 }} />
+          <AmountInput label="Original Amount" value={form.total_amount || ""}
+            onChange={v => set("total_amount", v)} style={{ flex: 1 }} />
         </FormRow>
         <FormRow>
           <AmountInput label="Monthly Payment" value={form.monthly_payment || ""}
             onChange={v => set("monthly_payment", v)} style={{ flex: 1 }} />
-          <Input label="Interest Rate (%/yr)" type="number" value={form.interest_rate || ""}
-            onChange={e => set("interest_rate", e.target.value)} placeholder="0" style={{ flex: 1 }} />
+          <Input label="Interest Rate (%/yr)" type="number" value={form.liability_interest_rate || ""}
+            onChange={e => set("liability_interest_rate", e.target.value)} placeholder="0" style={{ flex: 1 }} />
         </FormRow>
         <FormRow>
           <Input label="Start Date" type="date" value={form.start_date || ""}
@@ -742,8 +743,8 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
           <FormRow>
             <AmountInput label="Monthly Installment" value={form.monthly_installment || ""}
               onChange={v => set("monthly_installment", v)} style={{ flex: 1 }} />
-            <AmountInput label="Total Loan Amount" value={form.total_loan_amount || ""}
-              onChange={v => { set("total_loan_amount", v); set("outstanding_amount", v); }} style={{ flex: 1 }} />
+            <AmountInput label="Total Loan Amount" value={form.receivable_total || ""}
+              onChange={v => { set("receivable_total", v); set("outstanding_amount", v); }} style={{ flex: 1 }} />
           </FormRow>
           <FormRow>
             <Input label="Start Date" type="date" value={form.start_date || ""}
@@ -809,9 +810,9 @@ function emptyForm(type) {
   switch (type) {
     case "bank":        return { ...base, bank_name: "BCA", account_no: "", currency: "IDR", initial_balance: "", current_balance: 0, include_networth: true };
     case "credit_card": return { ...base, bank_name: "BCA", last4: "", network: "Visa", card_limit: "", monthly_target: "", statement_day: 25, due_day: 17, current_balance: 0 };
-    case "asset":       return { ...base, subtype: "Property", current_value: "", purchase_value: "", purchase_date: "" };
-    case "liability":   return { ...base, subtype: "Mortgage", creditor: "", outstanding_amount: "", original_amount: "", monthly_payment: "", interest_rate: "", start_date: "", end_date: "" };
-    case "receivable":  return { ...base, entity: "Hamasa", receivable_type: "reimburse", outstanding_amount: "", contact_name: "", contact_dept: "", monthly_installment: "", total_loan_amount: "", start_date: todayStr(), deduction_method: "salary_deduction", default_bank_id: "" };
+    case "asset":       return { ...base, subtype: "Property", current_value: "", purchase_price: "", purchase_date: "" };
+    case "liability":   return { ...base, subtype: "Mortgage", creditor: "", outstanding_amount: "", total_amount: "", monthly_payment: "", liability_interest_rate: "", start_date: "", end_date: "" };
+    case "receivable":  return { ...base, entity: "Hamasa", receivable_type: "reimburse", outstanding_amount: "", contact_name: "", contact_dept: "", monthly_installment: "", receivable_total: "", start_date: todayStr(), deduction_method: "salary_deduction", default_bank_id: "" };
     default:            return base;
   }
 }
