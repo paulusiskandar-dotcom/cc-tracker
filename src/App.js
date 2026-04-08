@@ -402,7 +402,7 @@ function Finance({ user, signOut }) {
               ...S.mobileNavBtn,
               color: active ? "#3b5bdb" : "#9ca3af",
             }}>
-              <span style={{ fontSize: 20 }}>{t?.icon}</span>
+              <NAV_ICON id={id} />
               <span style={{ fontSize: 9, fontWeight: active ? 700 : 500 }}>{t?.label}</span>
             </button>
           );
@@ -411,7 +411,7 @@ function Finance({ user, signOut }) {
           ...S.mobileNavBtn,
           color: showMore ? "#3b5bdb" : "#9ca3af",
         }}>
-          <span style={{ fontSize: 20, letterSpacing: 2 }}>•••</span>
+          <NAV_ICON id="more" />
           <span style={{ fontSize: 9, fontWeight: showMore ? 700 : 500 }}>More</span>
         </button>
       </nav>
@@ -455,6 +455,65 @@ function Finance({ user, signOut }) {
       <ToastContainer />
     </div>
   );
+}
+
+// ─── NAV ICONS ────────────────────────────────────────────────
+// Consistent outlined SVG icons — 22×22, stroke 1.8, no fill
+function NAV_ICON({ id }) {
+  const props = {
+    width: 22, height: 22,
+    fill: "none", stroke: "currentColor",
+    strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round",
+    viewBox: "0 0 24 24",
+  };
+  switch (id) {
+    case "dashboard":
+      // House outline
+      return (
+        <svg {...props}>
+          <path d="M3 12L12 3l9 9" />
+          <path d="M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9" />
+        </svg>
+      );
+    case "transactions":
+      // Arrow up-down (swap / transfer)
+      return (
+        <svg {...props}>
+          <path d="M7 17V4m0 0L4 7m3-3 3 3" />
+          <path d="M17 7v13m0 0 3-3m-3 3-3-3" />
+        </svg>
+      );
+    case "accounts":
+      // Bank / building columns
+      return (
+        <svg {...props}>
+          <path d="M3 21h18" />
+          <path d="M3 10h18" />
+          <path d="M5 6l7-3 7 3" />
+          <path d="M6 10v11M10 10v11M14 10v11M18 10v11" />
+        </svg>
+      );
+    case "assets":
+      // Trending-up line chart
+      return (
+        <svg {...props}>
+          <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
+          <polyline points="16 7 22 7 22 13" />
+        </svg>
+      );
+    case "more":
+      // 2×2 grid of rounded squares
+      return (
+        <svg {...props}>
+          <rect x="3"  y="3"  width="7" height="7" rx="1.5" />
+          <rect x="14" y="3"  width="7" height="7" rx="1.5" />
+          <rect x="3"  y="14" width="7" height="7" rx="1.5" />
+          <rect x="14" y="14" width="7" height="7" rx="1.5" />
+        </svg>
+      );
+    default:
+      return null;
+  }
 }
 
 // ─── STYLES ───────────────────────────────────────────────────
