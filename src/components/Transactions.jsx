@@ -455,7 +455,7 @@ export default function Transactions({
             fromOptions={fromOptions} toOptions={toOptions}
             accounts={accounts} categories={categories}
             incomeSrcs={incomeSrcs} allCurrencies={allCurrencies}
-            amtIDR={amtIDR}
+            amtIDR={amtIDR} receivables={receivables}
           />
         )}
       </Modal>
@@ -592,43 +592,90 @@ function TypePickerGrid({ types, onSelect }) {
 }
 
 // ─── TRANSACTION FORM ────────────────────────────────────────
-function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incomeSrcs = [], allCurrencies = [], amtIDR }) {
+function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incomeSrcs = [], allCurrencies = [], amtIDR, receivables = [] }) {
   const type = form.tx_type;
+  const [fromSource, setFromSource] = useState("bank");
 
-  const catOptions = [
-    ...categories.filter(c => c.is_active !== false),
-  ].map(c => ({ value: c.id, label: `${c.icon || ""} ${c.name || c.label}` }));
-  if (!catOptions.length) {
-    EXPENSE_CATEGORIES.forEach(c => catOptions.push({ value: c.id, label: `${c.icon} ${c.label}` }));
-  }
+  // Fix "Jenius · Jenius" — only append bank_name if different from name
+  const accLabel = a => a.name + (a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : "");
 
-  // value MUST be the account UUID — filter out any account without a valid id
-  const fromOpts = fromOptions
+  // Derived bank / CC lists from full accounts array
+  const bankAccs = accounts.filter(a => a.type === "bank"        && a.is_active !== false);
+  const ccAccs   = accounts.filter(a => a.type === "credit_card" && a.is_active !== false);
+
+  // Two-step from-source toggle applies to these tx types
+  const TWO_STEP_FROM = ["expense", "reimburse_out", "transfer", "pay_cc", "buy_asset"];
+  const hasTwoStep    = TWO_STEP_FROM.includes(type);
+
+  const fromList = hasTwoStep
+    ? (fromSource === "bank" ? bankAccs : ccAccs)
+    : fromOptions;
+
+  const fromOpts = fromList
     .filter(a => a.id && a.id.length === 36)
-    .map(a => ({ value: a.id, label: a.name + (a.bank_name ? ` · ${a.bank_name}` : "") }));
+    .map(a => ({ value: a.id, label: accLabel(a) }));
+
   const toOpts = toOptions
     .filter(a => a.id && a.id.length === 36)
-    .map(a => ({ value: a.id, label: a.name + (a.bank_name ? ` · ${a.bank_name}` : "") }));
+    .map(a => ({ value: a.id, label: accLabel(a) }));
+
   const incOpts = (incomeSrcs || [])
     .filter(s => s.id && s.id.length === 36)
     .map(s => ({ value: s.id, label: s.name }));
 
-  const needsFrom = fromOptions.length > 0;
-  const needsTo   = toOptions.length > 0;
-  const needsCat  = ["expense", "reimburse_out"].includes(type);
+  const catOptions = categories.filter(c => c.is_active !== false)
+    .map(c => ({ value: c.id, label: `${c.icon || ""} ${c.name || c.label}` }));
+  if (!catOptions.length) {
+    EXPENSE_CATEGORIES.forEach(c => catOptions.push({ value: c.id, label: `${c.icon} ${c.label}` }));
+  }
+
+  // to_id is auto-set by entity toggle for reimburse_out, so hide To dropdown
+  const needsTo  = toOptions.length > 0 && type !== "reimburse_out";
+  const needsCat = type === "expense";
+
+  // Switch bank/CC source and reset from_id
+  const switchFromSource = (src) => {
+    setFromSource(src);
+    set("from_id", null);
+  };
+
+  // For reimburse_out: selecting entity auto-sets to_id
+  const ENTITY_OPTS = ["Hamasa", "SDC", "Travelio"];
+  const pickEntity = (ent) => {
+    set("entity", ent);
+    const rec = receivables.find(r => r.entity === ent);
+    set("to_id", rec?.id || null);
+  };
+
+  // Pill button style helper
+  const pillStyle = (active, activeColor = "#111827") => ({
+    flex: 1, height: 36, borderRadius: 8, border: "1.5px solid",
+    borderColor: active ? activeColor : "#e5e7eb",
+    background:  active ? activeColor : "#f9fafb",
+    color:       active ? "#fff" : "#6b7280",
+    fontSize: 12, fontWeight: active ? 700 : 500,
+    cursor: "pointer", fontFamily: "Figtree, sans-serif",
+    transition: "all 0.15s",
+  });
+
+  const SEL_STYLE = {
+    width: "100%", height: 44, padding: "0 14px",
+    border: "1.5px solid #e5e7eb", borderRadius: 10,
+    fontFamily: "Figtree, sans-serif", fontSize: 14, fontWeight: 500,
+    color: "#111827", background: "#fff", outline: "none",
+    appearance: "none", WebkitAppearance: "none",
+    cursor: "pointer", boxSizing: "border-box",
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
       {/* Type badge */}
       <div style={{
-        display:    "inline-flex",
-        alignItems: "center",
-        gap:        6,
-        padding:    "4px 10px",
-        borderRadius: 20,
+        display: "inline-flex", alignItems: "center", gap: 6,
+        padding: "4px 10px", borderRadius: 20,
         background: (TYPE_CHOICES.find(t => t.id === type)?.color || "#9ca3af") + "18",
-        width:      "fit-content",
+        width: "fit-content",
       }}>
         <span style={{ fontSize: 14 }}>{TYPE_CHOICES.find(t => t.id === type)?.icon}</span>
         <span style={{ fontSize: 11, fontWeight: 700, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
@@ -639,7 +686,7 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
       {/* Date */}
       <Input label="Date" type="date" value={form.tx_date} onChange={e => set("tx_date", e.target.value)} />
 
-      {/* Description — most types */}
+      {/* Description */}
       {!["transfer","pay_cc","reimburse_in","collect_loan","pay_liability","fx_exchange"].includes(type) && (
         <Input
           label="Description"
@@ -648,8 +695,6 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
           placeholder={type === "income" ? "e.g. Monthly salary" : "e.g. Lunch at Warung Makan"}
         />
       )}
-
-      {/* Description for some transfer types */}
       {["transfer","pay_cc","fx_exchange"].includes(type) && (
         <Input
           label="Notes / Reference (optional)"
@@ -659,15 +704,9 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
         />
       )}
 
-      {/* Amount */}
+      {/* Amount + Currency */}
       <div style={{ display: "flex", gap: 8 }}>
-        <AmountInput
-          label="Amount"
-          value={form.amount}
-          onChange={v => set("amount", v)}
-          currency={form.currency}
-          style={{ flex: 1 }}
-        />
+        <AmountInput label="Amount" value={form.amount} onChange={v => set("amount", v)} currency={form.currency} style={{ flex: 1 }} />
         <Field label="Currency" style={{ width: 90, flexShrink: 0 }}>
           <select value={form.currency} onChange={e => set("currency", e.target.value)} style={{
             width: "100%", height: 44, border: "1.5px solid #e5e7eb", borderRadius: 10,
@@ -679,18 +718,34 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
           </select>
         </Field>
       </div>
-
-      {/* Non-IDR amount conversion hint */}
       {form.currency !== "IDR" && form.amount && (
         <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: -8 }}>
           ≈ {fmtIDR(amtIDR)} IDR
         </div>
       )}
 
-      {/* From account — value is always account.id (UUID) */}
-      {needsFrom && (
+      {/* FROM ACCOUNT — two-step (Bank / CC toggle + dropdown) */}
+      {hasTwoStep && (
+        <Field label="From Account">
+          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+            <button type="button" onClick={() => switchFromSource("bank")}        style={pillStyle(fromSource === "bank")}>🏦 Bank Account</button>
+            <button type="button" onClick={() => switchFromSource("credit_card")} style={pillStyle(fromSource === "credit_card")}>💳 Credit Card</button>
+          </div>
+          <select
+            value={form.from_id || ""}
+            onChange={e => set("from_id", e.target.value.length === 36 ? e.target.value : null)}
+            style={SEL_STYLE}
+          >
+            <option value="">Select {fromSource === "bank" ? "bank account" : "credit card"}…</option>
+            {fromOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </Field>
+      )}
+
+      {/* FROM ACCOUNT — regular select for non-two-step types (sell_asset, collect_loan, etc.) */}
+      {!hasTwoStep && fromOptions.length > 0 && (
         <Select
-          label={type === "sell_asset" ? "Asset" : type === "collect_loan" || type === "reimburse_in" ? "Receivable" : "From Account"}
+          label={type === "sell_asset" ? "Asset" : (type === "collect_loan" || type === "reimburse_in") ? "Receivable" : "From Account"}
           value={form.from_id || ""}
           onChange={e => set("from_id", e.target.value.length === 36 ? e.target.value : null)}
           options={fromOpts}
@@ -698,10 +753,23 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
         />
       )}
 
-      {/* To account — value is always account.id (UUID) */}
+      {/* ENTITY toggle for reimburse_out — auto-sets to_id */}
+      {type === "reimburse_out" && (
+        <Field label="Entity">
+          <div style={{ display: "flex", gap: 6 }}>
+            {ENTITY_OPTS.map(ent => (
+              <button key={ent} type="button" onClick={() => pickEntity(ent)} style={pillStyle(form.entity === ent, "#d97706")}>
+                {ent}
+              </button>
+            ))}
+          </div>
+        </Field>
+      )}
+
+      {/* TO ACCOUNT — skip for reimburse_out (entity toggle sets it) */}
       {needsTo && (
         <Select
-          label={type === "buy_asset" ? "Asset Account" : type === "reimburse_out" || type === "give_loan" ? "Receivable" : type === "pay_cc" ? "Credit Card" : type === "pay_liability" ? "Liability" : "To Account"}
+          label={type === "buy_asset" ? "Asset" : type === "give_loan" ? "Receivable" : type === "pay_cc" ? "Credit Card" : type === "pay_liability" ? "Liability" : "To Account"}
           value={form.to_id || ""}
           onChange={e => set("to_id", e.target.value.length === 36 ? e.target.value : null)}
           options={toOpts}
@@ -720,7 +788,7 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
         />
       )}
 
-      {/* Category */}
+      {/* Category — expense only */}
       {needsCat && (
         <Select
           label="Category"
@@ -730,41 +798,28 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
             set("category_id", e.target.value || null);
             set("category_name", found?.name || null);
           }}
-          options={categories.map(c => ({ value: c.id, label: `${c.icon || "❓"} ${c.name}` }))}
+          options={catOptions}
           placeholder="Select category…"
         />
       )}
 
-      {/* Entity — only for reimburse_out */}
-      {type === "reimburse_out" && (
-        <Select
-          label="Entity"
-          value={form.entity}
-          onChange={e => set("entity", e.target.value)}
-          options={ENTITIES}
-        />
-      )}
-
-      {/* FX Exchange extra fields */}
+      {/* FX Exchange extra field */}
       {type === "fx_exchange" && (
         <Input label="To Amount (received currency)" type="number" value={form.to_amount || ""}
           onChange={e => set("to_amount", e.target.value)} placeholder="0" />
       )}
 
-      {/* Optional fees for pay_cc */}
+      {/* Pay CC fees */}
       {type === "pay_cc" && (
         <FormRow>
-          <AmountInput label="Admin Fee (optional)" value={form.admin_fee || ""}
-            onChange={v => set("admin_fee", v)} style={{ flex: 1 }} />
-          <AmountInput label="Materai (optional)" value={form.materai || ""}
-            onChange={v => set("materai", v)} style={{ flex: 1 }} />
+          <AmountInput label="Admin Fee (optional)" value={form.admin_fee || ""} onChange={v => set("admin_fee", v)} style={{ flex: 1 }} />
+          <AmountInput label="Materai (optional)"   value={form.materai || ""}   onChange={v => set("materai", v)}   style={{ flex: 1 }} />
         </FormRow>
       )}
 
       {/* Transfer fee */}
       {type === "transfer" && (
-        <AmountInput label="Transfer Fee (optional)" value={form.transfer_fee || ""}
-          onChange={v => set("transfer_fee", v)} />
+        <AmountInput label="Transfer Fee (optional)" value={form.transfer_fee || ""} onChange={v => set("transfer_fee", v)} />
       )}
 
       {/* Notes */}

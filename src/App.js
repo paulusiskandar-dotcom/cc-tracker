@@ -207,7 +207,30 @@ function Finance({ user, signOut }) {
 
     console.log("[loadData] accounts:", acc.length, "ledger:", led.length);
 
-    setAccounts(acc);
+    // Auto-create default receivable accounts on first run
+    let finalAccounts = acc;
+    if (acc.filter(a => a.type === "receivable").length === 0) {
+      const defaults = [
+        { name: "Piutang Hamasa",   entity: "Hamasa"   },
+        { name: "Piutang SDC",      entity: "SDC"      },
+        { name: "Piutang Travelio", entity: "Travelio" },
+      ];
+      try {
+        const created = await Promise.all(defaults.map(d =>
+          accountsApi.create(user.id, {
+            ...d,
+            type: "receivable", subtype: "reimburse",
+            include_networth: true, receivable_outstanding: 0,
+          })
+        ));
+        finalAccounts = [...acc, ...created];
+        console.log("[loadData] created default receivables:", created.length);
+      } catch (e) {
+        console.warn("[loadData] failed to create default receivables:", e.message);
+      }
+    }
+
+    setAccounts(finalAccounts);
     setLedger(led);
     setCategories(cats);
     setIncomeSrcs(inc);
