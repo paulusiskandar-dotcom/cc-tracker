@@ -186,52 +186,57 @@ export default function Transactions({
 
     setSaving(true);
     try {
+      // UUID sanitizer — only accept exactly 36-char strings
+      const uuid = (v) => {
+        if (!v || v === "" || v === "null" || v === "undefined") return null;
+        if (typeof v === "string" && v.length === 36) return v;
+        return null;
+      };
+
       const cat = categories.find(c => c.id === form.category_id);
       const sn  = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
       const { from_type, to_type } = getTxFromToTypes(type);
 
       // Auto-generate description for types that don't require manual input
-      let description = form.description?.trim() || "";
-      if (!description) {
-        const toAcc   = accounts.find(a => a.id === form.to_id);
-        const fromAcc = accounts.find(a => a.id === form.from_id);
-        if      (type === "transfer")      description = `Transfer to ${toAcc?.name || "account"}`;
-        else if (type === "pay_cc")        description = `CC Payment — ${toAcc?.name || "credit card"}`;
-        else if (type === "buy_asset")     description = `Buy ${toAcc?.name || "asset"}`;
-        else if (type === "sell_asset")    description = `Sell ${fromAcc?.name || "asset"}`;
-        else if (type === "give_loan")     description = `Loan to ${toAcc?.name || ""}`.trim();
-        else if (type === "collect_loan")  description = `Loan payment from ${fromAcc?.name || ""}`.trim();
-        else if (type === "pay_liability") description = `Payment — ${toAcc?.name || "liability"}`;
-        else if (type === "reimburse_in")  description = `${fromAcc?.name || ""} reimbursed`.trim();
-        else if (type === "fx_exchange")   description = `FX Exchange`.trim();
-      }
+      const AUTO_DESC = {
+        transfer:      "Transfer",
+        pay_cc:        "CC Payment",
+        buy_asset:     "Asset Purchase",
+        sell_asset:    "Asset Sale",
+        give_loan:     "Employee Loan",
+        collect_loan:  "Loan Collection",
+        reimburse_in:  "Reimburse Received",
+        pay_liability: "Liability Payment",
+        fx_exchange:   "FX Exchange",
+      };
+      const description = form.description?.trim() || AUTO_DESC[type] || "Transaction";
 
-      // ── DEBUG ──────────────────────────────────────────────
-      console.log("=== LEDGER INSERT DEBUG ===");
-      console.log("form state:", JSON.stringify(form, null, 2));
-      console.log("from_id:", form.from_id, typeof form.from_id);
-      console.log("to_id:", form.to_id, typeof form.to_id);
-      console.log("category_id:", form.category_id, typeof form.category_id);
-      // ────────────────────────────────────────────────────
-
-      // Build explicit entry — never spread ...form to avoid leaking unknown UUID fields
+      // Explicit full entry — every UUID field goes through uuid()
       const entry = {
-        tx_date:       form.tx_date,
+        tx_date:        form.tx_date || new Date().toISOString().slice(0, 10),
         description,
-        amount:        sn(form.amount),
-        currency:      form.currency || "IDR",
-        amount_idr:    sn(amtIDR),
-        tx_type:       type,
+        amount:         sn(form.amount),
+        currency:       form.currency  || "IDR",
+        amount_idr:     sn(amtIDR),
+        tx_type:        type,
         from_type,
         to_type,
-        from_id:       form.from_id       || null,
-        to_id:         form.to_id         || null,
-        category_id:   form.category_id   || null,
-        category_name: cat?.name || form.category_name || null,
-        entity:        type === "reimburse_out" ? (form.entity || "Personal") : "Personal",
-        is_reimburse:  type === "reimburse_out",
-        notes:         form.notes         || null,
+        from_id:        uuid(form.from_id),
+        to_id:          uuid(form.to_id),
+        category_id:    uuid(form.category_id),
+        category_name:  cat?.name || form.category_name || null,
+        entity:         type === "reimburse_out" ? (form.entity || "Hamasa") : "Personal",
+        is_reimburse:   type === "reimburse_out",
+        merchant_name:  null,
+        notes:          form.notes || null,
+        attachment_url: null,
+        ai_categorized: false,
+        ai_confidence:  null,
+        installment_id: null,
+        scan_batch_id:  null,
       };
+
+      console.log("Inserting ledger entry:", entry);
       if (editEntry) {
         const updated = await ledgerApi.update(editEntry.id, entry);
         setLedger(p => p.map(e => e.id === editEntry.id ? updated : e));
