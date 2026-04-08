@@ -5,11 +5,27 @@ import { Overlay, F, R2, BtnRow, SubTabs, Input, Select, Textarea, Tag, EntityTa
          CatPill, Empty, SectionHeader, Spinner, showToast, confirmDelete, MonthSelect } from "./shared";
 
 const SUBTABS_BASE = [
-  { id:"all",        label:"All" },
-  { id:"expense",    label:"Expenses" },
-  { id:"income",     label:"Income" },
-  { id:"transfer",   label:"Transfers" },
-  { id:"reimburse",  label:"Reimburse" },
+  { id:"all",       label:"All" },
+  { id:"expense",   label:"Expenses" },
+  { id:"income",    label:"Income" },
+  { id:"transfer",  label:"Transfers" },
+  { id:"reimburse", label:"Reimburse" },
+];
+
+// Type choices for step-1 grid (2 per row)
+const TYPE_CHOICES = [
+  { id:"expense",       label:"Expense",       icon:"↑",  color:"#dc2626", desc:"Spending money" },
+  { id:"income",        label:"Income",        icon:"↓",  color:"#059669", desc:"Receiving money" },
+  { id:"transfer",      label:"Transfer",      icon:"↔",  color:"#3b5bdb", desc:"Between accounts" },
+  { id:"pay_cc",        label:"Pay CC",        icon:"▭",  color:"#7048e8", desc:"Credit card payment" },
+  { id:"buy_asset",     label:"Buy Asset",     icon:"▲",  color:"#0c8599", desc:"Purchase asset" },
+  { id:"sell_asset",    label:"Sell Asset",    icon:"▽",  color:"#059669", desc:"Sell asset" },
+  { id:"reimburse_out", label:"Reimburse",     icon:"↗",  color:"#d97706", desc:"Paid on behalf" },
+  { id:"reimburse_in",  label:"Recv. Reimb",  icon:"↙",  color:"#059669", desc:"Get reimbursed" },
+  { id:"give_loan",     label:"Give Loan",     icon:"↗",  color:"#d97706", desc:"Lend money" },
+  { id:"collect_loan",  label:"Collect Loan",  icon:"↙",  color:"#059669", desc:"Receive repayment" },
+  { id:"pay_liability", label:"Pay Liability", icon:"▼",  color:"#d97706", desc:"Pay off a debt" },
+  { id:"fx_exchange",   label:"FX Exchange",   icon:"⇄",  color:"#0c8599", desc:"Currency exchange" },
 ];
 
 const EMPTY_ENTRY = {
@@ -18,6 +34,14 @@ const EMPTY_ENTRY = {
   entity:"Personal", notes:"", is_reimburse:false,
 };
 
+function dateLabel(d) {
+  const today = new Date().toISOString().slice(0,10);
+  const yest  = new Date(Date.now()-864e5).toISOString().slice(0,10);
+  if (d === today) return "Today";
+  if (d === yest)  return "Yesterday";
+  return new Date(d+"T12:00:00").toLocaleDateString("en-US", { weekday:"short", day:"numeric", month:"long", year:"numeric" });
+}
+
 export default function Transactions({
   th, user, accounts, ledger, categories, fxRates, CURRENCIES: C,
   bankAccounts, creditCards, assets, liabilities, receivables,
@@ -25,54 +49,56 @@ export default function Transactions({
 }) {
   const pendingCount = pendingSyncs?.length || 0;
   const SUBTABS = pendingCount > 0
-    ? [...SUBTABS_BASE, { id:"pending", label:`Pending ${pendingCount > 0 ? `(${pendingCount})` : ""}` }]
+    ? [...SUBTABS_BASE, { id:"pending", label:`Pending (${pendingCount})` }]
     : SUBTABS_BASE;
 
-  const [subTab, setSubTab]       = useState("all");
-  const [showForm, setShowForm]   = useState(false);
-  const [editId, setEditId]       = useState(null);
-  const [form, setForm]           = useState(EMPTY_ENTRY);
-  const [saving, setSaving]       = useState(false);
+  const [subTab, setSubTab]         = useState("all");
+  const [showForm, setShowForm]     = useState(false);
+  const [formStep, setFormStep]     = useState(1);   // 1=type selection, 2=fields
+  const [editId, setEditId]         = useState(null);
+  const [form, setForm]             = useState(EMPTY_ENTRY);
+  const [saving, setSaving]         = useState(false);
   const [filterMonth, setFilterMonth] = useState("all");
-  const [filterEntity, setFilterEntity] = useState("all");
-  const [search, setSearch]       = useState("");
-  const [selected, setSelected]   = useState({});
-  const [showAI, setShowAI]       = useState(false);
+  const [search, setSearch]         = useState("");
+  const [selected, setSelected]     = useState({});
+  const [showAI, setShowAI]         = useState(false);
   const fileRef = useRef(null);
 
   const allCurrencies = C || CURRENCIES;
 
-  // ── Filtered list
   const filtered = useMemo(() => {
     let list = [...ledger];
     if (subTab === "reimburse") list = list.filter(e => e.is_reimburse);
-    else if (subTab !== "all") {
-      if (subTab === "expense") list = list.filter(e => ["expense"].includes(e.type));
-      else if (subTab === "income") list = list.filter(e => e.type === "income");
-      else if (subTab === "transfer") list = list.filter(e => ["transfer","pay_cc","fx_exchange"].includes(e.type));
-    }
+    else if (subTab === "expense") list = list.filter(e => e.type === "expense");
+    else if (subTab === "income")  list = list.filter(e => e.type === "income");
+    else if (subTab === "transfer") list = list.filter(e => ["transfer","pay_cc","fx_exchange"].includes(e.type));
     if (filterMonth !== "all") list = list.filter(e => ym(e.date) === filterMonth);
-    if (filterEntity !== "all") list = list.filter(e => e.entity === filterEntity);
-    if (search) list = list.filter(e => e.description?.toLowerCase().includes(search.toLowerCase()) || e.merchant_name?.toLowerCase().includes(search.toLowerCase()));
+    if (search) list = list.filter(e =>
+      e.description?.toLowerCase().includes(search.toLowerCase()) ||
+      e.merchant_name?.toLowerCase().includes(search.toLowerCase()));
     return list;
-  }, [ledger, subTab, filterMonth, filterEntity, search]);
+  }, [ledger, subTab, filterMonth, search]);
 
-  // ── Account options per type field
+  // Group by date for display
+  const grouped = useMemo(() => {
+    const map = {};
+    filtered.forEach(e => { if (!map[e.date]) map[e.date]=[]; map[e.date].push(e); });
+    return Object.entries(map).sort(([a],[b]) => b.localeCompare(a));
+  }, [filtered]);
+
   const fromOptions = useMemo(() => {
-    if (!form.type) return accounts;
     const maps = {
-      expense:     [...bankAccounts, ...creditCards],
-      income:      accounts,
-      transfer:    bankAccounts,
-      pay_cc:      bankAccounts,
-      buy_asset:   [...bankAccounts, ...creditCards],
-      sell_asset:  assets,
-      pay_liability: bankAccounts,
-      reimburse_out: [...bankAccounts, ...creditCards],
-      reimburse_in:  receivables,
-      give_loan:   bankAccounts,
+      expense:      [...bankAccounts,...creditCards],
+      income:       accounts,
+      transfer:     bankAccounts,
+      pay_cc:       bankAccounts,
+      buy_asset:    [...bankAccounts,...creditCards],
+      sell_asset:   assets,
+      pay_liability:bankAccounts,
+      reimburse_out:[...bankAccounts,...creditCards],
+      reimburse_in: receivables,
+      give_loan:    bankAccounts,
       collect_loan: receivables,
-      expense:  bankAccounts,
       fx_exchange:  bankAccounts,
     };
     return maps[form.type] || accounts;
@@ -80,44 +106,34 @@ export default function Transactions({
 
   const toOptions = useMemo(() => {
     const maps = {
-      expense:     [],
-      income:      bankAccounts,
-      transfer:    bankAccounts,
-      pay_cc:      creditCards,
-      buy_asset:   assets,
-      sell_asset:  bankAccounts,
-      pay_liability: liabilities,
-      reimburse_out: receivables,
-      reimburse_in:  bankAccounts,
-      give_loan:   receivables,
+      expense:      [],
+      income:       bankAccounts,
+      transfer:     bankAccounts,
+      pay_cc:       creditCards,
+      buy_asset:    assets,
+      sell_asset:   bankAccounts,
+      pay_liability:liabilities,
+      reimburse_out:receivables,
+      reimburse_in: bankAccounts,
+      give_loan:    receivables,
       collect_loan: bankAccounts,
-      expense:  [],
       fx_exchange:  bankAccounts,
     };
-    return maps[form.type] || accounts;
-  }, [form.type, accounts, bankAccounts, creditCards, assets, liabilities, receivables]);
+    return maps[form.type] || [];
+  }, [form.type, bankAccounts, creditCards, assets, liabilities, receivables]);
 
-  const needsCategory = ["expense","reimburse_out"].includes(form.type);
+  const needsCategory  = ["expense","reimburse_out"].includes(form.type);
   const needsToAccount = toOptions.length > 0;
   const amtIDR = toIDR(Number(form.amount||0), form.currency||"IDR", fxRates, allCurrencies);
 
-  // ── CRUD
-  const openNew = () => {
-    setForm({ ...EMPTY_ENTRY });
-    setEditId(null);
-    setShowForm(true);
-  };
-
+  const openNew = () => { setForm({...EMPTY_ENTRY}); setEditId(null); setFormStep(1); setShowForm(true); };
   const openEdit = (e) => {
-    setForm({
-      date: e.date, description: e.description, merchant_name: e.merchant_name||"",
-      amount: e.amount, currency: e.currency||"IDR", type: e.type,
-      from_account_id: e.from_account_id||"", to_account_id: e.to_account_id||"",
-      category_id: e.category_id||"", category_label: e.category_label||"",
-      entity: e.entity||"Personal", notes: e.notes||"", is_reimburse: e.is_reimburse||false,
-    });
-    setEditId(e.id);
-    setShowForm(true);
+    setForm({ date:e.date, description:e.description, merchant_name:e.merchant_name||"",
+      amount:e.amount, currency:e.currency||"IDR", type:e.type,
+      from_account_id:e.from_account_id||"", to_account_id:e.to_account_id||"",
+      category_id:e.category_id||"", category_label:e.category_label||"",
+      entity:e.entity||"Personal", notes:e.notes||"", is_reimburse:e.is_reimburse||false });
+    setEditId(e.id); setFormStep(2); setShowForm(true);
   };
 
   const save = async () => {
@@ -125,26 +141,22 @@ export default function Transactions({
     setSaving(true);
     try {
       const cat = categories.find(c=>c.id===form.category_id);
-      const entry = {
-        ...form, amount: Number(form.amount), amount_idr: amtIDR,
-        category_label: cat?.name || form.category_label || "",
-      };
+      const entry = { ...form, amount:Number(form.amount), amount_idr:amtIDR,
+        category_label: cat?.name||form.category_label||"" };
       if (editId) {
         const updated = await ledgerApi.update(editId, entry);
-        setLedger(p => p.map(e => e.id === editId ? updated : e));
+        setLedger(p => p.map(e => e.id===editId ? updated : e));
         showToast("Transaction updated");
       } else {
         const created = await ledgerApi.create(user.id, entry, accounts);
-        setLedger(p => [created, ...p]);
+        setLedger(p => [created,...p]);
         showToast("Transaction added");
-        await onRefresh(); // refresh balances
+        await onRefresh();
       }
-      // Learn merchant → category mapping
-      if (form.merchant_name && form.category_id) {
+      if (form.merchant_name && form.category_id)
         merchantApi.upsertMapping(user.id, form.merchant_name, form.category_id, form.category_label).catch(()=>{});
-      }
       setShowForm(false);
-    } catch (e) { showToast(e.message, "error"); }
+    } catch (e) { showToast(e.message,"error"); }
     setSaving(false);
   };
 
@@ -152,228 +164,237 @@ export default function Transactions({
     if (!confirmDelete(entry.description)) return;
     try {
       await ledgerApi.delete(entry.id, entry, accounts);
-      setLedger(p => p.filter(e => e.id !== entry.id));
-      showToast("Deleted");
-      await onRefresh();
-    } catch (e) { showToast(e.message, "error"); }
+      setLedger(p => p.filter(e => e.id!==entry.id));
+      showToast("Deleted"); await onRefresh();
+    } catch (e) { showToast(e.message,"error"); }
   };
 
   const bulkDelete = async () => {
-    const ids = Object.keys(selected).filter(k => selected[k]);
+    const ids = Object.keys(selected).filter(k=>selected[k]);
     if (!ids.length || !window.confirm(`Delete ${ids.length} transactions?`)) return;
-    for (const id of ids) {
-      const entry = ledger.find(e => e.id === id);
-      if (entry) await ledgerApi.delete(id, entry, accounts);
-    }
-    setLedger(p => p.filter(e => !ids.includes(e.id)));
-    setSelected({});
-    showToast(`${ids.length} deleted`);
-    await onRefresh();
+    for (const id of ids) { const e=ledger.find(x=>x.id===id); if(e) await ledgerApi.delete(id,e,accounts); }
+    setLedger(p=>p.filter(e=>!ids.includes(e.id))); setSelected({});
+    showToast(`${ids.length} deleted`); await onRefresh();
   };
 
   const selCount = Object.values(selected).filter(Boolean).length;
+  const outTotal = filtered.filter(e=>["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan"].includes(e.type)).reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0);
+  const inTotal  = filtered.filter(e=>["income","sell_asset","reimburse_in","collect_loan"].includes(e.type)).reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0);
 
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+    <div style={{ display:"flex", flexDirection:"column", gap:0 }}>
 
-      {/* ── Header ── */}
-      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-        <div style={{ fontSize:20, fontWeight:800, color:th.tx }}>Transactions</div>
-        <div style={{ display:"flex", gap:8 }}>
-          <button className="btn btn-ai" onClick={()=>setShowAI(true)} style={{ padding:"8px 12px", fontSize:12 }}>🤖 AI Import</button>
-          <button className="btn btn-primary" onClick={openNew}>+ Add</button>
+      {/* ── Action bar ── */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+        <div style={{ display:"flex", gap:8, flex:1 }}>
+          <MonthSelect value={filterMonth} onChange={setFilterMonth} th={th} style={{ maxWidth:160 }}/>
+          <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search transactions…" th={th} style={{ flex:1 }}/>
+        </div>
+        <div style={{ display:"flex", gap:8, marginLeft:12 }}>
+          <button className="btn btn-ghost btn-sm" onClick={()=>setShowAI(true)}>AI Import</button>
+          <button className="btn btn-primary btn-sm" onClick={openNew}>+ Add</button>
         </div>
       </div>
 
       {/* ── Sub-tabs ── */}
-      <SubTabs tabs={SUBTABS} active={subTab} onChange={setSubTab} th={th}/>
+      <SubTabs tabs={SUBTABS} active={subTab} onChange={setSubTab}/>
 
-      {/* ── PENDING TAB ── */}
-      {subTab === "pending" && (
-        <PendingReview
-          th={th} user={user} accounts={accounts} categories={categories}
-          pendingSyncs={pendingSyncs} setPendingSyncs={setPendingSyncs}
-          ledger={ledger} setLedger={setLedger} onRefresh={onRefresh}
-        />
-      )}
-
-      {/* ── Filters (hide on pending tab) ── */}
-      {subTab !== "pending" && <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-        <MonthSelect value={filterMonth} onChange={setFilterMonth} th={th}/>
-        <Select value={filterEntity} onChange={e=>setFilterEntity(e.target.value)} th={th} style={{ width:140 }}>
-          <option value="all">All Entities</option>
-          {ENTITIES.map(e=><option key={e}>{e}</option>)}
-        </Select>
-        <Input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search…" th={th} style={{ flex:1, minWidth:120 }}/>
-      </div>}
-
-      {/* ── Bulk actions (hide on pending tab) ── */}
-      {subTab !== "pending" && selCount > 0 && (
-        <div style={{ display:"flex", gap:8, alignItems:"center", padding:"8px 12px", background:th.acBg, borderRadius:9, border:`1px solid ${th.ac}44` }}>
-          <span style={{ fontSize:12, color:th.ac, fontWeight:700 }}>{selCount} selected</span>
-          <button className="btn btn-danger" onClick={bulkDelete} style={{ padding:"5px 12px", fontSize:11 }}>🗑 Delete</button>
-          <button onClick={()=>setSelected({})} style={{ background:"none", border:"none", color:th.tx3, cursor:"pointer", fontSize:12 }}>Clear</button>
+      {/* ── Summary strip ── */}
+      {subTab !== "pending" && (
+        <div style={{ display:"flex", gap:16, padding:"10px 0", borderBottom:`1px solid ${th.bor}`, marginBottom:4, fontSize:12 }}>
+          <span style={{ color:th.tx3 }}>{filtered.length} items</span>
+          <span className="num" style={{ color:th.rd }}>−{fmtIDR(outTotal,true)}</span>
+          <span className="num" style={{ color:th.gr }}>+{fmtIDR(inTotal,true)}</span>
+          {selCount>0 && <>
+            <span style={{ marginLeft:"auto", color:th.ac, fontWeight:600 }}>{selCount} selected</span>
+            <button onClick={bulkDelete} style={{ background:"none", border:"none", color:th.rd, cursor:"pointer", fontSize:12, fontWeight:600, fontFamily:"'Sora',sans-serif" }}>Delete</button>
+            <button onClick={()=>setSelected({})} style={{ background:"none", border:"none", color:th.tx3, cursor:"pointer", fontSize:12, fontFamily:"'Sora',sans-serif" }}>Clear</button>
+          </>}
         </div>
       )}
 
-      {/* ── Summary (hide on pending tab) ── */}
-      {subTab !== "pending" && <div style={{ display:"flex", gap:12, flexWrap:"wrap", fontSize:12 }}>
-        <span style={{ color:th.tx3 }}>{filtered.length} transactions</span>
-        <span className="num" style={{ color:th.rd }}>Out: {fmtIDR(filtered.filter(e=>["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan"].includes(e.type)).reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0),true)}</span>
-        <span className="num" style={{ color:th.gr }}>In: {fmtIDR(filtered.filter(e=>["income","sell_asset","reimburse_in","collect_loan"].includes(e.type)).reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0),true)}</span>
-      </div>}
+      {/* ── Pending tab ── */}
+      {subTab === "pending" && (
+        <PendingReview th={th} user={user} accounts={accounts} categories={categories}
+          pendingSyncs={pendingSyncs} setPendingSyncs={setPendingSyncs}
+          ledger={ledger} setLedger={setLedger} onRefresh={onRefresh}/>
+      )}
 
-      {/* ── Transaction list (hide on pending tab) ── */}
-      {subTab !== "pending" && (filtered.length === 0
-        ? <Empty icon="📋" message="No transactions found" th={th}/>
-        : filtered.map(e => {
-            const isOut = ["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan"].includes(e.type);
-            const isIn  = ["income","sell_asset","reimburse_in","collect_loan"].includes(e.type);
-            const amt   = Number(e.amount_idr||e.amount||0);
-            const fromAcc = accounts.find(a=>a.id===e.from_account_id);
-            const toAcc   = accounts.find(a=>a.id===e.to_account_id);
-            const cat = categories.find(c=>c.id===e.category_id);
-            return (
-              <div key={e.id} style={{
-                display:"flex", gap:10, alignItems:"flex-start", padding:"12px 14px",
-                background:th.sur, border:`1px solid ${selected[e.id]?th.ac:th.bor}`,
-                borderRadius:12, cursor:"pointer", transition:"border-color .1s",
-              }}>
-                <input type="checkbox" checked={!!selected[e.id]} onChange={ev=>setSelected(s=>({...s,[e.id]:ev.target.checked}))}
-                  onClick={ev=>ev.stopPropagation()} style={{ marginTop:2, accentColor:th.ac }}/>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontSize:13, fontWeight:700, color:th.tx, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>{e.description}</div>
-                      <div style={{ fontSize:11, color:th.tx3, marginTop:2, display:"flex", gap:8, flexWrap:"wrap" }}>
-                        <span>{e.date}</span>
-                        {fromAcc && <span>{fromAcc.name}{toAcc&&<> → {toAcc.name}</>}</span>}
-                        {(cat||e.category_label) && <span><CatPill category={cat?.name||e.category_label} small th={th}/></span>}
-                        {e.entity&&e.entity!=="Personal" && <EntityTag entity={e.entity} small/>}
-                        {e.is_reimburse && <Tag bg={th.amBg} color={th.am} small>↗ Reimburse</Tag>}
+      {/* ── Transaction list grouped by date ── */}
+      {subTab !== "pending" && (
+        grouped.length === 0
+          ? <Empty icon="◎" message="No transactions found" th={th}/>
+          : grouped.map(([date, rows]) => (
+              <div key={date}>
+                <div className="tx-date-header" style={{ color:th.tx3 }}>{dateLabel(date)}</div>
+                {rows.map(e => {
+                  const isOut = ["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan"].includes(e.type);
+                  const isIn  = ["income","sell_asset","reimburse_in","collect_loan"].includes(e.type);
+                  const amt   = Number(e.amount_idr||e.amount||0);
+                  const fromAcc = accounts.find(a=>a.id===e.from_account_id);
+                  const toAcc   = accounts.find(a=>a.id===e.to_account_id);
+                  const catDef  = EXPENSE_CATEGORIES.find(c=>c.id===e.category_id||c.label===e.category_label);
+                  const iconBg  = catDef ? catDef.color+"22" : isOut ? th.rdBg : isIn ? th.grBg : th.acBg;
+                  const iconCol = catDef ? catDef.color : isOut ? th.rd : isIn ? th.gr : th.ac;
+                  const icon    = catDef?.icon || (isOut?"↑":isIn?"↓":"↔");
+                  return (
+                    <div key={e.id} className="tx-row"
+                      style={{ background:selected[e.id]?th.acBg:"transparent" }}
+                      onClick={()=>setSelected(s=>({...s,[e.id]:!s[e.id]}))}>
+                      {/* Category icon */}
+                      <div style={{ width:36,height:36,borderRadius:"50%",background:iconBg,
+                        display:"flex",alignItems:"center",justifyContent:"center",
+                        fontSize:16,flexShrink:0,color:iconCol }}>{icon}</div>
+                      {/* Description + meta */}
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontSize:14, fontWeight:500, color:th.tx, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{e.description}</div>
+                        <div style={{ fontSize:12, color:th.tx3, marginTop:1, display:"flex", gap:6, flexWrap:"wrap" }}>
+                          {fromAcc && <span>{fromAcc.name}{toAcc&&<> → {toAcc.name}</>}</span>}
+                          {catDef && <span>{catDef.label}</span>}
+                          {e.entity&&e.entity!=="Personal" && <span style={{ color:th.ac }}>{e.entity}</span>}
+                        </div>
+                      </div>
+                      {/* Amount */}
+                      <div className="num" style={{ fontSize:14, fontWeight:700, color:isOut?th.rd:isIn?th.gr:th.ac, flexShrink:0 }}>
+                        {isOut?"−":isIn?"+":""}{fmtIDR(amt,true)}
+                      </div>
+                      {/* Actions */}
+                      <div style={{ display:"flex", gap:4, flexShrink:0 }} onClick={ev=>ev.stopPropagation()}>
+                        <button className="btn-icon" onClick={()=>openEdit(e)} style={{ color:th.tx3 }}>✎</button>
+                        <button className="btn-icon" onClick={()=>del(e)} style={{ color:th.rd, borderColor:th.rdBg }}>✕</button>
                       </div>
                     </div>
-                    <div className="num" style={{ fontSize:14, fontWeight:800, color:isOut?th.rd:isIn?th.gr:th.ac, marginLeft:12, flexShrink:0 }}>
-                      {isOut?"−":isIn?"+":""}{fmtIDR(amt,true)}
-                    </div>
-                  </div>
-                </div>
-                <div style={{ display:"flex", gap:4, flexShrink:0 }}>
-                  <button onClick={()=>openEdit(e)} style={{ background:th.sur2, border:`1px solid ${th.bor}`, borderRadius:7, padding:"4px 8px", cursor:"pointer", fontSize:11, color:th.tx3 }}>✏️</button>
-                  <button onClick={()=>del(e)} style={{ background:th.rdBg, border:`1px solid ${th.rd}44`, borderRadius:7, padding:"4px 8px", cursor:"pointer", fontSize:11, color:th.rd }}>🗑</button>
-                </div>
+                  );
+                })}
               </div>
-            );
-          })
+            ))
       )}
 
       {/* ── ADD/EDIT FORM ── */}
       {showForm && (
-        <Overlay onClose={()=>setShowForm(false)} th={th} title={editId?"Edit Transaction":"Add Transaction"} sub={TX_TYPES.find(t=>t.id===form.type)?.label}>
-          <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+        <Overlay onClose={()=>setShowForm(false)} th={th}
+          title={editId ? "Edit Transaction" : formStep===1 ? "Add Transaction" : TYPE_CHOICES.find(t=>t.id===form.type)?.label||"Add Transaction"}
+          sub={formStep===2 ? "Step 2 of 2" : !editId ? "Step 1 of 2" : undefined}>
 
-            {/* Type selector */}
-            <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
-              {TX_TYPES.filter(t=>!["opening_balance","cc_installment"].includes(t.id)).map(t => (
-                <button key={t.id} onClick={()=>setForm(f=>({...f,type:t.id,from_account_id:"",to_account_id:"",category_id:""}))}
-                  style={{ padding:"5px 10px", border:`1px solid ${form.type===t.id?t.color:th.bor}`, borderRadius:7,
-                    background:form.type===t.id?t.color+"22":"transparent", color:form.type===t.id?t.color:th.tx3,
-                    fontFamily:"'Sora',sans-serif", fontWeight:700, fontSize:10, cursor:"pointer", whiteSpace:"nowrap" }}>
-                  {t.icon} {t.label}
-                </button>
-              ))}
-            </div>
-
-            <R2>
-              <F label="Date" th={th}><Input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} th={th}/></F>
-              <F label="Currency" th={th}>
-                <Select value={form.currency} onChange={e=>setForm(f=>({...f,currency:e.target.value}))} th={th}>
-                  {allCurrencies.map(c=><option key={c.code} value={c.code}>{c.flag} {c.code}</option>)}
-                </Select>
-              </F>
-            </R2>
-
-            <F label="Description" th={th} required>
-              <Input value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} placeholder="What was this for?" th={th}/>
-            </F>
-
-            <R2>
-              <F label="Amount" th={th} required>
-                <Input type="number" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))} placeholder="0" th={th}
-                  style={{ fontFamily:"'JetBrains Mono',monospace" }}/>
-              </F>
-              <F label="Entity" th={th}>
-                <Select value={form.entity} onChange={e=>setForm(f=>({...f,entity:e.target.value}))} th={th}>
-                  {ENTITIES.map(e=><option key={e}>{e}</option>)}
-                </Select>
-              </F>
-            </R2>
-
-            {/* From account */}
-            {fromOptions.length > 0 && (
-              <F label="From Account" th={th}>
-                <Select value={form.from_account_id} onChange={e=>setForm(f=>({...f,from_account_id:e.target.value}))} th={th}>
-                  <option value="">Select account…</option>
-                  {fromOptions.map(a=><option key={a.id} value={a.id}>{a.name} {a.type==="bank"?`(${fmtIDR(a.current_balance||0,true)})`:a.type==="credit_card"?`(Debt: ${fmtIDR(a.current_balance||0,true)})`:""}</option>)}
-                </Select>
-              </F>
-            )}
-
-            {/* To account */}
-            {needsToAccount && (
-              <F label="To Account" th={th}>
-                <Select value={form.to_account_id} onChange={e=>setForm(f=>({...f,to_account_id:e.target.value}))} th={th}>
-                  <option value="">Select account…</option>
-                  {toOptions.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
-                </Select>
-              </F>
-            )}
-
-            {/* Category */}
-            {needsCategory && (
-              <F label="Category" th={th}>
-                <Select value={form.category_id} onChange={e=>{
-                  const cat=categories.find(c=>c.id===e.target.value);
-                  setForm(f=>({...f,category_id:e.target.value,category_label:cat?.name||""}));
-                }} th={th}>
-                  <option value="">Select category…</option>
-                  {categories.map(c=><option key={c.id} value={c.id}>{c.icon||""} {c.name}</option>)}
-                </Select>
-              </F>
-            )}
-
-            {/* Reimburse toggle */}
-            {["expense"].includes(form.type) && (
-              <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", fontSize:13, color:th.tx2 }}>
-                <input type="checkbox" checked={form.is_reimburse} onChange={e=>setForm(f=>({...f,is_reimburse:e.target.checked}))}
-                  style={{ accentColor:th.am }}/>
-                Paid on behalf of entity (Reimburse Out)
-              </label>
-            )}
-
-            <F label="Notes" th={th}>
-              <Input value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} placeholder="Optional notes" th={th}/>
-            </F>
-
-            {form.currency !== "IDR" && (
-              <div style={{ fontSize:11, color:th.tx3, textAlign:"right" }}>
-                ≈ {fmtIDR(amtIDR)} (IDR)
+          {/* Step 1: type grid */}
+          {formStep === 1 && !editId && (
+            <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+              <div style={{ fontSize:13, color:th.tx3 }}>What type of transaction?</div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+                {TYPE_CHOICES.map(t => (
+                  <button key={t.id} onClick={()=>{ setForm(f=>({...f,type:t.id,from_account_id:"",to_account_id:"",category_id:""})); setFormStep(2); }}
+                    style={{ display:"flex", alignItems:"center", gap:10, padding:"12px 14px",
+                      border:`1px solid ${th.bor}`, borderRadius:10, background:th.sur,
+                      cursor:"pointer", textAlign:"left", transition:"all .12s", fontFamily:"'Sora',sans-serif" }}>
+                    <div style={{ width:32,height:32,borderRadius:8,background:t.color+"18",
+                      display:"flex",alignItems:"center",justifyContent:"center",
+                      fontSize:16,color:t.color,flexShrink:0 }}>{t.icon}</div>
+                    <div>
+                      <div style={{ fontSize:13, fontWeight:600, color:th.tx }}>{t.label}</div>
+                      <div style={{ fontSize:11, color:th.tx3 }}>{t.desc}</div>
+                    </div>
+                  </button>
+                ))}
               </div>
-            )}
+              <div style={{ paddingBottom:8 }}>
+                <button className="btn btn-ghost" onClick={()=>setShowForm(false)} style={{ width:"100%", height:40 }}>Cancel</button>
+              </div>
+            </div>
+          )}
 
-            <BtnRow onCancel={()=>setShowForm(false)} onOk={save} label={editId?"Update":"Add Transaction"} th={th} saving={saving}/>
-          </div>
+          {/* Step 2: form fields */}
+          {(formStep === 2 || editId) && (
+            <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+              {/* Back to type selection (new only) */}
+              {!editId && (
+                <button onClick={()=>setFormStep(1)} style={{ background:"none", border:"none", cursor:"pointer", color:th.tx3, fontSize:12, fontFamily:"'Sora',sans-serif", textAlign:"left", padding:0, display:"flex", alignItems:"center", gap:4 }}>
+                  ← Back to type
+                </button>
+              )}
+
+              <R2>
+                <F label="Date" th={th}><Input type="date" value={form.date} onChange={e=>setForm(f=>({...f,date:e.target.value}))} th={th}/></F>
+                <F label="Currency" th={th}>
+                  <Select value={form.currency} onChange={e=>setForm(f=>({...f,currency:e.target.value}))} th={th}>
+                    {allCurrencies.map(c=><option key={c.code} value={c.code}>{c.flag} {c.code}</option>)}
+                  </Select>
+                </F>
+              </R2>
+
+              <F label="Description" th={th} required>
+                <Input value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} placeholder="What was this for?" th={th}/>
+              </F>
+
+              <R2>
+                <F label="Amount" th={th} required>
+                  <Input type="number" value={form.amount} onChange={e=>setForm(f=>({...f,amount:e.target.value}))} placeholder="0" th={th}
+                    style={{ fontFamily:"'JetBrains Mono',monospace" }}/>
+                </F>
+                <F label="Entity" th={th}>
+                  <Select value={form.entity} onChange={e=>setForm(f=>({...f,entity:e.target.value}))} th={th}>
+                    {ENTITIES.map(e=><option key={e}>{e}</option>)}
+                  </Select>
+                </F>
+              </R2>
+
+              {fromOptions.length > 0 && (
+                <F label={["income","sell_asset","reimburse_in","collect_loan"].includes(form.type)?"Source":"From Account"} th={th}>
+                  <Select value={form.from_account_id} onChange={e=>setForm(f=>({...f,from_account_id:e.target.value}))} th={th}>
+                    <option value="">Select account…</option>
+                    {fromOptions.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+                  </Select>
+                </F>
+              )}
+
+              {needsToAccount && (
+                <F label={form.type==="income"?"To Account":"Destination"} th={th}>
+                  <Select value={form.to_account_id} onChange={e=>setForm(f=>({...f,to_account_id:e.target.value}))} th={th}>
+                    <option value="">Select account…</option>
+                    {toOptions.map(a=><option key={a.id} value={a.id}>{a.name}</option>)}
+                  </Select>
+                </F>
+              )}
+
+              {needsCategory && (
+                <F label="Category" th={th}>
+                  <Select value={form.category_id} onChange={e=>{
+                    const cat=categories.find(c=>c.id===e.target.value);
+                    setForm(f=>({...f,category_id:e.target.value,category_label:cat?.name||""}));
+                  }} th={th}>
+                    <option value="">Select category…</option>
+                    {categories.map(c=><option key={c.id} value={c.id}>{c.icon||""} {c.name}</option>)}
+                  </Select>
+                </F>
+              )}
+
+              {form.type==="expense" && (
+                <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", fontSize:13, color:th.tx2 }}>
+                  <input type="checkbox" checked={form.is_reimburse} onChange={e=>setForm(f=>({...f,is_reimburse:e.target.checked}))}
+                    style={{ accentColor:th.am, width:16, height:16 }}/>
+                  Mark as reimbursable
+                </label>
+              )}
+
+              <F label="Notes" th={th}>
+                <Input value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} placeholder="Optional notes" th={th}/>
+              </F>
+
+              {form.currency !== "IDR" && (
+                <div style={{ fontSize:12, color:th.tx3, textAlign:"right" }}>≈ {fmtIDR(amtIDR)} IDR</div>
+              )}
+
+              <BtnRow onCancel={()=>setShowForm(false)} onOk={save} label={editId?"Save Changes":"Add Transaction"} th={th} saving={saving}/>
+            </div>
+          )}
         </Overlay>
       )}
 
-      {/* ── AI IMPORT MODAL ── */}
+      {/* ── AI IMPORT ── */}
       {showAI && (
-        <AIImportPanel
-          th={th} user={user} accounts={accounts} categories={categories}
+        <AIImportPanel th={th} user={user} accounts={accounts} categories={categories}
           fxRates={fxRates} CURRENCIES={allCurrencies}
           onClose={()=>setShowAI(false)}
-          onImported={(rows)=>{ setLedger(p=>[...rows,...p]); onRefresh(); }}
-        />
+          onImported={(rows)=>{ setLedger(p=>[...rows,...p]); onRefresh(); }}/>
       )}
     </div>
   );

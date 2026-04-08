@@ -9,7 +9,16 @@
       "Bash(pkill -f \"react-scripts start\")",
       "Bash(npm start:*)",
       "Bash(pkill -9 -f \"react-scripts\")",
-      "Bash(xargs kill:*)"
+      "Bash(xargs kill:*)",
+      "Bash(supabase link:*)",
+      "Bash(supabase functions:*)",
+      "Bash(supabase secrets:*)",
+      "Bash(npm run:*)",
+      "Bash(CI=false npm run build)",
+      "Bash(grep -l \"merchant\" src/components/*.jsx src/api.js)",
+      "Bash(grep -n \"qris_debit\" src/constants.js src/components/*.jsx src/api.js)",
+      "Bash(grep -n \"EMPTY_ENTRY\\\\|const entry\\\\s*=\\\\|{ ...form\\\\|{ ...entry\\\\|merchant_name\\\\|category_label\\\\|amount_idr\\\\|confidence\\\\|is_reimburse\" src/components/Transactions.jsx)",
+      "Bash(ls *.sql)"
     ]
   }
 }

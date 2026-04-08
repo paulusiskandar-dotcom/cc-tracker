@@ -9,33 +9,95 @@ export function injectBaseCSS() {
   _cssInjected = true;
   const s = document.createElement("style");
   s.textContent = `
-    @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
     *{box-sizing:border-box;margin:0;padding:0}
-    body{font-family:'Sora',system-ui,sans-serif}
+    body{font-family:'Sora',system-ui,sans-serif;font-size:14px;-webkit-font-smoothing:antialiased}
     @keyframes spin{to{transform:rotate(360deg)}}
-    @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
     @keyframes fadeIn{from{opacity:0}to{opacity:1}}
-    .inp{width:100%;border:1.5px solid;border-radius:10px;padding:10px 13px;font-family:'Sora',sans-serif;font-size:13px;outline:none;transition:border-color .15s,box-shadow .15s;min-height:44px}
-    .inp:focus{border-color:#3b5bdb!important;box-shadow:0 0 0 3px #3b5bdb18!important}
-    .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:none;border-radius:10px;padding:10px 18px;font-family:'Sora',sans-serif;font-weight:700;font-size:13px;cursor:pointer;transition:all .15s;white-space:nowrap;min-height:44px}
-    .btn:disabled{opacity:.5;cursor:not-allowed}
-    .btn-primary{background:linear-gradient(135deg,#3b5bdb,#7048e8);color:#fff}
-    .btn-ghost{background:transparent;color:#8a90aa;border:1.5px solid #e2e4ed}
-    .btn-danger{background:#fff5f5;color:#e03131;border:1.5px solid #ffc9c9}
-    .btn-ai{background:linear-gradient(135deg,#7048e8,#0c8599);color:#fff}
+
+    /* ── Inputs ── */
+    .inp{width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:0 12px;height:40px;
+      font-family:'Sora',sans-serif;font-size:14px;outline:none;
+      transition:border-color .15s,box-shadow .15s;background:#fff;color:#111827}
+    .inp:focus{border-color:#3b5bdb!important;box-shadow:0 0 0 3px #eef2ff!important}
+    textarea.inp{height:auto;padding:10px 12px}
+
+    /* ── Buttons ── */
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:none;
+      border-radius:8px;padding:0 16px;height:36px;
+      font-family:'Sora',sans-serif;font-weight:600;font-size:13px;cursor:pointer;
+      transition:all .15s;white-space:nowrap;line-height:1}
+    .btn:disabled{opacity:.45;cursor:not-allowed}
+    .btn-primary{background:#3b5bdb;color:#fff}
+    .btn-primary:hover:not(:disabled){background:#3451c7}
+    .btn-ghost{background:transparent;color:#6b7280;border:1px solid #e5e7eb}
+    .btn-ghost:hover:not(:disabled){background:#f3f4f6}
+    .btn-danger{background:#fef2f2;color:#dc2626;border:1px solid #fecaca}
+    .btn-danger:hover:not(:disabled){background:#fee2e2}
+    .btn-ai{background:#3b5bdb;color:#fff}
+    .btn-ai:hover:not(:disabled){background:#3451c7}
+    .btn-sm{height:30px;padding:0 12px;font-size:12px;border-radius:6px}
+    .btn-icon{width:32px;height:32px;padding:0;border-radius:6px;border:1px solid #e5e7eb;background:transparent;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;color:#6b7280;transition:all .15s}
+    .btn-icon:hover{background:#f3f4f6}
+
+    /* ── Typography ── */
     .num{font-family:'JetBrains Mono',monospace}
-    .card{border-radius:14px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.05),0 4px 16px rgba(0,0,0,.04)}
-    .fade-up{animation:fadeUp .25s ease both}
+    .label-sm{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+
+    /* ── Cards ── */
+    .card{border-radius:12px;padding:16px;border:1px solid #e5e7eb;background:#fff}
+
+    /* ── Utils ── */
+    .fade-up{animation:fadeUp .2s ease both}
     ::-webkit-scrollbar{width:4px;height:4px}
     ::-webkit-scrollbar-track{background:transparent}
-    ::-webkit-scrollbar-thumb{background:#d0d3e0;border-radius:4px}
+    ::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:4px}
+
+    /* ── Layout ── */
+    .desktop-sidebar{display:none}
+    .mobile-nav{display:flex}
+    @media(min-width:769px){
+      .desktop-sidebar{display:flex!important}
+      .mobile-nav{display:none!important}
+      .mobile-header-logo{display:none}
+    }
+    @media(max-width:768px){
+      .desktop-sidebar{display:none!important}
+    }
+
+    /* ── Overlay / Modal ── */
     .overlay-backdrop{align-items:flex-end;overflow:hidden}
     .overlay-modal{height:100dvh;border-radius:0}
+    .overlay-drag{display:block}
     @media(min-width:769px){
       .overlay-backdrop{align-items:center;padding:24px 16px}
-      .overlay-modal{height:auto!important;max-height:85vh;border-radius:20px!important}
-      .overlay-handle{display:none}
+      .overlay-modal{height:auto!important;max-height:85vh;border-radius:16px!important}
+      .overlay-drag{display:none}
     }
+
+    /* ── Nav items ── */
+    .nav-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border:none;
+      border-radius:8px;cursor:pointer;font-family:'Sora',sans-serif;font-weight:500;
+      font-size:13px;transition:all .12s;width:100%;text-align:left;
+      background:transparent;color:#6b7280}
+    .nav-item:hover{background:#f3f4f6}
+    .nav-item.active{background:#eef2ff;color:#3b5bdb;font-weight:600}
+
+    /* ── Transaction list ── */
+    .tx-row{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:8px;
+      cursor:pointer;transition:background .1s}
+    .tx-row:hover{background:#f9fafb}
+    .tx-date-header{font-size:11px;font-weight:700;text-transform:uppercase;
+      letter-spacing:.5px;color:#9ca3af;padding:12px 12px 4px}
+
+    /* ── SubTabs ── */
+    .subtab-bar{display:flex;gap:0;border-bottom:1px solid #e5e7eb;margin-bottom:0}
+    .subtab{border:none;background:none;padding:8px 14px;font-family:'Sora',sans-serif;
+      font-size:13px;font-weight:500;cursor:pointer;color:#6b7280;
+      border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .15s}
+    .subtab.active{color:#3b5bdb;font-weight:600;border-bottom-color:#3b5bdb}
+    .subtab:hover:not(.active){color:#374151}
   `;
   document.head.appendChild(s);
 }
@@ -52,10 +114,7 @@ export function Spinner({ size = 24, color = "#3b5bdb" }) {
 }
 
 // ─── OVERLAY / MODAL ──────────────────────────────────────────
-// Layout: flex-column on modal. Header = flexShrink:0. Body = flex:1+overflow:auto.
-// BtnRow inside body uses position:sticky,bottom:0 → always visible without scrolling.
-// Mobile: full-screen (height:100dvh). Desktop: centered, max-height:85vh via CSS class.
-export function Overlay({ children, onClose, th, title, sub, maxWidth = 500, noPad = false }) {
+export function Overlay({ children, onClose, th, title, sub, maxWidth = 480, noPad = false }) {
   const bodyRef = useRef(null);
   const handleBackdrop = useCallback(e => {
     if (e.target === e.currentTarget) onClose();
@@ -67,48 +126,37 @@ export function Overlay({ children, onClose, th, title, sub, maxWidth = 500, noP
     });
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    return () => {
-      cancelAnimationFrame(raf);
-      document.body.style.overflow = prev;
-    };
+    return () => { cancelAnimationFrame(raf); document.body.style.overflow = prev; };
   }, []);
 
   return (
-    <div onClick={handleBackdrop}
-      className="overlay-backdrop"
-      style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.48)", zIndex:1000,
+    <div onClick={handleBackdrop} className="overlay-backdrop"
+      style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.4)", zIndex:1000,
         display:"flex", justifyContent:"center" }}>
-
-      {/* Modal: flex column so header+footer never scroll away */}
       <div className="overlay-modal" style={{
         background:th.sur, width:"100%", maxWidth,
         display:"flex", flexDirection:"column",
-        animation:"fadeUp .2s ease both", boxShadow:th.sh2,
+        animation:"fadeUp .18s ease both", boxShadow:"0 20px 60px rgba(0,0,0,.15)",
       }}>
-        {/* Drag handle — hidden on desktop */}
-        <div className="overlay-handle" style={{ padding:"10px 0 0", textAlign:"center", flexShrink:0 }}>
-          <div style={{ width:40, height:4, borderRadius:2, background:th.bor2, display:"inline-block" }}/>
+        {/* Mobile drag handle */}
+        <div className="overlay-drag" style={{ padding:"10px 0 6px", textAlign:"center", flexShrink:0 }}>
+          <div style={{ width:36, height:4, borderRadius:2, background:th.bor2, display:"inline-block" }}/>
         </div>
-
-        {/* Header — flexShrink:0, never scrolls away */}
+        {/* Sticky header */}
         <div style={{
-          flexShrink:0, padding:"14px 20px", borderBottom:`1px solid ${th.bor}`,
+          flexShrink:0, padding:"16px 20px", borderBottom:`1px solid ${th.bor}`,
           display:"flex", justifyContent:"space-between", alignItems:"center",
         }}>
           <div>
-            <div style={{ fontSize:16, fontWeight:800, color:th.tx, letterSpacing:"-.3px" }}>{title||""}</div>
-            {sub && <div style={{ fontSize:11, color:th.tx3, marginTop:2 }}>{sub}</div>}
+            <div style={{ fontSize:15, fontWeight:700, color:th.tx }}>{title||""}</div>
+            {sub && <div style={{ fontSize:12, color:th.tx3, marginTop:2 }}>{sub}</div>}
           </div>
-          <button onClick={onClose} style={{ background:"none", border:"none", cursor:"pointer",
-            color:th.tx3, fontSize:24, lineHeight:1, padding:"4px 0 4px 12px", flexShrink:0 }}>×</button>
+          <button onClick={onClose} className="btn-icon" style={{ border:"none", background:"none", color:th.tx3, fontSize:20, width:32, height:32 }}>×</button>
         </div>
-
-        {/* Body — the ONLY scroll container. BtnRow inside uses sticky bottom:0. */}
+        {/* Scrollable body */}
         <div ref={bodyRef} style={{
-          flex:1, overflowY:"auto",
-          WebkitOverflowScrolling:"touch", overscrollBehavior:"contain",
-          padding: noPad ? 0 : "16px 20px 0",
-          paddingBottom: noPad ? "env(safe-area-inset-bottom)" : 0,
+          flex:1, overflowY:"auto", WebkitOverflowScrolling:"touch", overscrollBehavior:"contain",
+          padding: noPad ? 0 : "20px 20px 0",
         }}>
           {children}
         </div>
@@ -148,17 +196,16 @@ export function R2({ children }) {
 export function BtnRow({ onCancel, onOk, label = "Save", th, saving, disabled }) {
   return (
     <div style={{
-      position:"sticky", bottom:0, zIndex:5,
-      background:th.sur,
-      padding:"12px 0 max(16px, env(safe-area-inset-bottom))",
-      marginTop:16,
-      borderTop:`1px solid ${th.bor}`,
+      position:"sticky", bottom:0, zIndex:5, background:th.sur,
+      padding:"16px 0 max(16px, env(safe-area-inset-bottom))",
+      marginTop:20, borderTop:`1px solid ${th.bor}`,
       display:"flex", gap:8,
     }}>
       <button className="btn btn-ghost" onClick={onCancel} disabled={saving}
-        style={{ flex:1, color:th.tx2, borderColor:th.bor }}>Cancel</button>
-      <button className="btn btn-primary" onClick={onOk} disabled={saving||disabled} style={{ flex:2 }}>
-        {saving ? <><Spinner size={14} color="#fff"/>&nbsp;Saving…</> : label}
+        style={{ flex:1, height:40 }}>Cancel</button>
+      <button className="btn btn-primary" onClick={onOk} disabled={saving||disabled}
+        style={{ flex:2, height:40 }}>
+        {saving ? <><Spinner size={13} color="#fff"/>Saving…</> : label}
       </button>
     </div>
   );
@@ -273,19 +320,13 @@ export function CatPill({ category, small, th }) {
 }
 
 // ─── SUB-TAB BAR ──────────────────────────────────────────────
-export function SubTabs({ tabs, active, onChange, th }) {
+export function SubTabs({ tabs, active, onChange }) {
   return (
-    <div style={{ display:"flex", gap:4, background:th.sur2, borderRadius:11, padding:3, flexWrap:"wrap" }}>
+    <div className="subtab-bar">
       {tabs.map(t => (
-        <button key={t.id} onClick={()=>onChange(t.id)} style={{
-          flex:"1 1 auto", border:"none", padding:"7px 12px", borderRadius:8,
-          fontFamily:"'Sora',sans-serif", fontWeight:700, fontSize:11, cursor:"pointer",
-          background:active===t.id ? th.sur : "transparent",
-          color:active===t.id ? th.ac : th.tx3,
-          boxShadow:active===t.id ? th.sh : "none",
-          transition:"all .15s", whiteSpace:"nowrap",
-        }}>
-          {t.icon && <span style={{ marginRight:4 }}>{t.icon}</span>}{t.label}
+        <button key={t.id} onClick={()=>onChange(t.id)}
+          className={`subtab${active===t.id?" active":""}`}>
+          {t.label}
         </button>
       ))}
     </div>
@@ -295,26 +336,15 @@ export function SubTabs({ tabs, active, onChange, th }) {
 // ─── INPUT WITH STYLE ─────────────────────────────────────────
 export function Input({ value, onChange, type="text", placeholder, th, style={}, ...props }) {
   return (
-    <input
-      className="inp"
-      type={type}
-      value={value}
-      onChange={onChange}
-      placeholder={placeholder}
-      style={{ background:th.sur, color:th.tx, borderColor:th.bor2, ...style }}
-      {...props}
-    />
+    <input className="inp" type={type} value={value} onChange={onChange} placeholder={placeholder}
+      style={{ background:th.sur, color:th.tx, borderColor:th.bor, ...style }} {...props}/>
   );
 }
 
 export function Select({ value, onChange, children, th, style={} }) {
   return (
-    <select
-      className="inp"
-      value={value}
-      onChange={onChange}
-      style={{ background:th.sur, color:th.tx, borderColor:th.bor2, cursor:"pointer", ...style }}
-    >
+    <select className="inp" value={value} onChange={onChange}
+      style={{ background:th.sur, color:th.tx, borderColor:th.bor, cursor:"pointer", ...style }}>
       {children}
     </select>
   );
@@ -322,14 +352,8 @@ export function Select({ value, onChange, children, th, style={} }) {
 
 export function Textarea({ value, onChange, placeholder, th, rows=3, style={} }) {
   return (
-    <textarea
-      className="inp"
-      value={value}
-      onChange={onChange}
-      placeholder={placeholder}
-      rows={rows}
-      style={{ background:th.sur, color:th.tx, borderColor:th.bor2, resize:"vertical", ...style }}
-    />
+    <textarea className="inp" value={value} onChange={onChange} placeholder={placeholder} rows={rows}
+      style={{ background:th.sur, color:th.tx, borderColor:th.bor, resize:"vertical", ...style }}/>
   );
 }
 
