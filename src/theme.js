@@ -1,0 +1,31 @@
+export const LIGHT = {
+  bg:"#f5f6fa",   sur:"#ffffff",   sur2:"#f0f1f7",  sur3:"#e8eaf2",
+  bor:"#e2e4ed",  bor2:"#d0d3e0",
+  tx:"#0f1117",   tx2:"#4a4f6a",   tx3:"#8a90aa",
+  ac:"#3b5bdb",   acBg:"#eef2ff",
+  gr:"#0ca678",   grBg:"#e6fcf5",
+  rd:"#e03131",   rdBg:"#fff5f5",
+  am:"#e67700",   amBg:"#fff9db",
+  pu:"#7048e8",   puBg:"#f3f0ff",
+  te:"#0c8599",   teBg:"#e3fafc",
+  pk:"#c2255c",   pkBg:"#fff0f6",
+  sh:"0 1px 3px rgba(0,0,0,.05),0 4px 16px rgba(0,0,0,.04)",
+  sh2:"0 4px 24px rgba(0,0,0,.08)",
+  nav:"#ffffff",
+};
+export const DARK = {
+  bg:"#0d0f18",   sur:"#141620",   sur2:"#1a1d2e",  sur3:"#1f2338",
+  bor:"#252840",  bor2:"#2e3250",
+  tx:"#eef0f8",   tx2:"#9099c0",   tx3:"#5a6090",
+  ac:"#7c8ff0",   acBg:"#1a1f3a",
+  gr:"#38d9a9",   grBg:"#0d2420",
+  rd:"#fc8181",   rdBg:"#2d1515",
+  am:"#fcd34d",   amBg:"#2a2000",
+  pu:"#b197fc",   puBg:"#1e1530",
+  te:"#63e6e2",   teBg:"#0d2426",
+  pk:"#f783ac",   pkBg:"#2d1525",
+  sh:"0 1px 3px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.2)",
+  sh2:"0 4px 24px rgba(0,0,0,.4)",
+  nav:"#141620",
+};
+export const getTheme = (isDark) => isDark ? DARK : LIGHT;
