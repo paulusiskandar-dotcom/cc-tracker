@@ -1,5 +1,5 @@
 import { useState, useMemo, useRef } from "react";
-import { ledgerApi, gmailApi, aiCall, parseJSON, fmtIDR, todayStr, ym, toIDR, agingLabel } from "../api";
+import { ledgerApi, gmailApi, merchantApi, aiCall, parseJSON, fmtIDR, todayStr, ym, toIDR, agingLabel } from "../api";
 import { EXPENSE_CATEGORIES, ENTITIES, TX_TYPES, CURRENCIES } from "../constants";
 import { Overlay, F, R2, BtnRow, SubTabs, Input, Select, Textarea, Tag, EntityTag, TxTypeTag, Amount,
          CatPill, Empty, SectionHeader, Spinner, showToast, confirmDelete, MonthSelect } from "./shared";
@@ -138,6 +138,10 @@ export default function Transactions({
         setLedger(p => [created, ...p]);
         showToast("Transaction added");
         await onRefresh(); // refresh balances
+      }
+      // Learn merchant → category mapping
+      if (form.merchant_name && form.category_id) {
+        merchantApi.upsertMapping(user.id, form.merchant_name, form.category_id, form.category_label).catch(()=>{});
       }
       setShowForm(false);
     } catch (e) { showToast(e.message, "error"); }
@@ -485,6 +489,12 @@ Rules: TRSF/Transfer→transfer, QRIS/QR→is_qris=true, CC/Credit Card payment�
       }
       onImported(created);
       showToast(`✅ ${created.length} transactions imported`);
+      // Learn merchant → category for all confirmed imports
+      for (const row of toImport) {
+        if (row.merchant_name && row.category_id) {
+          merchantApi.upsertMapping(user.id, row.merchant_name, row.category_id, row.category_label).catch(()=>{});
+        }
+      }
       onClose();
     } catch(e) { showToast(e.message,"error"); }
     setSaving(false);
@@ -611,6 +621,16 @@ function PendingReview({
       await gmailApi.updateSync(sync.id, { status: "confirmed" });
       setPendingSyncs(p => p.filter(s => s.id !== sync.id));
       showToast(`Imported from ${sync.sender_email || "email"}`);
+      // Learn merchant mappings from confirmed email transactions
+      for (const tx of txs) {
+        if (tx.merchant_name && (tx.category_id || tx.suggested_category)) {
+          merchantApi.upsertMapping(
+            user.id, tx.merchant_name,
+            tx.category_id || tx.suggested_category,
+            tx.category_label || tx.suggested_category
+          ).catch(()=>{});
+        }
+      }
       await onRefresh();
     } catch (e) { showToast(e.message, "error"); }
     setSaving(false);
