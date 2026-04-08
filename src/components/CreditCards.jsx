@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { ledgerApi, installmentsApi, recurringApi } from "../api";
+import { ledgerApi, installmentsApi, recurringApi, getTxFromToTypes } from "../api";
 import { ENTITIES } from "../constants";
 import { fmtIDR, todayStr, ym, daysUntil } from "../utils";
 import Modal, { ConfirmModal } from "./shared/Modal";
@@ -114,6 +114,8 @@ export default function CreditCards({
         currency:        "IDR",
         amount_idr:      total,
         tx_type:         "pay_cc",
+        from_type:       "account",
+        to_type:         "account",
         from_id:         payForm.bankId,
         to_id:           payForm.cardId,
         entity:          "Personal",
@@ -167,7 +169,10 @@ export default function CreditCards({
         currency:        inst.currency || "IDR",
         amount_idr:      sn2(inst.monthly_amount),
         tx_type:         "cc_installment",
+        from_type:       "account",
+        to_type:         "expense",
         from_id:         inst.account_id,
+        to_id:           null,
         entity:          inst.entity || "Personal",
         notes:           "CC Installment",
       };
@@ -201,15 +206,19 @@ export default function CreditCards({
     try {
       const cc = accounts.find(a => a.id === r.from_id);
       const sn3 = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
+      const txType = r.tx_type || "expense";
+      const { from_type, to_type } = getTxFromToTypes(txType);
       const entry = {
         tx_date:         todayStr(),
         description:     r.name,
         amount:          sn3(r.amount),
         currency:        r.currency || "IDR",
         amount_idr:      sn3(r.amount),
-        tx_type:         r.tx_type || "expense",
-        from_id:         r.from_id || "",
-        to_id:           r.to_id   || "",
+        tx_type:         txType,
+        from_type,
+        to_type,
+        from_id:         r.from_id || null,
+        to_id:           r.to_id   || null,
         entity:          r.entity  || "Personal",
         notes:           `Applied from recurring template`,
       };

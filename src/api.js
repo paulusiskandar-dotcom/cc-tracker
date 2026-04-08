@@ -1,5 +1,37 @@
 import { supabase } from "./lib/supabase";
 
+// ─── FROM_TYPE / TO_TYPE MAPPING ─────────────────────────────
+export const getTxFromToTypes = (txType) => {
+  const map = {
+    expense:         { from_type: "account",        to_type: "expense"  },
+    income:          { from_type: "income_source",  to_type: "account"  },
+    transfer:        { from_type: "account",        to_type: "account"  },
+    pay_cc:          { from_type: "account",        to_type: "account"  },
+    buy_asset:       { from_type: "account",        to_type: "account"  },
+    sell_asset:      { from_type: "account",        to_type: "account"  },
+    pay_liability:   { from_type: "account",        to_type: "account"  },
+    reimburse_out:   { from_type: "account",        to_type: "account"  },
+    reimburse_in:    { from_type: "account",        to_type: "account"  },
+    give_loan:       { from_type: "account",        to_type: "account"  },
+    collect_loan:    { from_type: "account",        to_type: "account"  },
+    fx_exchange:     { from_type: "account",        to_type: "account"  },
+    cc_installment:  { from_type: "account",        to_type: "expense"  },
+    opening_balance: { from_type: "account",        to_type: "account"  },
+  };
+  return map[txType] || { from_type: "account", to_type: "account" };
+};
+
+// ─── LEDGER VALIDATION ────────────────────────────────────────
+const validateLedgerEntry = (entry) => {
+  if (!entry.from_type) throw new Error("from_type is required");
+  if (!entry.to_type)   throw new Error("to_type is required");
+  if (!entry.tx_date)   throw new Error("Date is required");
+  if (!entry.description) throw new Error("Description is required");
+  if (!entry.amount || Number(entry.amount) <= 0) throw new Error("Amount must be greater than 0");
+  if (!entry.tx_type)   throw new Error("Transaction type is required");
+  return true;
+};
+
 // ─── BALANCE FIELD PER ACCOUNT TYPE ───────────────────────────
 const balField = (type) => {
   if (type === "bank")                               return "current_balance";
@@ -149,6 +181,7 @@ export const ledgerApi = {
 
   // Create entry + update balances
   create: async (userId, entry, accounts = []) => {
+    validateLedgerEntry(entry);
     const { data, error } = await supabase
       .from("ledger")
       .insert([{ ...entry, user_id: userId }])
@@ -205,7 +238,7 @@ export const categoriesApi = {
     const { data, error } = await supabase
       .from("expense_categories")
       .select("*")
-      .or(`user_id.eq.${userId},is_system.eq.true`)
+      .or(`user_id.is.null,user_id.eq.${userId}`)
       .order("sort_order");
     if (error) throw new Error(error.message);
     return data || [];

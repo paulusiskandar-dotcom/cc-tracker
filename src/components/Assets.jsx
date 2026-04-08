@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { accountsApi, ledgerApi } from "../api";
+import { accountsApi, ledgerApi, getTxFromToTypes } from "../api";
 import { fmtIDR, todayStr } from "../utils";
 import { ASSET_SUBTYPES, ASSET_ICON, ASSET_COL, LIAB_SUBTYPES } from "../constants";
 import { LIGHT, DARK } from "../theme";
@@ -162,6 +162,8 @@ export default function Assets({ user, accounts, ledger, onRefresh, setAccounts,
         currency:        "IDR",
         amount_idr:      amt,
         tx_type:         "pay_liability",
+        from_type:       "account",
+        to_type:         "account",
         from_id:         payForm.bankId,
         to_id:           payForm.liabId,
         entity:          liab?.entity || "Personal",

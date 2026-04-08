@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { ledgerApi, gmailApi, scanApi } from "../api";
+import { ledgerApi, gmailApi, scanApi, getTxFromToTypes } from "../api";
 import { fmtIDR, todayStr } from "../utils";
 import { LIGHT, DARK } from "../theme";
 import { Modal, Button, Field, Input, AmountInput, FormRow, Select, EmptyState, Spinner, showToast } from "./shared/index";
@@ -89,6 +89,7 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
     let ok = 0;
     for (const r of toImport) {
       try {
+        const { from_type, to_type } = getTxFromToTypes(r.tx_type);
         const entry = {
           tx_date:         r.tx_date,
           description:     r.description,
@@ -96,10 +97,13 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
           currency:        r.currency || "IDR",
           amount_idr:      Number(r.amount_idr || r.amount),
           tx_type:         r.tx_type,
+          from_type,
+          to_type,
           from_id:         r.from_id || null,
-          to_id:           r.to_id || null,
+          to_id:           r.to_id   || null,
           entity:          r.entity || "Personal",
-          category:        r.category || "other",
+          category_id:     null,
+          category_name:   r.category || null,
           notes:           r.notes || "",
         };
         const created = await ledgerApi.create(user.id, entry, accounts);
@@ -123,10 +127,13 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
         currency:        "IDR",
         amount_idr:      Number(item.amount),
         tx_type:         "expense",
+        from_type:       "account",
+        to_type:         "expense",
         from_id:         ccAccounts[0]?.id || spendAccounts[0]?.id || null,
         to_id:           null,
         entity:          "Personal",
-        category:        item.category || "other",
+        category_id:     null,
+        category_name:   item.category || null,
         notes:           item.email_subject || "",
       };
       const created = await ledgerApi.create(user.id, entry, accounts);

@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { ledgerApi, incomeSrcApi } from "../api";
+import { ledgerApi, incomeSrcApi, getTxFromToTypes } from "../api";
 import { fmtIDR, todayStr, ym, mlShort } from "../utils";
 import { INCOME_CATEGORIES, ENTITIES, FREQUENCIES, CURRENCIES } from "../constants";
 import { LIGHT, DARK } from "../theme";
@@ -139,11 +139,14 @@ export default function Income({
         currency:         incForm.currency || "IDR",
         amount_idr:       amt,
         tx_type:          "income",
-        from_id:          null,
+        from_type:        "income_source",
+        to_type:          "account",
+        from_id:          incForm.income_source_id || null,
         to_id:            incForm.to_account_id,
         entity:           incForm.entity || "Personal",
         notes:            incForm.notes || "",
         category_name:    src?.type || "Salary",
+        category_id:      null,
       };
       const r = await ledgerApi.create(user.id, entry, accounts);
       if (r) setLedger(prev => [r, ...prev]);

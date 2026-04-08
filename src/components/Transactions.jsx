@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { ledgerApi, merchantApi, gmailApi } from "../api";
+import { ledgerApi, merchantApi, gmailApi, getTxFromToTypes } from "../api";
 import { EXPENSE_CATEGORIES, ENTITIES, TX_TYPES } from "../constants";
 import { fmtIDR, todayStr, ym, toIDR, groupByDate, fmtDateLabel } from "../utils";
 import Modal, { ConfirmModal } from "./shared/Modal";
@@ -35,7 +35,8 @@ const TYPE_CHOICES = [
 const EMPTY = {
   tx_date: todayStr(), description: "", amount: "", currency: "IDR",
   tx_type: "expense", from_id: "", to_id: "",
-  category_id: "", category_name: "", entity: "Personal",
+  from_type: "account", to_type: "expense",
+  category_id: null, category_name: null, entity: "Personal",
   notes: "", is_reimburse: false,
 };
 
@@ -149,8 +150,10 @@ export default function Transactions({
       tx_type:         e.tx_type,
       from_id:         e.from_id || "",
       to_id:           e.to_id   || "",
-      category_id:     e.category_id     || "",
-      category_name:   e.category_name  || "",
+      from_type:       e.from_type || getTxFromToTypes(e.tx_type).from_type,
+      to_type:         e.to_type   || getTxFromToTypes(e.tx_type).to_type,
+      category_id:     e.category_id   || null,
+      category_name:   e.category_name || null,
       entity:          e.entity          || "Personal",
       notes:           e.notes           || "",
       is_reimburse:    e.is_reimburse     || false,
@@ -170,11 +173,15 @@ export default function Transactions({
     try {
       const cat   = categories.find(c => c.id === form.category_id);
       const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
+      const { from_type, to_type } = getTxFromToTypes(form.tx_type);
       const entry = {
         ...form,
-        amount:         sn(form.amount),
-        amount_idr:     sn(amtIDR),
-        category_name: cat?.name || form.category_name || "",
+        amount:        sn(form.amount),
+        amount_idr:    sn(amtIDR),
+        from_type,
+        to_type,
+        category_id:   form.category_id || null,
+        category_name: cat?.name || form.category_name || null,
       };
       if (editEntry) {
         const updated = await ledgerApi.update(editEntry.id, entry);
@@ -656,13 +663,13 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
       {needsCat && (
         <Select
           label="Category"
-          value={form.category_id}
+          value={form.category_id || ""}
           onChange={e => {
-            const found = EXPENSE_CATEGORIES.find(c => c.id === e.target.value);
-            set("category_id", e.target.value);
-            set("category_name", found?.label || "");
+            const found = categories.find(c => c.id === e.target.value);
+            set("category_id", e.target.value || null);
+            set("category_name", found?.name || null);
           }}
-          options={EXPENSE_CATEGORIES.map(c => ({ value: c.id, label: `${c.icon} ${c.label}` }))}
+          options={categories.map(c => ({ value: c.id, label: `${c.icon || "❓"} ${c.name}` }))}
           placeholder="Select category…"
         />
       )}
@@ -736,21 +743,26 @@ function PendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, user,
 
   const confirm = async (sync) => {
     try {
+      const txType = sync.tx_type || "expense";
+      const { from_type, to_type } = getTxFromToTypes(txType);
+      const catMatch = categories.find(c =>
+        c.name?.toLowerCase() === (sync.suggested_category_label || "").toLowerCase()
+      );
       const entry = {
         tx_date:         sync.transaction_date || sync.received_at?.slice(0, 10) || todayStr(),
         description:     sync.merchant_name || sync.subject || "Gmail transaction",
         amount:          Number(sync.amount || 0),
         currency:        sync.currency || "IDR",
         amount_idr:      Number(sync.amount_idr || sync.amount || 0),
-        tx_type:         sync.tx_type || "expense",
-        from_id:         sync.matched_account_id || "",
-        to_id:           "",
-        category_id:     sync.suggested_category || "other",
-        category_name:   sync.suggested_category_label || "Other",
+        tx_type:         txType,
+        from_type,
+        to_type,
+        from_id:         sync.matched_account_id || null,
+        to_id:           null,
+        category_id:     catMatch?.id || null,
+        category_name:   catMatch?.name || null,
         entity:          sync.entity || "Personal",
         notes:           `Imported from Gmail: ${sync.subject || ""}`,
-        source:          "gmail",
-        email_sync_id:   sync.id,
       };
       const created = await ledgerApi.create(user.id, entry, accounts);
       setLedger(p => [created, ...p]);
