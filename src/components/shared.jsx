@@ -29,11 +29,11 @@ export function injectBaseCSS() {
     ::-webkit-scrollbar{width:4px;height:4px}
     ::-webkit-scrollbar-track{background:transparent}
     ::-webkit-scrollbar-thumb{background:#d0d3e0;border-radius:4px}
-    .overlay-backdrop{align-items:stretch}
-    .overlay-modal{border-radius:0;min-height:100%;max-height:none}
+    .overlay-backdrop{align-items:flex-start;overflow-y:auto;padding:0}
+    .overlay-modal{border-radius:0;min-height:100vh;width:100%}
     @media(min-width:769px){
-      .overlay-backdrop{align-items:center;padding:24px 16px}
-      .overlay-modal{border-radius:20px!important;min-height:unset!important;max-height:85vh!important;height:auto}
+      .overlay-backdrop{align-items:flex-start;padding:20px 16px}
+      .overlay-modal{border-radius:20px!important;min-height:unset!important;width:auto;margin:auto}
       .overlay-handle{display:none}
     }
   `;
@@ -53,16 +53,16 @@ export function Spinner({ size = 24, color = "#3b5bdb" }) {
 
 // ─── OVERLAY / MODAL ──────────────────────────────────────────
 export function Overlay({ children, onClose, th, title, sub, maxWidth = 500, noPad = false }) {
-  const contentRef = useRef(null);
+  // backdropRef: the backdrop IS the scroll container — it's position:fixed+inset:0 with overflowY:auto
+  const backdropRef = useRef(null);
   const handleBackdrop = useCallback(e => {
     if (e.target === e.currentTarget) onClose();
   }, [onClose]);
 
   useEffect(() => {
-    // requestAnimationFrame ensures children have rendered before we scroll,
-    // so the scroll-to-top is never a no-op on first open.
+    // Scroll the backdrop (the scroll container) to top after first paint
     const raf = requestAnimationFrame(() => {
-      contentRef.current?.scrollTo({ top: 0, behavior: "instant" });
+      backdropRef.current?.scrollTo({ top: 0, behavior: "instant" });
     });
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -73,19 +73,18 @@ export function Overlay({ children, onClose, th, title, sub, maxWidth = 500, noP
   }, []);
 
   return (
-    <div onClick={handleBackdrop}
+    // Backdrop = the scroll container. overflowY:auto + align-items:flex-start via CSS class.
+    // This means the modal always starts at the top — nothing gets cut off.
+    <div ref={backdropRef} onClick={handleBackdrop}
       className="overlay-backdrop"
       style={{
         position:"fixed", inset:0, background:"rgba(0,0,0,.48)", zIndex:1000,
         display:"flex", justifyContent:"center",
-      }}>
-      {/* ONE scroll container — sticky header/footer work relative to this div.
-          Mobile: fullscreen (min-height:100%, no maxHeight) via CSS class.
-          Desktop: centered 85vh via CSS media query. */}
-      <div ref={contentRef} className="overlay-modal" style={{
-        background:th.sur, width:"100%", maxWidth,
-        overflowY:"auto",
         WebkitOverflowScrolling:"touch", overscrollBehavior:"contain",
+      }}>
+      {/* Inner modal: no overflow, no maxHeight — outer backdrop handles scrolling */}
+      <div className="overlay-modal" style={{
+        background:th.sur, maxWidth,
         animation:"fadeUp .2s ease both", boxShadow:th.sh2,
         paddingBottom:"env(safe-area-inset-bottom)",
       }}>
@@ -93,7 +92,7 @@ export function Overlay({ children, onClose, th, title, sub, maxWidth = 500, noP
         <div className="overlay-handle" style={{ padding:"12px 0 0", textAlign:"center" }}>
           <div style={{ width:40, height:4, borderRadius:2, background:th.bor2, display:"inline-block" }}/>
         </div>
-        {/* Sticky header — sticky because its parent IS the scroll container */}
+        {/* Sticky header — sticks to top of the backdrop (scroll container = viewport) */}
         <div style={{
           position:"sticky", top:0, zIndex:10, background:th.sur,
           padding:"0 20px 12px", borderBottom:`1px solid ${th.bor}`,
