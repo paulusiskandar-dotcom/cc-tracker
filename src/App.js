@@ -4,7 +4,7 @@ import { getTheme } from "./theme";
 import { TABS, CURRENCIES, APP_VERSION, APP_BUILD } from "./constants";
 import { accountsApi, ledgerApi, categoriesApi, incomeSrcApi, installmentsApi,
          recurringApi, merchantApi, fxApi, settingsApi, gmailApi, fmtIDR, todayStr, ym } from "./api";
-import { injectBaseCSS, calcNetWorth, Spinner } from "./components/shared";
+import { injectBaseCSS, calcNetWorth, Spinner, showToast } from "./components/shared";
 import Dashboard    from "./components/Dashboard";
 import Transactions from "./components/Transactions";
 import Accounts     from "./components/Accounts";
@@ -146,6 +146,22 @@ function Finance({ user, signOut }) {
 
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { settingsApi.set(user.id, "isDark", isDark); }, [isDark, user.id]);
+
+  // Handle Gmail OAuth redirect (?gmail=connected | ?gmail=error)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const gmailStatus = params.get("gmail");
+    if (!gmailStatus) return;
+    if (gmailStatus === "connected") {
+      showToast("Gmail connected successfully!", "success");
+      loadData(); // reload to pick up new gmail_tokens row
+    } else if (gmailStatus === "error") {
+      const reason = params.get("reason") || params.get("message") || "Unknown error";
+      showToast(`Gmail connection failed: ${reason}`, "error");
+    }
+    // Clear URL params without reloading
+    window.history.replaceState({}, "", window.location.pathname);
+  }, []);
 
   // ── Derived data (shared across modules)
   const bankAccounts  = useMemo(() => accounts.filter(a => a.type === "bank"), [accounts]);
