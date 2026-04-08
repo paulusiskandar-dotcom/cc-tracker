@@ -87,7 +87,7 @@ export const agingLabel = (dateStr) => {
 };
 
 // ─── NET WORTH CALCULATION ───────────────────────────────────
-export const calcNetWorth = (accounts) => {
+export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [] } = {}) => {
   let bank = 0, assets = 0, receivables = 0, ccDebt = 0, liabilities = 0;
 
   for (const a of accounts) {
@@ -105,8 +105,17 @@ export const calcNetWorth = (accounts) => {
     }
   }
 
-  const total = bank + assets + receivables - ccDebt - liabilities;
-  return { total, bank, assets, receivables, ccDebt, liabilities };
+  const employeeLoanTotal = employeeLoans
+    .filter(l => l.status !== "settled")
+    .reduce((sum, l) => {
+      const paid = loanPayments
+        .filter(p => p.loan_id === l.id)
+        .reduce((s, p) => s + Number(p.amount || 0), 0);
+      return sum + Math.max(0, Number(l.total_amount || 0) - paid);
+    }, 0);
+
+  const total = bank + assets + receivables + employeeLoanTotal - ccDebt - liabilities;
+  return { total, bank, assets, receivables, ccDebt, liabilities, employeeLoanTotal };
 };
 
 // ─── CATEGORY HELPERS ─────────────────────────────────────────

@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { ledgerApi, merchantApi, gmailApi, getTxFromToTypes } from "../api";
+import { ledgerApi, merchantApi, gmailApi, getTxFromToTypes, employeeLoanApi } from "../api";
 import { EXPENSE_CATEGORIES, ENTITIES, TX_TYPES } from "../constants";
 import { fmtIDR, todayStr, ym, toIDR, groupByDate, fmtDateLabel } from "../utils";
 import Modal, { ConfirmModal } from "./shared/Modal";
@@ -38,6 +38,8 @@ const EMPTY = {
   from_type: "account", to_type: "expense",
   category_id: null, category_name: null, entity: "Personal",
   notes: "", is_reimburse: false,
+  // give_loan extras
+  employee_name: "", monthly_installment: "", loan_start_date: todayStr(),
 };
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────
@@ -45,6 +47,7 @@ export default function Transactions({
   user, accounts, ledger, categories, fxRates, CURRENCIES: C,
   bankAccounts, creditCards, assets, liabilities, receivables,
   onRefresh, setLedger, pendingSyncs, setPendingSyncs, incomeSrcs,
+  employeeLoans = [], setEmployeeLoans,
 }) {
   const allCurrencies = C || [];
   const pendingCount  = pendingSyncs?.length || 0;
@@ -192,9 +195,54 @@ export default function Transactions({
         if (typeof v === "string" && v.length === 36) return v;
         return null;
       };
+      const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
+
+      // ── Give Loan (Method A): create employee_loan first, then ledger ──
+      if (type === "give_loan" && !editEntry) {
+        if (!form.from_id) { showToast("Select bank account", "error"); setSaving(false); return; }
+        if (!form.employee_name?.trim()) { showToast("Employee name is required", "error"); setSaving(false); return; }
+        const loan = await employeeLoanApi.create(user.id, {
+          employee_name:       form.employee_name.trim(),
+          monthly_installment: sn(form.monthly_installment),
+          total_amount:        sn(form.amount),
+          start_date:          form.loan_start_date || form.tx_date,
+          notes:               form.notes || null,
+          status:              "active",
+        });
+        setEmployeeLoans?.(prev => [loan, ...prev]);
+        const loanEntry = {
+          tx_date:        form.tx_date,
+          description:    `Employee Loan — ${loan.employee_name}`,
+          amount:         sn(form.amount),
+          currency:       "IDR",
+          amount_idr:     sn(form.amount),
+          tx_type:        "give_loan",
+          from_type:      "account",
+          to_type:        "employee_loan",
+          from_id:        uuid(form.from_id),
+          to_id:          loan.id,
+          entity:         "Personal",
+          is_reimburse:   false,
+          merchant_name:  null,
+          notes:          form.notes || null,
+          attachment_url: null,
+          ai_categorized: false,
+          ai_confidence:  null,
+          installment_id: null,
+          scan_batch_id:  null,
+          category_id:    null,
+          category_name:  null,
+        };
+        const created = await ledgerApi.create(user.id, loanEntry, accounts);
+        setLedger(p => [created, ...p]);
+        showToast(`Loan of ${fmtIDR(sn(form.amount), true)} created for ${loan.employee_name}`);
+        await onRefresh();
+        setModal(null);
+        setSaving(false);
+        return;
+      }
 
       const cat = categories.find(c => c.id === form.category_id);
-      const sn  = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
       const { from_type, to_type } = getTxFromToTypes(type);
 
       // Auto-generate description for types that don't require manual input
@@ -604,7 +652,7 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
   const ccAccs   = accounts.filter(a => a.type === "credit_card" && a.is_active !== false);
 
   // Two-step from-source toggle applies to these tx types
-  const TWO_STEP_FROM = ["expense", "reimburse_out", "transfer", "pay_cc", "buy_asset"];
+  const TWO_STEP_FROM = ["expense", "reimburse_out", "transfer", "pay_cc", "buy_asset", "give_loan"];
   const hasTwoStep    = TWO_STEP_FROM.includes(type);
 
   const fromList = hasTwoStep
@@ -629,8 +677,8 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
     EXPENSE_CATEGORIES.forEach(c => catOptions.push({ value: c.id, label: `${c.icon} ${c.label}` }));
   }
 
-  // to_id is auto-set by entity toggle for reimburse_out, so hide To dropdown
-  const needsTo  = toOptions.length > 0 && type !== "reimburse_out";
+  // to_id is auto-set for reimburse_out (entity toggle) and give_loan (auto-created)
+  const needsTo  = toOptions.length > 0 && !["reimburse_out", "give_loan"].includes(type);
   const needsCat = type === "expense";
 
   // Switch bank/CC source and reset from_id
@@ -724,23 +772,58 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
         </div>
       )}
 
+      {/* Give Loan — employee details (before From Account) */}
+      {type === "give_loan" && (
+        <Input
+          label="Employee Name *"
+          value={form.employee_name || ""}
+          onChange={e => set("employee_name", e.target.value)}
+          placeholder="Full name"
+        />
+      )}
+
       {/* FROM ACCOUNT — two-step (Bank / CC toggle + dropdown) */}
       {hasTwoStep && (
-        <Field label="From Account">
-          <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-            <button type="button" onClick={() => switchFromSource("bank")}        style={pillStyle(fromSource === "bank")}>🏦 Bank Account</button>
-            <button type="button" onClick={() => switchFromSource("credit_card")} style={pillStyle(fromSource === "credit_card")}>💳 Credit Card</button>
-          </div>
+        <Field label={type === "give_loan" ? "From Bank Account" : "From Account"}>
+          {type !== "give_loan" && (
+            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+              <button type="button" onClick={() => switchFromSource("bank")}        style={pillStyle(fromSource === "bank")}>🏦 Bank Account</button>
+              <button type="button" onClick={() => switchFromSource("credit_card")} style={pillStyle(fromSource === "credit_card")}>💳 Credit Card</button>
+            </div>
+          )}
           <select
             value={form.from_id || ""}
             onChange={e => set("from_id", e.target.value.length === 36 ? e.target.value : null)}
             style={SEL_STYLE}
           >
-            <option value="">Select {fromSource === "bank" ? "bank account" : "credit card"}…</option>
-            {fromOpts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            <option value="">Select bank account…</option>
+            {(type === "give_loan" ? bankAccs.filter(a => a.id && a.id.length === 36).map(a => ({ value: a.id, label: accLabel(a) })) : fromOpts).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </Field>
       )}
+
+      {/* Give Loan — installment + start date + auto-calc */}
+      {type === "give_loan" && (() => {
+        const total   = Number(form.amount || 0);
+        const monthly = Number(form.monthly_installment || 0);
+        const totalMo = total > 0 && monthly > 0 ? Math.ceil(total / monthly) : null;
+        const endDate = totalMo && form.loan_start_date
+          ? (() => { const d = new Date(form.loan_start_date + "T00:00:00"); d.setMonth(d.getMonth() + totalMo); return d.toLocaleDateString("en-US", { month: "long", year: "numeric" }); })()
+          : null;
+        return (
+          <>
+            <AmountInput label="Monthly Installment" value={form.monthly_installment || ""} onChange={v => set("monthly_installment", v)} />
+            <Input label="Start Date" type="date" value={form.loan_start_date || form.tx_date || todayStr()} onChange={e => set("loan_start_date", e.target.value)} />
+            {totalMo && (
+              <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "10px 14px", display: "flex", gap: 20 }}>
+                <div><div style={{ fontSize: 9, color: "#059669", fontWeight: 700, textTransform: "uppercase" }}>Duration</div><div style={{ fontSize: 13, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif" }}>{totalMo} months</div></div>
+                <div><div style={{ fontSize: 9, color: "#059669", fontWeight: 700, textTransform: "uppercase" }}>Monthly</div><div style={{ fontSize: 13, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif" }}>{fmtIDR(monthly)}</div></div>
+                {endDate && <div><div style={{ fontSize: 9, color: "#059669", fontWeight: 700, textTransform: "uppercase" }}>Ends</div><div style={{ fontSize: 13, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif" }}>{endDate}</div></div>}
+              </div>
+            )}
+          </>
+        );
+      })()}
 
       {/* FROM ACCOUNT — regular select for non-two-step types (sell_asset, collect_loan, etc.) */}
       {!hasTwoStep && fromOptions.length > 0 && (

@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { ledgerApi, employeeLoanApi, loanPaymentsApi } from "../api";
+import { supabase } from "../lib/supabase";
 import { fmtIDR, todayStr, agingLabel } from "../utils";
 import { ENT_COL, ENT_BG, LIGHT, DARK } from "../theme";
 import {
@@ -29,12 +30,12 @@ const ENTITY_CHOICES = ["Hamasa", "SDC", "Travelio"];
 
 const EMPTY_LOAN = {
   employee_name: "", employee_dept: "",
-  total_amount: "", monthly_installment: "",
+  total_amount: "", monthly_installment: "", already_paid: "",
   start_date: todayStr(), notes: "",
 };
 
 // ─── LOAN FORM FIELDS (shared by Add + Edit modals) ──────────
-function LoanFormFields({ form, setForm, T }) {
+function LoanFormFields({ form, setForm, T, showAlreadyPaid = false }) {
   const total   = Number(form.total_amount   || 0);
   const monthly = Number(form.monthly_installment || 0);
   const totalMo = total > 0 && monthly > 0 ? Math.ceil(total / monthly) : null;
@@ -63,6 +64,9 @@ function LoanFormFields({ form, setForm, T }) {
       <Field label="Start Date">
         <Input type="date" value={form.start_date} onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))} />
       </Field>
+      {showAlreadyPaid && (
+        <AmountInput label="Amount Already Paid (optional)" value={form.already_paid} onChange={v => setForm(f => ({ ...f, already_paid: v }))} currency="IDR" />
+      )}
       <Field label="Notes">
         <Input value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional" />
       </Field>
@@ -108,16 +112,20 @@ export default function Receivables({
 
   // ── Reimburse modals ─────────────────────────────────────────
   const [outModal, setOutModal]     = useState(false);
-  const [inModal, setInModal]       = useState(false);
   const [selectedRec, setSelectedRec] = useState(null);
 
   const [outForm, setOutForm] = useState({
     date: todayStr(), description: "", amount: "",
     entity: "Hamasa", from_id: "", notes: "",
   });
-  const [inForm, setInForm] = useState({
-    date: todayStr(), amount: "", bank_id: "", notes: "",
-  });
+
+  // ── Settle (reimburse_in checklist) modal ─────────────────────
+  const [settleModal,   setSettleModal]   = useState(false);
+  const [settleRec,     setSettleRec]     = useState(null);   // receivable account
+  const [settleChecked, setSettleChecked] = useState({});     // { entry.id: boolean }
+  const [settleAmount,  setSettleAmount]  = useState("");     // editable received amount
+  const [settleBankId,  setSettleBankId]  = useState("");
+  const [settleShortfallCatId, setSettleShortfallCatId] = useState(null);
 
   // ── Employee Loan modals ──────────────────────────────────────
   const [addLoanModal,  setAddLoanModal]  = useState(false);
@@ -130,7 +138,7 @@ export default function Receivables({
 
   // ── DERIVED ────────────────────────────────────────────────
   const receivables    = useMemo(() => accounts.filter(a => a.type === "receivable"), [accounts]);
-  const reimburseAccs  = useMemo(() => receivables.filter(a => a.receivable_type === "reimburse"), [receivables]);
+  const reimburseAccs  = useMemo(() => receivables, [receivables]);
   const bankAccounts   = useMemo(() => accounts.filter(a => a.type === "bank"), [accounts]);
   const spendAccounts  = useMemo(() => accounts.filter(a => ["bank", "credit_card"].includes(a.type)), [accounts]);
 
@@ -169,9 +177,7 @@ export default function Receivables({
       return showToast("Fill all required fields", "error");
     setSaving(true);
     try {
-      const rec = receivables.find(r =>
-        r.entity === outForm.entity && r.receivable_type === "reimburse"
-      );
+      const rec = receivables.find(r => r.entity === outForm.entity);
       if (!rec) {
         showToast(`No reimburse account for ${outForm.entity}. Add one in Accounts.`, "error");
         setSaving(false);
@@ -203,32 +209,126 @@ export default function Receivables({
     setSaving(false);
   };
 
-  const handleIn = async () => {
-    if (!selectedRec || !inForm.amount || !inForm.bank_id)
-      return showToast("Fill all required fields", "error");
+  // ── SETTLE FLOW ──────────────────────────────────────────────
+  // Open settle modal for a receivable account
+  const openSettle = (rec) => {
+    const outEntries = ledger.filter(e => e.tx_type === "reimburse_out" && e.to_id === rec.id);
+    // Default: check all items
+    const checked = {};
+    outEntries.forEach(e => { checked[e.id] = true; });
+    setSettleRec(rec);
+    setSettleChecked(checked);
+    setSettleAmount(String(Number(rec.receivable_outstanding || 0)));
+    setSettleBankId(bankAccounts[0]?.id || "");
+    setSettleShortfallCatId(null);
+    setSettleModal(true);
+  };
+
+  const handleSettle = async () => {
+    if (!settleRec || !settleBankId) return showToast("Select a bank account", "error");
+    const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
+    const received = sn(settleAmount);
+    if (received <= 0) return showToast("Enter amount received", "error");
+
+    const outEntries = ledger.filter(e => e.tx_type === "reimburse_out" && e.to_id === settleRec.id);
+    const checkedEntries = outEntries.filter(e => settleChecked[e.id]);
+    const selectedTotal  = checkedEntries.reduce((s, e) => s + Number(e.amount || 0), 0);
+    const shortfall      = Math.max(0, selectedTotal - received);
+    const excess         = Math.max(0, received - selectedTotal);
+
     setSaving(true);
     try {
-      const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
-      const amt = sn(inForm.amount);
-      const entry = {
-        tx_date:     inForm.date || todayStr(),
-        description: `${selectedRec.entity} reimburse received`,
-        amount:      amt,
-        currency:    "IDR",
-        amount_idr:  amt,
-        tx_type:     "reimburse_in",
-        from_type:   "account",
-        to_type:     "account",
-        from_id:     selectedRec.id,
-        to_id:       inForm.bank_id,
-        entity:      selectedRec.entity,
-        notes:       inForm.notes || "",
+      const created = [];
+
+      // One reimburse_in for the received amount
+      const inEntry = {
+        tx_date:      todayStr(),
+        description:  `${settleRec.entity} reimburse received`,
+        amount:       received,
+        currency:     "IDR",
+        amount_idr:   received,
+        tx_type:      "reimburse_in",
+        from_type:    "account",
+        to_type:      "account",
+        from_id:      settleRec.id,
+        to_id:        settleBankId,
+        entity:       settleRec.entity,
+        is_reimburse: true,
+        notes:        checkedEntries.map(e => e.description).join(", ") || null,
+        merchant_name: null, attachment_url: null,
+        ai_categorized: false, ai_confidence: null,
+        installment_id: null, scan_batch_id: null,
+        category_id: null, category_name: null,
       };
-      const r = await ledgerApi.create(user.id, entry, accounts);
-      if (r) setLedger(prev => [r, ...prev]);
+      const r1 = await ledgerApi.create(user.id, inEntry, accounts);
+      if (r1) created.push(r1);
+
+      // If shortfall: record as expense from receivable (write-off)
+      if (shortfall > 0) {
+        const expEntry = {
+          tx_date:      todayStr(),
+          description:  `${settleRec.entity} settlement shortfall`,
+          amount:       shortfall,
+          currency:     "IDR",
+          amount_idr:   shortfall,
+          tx_type:      "reimburse_in",  // use reimburse_in so receivable is debited
+          from_type:    "account",
+          to_type:      "account",
+          from_id:      settleRec.id,
+          to_id:        settleBankId,    // goes to same bank (will be zero-value net)
+          entity:       settleRec.entity,
+          is_reimburse: true,
+          category_id:  settleShortfallCatId || null,
+          notes:        "Shortfall write-off",
+          merchant_name: null, attachment_url: null,
+          ai_categorized: false, ai_confidence: null,
+          installment_id: null, scan_batch_id: null,
+          category_name: null,
+        };
+        // Manually reduce receivable_outstanding for shortfall, then reverse bank delta
+        const r2 = await ledgerApi.create(user.id, expEntry, accounts);
+        if (r2) created.push(r2);
+        // Reverse the bank credit (shortfall didn't actually arrive)
+        // We do this by applying a -shortfall to the bank account directly
+        const bankAcc = bankAccounts.find(a => a.id === settleBankId);
+        if (bankAcc) {
+          await supabase.rpc("increment_account_balance", {
+            p_account_id: settleBankId,
+            p_field:      "current_balance",
+            p_delta:      -shortfall,
+          }).catch(() => {});
+        }
+      }
+
+      // If excess: create income entry
+      if (excess > 0) {
+        const exEntry = {
+          tx_date:      todayStr(),
+          description:  `${settleRec.entity} settlement excess`,
+          amount:       excess,
+          currency:     "IDR",
+          amount_idr:   excess,
+          tx_type:      "income",
+          from_type:    "income_source",
+          to_type:      "account",
+          from_id:      null,
+          to_id:        settleBankId,
+          entity:       "Personal",
+          is_reimburse: false,
+          notes:        "Excess reimbursement",
+          merchant_name: null, attachment_url: null,
+          ai_categorized: false, ai_confidence: null,
+          installment_id: null, scan_batch_id: null,
+          category_id: null, category_name: null,
+        };
+        const r3 = await ledgerApi.create(user.id, exEntry, accounts);
+        if (r3) created.push(r3);
+      }
+
+      setLedger(prev => [...created, ...prev]);
       await onRefresh();
-      showToast(`Received ${fmtIDR(amt, true)} from ${selectedRec.entity}`);
-      setInModal(false);
+      showToast(`Settled ${fmtIDR(received, true)} for ${settleRec.entity}`);
+      setSettleModal(false);
     } catch (e) { showToast(e.message, "error"); }
     setSaving(false);
   };
@@ -240,18 +340,33 @@ export default function Receivables({
     setSaving(true);
     try {
       const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
+      const alreadyPaid   = sn(loanForm.already_paid);
+      const monthlyAmt    = sn(loanForm.monthly_installment);
+      const paidMonths    = monthlyAmt > 0 ? Math.floor(alreadyPaid / monthlyAmt) : 0;
       const d = {
         employee_name:        loanForm.employee_name.trim(),
         employee_dept:        loanForm.employee_dept.trim() || null,
         total_amount:         sn(loanForm.total_amount),
-        monthly_installment:  sn(loanForm.monthly_installment),
+        monthly_installment:  monthlyAmt,
         start_date:           loanForm.start_date || null,
         notes:                loanForm.notes || null,
         status:               "active",
-        paid_months:          0,
+        paid_months:          paidMonths,
       };
       const created = await employeeLoanApi.create(user.id, d);
       if (created) setEmployeeLoans(prev => [created, ...prev]);
+
+      // If already_paid > 0, record initial payments so loansWithStats is accurate
+      if (alreadyPaid > 0) {
+        const initPayment = await loanPaymentsApi.create(user.id, {
+          loan_id:  created.id,
+          pay_date: loanForm.start_date || todayStr(),
+          amount:   alreadyPaid,
+          notes:    "Initial paid amount (pre-existing)",
+        });
+        if (initPayment) setLoanPayments(prev => [initPayment, ...prev]);
+      }
+
       showToast(`Loan added for ${d.employee_name}`);
       setAddLoanModal(false);
       setLoanForm(EMPTY_LOAN);
@@ -386,7 +501,7 @@ export default function Receivables({
               message="No reimburse accounts. Add one from Accounts (type: Receivable → Reimburse)."
             />
           ) : (
-            recStats.filter(r => r.receivable_type === "reimburse").map(r => {
+            recStats.map(r => {
               const outstanding = Number(r.receivable_outstanding || 0);
               const entCol      = ENT_COL[r.entity] || T.ac;
               const entBg       = ENT_BG[r.entity]  || T.sur2;
@@ -433,23 +548,16 @@ export default function Receivables({
                       >
                         + Expense
                       </Button>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => {
-                          setSelectedRec(r);
-                          setInForm({
-                            date:    todayStr(),
-                            amount:  String(outstanding),
-                            bank_id: bankAccounts[0]?.id || "",
-                            notes:   "",
-                          });
-                          setInModal(true);
-                        }}
-                        style={{ color: "#059669", borderColor: "#059669" }}
-                      >
-                        ↙ Receive
-                      </Button>
+                      {outstanding > 0 && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => openSettle(r)}
+                          style={{ color: "#059669", borderColor: "#059669" }}
+                        >
+                          ✓ Settle
+                        </Button>
+                      )}
                     </div>
                   </div>
 
@@ -705,51 +813,115 @@ export default function Receivables({
         </div>
       </Modal>
 
-      {/* ── RECEIVE REIMBURSEMENT MODAL ─────────────────── */}
+      {/* ── SETTLE REIMBURSEMENT MODAL (checklist) ────── */}
       <Modal
-        isOpen={inModal && !!selectedRec}
-        onClose={() => setInModal(false)}
-        title="Receive Reimbursement"
+        isOpen={settleModal && !!settleRec}
+        onClose={() => setSettleModal(false)}
+        title={`Settle ${settleRec?.entity || ""} Receivables`}
         footer={
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <Button variant="secondary" size="md" onClick={() => setInModal(false)}>Cancel</Button>
-            <Button variant="primary" size="md" busy={saving} disabled={!inForm.amount || !inForm.bank_id} onClick={handleIn}>
-              Record →
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button variant="secondary" size="md" onClick={() => setSettleModal(false)}>Cancel</Button>
+            <Button variant="primary" size="md" busy={saving} onClick={handleSettle}>
+              Confirm Settlement
             </Button>
           </div>
         }
       >
-        {selectedRec && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{
-              background: ENT_BG[selectedRec.entity] || T.sur2,
-              borderRadius: 10, padding: "10px 14px",
-              display: "flex", justifyContent: "space-between", alignItems: "center",
-            }}>
-              <div style={{ fontSize: 12, color: T.text2 }}>Outstanding — {selectedRec.entity}</div>
-              <div style={{ fontSize: 16, fontWeight: 800, color: ENT_COL[selectedRec.entity] || T.ac }}>
-                {fmtIDR(Number(selectedRec.receivable_outstanding || 0))}
-              </div>
-            </div>
-            <FormRow>
-              <AmountInput label="Amount Received *" value={inForm.amount} onChange={v => setInForm(f => ({ ...f, amount: v }))} currency="IDR" />
-              <Field label="Date">
-                <Input type="date" value={inForm.date} onChange={e => setInForm(f => ({ ...f, date: e.target.value }))} />
-              </Field>
-            </FormRow>
-            <Field label="To Bank Account *">
+        {settleRec && (() => {
+          const outEntries = ledger.filter(e => e.tx_type === "reimburse_out" && e.to_id === settleRec.id);
+          const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
+          const selectedTotal = outEntries.filter(e => settleChecked[e.id]).reduce((s, e) => s + Number(e.amount || 0), 0);
+          const received  = sn(settleAmount);
+          const shortfall = Math.max(0, selectedTotal - received);
+          const excess    = Math.max(0, received - selectedTotal);
+
+          const allCats = [
+            { value: "", label: "— no category —" },
+          ].concat(
+            (window._catOptions || [])
+          );
+
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {/* Checklist */}
+              {outEntries.length === 0 ? (
+                <div style={{ fontSize: 13, color: "#9ca3af", textAlign: "center", padding: "20px 0" }}>
+                  No reimburse_out entries found for {settleRec.entity}.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0 8px", borderBottom: "1px solid #f3f4f6", marginBottom: 4 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af" }}>ITEM</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af" }}>AMOUNT</span>
+                  </div>
+                  {outEntries.map(e => (
+                    <label key={e.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid #f9fafb", cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={!!settleChecked[e.id]}
+                        onChange={ev => {
+                          setSettleChecked(c => ({ ...c, [e.id]: ev.target.checked }));
+                        }}
+                        style={{ width: 16, height: 16, cursor: "pointer", accentColor: "#059669" }}
+                      />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
+                          {e.description || "—"}
+                        </div>
+                        <div style={{ fontSize: 10, color: "#9ca3af" }}>{e.tx_date}</div>
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#dc2626", fontFamily: "Figtree, sans-serif", flexShrink: 0 }}>
+                        {fmtIDR(Number(e.amount || 0), true)}
+                      </div>
+                    </label>
+                  ))}
+                  <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0 0", fontSize: 12, fontWeight: 700 }}>
+                    <span style={{ color: "#6b7280" }}>Selected total</span>
+                    <span style={{ color: "#111827" }}>{fmtIDR(selectedTotal)}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* To account */}
               <Select
-                value={inForm.bank_id}
-                onChange={e => setInForm(f => ({ ...f, bank_id: e.target.value }))}
+                label="To Bank Account *"
+                value={settleBankId}
+                onChange={e => setSettleBankId(e.target.value)}
                 options={bankAccounts.map(b => ({ value: b.id, label: b.name }))}
                 placeholder="Select bank…"
               />
-            </Field>
-            <Field label="Notes">
-              <Input value={inForm.notes} onChange={e => setInForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional" />
-            </Field>
-          </div>
-        )}
+
+              {/* Amount received (editable) */}
+              <AmountInput
+                label="Amount Received *"
+                value={settleAmount}
+                onChange={v => setSettleAmount(v)}
+                currency="IDR"
+              />
+
+              {/* Shortfall / excess indicator */}
+              {shortfall > 0 && (
+                <div style={{ background: "#fef9ec", border: "1px solid #fde68a", borderRadius: 10, padding: "10px 14px" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#92400e", marginBottom: 8 }}>
+                    Shortfall: {fmtIDR(shortfall)} — write off as expense?
+                  </div>
+                  <Select
+                    label="Category (optional)"
+                    value={settleShortfallCatId || ""}
+                    onChange={e => setSettleShortfallCatId(e.target.value || null)}
+                    options={allCats}
+                    placeholder="— skip —"
+                  />
+                </div>
+              )}
+              {excess > 0 && (
+                <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "10px 14px", fontSize: 12, fontWeight: 600, color: "#059669" }}>
+                  Excess: {fmtIDR(excess)} — will be recorded as income.
+                </div>
+              )}
+            </div>
+          );
+        })()}
       </Modal>
 
       {/* ── ADD LOAN MODAL ───────────────────────────────── */}
@@ -770,7 +942,7 @@ export default function Receivables({
           </div>
         }
       >
-        <LoanFormFields form={loanForm} setForm={setLoanForm} T={T} />
+        <LoanFormFields form={loanForm} setForm={setLoanForm} T={T} showAlreadyPaid />
       </Modal>
 
       {/* ── EDIT LOAN MODAL ──────────────────────────────── */}

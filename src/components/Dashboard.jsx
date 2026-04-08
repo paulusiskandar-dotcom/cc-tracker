@@ -11,6 +11,7 @@ export default function Dashboard({
   creditCards, assets, receivables, liabilities,
   curMonth, pendingSyncs, setTab,
   setLedger, setReminders, onRefresh,
+  employeeLoans = [], loanPayments = [],
 }) {
   const [confirmingId, setConfirmingId] = useState(null);
 
@@ -48,6 +49,8 @@ export default function Dashboard({
   const totalReceivables = useMemo(() =>
     receivables.reduce((s, r) => s + Number(r.receivable_outstanding || 0), 0),
   [receivables]);
+
+  const totalEmpLoans = useMemo(() => netWorth?.employeeLoanTotal || 0, [netWorth]);
 
   // Last 6 months cash flow (for mini chart)
   const cashFlowData = useMemo(() => {
@@ -204,10 +207,11 @@ export default function Dashboard({
           )}
           <div style={DARK_STATS}>
             {[
-              { label: "Bank",    value: fmtIDR(nw.bank, true),        color: "#a5f3fc" },
-              { label: "Assets",  value: fmtIDR(nw.assets, true),      color: "#86efac" },
-              { label: "Recv",    value: fmtIDR(nw.receivables, true), color: "#fde68a" },
-              { label: "CC Debt", value: fmtIDR(nw.ccDebt, true),      color: "#fca5a5" },
+              { label: "Bank",    value: fmtIDR(nw.bank, true),              color: "#a5f3fc" },
+              { label: "Assets",  value: fmtIDR(nw.assets, true),            color: "#86efac" },
+              { label: "Recv",    value: fmtIDR(nw.receivables, true),       color: "#fde68a" },
+              { label: "Loans",   value: fmtIDR(nw.employeeLoanTotal, true), color: "#fde68a" },
+              { label: "CC Debt", value: fmtIDR(nw.ccDebt, true),            color: "#fca5a5" },
             ].filter(s => {
               const n = Number(s.value.replace(/[^0-9]/g, ""));
               return n > 0;
@@ -258,10 +262,11 @@ export default function Dashboard({
         <BentoTile
           bg="#fdf6e8" icon="📋" iconBg="rgba(217,119,6,0.12)"
           label="Receivables"
-          value={fmtIDR(totalReceivables)}
-          sub={`${receivables.length} open`}
-          badge={receivables.length > 0 ? `${receivables.length} open` : null}
+          value={fmtIDR(totalReceivables + totalEmpLoans)}
+          sub={`Reimburse: ${fmtIDR(totalReceivables, true)}${totalEmpLoans > 0 ? ` · Loans: ${fmtIDR(totalEmpLoans, true)}` : ""}`}
+          badge={totalReceivables + totalEmpLoans > 0 ? "View →" : null}
           badgeColor="#d97706"
+          onClick={() => setTab?.("receivables")}
         />
 
         {/* [6] Cash Flow — spans 2 cols */}
@@ -386,9 +391,9 @@ export default function Dashboard({
 }
 
 // ─── BENTO TILE ───────────────────────────────────────────────
-function BentoTile({ bg, icon, iconBg, label, value, sub, badge, badgeColor }) {
+function BentoTile({ bg, icon, iconBg, label, value, sub, badge, badgeColor, onClick }) {
   return (
-    <div style={{ ...BENTO_BASE, background: bg }}>
+    <div onClick={onClick} style={{ ...BENTO_BASE, background: bg, cursor: onClick ? "pointer" : "default" }}>
       {/* Badge */}
       {badge && (
         <div style={{
