@@ -145,7 +145,8 @@ export const getGreeting = () => {
 
 // ─── UUID SANITIZER ───────────────────────────────────────────
 // Any UUID field must be null if empty — never send "" to Supabase
-export const toUUID = (val) => (!val || val === "") ? null : val;
+export const toUUID = (val) =>
+  (!val || val === "" || val === "undefined" || val === "null") ? null : val;
 
 // ─── MISC ─────────────────────────────────────────────────────
 export const clamp = (val, min, max) => Math.min(Math.max(val, min), max);

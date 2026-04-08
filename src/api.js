@@ -31,8 +31,20 @@ const validateLedgerEntry = (entry) => {
   return true;
 };
 
-// Sanitize UUID — never send "" to Supabase UUID columns
-const toUUID = (v) => (!v || v === "") ? null : v;
+// Sanitize UUID — never send "" / "undefined" / "null" to Supabase UUID columns
+const toUUID = (v) =>
+  (!v || v === "" || v === "undefined" || v === "null") ? null : v;
+
+// Apply toUUID to every key ending in _id (except user_id which is added separately)
+const sanitizeUUIDs = (obj) => {
+  const out = { ...obj };
+  for (const key of Object.keys(out)) {
+    if (key.endsWith("_id") && key !== "user_id") {
+      out[key] = toUUID(out[key]);
+    }
+  }
+  return out;
+};
 
 // ─── BALANCE FIELD PER ACCOUNT TYPE ───────────────────────────
 const balField = (type) => {
@@ -184,15 +196,8 @@ export const ledgerApi = {
   // Create entry + update balances
   create: async (userId, entry, accounts = []) => {
     validateLedgerEntry(entry);
-    // Sanitize all UUID fields — empty string is invalid for UUID columns
-    const safeEntry = {
-      ...entry,
-      from_id:        toUUID(entry.from_id),
-      to_id:          toUUID(entry.to_id),
-      category_id:    toUUID(entry.category_id),
-      scan_batch_id:  toUUID(entry.scan_batch_id),
-      installment_id: toUUID(entry.installment_id),
-    };
+    // Sanitize ALL _id UUID fields — "" and "undefined" are invalid for UUID columns
+    const safeEntry = sanitizeUUIDs(entry);
     const { data, error } = await supabase
       .from("ledger")
       .insert([{ ...safeEntry, user_id: userId }])
@@ -216,7 +221,7 @@ export const ledgerApi = {
   update: async (id, d) => {
     const { data, error } = await supabase
       .from("ledger")
-      .update(d)
+      .update(sanitizeUUIDs(d))
       .eq("id", id)
       .select()
       .single();

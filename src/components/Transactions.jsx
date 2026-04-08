@@ -34,7 +34,7 @@ const TYPE_CHOICES = [
 
 const EMPTY = {
   tx_date: todayStr(), description: "", amount: "", currency: "IDR",
-  tx_type: "expense", from_id: "", to_id: "",
+  tx_type: "expense", from_id: null, to_id: null,
   from_type: "account", to_type: "expense",
   category_id: null, category_name: null, entity: "Personal",
   notes: "", is_reimburse: false,
@@ -148,8 +148,8 @@ export default function Transactions({
       amount:          e.amount,
       currency:        e.currency || "IDR",
       tx_type:         e.tx_type,
-      from_id:         e.from_id || "",
-      to_id:           e.to_id   || "",
+      from_id:         e.from_id || null,
+      to_id:           e.to_id   || null,
       from_type:       e.from_type || getTxFromToTypes(e.tx_type).from_type,
       to_type:         e.to_type   || getTxFromToTypes(e.tx_type).to_type,
       category_id:     e.category_id   || null,
@@ -206,19 +206,23 @@ export default function Transactions({
         else if (type === "fx_exchange")   description = `FX Exchange`.trim();
       }
 
+      // Build explicit entry — never spread ...form to avoid leaking unknown UUID fields
       const entry = {
-        ...form,
+        tx_date:       form.tx_date,
         description,
         amount:        sn(form.amount),
+        currency:      form.currency || "IDR",
         amount_idr:    sn(amtIDR),
+        tx_type:       type,
         from_type,
         to_type,
-        from_id:       form.from_id || null,
-        to_id:         form.to_id   || null,
-        category_id:   form.category_id || null,
+        from_id:       form.from_id       || null,
+        to_id:         form.to_id         || null,
+        category_id:   form.category_id   || null,
         category_name: cat?.name || form.category_name || null,
         entity:        type === "reimburse_out" ? (form.entity || "Personal") : "Personal",
         is_reimburse:  type === "reimburse_out",
+        notes:         form.notes         || null,
       };
       if (editEntry) {
         const updated = await ledgerApi.update(editEntry.id, entry);
