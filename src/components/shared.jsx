@@ -15,9 +15,9 @@ export function injectBaseCSS() {
     @keyframes spin{to{transform:rotate(360deg)}}
     @keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
     @keyframes fadeIn{from{opacity:0}to{opacity:1}}
-    .inp{width:100%;border:1.5px solid;border-radius:9px;padding:9px 12px;font-family:'Sora',sans-serif;font-size:13px;outline:none;transition:border-color .15s}
-    .inp:focus{border-color:#3b5bdb!important}
-    .btn{display:inline-flex;align-items:center;gap:6px;border:none;border-radius:9px;padding:9px 16px;font-family:'Sora',sans-serif;font-weight:700;font-size:13px;cursor:pointer;transition:all .15s;white-space:nowrap}
+    .inp{width:100%;border:1.5px solid;border-radius:10px;padding:10px 13px;font-family:'Sora',sans-serif;font-size:13px;outline:none;transition:border-color .15s,box-shadow .15s;min-height:44px}
+    .inp:focus{border-color:#3b5bdb!important;box-shadow:0 0 0 3px #3b5bdb18!important}
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:none;border-radius:10px;padding:10px 18px;font-family:'Sora',sans-serif;font-weight:700;font-size:13px;cursor:pointer;transition:all .15s;white-space:nowrap;min-height:44px}
     .btn:disabled{opacity:.5;cursor:not-allowed}
     .btn-primary{background:linear-gradient(135deg,#3b5bdb,#7048e8);color:#fff}
     .btn-ghost{background:transparent;color:#8a90aa;border:1.5px solid #e2e4ed}
@@ -29,11 +29,11 @@ export function injectBaseCSS() {
     ::-webkit-scrollbar{width:4px;height:4px}
     ::-webkit-scrollbar-track{background:transparent}
     ::-webkit-scrollbar-thumb{background:#d0d3e0;border-radius:4px}
-    .overlay-backdrop{align-items:flex-start;overflow-y:auto;padding:0}
-    .overlay-modal{border-radius:0;min-height:100vh;width:100%}
+    .overlay-backdrop{align-items:flex-end;overflow:hidden}
+    .overlay-modal{height:100dvh;border-radius:0}
     @media(min-width:769px){
-      .overlay-backdrop{align-items:flex-start;padding:20px 16px}
-      .overlay-modal{border-radius:20px!important;min-height:unset!important;width:auto;margin:auto}
+      .overlay-backdrop{align-items:center;padding:24px 16px}
+      .overlay-modal{height:auto!important;max-height:85vh;border-radius:20px!important}
       .overlay-handle{display:none}
     }
   `;
@@ -52,17 +52,18 @@ export function Spinner({ size = 24, color = "#3b5bdb" }) {
 }
 
 // ─── OVERLAY / MODAL ──────────────────────────────────────────
+// Layout: flex-column on modal. Header = flexShrink:0. Body = flex:1+overflow:auto.
+// BtnRow inside body uses position:sticky,bottom:0 → always visible without scrolling.
+// Mobile: full-screen (height:100dvh). Desktop: centered, max-height:85vh via CSS class.
 export function Overlay({ children, onClose, th, title, sub, maxWidth = 500, noPad = false }) {
-  // backdropRef: the backdrop IS the scroll container — it's position:fixed+inset:0 with overflowY:auto
-  const backdropRef = useRef(null);
+  const bodyRef = useRef(null);
   const handleBackdrop = useCallback(e => {
     if (e.target === e.currentTarget) onClose();
   }, [onClose]);
 
   useEffect(() => {
-    // Scroll the backdrop (the scroll container) to top after first paint
     const raf = requestAnimationFrame(() => {
-      backdropRef.current?.scrollTo({ top: 0, behavior: "instant" });
+      bodyRef.current?.scrollTo({ top: 0, behavior: "instant" });
     });
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -73,40 +74,42 @@ export function Overlay({ children, onClose, th, title, sub, maxWidth = 500, noP
   }, []);
 
   return (
-    // Backdrop = the scroll container. overflowY:auto + align-items:flex-start via CSS class.
-    // This means the modal always starts at the top — nothing gets cut off.
-    <div ref={backdropRef} onClick={handleBackdrop}
+    <div onClick={handleBackdrop}
       className="overlay-backdrop"
-      style={{
-        position:"fixed", inset:0, background:"rgba(0,0,0,.48)", zIndex:1000,
-        display:"flex", justifyContent:"center",
-        WebkitOverflowScrolling:"touch", overscrollBehavior:"contain",
-      }}>
-      {/* Inner modal: no overflow, no maxHeight — outer backdrop handles scrolling */}
+      style={{ position:"fixed", inset:0, background:"rgba(0,0,0,.48)", zIndex:1000,
+        display:"flex", justifyContent:"center" }}>
+
+      {/* Modal: flex column so header+footer never scroll away */}
       <div className="overlay-modal" style={{
-        background:th.sur, maxWidth,
+        background:th.sur, width:"100%", maxWidth,
+        display:"flex", flexDirection:"column",
         animation:"fadeUp .2s ease both", boxShadow:th.sh2,
-        paddingBottom:"env(safe-area-inset-bottom)",
       }}>
-        {/* Drag handle — hidden on desktop via CSS */}
-        <div className="overlay-handle" style={{ padding:"12px 0 0", textAlign:"center" }}>
+        {/* Drag handle — hidden on desktop */}
+        <div className="overlay-handle" style={{ padding:"10px 0 0", textAlign:"center", flexShrink:0 }}>
           <div style={{ width:40, height:4, borderRadius:2, background:th.bor2, display:"inline-block" }}/>
         </div>
-        {/* Sticky header — sticks to top of the backdrop (scroll container = viewport) */}
+
+        {/* Header — flexShrink:0, never scrolls away */}
         <div style={{
-          position:"sticky", top:0, zIndex:10, background:th.sur,
-          padding:"0 20px 12px", borderBottom:`1px solid ${th.bor}`,
-          display:"flex", justifyContent:"space-between", alignItems:"flex-start",
+          flexShrink:0, padding:"14px 20px", borderBottom:`1px solid ${th.bor}`,
+          display:"flex", justifyContent:"space-between", alignItems:"center",
         }}>
           <div>
             <div style={{ fontSize:16, fontWeight:800, color:th.tx, letterSpacing:"-.3px" }}>{title||""}</div>
             {sub && <div style={{ fontSize:11, color:th.tx3, marginTop:2 }}>{sub}</div>}
           </div>
           <button onClick={onClose} style={{ background:"none", border:"none", cursor:"pointer",
-            color:th.tx3, fontSize:22, padding:"0 0 0 12px", lineHeight:1, flexShrink:0 }}>×</button>
+            color:th.tx3, fontSize:24, lineHeight:1, padding:"4px 0 4px 12px", flexShrink:0 }}>×</button>
         </div>
-        {/* Content */}
-        <div style={{ padding: noPad ? 0 : "16px 20px 4px" }}>
+
+        {/* Body — the ONLY scroll container. BtnRow inside uses sticky bottom:0. */}
+        <div ref={bodyRef} style={{
+          flex:1, overflowY:"auto",
+          WebkitOverflowScrolling:"touch", overscrollBehavior:"contain",
+          padding: noPad ? 0 : "16px 20px 0",
+          paddingBottom: noPad ? "env(safe-area-inset-bottom)" : 0,
+        }}>
           {children}
         </div>
       </div>
@@ -117,11 +120,21 @@ export function Overlay({ children, onClose, th, title, sub, maxWidth = 500, noP
 // ─── FORM FIELD WRAPPER ───────────────────────────────────────
 export function F({ label, children, th, required }) {
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
-      <label style={{ fontSize:11, fontWeight:700, color:th.tx3, textTransform:"uppercase", letterSpacing:.5 }}>
+    <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+      <label style={{ fontSize:11, fontWeight:700, color:th.tx3, textTransform:"uppercase", letterSpacing:.6, lineHeight:1 }}>
         {label}{required && <span style={{ color:th.rd }}> *</span>}
       </label>
       {children}
+    </div>
+  );
+}
+
+// ─── FORM SECTION DIVIDER ─────────────────────────────────────
+export function FormSection({ label, th }) {
+  return (
+    <div style={{ display:"flex", alignItems:"center", gap:10, margin:"6px 0 2px" }}>
+      <div style={{ fontSize:10, fontWeight:800, color:th.tx3, textTransform:"uppercase", letterSpacing:1, whiteSpace:"nowrap" }}>{label}</div>
+      <div style={{ flex:1, height:1, background:th.bor }}/>
     </div>
   );
 }
@@ -135,9 +148,10 @@ export function R2({ children }) {
 export function BtnRow({ onCancel, onOk, label = "Save", th, saving, disabled }) {
   return (
     <div style={{
-      position:"sticky", bottom:0,
+      position:"sticky", bottom:0, zIndex:5,
       background:th.sur,
-      paddingTop:12, marginTop:16,
+      padding:"12px 0 max(16px, env(safe-area-inset-bottom))",
+      marginTop:16,
       borderTop:`1px solid ${th.bor}`,
       display:"flex", gap:8,
     }}>
@@ -177,7 +191,7 @@ export function TxTypeTag({ type, small }) {
     expense:"#fff5f5",income:"#e6fcf5",transfer:"#eef2ff",pay_cc:"#f3f0ff",
     buy_asset:"#e3fafc",sell_asset:"#e6fcf5",pay_liability:"#fff9db",
     reimburse_out:"#fff9db",reimburse_in:"#e6fcf5",give_loan:"#fff9db",
-    collect_loan:"#e6fcf5",qris_debit:"#fff5f5",fx_exchange:"#e3fafc",
+    collect_loan:"#e6fcf5",expense:"#fff5f5",fx_exchange:"#e3fafc",
     opening_balance:"#eef2ff",cc_installment:"#f3f0ff",
   };
   return <Tag bg={colors[type]||"#f0f1f7"} color={t.color} small={small}>{t.icon} {t.label}</Tag>;
@@ -185,7 +199,7 @@ export function TxTypeTag({ type, small }) {
 
 // ─── AMOUNT DISPLAY ───────────────────────────────────────────
 export function Amount({ amount, currency = "IDR", type, small }) {
-  const isOut = ["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan","qris_debit"].includes(type);
+  const isOut = ["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan"].includes(type);
   const isIn  = ["income","sell_asset","reimburse_in","collect_loan"].includes(type);
   const color = isOut ? "#e03131" : isIn ? "#0ca678" : "#3b5bdb";
   const prefix = isOut ? "−" : isIn ? "+" : "";

@@ -70,7 +70,7 @@ export default function Dashboard({
   [thisMonthLedger]);
 
   const thisMonthExpense = useMemo(() =>
-    thisMonthLedger.filter(e=>["expense","qris_debit"].includes(e.type)).reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0),
+    thisMonthLedger.filter(e=>["expense"].includes(e.type)).reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0),
   [thisMonthLedger]);
 
   // Last 6 months cash flow
@@ -83,7 +83,7 @@ export default function Dashboard({
       months.push({
         month: mlShort(m),
         income:  ledger.filter(e=>ym(e.date)===m&&e.type==="income").reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0),
-        expense: ledger.filter(e=>ym(e.date)===m&&["expense","qris_debit"].includes(e.type)).reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0),
+        expense: ledger.filter(e=>ym(e.date)===m&&["expense"].includes(e.type)).reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0),
       });
     }
     return months;
@@ -92,7 +92,7 @@ export default function Dashboard({
   // Spending by category this month
   const catSpend = useMemo(() => {
     const map = {};
-    thisMonthLedger.filter(e=>["expense","qris_debit"].includes(e.type)).forEach(e => {
+    thisMonthLedger.filter(e=>["expense"].includes(e.type)).forEach(e => {
       const k = e.category_label || e.category || "Other";
       map[k] = (map[k]||0) + Number(e.amount_idr||e.amount||0);
     });
@@ -106,7 +106,7 @@ export default function Dashboard({
     const util = limit > 0 ? (debt/limit)*100 : 0;
     const target = Number(cc.monthly_target||0);
     const thisMonthSpent = thisMonthLedger
-      .filter(e=>["expense","qris_debit"].includes(e.type)&&e.from_account_id===cc.id)
+      .filter(e=>["expense"].includes(e.type)&&e.from_account_id===cc.id)
       .reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0);
     return { ...cc, debt, limit, util, target, thisMonthSpent, daysUntilDue: cc.due_day ? daysUntil(cc.due_day) : null };
   }), [creditCards, thisMonthLedger]);
@@ -196,7 +196,7 @@ export default function Dashboard({
         <StatCard label="Income This Month" value={fmtIDR(thisMonthIncome,true)} color={th.gr} icon="↓" th={th}
           sub={`Surplus: ${fmtIDR(thisMonthIncome-thisMonthExpense,true)}`}/>
         <StatCard label="Expenses This Month" value={fmtIDR(thisMonthExpense,true)} color={th.rd} icon="↑" th={th}
-          sub={`${thisMonthLedger.filter(e=>["expense","qris_debit"].includes(e.type)).length} transactions`}/>
+          sub={`${thisMonthLedger.filter(e=>["expense"].includes(e.type)).length} transactions`}/>
       </div>
 
       {/* ── CASH FLOW CHART ── */}
@@ -332,7 +332,7 @@ export default function Dashboard({
         {recentLedger.length === 0
           ? <Empty icon="📋" message="No transactions yet" th={th}/>
           : recentLedger.map(e => {
-              const isOut = ["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan","qris_debit"].includes(e.type);
+              const isOut = ["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan"].includes(e.type);
               const isIn  = ["income","sell_asset","reimburse_in","collect_loan"].includes(e.type);
               const amt = Number(e.amount_idr||e.amount||0);
               const acc = accounts.find(a=>a.id===(isOut?e.from_account_id:e.to_account_id));

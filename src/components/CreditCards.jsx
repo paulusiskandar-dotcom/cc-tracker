@@ -34,7 +34,7 @@ export default function CreditCards({
     const limit = Number(cc.card_limit||0);
     const util = limit>0?(debt/limit)*100:0;
     const target = Number(cc.monthly_target||0);
-    const monthLedger = ledger.filter(e=>ym(e.date)===filterMonth&&e.from_account_id===cc.id&&["expense","qris_debit"].includes(e.type));
+    const monthLedger = ledger.filter(e=>ym(e.date)===filterMonth&&e.from_account_id===cc.id&&["expense"].includes(e.type));
     const monthSpent = monthLedger.reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0);
     const dueIn = cc.due_day ? daysUntil(cc.due_day) : null;
     const stmtIn = cc.statement_day ? daysUntil(cc.statement_day) : null;

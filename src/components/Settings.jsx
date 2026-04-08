@@ -198,7 +198,7 @@ export default function Settings({
     setShowRecurForm(true);
   };
 
-  const expenseTypes = TX_TYPES.filter(t => ["expense","income","qris_debit"].includes(t.id));
+  const expenseTypes = TX_TYPES.filter(t => ["expense","income"].includes(t.id));
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:12 }}>

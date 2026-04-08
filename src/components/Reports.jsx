@@ -40,7 +40,7 @@ export default function Reports({
       const entries = ledger.filter(e => e.date?.slice(0, 7) === mo);
       const filtered = entityFilter === "All" ? entries : entries.filter(e => e.entity === entityFilter);
       const income  = filtered.filter(e => e.type === "income").reduce((s, e) => s + Number(e.amount_idr || 0), 0);
-      const expense = filtered.filter(e => ["expense","qris_debit"].includes(e.type)).reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+      const expense = filtered.filter(e => ["expense"].includes(e.type)).reduce((s, e) => s + Number(e.amount_idr || 0), 0);
       const surplus = income - expense;
       return { month: mlShort(mo + "-01"), income, expense, surplus };
     });
@@ -54,7 +54,7 @@ export default function Reports({
   // ── Expense by category ─────────────────────────────────────
   const catData = useMemo(() => {
     const filtered = entityFilter === "All" ? ledger : ledger.filter(e => e.entity === entityFilter);
-    const expEntries = filtered.filter(e => ["expense","qris_debit"].includes(e.type));
+    const expEntries = filtered.filter(e => ["expense"].includes(e.type));
     const map = {};
     expEntries.forEach(e => {
       const cat = e.category || "other";
@@ -74,7 +74,7 @@ export default function Reports({
   const catMonthData = useMemo(() => {
     return months.map(mo => {
       const entries = ledger.filter(e =>
-        e.date?.slice(0, 7) === mo && ["expense","qris_debit"].includes(e.type) &&
+        e.date?.slice(0, 7) === mo && ["expense"].includes(e.type) &&
         (entityFilter === "All" || e.entity === entityFilter)
       );
       const row = { month: mlShort(mo + "-01") };
@@ -106,7 +106,7 @@ export default function Reports({
       futureEntries.forEach(e => {
         const amt = Number(e.amount_idr || 0);
         if (e.type === "income") bankAdj -= amt;
-        if (e.type === "expense" || e.type === "qris_debit") ccAdj -= amt;
+        if (e.type === "expense" || e.type === "expense") ccAdj -= amt;
         if (e.type === "pay_cc") { bankAdj += amt; ccAdj += amt; }
       });
       const histBank = currentBank + bankAdj;

@@ -47,7 +47,7 @@ export default function Transactions({
     let list = [...ledger];
     if (subTab === "reimburse") list = list.filter(e => e.is_reimburse);
     else if (subTab !== "all") {
-      if (subTab === "expense") list = list.filter(e => ["expense","qris_debit"].includes(e.type));
+      if (subTab === "expense") list = list.filter(e => ["expense"].includes(e.type));
       else if (subTab === "income") list = list.filter(e => e.type === "income");
       else if (subTab === "transfer") list = list.filter(e => ["transfer","pay_cc","fx_exchange"].includes(e.type));
     }
@@ -72,7 +72,7 @@ export default function Transactions({
       reimburse_in:  receivables,
       give_loan:   bankAccounts,
       collect_loan: receivables,
-      qris_debit:  bankAccounts,
+      expense:  bankAccounts,
       fx_exchange:  bankAccounts,
     };
     return maps[form.type] || accounts;
@@ -91,13 +91,13 @@ export default function Transactions({
       reimburse_in:  bankAccounts,
       give_loan:   receivables,
       collect_loan: bankAccounts,
-      qris_debit:  [],
+      expense:  [],
       fx_exchange:  bankAccounts,
     };
     return maps[form.type] || accounts;
   }, [form.type, accounts, bankAccounts, creditCards, assets, liabilities, receivables]);
 
-  const needsCategory = ["expense","qris_debit","reimburse_out"].includes(form.type);
+  const needsCategory = ["expense","reimburse_out"].includes(form.type);
   const needsToAccount = toOptions.length > 0;
   const amtIDR = toIDR(Number(form.amount||0), form.currency||"IDR", fxRates, allCurrencies);
 
@@ -219,7 +219,7 @@ export default function Transactions({
       {/* ── Summary (hide on pending tab) ── */}
       {subTab !== "pending" && <div style={{ display:"flex", gap:12, flexWrap:"wrap", fontSize:12 }}>
         <span style={{ color:th.tx3 }}>{filtered.length} transactions</span>
-        <span className="num" style={{ color:th.rd }}>Out: {fmtIDR(filtered.filter(e=>["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan","qris_debit"].includes(e.type)).reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0),true)}</span>
+        <span className="num" style={{ color:th.rd }}>Out: {fmtIDR(filtered.filter(e=>["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan"].includes(e.type)).reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0),true)}</span>
         <span className="num" style={{ color:th.gr }}>In: {fmtIDR(filtered.filter(e=>["income","sell_asset","reimburse_in","collect_loan"].includes(e.type)).reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0),true)}</span>
       </div>}
 
@@ -227,7 +227,7 @@ export default function Transactions({
       {subTab !== "pending" && (filtered.length === 0
         ? <Empty icon="📋" message="No transactions found" th={th}/>
         : filtered.map(e => {
-            const isOut = ["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan","qris_debit"].includes(e.type);
+            const isOut = ["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan"].includes(e.type);
             const isIn  = ["income","sell_asset","reimburse_in","collect_loan"].includes(e.type);
             const amt   = Number(e.amount_idr||e.amount||0);
             const fromAcc = accounts.find(a=>a.id===e.from_account_id);
@@ -270,7 +270,7 @@ export default function Transactions({
       {/* ── ADD/EDIT FORM ── */}
       {showForm && (
         <Overlay onClose={()=>setShowForm(false)} th={th} title={editId?"Edit Transaction":"Add Transaction"} sub={TX_TYPES.find(t=>t.id===form.type)?.label}>
-          <div style={{ display:"flex", flexDirection:"column", gap:11 }}>
+          <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
 
             {/* Type selector */}
             <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
@@ -343,7 +343,7 @@ export default function Transactions({
             )}
 
             {/* Reimburse toggle */}
-            {["expense","qris_debit"].includes(form.type) && (
+            {["expense"].includes(form.type) && (
               <label style={{ display:"flex", alignItems:"center", gap:8, cursor:"pointer", fontSize:13, color:th.tx2 }}>
                 <input type="checkbox" checked={form.is_reimburse} onChange={e=>setForm(f=>({...f,is_reimburse:e.target.checked}))}
                   style={{ accentColor:th.am }}/>
@@ -449,7 +449,7 @@ Rules: TRSF/Transfer→transfer, QRIS/QR→is_qris=true, CC/Credit Card payment�
           let type = tx.type;
           if (fromAcc && toAcc) type = "transfer";
           else if (tx.is_cc_payment) type = "pay_cc";
-          else if (tx.is_qris || tx.is_debit) type = "qris_debit";
+          else if (tx.is_qris || tx.is_debit) type = "expense";
           // Category match
           const cat = categories.find(c=>c.name===tx.suggested_category);
           return {
@@ -559,7 +559,7 @@ Rules: TRSF/Transfer→transfer, QRIS/QR→is_qris=true, CC/Credit Card payment�
                       <option value="income">↓ In</option>
                       <option value="transfer">↔ Trf</option>
                       <option value="pay_cc">💳 CC</option>
-                      <option value="qris_debit">📱 QRIS</option>
+                      <option value="expense">📱 QRIS</option>
                     </select>
                     <select className="inp" value={row.from_account_id||""} onChange={e=>editRow(i,"from_account_id",e.target.value)} style={{ padding:"2px 4px", fontSize:10, background:th.sur, borderColor:th.bor2, color:th.tx }}>
                       <option value="">— Account —</option>

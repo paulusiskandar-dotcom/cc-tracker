@@ -73,7 +73,6 @@ export const TX_TYPES = [
   { id:"reimburse_in",  label:"Reimburse In",  icon:"↙", color:"#0ca678" },
   { id:"give_loan",     label:"Give Loan",     icon:"↗", color:"#e67700" },
   { id:"collect_loan",  label:"Collect Loan",  icon:"↙", color:"#0ca678" },
-  { id:"qris_debit",    label:"QRIS/Debit",    icon:"📱",color:"#e03131" },
   { id:"fx_exchange",   label:"FX Exchange",   icon:"💱",color:"#0c8599" },
   { id:"opening_balance",label:"Opening Bal",  icon:"◈", color:"#3b5bdb" },
 ];

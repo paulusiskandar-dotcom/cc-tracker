@@ -25,7 +25,7 @@ const getDeltas = (txType, amount) => {
     reimburse_in:   { from: { receivable:-amount }, to: { bank:+amount } },
     give_loan:      { from: { bank:-amount }, to: { receivable:+amount } },
     collect_loan:   { from: { receivable:-amount }, to: { bank:+amount } },
-    qris_debit:     { from: { bank:-amount, debit_card:-amount }, to: null },
+    expense:     { from: { bank:-amount, debit_card:-amount }, to: null },
     fx_exchange:    { from: { bank:-amount }, to: { bank:+amount } },
     opening_balance:{ from: null, to: { bank:+amount, credit_card:+amount, asset:+amount, liability:+amount, receivable:+amount } },
     cc_installment: { from: { credit_card:+amount }, to: null },

@@ -44,7 +44,7 @@ export default function Income({
       const d = new Date(now.getFullYear(), now.getMonth()-i, 1);
       const m = d.toISOString().slice(0,7);
       const income  = incomeLedger.filter(e=>ym(e.date)===m).reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0);
-      const expense = ledger.filter(e=>ym(e.date)===m&&["expense","qris_debit"].includes(e.type)).reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0);
+      const expense = ledger.filter(e=>ym(e.date)===m&&["expense"].includes(e.type)).reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0);
       months.push({ month:mlShort(m), income, expense, surplus:income-expense });
     }
     return months;
