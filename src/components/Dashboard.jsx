@@ -9,6 +9,7 @@ export default function Dashboard({
   user, accounts, ledger, thisMonthLedger, categories,
   reminders, recurTemplates, netWorth, bankAccounts,
   creditCards, assets, receivables, liabilities,
+  installments = [],
   curMonth, pendingSyncs, setTab,
   setLedger, setReminders, onRefresh,
   employeeLoans = [], loanPayments = [],
@@ -82,6 +83,18 @@ export default function Dashboard({
       .sort((a, b) => new Date(a.due_date) - new Date(b.due_date))
       .slice(0, 5),
   [reminders]);
+
+  // Upcoming CC installments (active, next billing)
+  const upcomingInstallments = useMemo(() => {
+    const now = new Date();
+    return installments
+      .filter(inst => (inst.paid_months || 0) < (inst.months || 0))
+      .map(inst => {
+        const cc = creditCards.find(c => c.id === inst.account_id);
+        return { ...inst, ccName: cc?.name || "CC" };
+      })
+      .slice(0, 3);
+  }, [installments, creditCards]);
 
   // Last sync time
   const lastSyncMins = useMemo(() => {
@@ -303,13 +316,18 @@ export default function Dashboard({
 
         {/* [7] Upcoming Reminders */}
         <div style={BENTO_WHITE}>
-          <div style={CARD_TITLE}>Upcoming</div>
-          {upcomingReminders.length === 0 ? (
+          <div style={{ ...CARD_ROW, marginBottom: 8 }}>
+            <div style={CARD_TITLE}>Upcoming</div>
+            {(upcomingReminders.length > 0 || upcomingInstallments.length > 0) && (
+              <button onClick={() => setTab?.("upcoming")} style={LINK_BTN}>See all →</button>
+            )}
+          </div>
+          {upcomingReminders.length === 0 && upcomingInstallments.length === 0 ? (
             <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 8 }}>
-              No upcoming reminders
+              No upcoming items
             </div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {upcomingReminders.map(r => {
                 const tmpl      = r.recurring_templates || {};
                 const daysLeft  = Math.ceil(daysUntilDate(r.due_date));
@@ -358,6 +376,32 @@ export default function Dashboard({
                   </div>
                 );
               })}
+
+              {/* CC Installments — info only */}
+              {upcomingInstallments.map(inst => (
+                <div key={inst.id} style={{
+                  display: "flex", alignItems: "flex-start", gap: 8,
+                  padding: "8px 10px", background: "#f9fafb",
+                  borderRadius: 10, border: "1px solid #f3f4f6",
+                }}>
+                  <div style={{
+                    width: 8, height: 8, borderRadius: "50%",
+                    background: "#9ca3af", flexShrink: 0, marginTop: 4,
+                  }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontSize: 12, fontWeight: 600, color: "#6b7280",
+                      fontFamily: "Figtree, sans-serif",
+                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                    }}>
+                      📅 {inst.description}
+                    </div>
+                    <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
+                      {inst.ccName} · {inst.paid_months}/{inst.months} paid · {fmtIDR(inst.monthly_amount, true)}/mo
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>

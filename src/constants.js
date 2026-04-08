@@ -1,5 +1,5 @@
 // ─── APP VERSION ──────────────────────────────────────────────
-export const APP_VERSION = "2.1.1";
+export const APP_VERSION = "2.2.0";
 export const APP_BUILD   = "2026-04-08";
 
 // ─── CURRENCIES ───────────────────────────────────────────────
@@ -113,6 +113,7 @@ export const EXPENSE_CATEGORIES = [
     keywords: ["housekeeper","allowance","school fee","diapers","toys","family","child","baby"] },
   { id: "social",        label: "Social & Gifts",   icon: "🎁",  color: "#c2255c",
     keywords: ["gift","donation","wedding","birthday","charity","flowers","social"] },
+  { id: "cash_advance_fee", label: "Cash Advance Fee", icon: "💸", color: "#dc2626", keywords: ["cash advance", "advance fee", "ca fee"] },
   { id: "other",         label: "Other",            icon: "❓",  color: "#9ca3af", keywords: [] },
 ];
 
@@ -133,6 +134,7 @@ export const TABS = [
   { id: "cards",        icon: "▭",  label: "Credit Cards" },
   { id: "assets",       icon: "◈",  label: "Assets" },
   { id: "receivables",  icon: "◎",  label: "Receivables" },
+  { id: "upcoming",     icon: "📅",  label: "Upcoming" },
   { id: "income",       icon: "↓",  label: "Income" },
   { id: "reports",      icon: "◻",  label: "Reports" },
   { id: "settings",     icon: "◑",  label: "Settings" },
@@ -142,6 +144,7 @@ export const MOBILE_MAIN_TABS = ["dashboard", "transactions", "accounts", "asset
 export const MOBILE_MORE_TABS = [
   { id: "cards",       label: "Credit Cards" },
   { id: "receivables", label: "Receivables" },
+  { id: "upcoming",    label: "Upcoming" },
   { id: "income",      label: "Income" },
   { id: "reports",     label: "Reports" },
   { id: "settings",    label: "Settings" },

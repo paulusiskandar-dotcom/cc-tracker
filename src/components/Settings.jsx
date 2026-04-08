@@ -37,6 +37,7 @@ export default function Settings({
   recurTemplates, setRecurTemplates,
   merchantMaps, setMerchantMaps,
   onRefresh,
+  accounts = [], bankAccounts = [], creditCards = [],
 }) {
   const T = dark ? DARK : LIGHT;
 
@@ -67,8 +68,9 @@ export default function Settings({
   const [recurModal, setRecurModal]   = useState(false);
   const [editRecur, setEditRecur]     = useState(null);
   const [recurForm, setRecurForm]     = useState({
-    name: "", type: "expense", amount: "", currency: "IDR",
+    name: "", tx_type: "expense", amount: "", currency: "IDR",
     frequency: "Monthly", category: "", entity: "Personal", notes: "",
+    from_id: "", to_id: "", day_of_month: "",
   });
 
   // ── Merchants ──────────────────────────────────────────────
@@ -165,10 +167,20 @@ export default function Settings({
   const openRecurModal = (t = null) => {
     if (t) {
       setEditRecur(t);
-      setRecurForm({ name: t.name, tx_type: t.tx_type, amount: String(t.amount), currency: t.currency || "IDR", frequency: t.frequency || "Monthly", category: t.category || "", entity: t.entity || "Personal", notes: t.notes || "" });
+      setRecurForm({
+        name: t.name, tx_type: t.tx_type, amount: String(t.amount),
+        currency: t.currency || "IDR", frequency: t.frequency || "Monthly",
+        category: t.category || "", entity: t.entity || "Personal", notes: t.notes || "",
+        from_id: t.from_id || "", to_id: t.to_id || "",
+        day_of_month: t.day_of_month ? String(t.day_of_month) : "",
+      });
     } else {
       setEditRecur(null);
-      setRecurForm({ name: "", tx_type: "expense", amount: "", currency: "IDR", frequency: "Monthly", category: "", entity: "Personal", notes: "" });
+      setRecurForm({
+        name: "", tx_type: "expense", amount: "", currency: "IDR",
+        frequency: "Monthly", category: "", entity: "Personal", notes: "",
+        from_id: "", to_id: "", day_of_month: "",
+      });
     }
     setRecurModal(true);
   };
@@ -178,12 +190,20 @@ export default function Settings({
     setSaving(true);
     try {
       const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
+      const toUUID = (v) => (!v || v === "") ? null : v;
+      const payload = {
+        ...recurForm,
+        amount:       sn(recurForm.amount),
+        from_id:      toUUID(recurForm.from_id),
+        to_id:        toUUID(recurForm.to_id),
+        day_of_month: recurForm.day_of_month ? Number(recurForm.day_of_month) : null,
+      };
       if (editRecur) {
-        const updated = await recurringApi.updateTemplate(editRecur.id, { ...recurForm, amount: sn(recurForm.amount) });
+        const updated = await recurringApi.updateTemplate(editRecur.id, payload);
         setRecurTemplates(prev => prev.map(t => t.id === editRecur.id ? { ...t, ...updated } : t));
         showToast("Template updated");
       } else {
-        const created = await recurringApi.createTemplate(user.id, { ...recurForm, amount: sn(recurForm.amount) });
+        const created = await recurringApi.createTemplate(user.id, payload);
         setRecurTemplates(prev => [created, ...prev]);
         showToast("Template created");
       }
@@ -457,8 +477,10 @@ export default function Settings({
                       <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{t.name}</div>
                       <div style={{ fontSize: 11, color: T.text3, marginTop: 3 }}>
                         {t.frequency} · {txDef?.label || t.tx_type}
+                        {t.day_of_month && ` · day ${t.day_of_month}`}
                         {t.category && ` · ${t.category}`}
                         {t.entity && t.entity !== "Personal" && ` · ${t.entity}`}
+                        {t.from_id && (() => { const a = accounts.find(x => x.id === t.from_id); return a ? ` · from ${a.name}` : ""; })()}
                       </div>
                     </div>
                     <div style={{ textAlign: "right" }}>
@@ -683,6 +705,39 @@ export default function Settings({
               />
             </Field>
           </FormRow>
+          <FormRow>
+            <Field label="From Account">
+              <Select
+                value={recurForm.from_id}
+                onChange={e => setRecurForm(f => ({ ...f, from_id: e.target.value }))}
+                options={[...bankAccounts, ...creditCards].map(a => ({ value: a.id, label: a.name }))}
+                placeholder="Any / not set"
+              />
+            </Field>
+            <Field label="To Account">
+              <Select
+                value={recurForm.to_id}
+                onChange={e => setRecurForm(f => ({ ...f, to_id: e.target.value }))}
+                options={bankAccounts.map(a => ({ value: a.id, label: a.name }))}
+                placeholder="Any / not set"
+              />
+            </Field>
+          </FormRow>
+          <Field label="Day of Month (billing day)">
+            <input
+              type="number" min="1" max="31"
+              value={recurForm.day_of_month}
+              onChange={e => setRecurForm(f => ({ ...f, day_of_month: e.target.value }))}
+              placeholder="e.g. 15"
+              style={{
+                border: "1.5px solid #e5e7eb", borderRadius: 10,
+                padding: "0 14px", fontFamily: "Figtree, sans-serif",
+                fontSize: 14, fontWeight: 500, outline: "none",
+                color: "#111827", background: "#fff", height: 44,
+                width: "100%", boxSizing: "border-box",
+              }}
+            />
+          </Field>
           <Field label="Notes">
             <Input
               value={recurForm.notes}

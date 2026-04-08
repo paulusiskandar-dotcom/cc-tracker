@@ -116,7 +116,7 @@ export default function Receivables({
 
   const [outForm, setOutForm] = useState({
     date: todayStr(), description: "", amount: "",
-    entity: "Hamasa", from_id: "", notes: "",
+    entity: "Hamasa", from_id: "", notes: "", cash_advance_fee: "",
   });
 
   // ── Settle (reimburse_in checklist) modal ─────────────────────
@@ -185,6 +185,7 @@ export default function Receivables({
       }
       const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
       const amt = sn(outForm.amount);
+      const fee = sn(outForm.cash_advance_fee);
       const entry = {
         tx_date:      outForm.date,
         description:  outForm.description,
@@ -202,8 +203,34 @@ export default function Receivables({
       };
       const r = await ledgerApi.create(user.id, entry, accounts);
       if (r) setLedger(prev => [r, ...prev]);
+
+      // Optional: record cash advance fee as an expense from the same account
+      if (fee > 0) {
+        const feeEntry = {
+          tx_date:      outForm.date,
+          description:  `${outForm.entity} Cash Advance Fee`,
+          amount:       fee,
+          currency:     "IDR",
+          amount_idr:   fee,
+          tx_type:      "expense",
+          from_type:    "account",
+          to_type:      "expense",
+          from_id:      outForm.from_id,
+          to_id:        null,
+          entity:       outForm.entity,
+          category_id:  "cash_advance_fee",
+          notes:        `CA fee for: ${outForm.description}`,
+          merchant_name: null, attachment_url: null,
+          ai_categorized: false, ai_confidence: null,
+          installment_id: null, scan_batch_id: null,
+          is_reimburse: false,
+        };
+        const rf = await ledgerApi.create(user.id, feeEntry, accounts);
+        if (rf) setLedger(prev => [rf, ...prev]);
+      }
+
       await onRefresh();
-      showToast(`Recorded: ${fmtIDR(amt, true)} for ${outForm.entity}`);
+      showToast(`Recorded: ${fmtIDR(amt, true)}${fee > 0 ? ` + ${fmtIDR(fee, true)} CA fee` : ""} for ${outForm.entity}`);
       setOutModal(false);
     } catch (e) { showToast(e.message, "error"); }
     setSaving(false);
@@ -216,11 +243,14 @@ export default function Receivables({
     // Default: check all items
     const checked = {};
     outEntries.forEach(e => { checked[e.id] = true; });
+    const defaultBank = bankAccounts.find(b =>
+      (b.name || "").toLowerCase().includes("reimburse") || b.subtype === "reimburse"
+    ) || bankAccounts[0];
     setSettleRec(rec);
     setSettleChecked(checked);
     setSettleAmount(String(Number(rec.receivable_outstanding || 0)));
-    setSettleBankId(bankAccounts[0]?.id || "");
-    setSettleShortfallCatId(null);
+    setSettleBankId(defaultBank?.id || "");
+    setSettleShortfallCatId("cash_advance_fee");
     setSettleModal(true);
   };
 
@@ -459,7 +489,7 @@ export default function Receivables({
             `${fmtIDR(totalLoanOutstanding, true)} loans outstanding`}
         </div>
         <Button variant="primary" size="sm" onClick={() => {
-          setOutForm({ date: todayStr(), description: "", amount: "", entity: "Hamasa", from_id: spendAccounts[0]?.id || "", notes: "" });
+          setOutForm({ date: todayStr(), description: "", amount: "", entity: "Hamasa", from_id: spendAccounts[0]?.id || "", notes: "", cash_advance_fee: "" });
           setOutModal(true);
         }}>
           + Record Expense
@@ -807,6 +837,12 @@ export default function Receivables({
               placeholder="Select account…"
             />
           </Field>
+          <AmountInput
+            label="Cash Advance Fee (optional)"
+            value={outForm.cash_advance_fee}
+            onChange={v => setOutForm(f => ({ ...f, cash_advance_fee: v }))}
+            currency="IDR"
+          />
           <Field label="Notes">
             <Input value={outForm.notes} onChange={e => setOutForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional" />
           </Field>
