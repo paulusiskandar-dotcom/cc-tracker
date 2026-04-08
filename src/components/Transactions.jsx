@@ -589,9 +589,16 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
     EXPENSE_CATEGORIES.forEach(c => catOptions.push({ value: c.id, label: `${c.icon} ${c.label}` }));
   }
 
-  const fromOpts = fromOptions.map(a => ({ value: a.id, label: a.name + (a.bank_name ? ` · ${a.bank_name}` : "") }));
-  const toOpts   = toOptions.map(a  => ({ value: a.id, label: a.name + (a.bank_name ? ` · ${a.bank_name}` : "") }));
-  const incOpts  = (incomeSrcs || []).map(s => ({ value: s.id, label: s.name }));
+  // value MUST be the account UUID — filter out any account without a valid id
+  const fromOpts = fromOptions
+    .filter(a => a.id && a.id.length === 36)
+    .map(a => ({ value: a.id, label: a.name + (a.bank_name ? ` · ${a.bank_name}` : "") }));
+  const toOpts = toOptions
+    .filter(a => a.id && a.id.length === 36)
+    .map(a => ({ value: a.id, label: a.name + (a.bank_name ? ` · ${a.bank_name}` : "") }));
+  const incOpts = (incomeSrcs || [])
+    .filter(s => s.id && s.id.length === 36)
+    .map(s => ({ value: s.id, label: s.name }));
 
   const needsFrom = fromOptions.length > 0;
   const needsTo   = toOptions.length > 0;
@@ -667,23 +674,23 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
         </div>
       )}
 
-      {/* From account */}
+      {/* From account — value is always account.id (UUID) */}
       {needsFrom && (
         <Select
           label={type === "sell_asset" ? "Asset" : type === "collect_loan" || type === "reimburse_in" ? "Receivable" : "From Account"}
-          value={form.from_id}
-          onChange={e => set("from_id", e.target.value)}
+          value={form.from_id || ""}
+          onChange={e => set("from_id", e.target.value.length === 36 ? e.target.value : null)}
           options={fromOpts}
           placeholder="Select…"
         />
       )}
 
-      {/* To account */}
+      {/* To account — value is always account.id (UUID) */}
       {needsTo && (
         <Select
           label={type === "buy_asset" ? "Asset Account" : type === "reimburse_out" || type === "give_loan" ? "Receivable" : type === "pay_cc" ? "Credit Card" : type === "pay_liability" ? "Liability" : "To Account"}
-          value={form.to_id}
-          onChange={e => set("to_id", e.target.value)}
+          value={form.to_id || ""}
+          onChange={e => set("to_id", e.target.value.length === 36 ? e.target.value : null)}
           options={toOpts}
           placeholder="Select…"
         />

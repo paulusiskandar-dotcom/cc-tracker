@@ -31,16 +31,15 @@ const validateLedgerEntry = (entry) => {
   return true;
 };
 
-// Sanitize UUID — never send "" / "undefined" / "null" to Supabase UUID columns
-const toUUID = (v) =>
-  (!v || v === "" || v === "undefined" || v === "null") ? null : v;
+// Validate UUID by length — only a real 36-char UUID passes, everything else → null
+const cleanUUID = (v) => (v && typeof v === "string" && v.length === 36) ? v : null;
 
-// Apply toUUID to every key ending in _id (except user_id which is added separately)
+// Apply cleanUUID to every key ending in _id (except user_id which is added separately)
 const sanitizeUUIDs = (obj) => {
   const out = { ...obj };
   for (const key of Object.keys(out)) {
     if (key.endsWith("_id") && key !== "user_id") {
-      out[key] = toUUID(out[key]);
+      out[key] = cleanUUID(out[key]);
     }
   }
   return out;
@@ -196,8 +195,13 @@ export const ledgerApi = {
   // Create entry + update balances
   create: async (userId, entry, accounts = []) => {
     validateLedgerEntry(entry);
-    // Sanitize ALL _id UUID fields — "" and "undefined" are invalid for UUID columns
+    // Sanitize ALL _id UUID fields — empty string / name / "undefined" are invalid
     const safeEntry = sanitizeUUIDs(entry);
+
+    console.log("[ledger.create] from_id:", safeEntry.from_id);
+    console.log("[ledger.create] to_id:  ", safeEntry.to_id);
+    console.log("[ledger.create] cat_id: ", safeEntry.category_id);
+
     const { data, error } = await supabase
       .from("ledger")
       .insert([{ ...safeEntry, user_id: userId }])
