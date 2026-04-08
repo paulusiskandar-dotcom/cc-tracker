@@ -16,7 +16,6 @@ import Accounts     from "./components/Accounts";
 import CreditCards  from "./components/CreditCards";
 import Assets       from "./components/Assets";
 import Receivables  from "./components/Receivables";
-import Upcoming     from "./components/Upcoming";
 import Income       from "./components/Income";
 import Reports      from "./components/Reports";
 import Settings     from "./components/Settings";
@@ -322,7 +321,6 @@ function Finance({ user, signOut }) {
       case "cards":        return <CreditCards  {...shared} />;
       case "assets":       return <Assets       {...shared} />;
       case "receivables":  return <Receivables  {...shared} />;
-      case "upcoming":     return <Upcoming     {...shared} />;
       case "income":       return <Income       {...shared} />;
       case "reports":      return <Reports      {...shared} />;
       case "settings":     return <Settings     {...shared} signOut={signOut} />;

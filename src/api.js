@@ -384,7 +384,7 @@ export const recurringApi = {
   getReminders: async (userId) => {
     const { data, error } = await supabase
       .from("recurring_reminders")
-      .select("*, recurring_templates(name, tx_type, amount, currency, entity)")
+      .select("*, recurring_templates(name, tx_type, amount, currency, entity, from_id, to_id, category_id, day_of_month, frequency)")
       .eq("user_id", userId)
       .eq("status", "pending")
       .order("due_date");

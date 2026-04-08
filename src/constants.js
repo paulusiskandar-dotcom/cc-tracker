@@ -123,6 +123,15 @@ export const INCOME_CATEGORIES = [
   "Freelance", "Bonus", "Transfer In", "Other",
 ];
 
+export const INCOME_CATEGORIES_LIST = [
+  { id: "salary",          label: "Salary",          icon: "💼", color: "#059669" },
+  { id: "rental_income",   label: "Rental Income",   icon: "🏠", color: "#0891b2" },
+  { id: "dividend",        label: "Dividend",        icon: "📈", color: "#7c3aed" },
+  { id: "freelance",       label: "Freelance",       icon: "💻", color: "#d97706" },
+  { id: "loan_collection", label: "Loan Collection", icon: "🔄", color: "#3b5bdb" },
+  { id: "other_income",    label: "Other Income",    icon: "💰", color: "#6b7280" },
+];
+
 // ─── RECURRING FREQUENCIES ────────────────────────────────────
 export const FREQUENCIES = ["Daily", "Weekly", "Monthly", "Quarterly", "Yearly"];
 
@@ -134,7 +143,6 @@ export const TABS = [
   { id: "cards",        icon: "▭",  label: "Credit Cards" },
   { id: "assets",       icon: "◈",  label: "Assets" },
   { id: "receivables",  icon: "◎",  label: "Receivables" },
-  { id: "upcoming",     icon: "📅",  label: "Upcoming" },
   { id: "income",       icon: "↓",  label: "Income" },
   { id: "reports",      icon: "◻",  label: "Reports" },
   { id: "settings",     icon: "◑",  label: "Settings" },
@@ -144,7 +152,6 @@ export const MOBILE_MAIN_TABS = ["dashboard", "transactions", "accounts", "asset
 export const MOBILE_MORE_TABS = [
   { id: "cards",       label: "Credit Cards" },
   { id: "receivables", label: "Receivables" },
-  { id: "upcoming",    label: "Upcoming" },
   { id: "income",      label: "Income" },
   { id: "reports",     label: "Reports" },
   { id: "settings",    label: "Settings" },

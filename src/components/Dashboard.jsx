@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { ledgerApi, recurringApi } from "../api";
-import { EXPENSE_CATEGORIES } from "../constants";
-import { fmtIDR, ym, mlShort, daysUntilDate, getGreeting, todayStr, groupByDate } from "../utils";
-import { showToast, Spinner, EmptyState } from "./shared/index";
+import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
+import { fmtIDR, ym, mlShort, getGreeting, todayStr, groupByDate } from "../utils";
+import { showToast, EmptyState, Modal, Button, AmountInput, Field, Input, FormRow } from "./shared/index";
 import { GroupedTransactionList } from "./shared/TransactionRow";
 
 export default function Dashboard({
@@ -14,7 +14,10 @@ export default function Dashboard({
   setLedger, setReminders, onRefresh,
   employeeLoans = [], loanPayments = [],
 }) {
-  const [confirmingId, setConfirmingId] = useState(null);
+  const [confirmModal,  setConfirmModal]  = useState(false);
+  const [confirmTarget, setConfirmTarget] = useState(null);  // { reminder, tmpl, editMode }
+  const [confirmForm,   setConfirmForm]   = useState({ date: todayStr(), amount: "", notes: "" });
+  const [confirmSaving, setConfirmSaving] = useState(false);
 
   // ─── DERIVED STATS ───────────────────────────────────────────
   const nw = netWorth || { total: 0, bank: 0, assets: 0, receivables: 0, ccDebt: 0, liabilities: 0 };
@@ -77,24 +80,120 @@ export default function Dashboard({
     return groupByDate(recent);
   }, [ledger]);
 
-  // Next 5 pending reminders
-  const upcomingReminders = useMemo(() =>
-    [...reminders]
-      .sort((a, b) => new Date(a.due_date) - new Date(b.due_date))
-      .slice(0, 5),
-  [reminders]);
+  // Per-loan stats
+  const loansWithStats = useMemo(() => {
+    return employeeLoans.map(loan => {
+      const paid = loanPayments.filter(p => p.loan_id === loan.id)
+        .reduce((s, p) => s + Number(p.amount || 0), 0);
+      const remaining = Math.max(0, Number(loan.total_amount || 0) - paid);
+      return { ...loan, paidSoFar: paid, remaining };
+    });
+  }, [employeeLoans, loanPayments]);
 
-  // Upcoming CC installments (active, next billing)
-  const upcomingInstallments = useMemo(() => {
-    const now = new Date();
-    return installments
+  // ── UNIFIED UPCOMING ITEMS (next 7 days, max 10) ─────────────
+  const upcomingItems = useMemo(() => {
+    const today = todayStr();
+    const all = [];
+
+    // A) Pending recurring reminders
+    reminders.forEach(r => {
+      const tmpl = r.recurring_templates || {};
+      const isIncome = tmpl.tx_type === "income";
+      all.push({
+        id:   `r-${r.id}`, type: "reminder", raw: r,
+        date: r.due_date,
+        title: tmpl.name || "Reminder",
+        amount: Number(tmpl.amount || 0),
+        amountColor: isIncome ? "#059669" : "#dc2626",
+        amountSign:  isIncome ? "+" : "−",
+        icon: isIncome ? "💰" : "↑",
+        iconBg: isIncome ? "#dcfce7" : "#fee2e2",
+        iconColor: isIncome ? "#059669" : "#dc2626",
+        actionable: true,
+      });
+    });
+
+    // B) Employee loan next payments (active loans)
+    loansWithStats
+      .filter(l => l.status !== "settled" && l.remaining > 0 && l.monthly_installment)
+      .forEach(loan => {
+        const startDay = loan.start_date ? new Date(loan.start_date + "T00:00:00").getDate() : 1;
+        const now = new Date();
+        let nextDue = new Date(now.getFullYear(), now.getMonth(), startDay);
+        if (nextDue <= now) nextDue = new Date(now.getFullYear(), now.getMonth() + 1, startDay);
+        const dueDateStr = nextDue.toISOString().slice(0, 10);
+        all.push({
+          id:   `l-${loan.id}`, type: "loan", raw: loan,
+          date: dueDateStr,
+          title: `${loan.employee_name}`,
+          sub: `Monthly payment · Remaining ${fmtIDR(loan.remaining, true)}`,
+          amount: Number(loan.monthly_installment),
+          amountColor: "#3b5bdb", amountSign: "−",
+          icon: "👤", iconBg: "#dbeafe", iconColor: "#3b5bdb",
+          actionable: false,
+        });
+      });
+
+    // C) Unsettled reimburse (oldest outstanding first)
+    receivables
+      .filter(r => Number(r.receivable_outstanding || 0) > 0)
+      .slice(0, 3)
+      .forEach(r => {
+        all.push({
+          id:   `v-${r.id}`, type: "receivable", raw: r,
+          date: today,
+          title: `${r.entity || r.name}`,
+          sub: "Outstanding reimburse",
+          amount: Number(r.receivable_outstanding),
+          amountColor: "#d97706", amountSign: "+",
+          icon: "📋", iconBg: "#fef3c7", iconColor: "#d97706",
+          actionable: false,
+        });
+      });
+
+    // D) CC installments (info only)
+    installments
       .filter(inst => (inst.paid_months || 0) < (inst.months || 0))
-      .map(inst => {
+      .slice(0, 3)
+      .forEach(inst => {
         const cc = creditCards.find(c => c.id === inst.account_id);
-        return { ...inst, ccName: cc?.name || "CC" };
-      })
-      .slice(0, 3);
-  }, [installments, creditCards]);
+        all.push({
+          id:   `i-${inst.id}`, type: "installment", raw: inst,
+          date: today,
+          title: inst.description || "CC Installment",
+          sub: `${cc?.name || "CC"} · Month ${(inst.paid_months || 0) + 1}/${inst.months}`,
+          amount: Number(inst.monthly_amount || 0),
+          amountColor: "#9ca3af", amountSign: "−",
+          icon: "📅", iconBg: "#f3f4f6", iconColor: "#9ca3af",
+          actionable: false, infoOnly: true,
+        });
+      });
+
+    return all
+      .sort((a, b) => a.date.localeCompare(b.date) || (a.type === "installment" ? 1 : -1))
+      .slice(0, 10);
+  }, [reminders, loansWithStats, receivables, installments, creditCards]);
+
+  // Group upcoming by date
+  const upcomingGroups = useMemo(() => {
+    const today    = todayStr();
+    const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    const groups   = {};
+    upcomingItems.forEach(item => {
+      const d = item.date;
+      if (!groups[d]) {
+        let label;
+        if (d === today)    label = "TODAY";
+        else if (d === tomorrow) label = "TOMORROW";
+        else label = new Date(d + "T00:00:00").toLocaleDateString("en-US", {
+          weekday: "short", month: "short", day: "numeric",
+        }).toUpperCase();
+        groups[d] = { label, items: [] };
+      }
+      groups[d].items.push(item);
+    });
+    return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
+  }, [upcomingItems]);
 
   // Last sync time
   const lastSyncMins = useMemo(() => {
@@ -105,13 +204,6 @@ export default function Dashboard({
     return Math.floor((Date.now() - new Date(latest.received_at)) / 60000);
   }, [pendingSyncs]);
 
-  // Month-over-month net worth change
-  const prevMonthLedger = useMemo(() => {
-    const now = new Date();
-    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 7);
-    return ledger.filter(e => ym(e.tx_date) === prev);
-  }, [ledger]);
-
   const monthlyChange = useMemo(() => {
     const inc  = thisMonthLedger.filter(e => e.tx_type === "income").reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
     const exp  = thisMonthLedger.filter(e => e.tx_type === "expense").reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
@@ -119,19 +211,54 @@ export default function Dashboard({
   }, [thisMonthLedger]);
 
   // ─── REMINDER ACTIONS ────────────────────────────────────────
-  const confirmReminder = async (r) => {
-    if (confirmingId === r.id) return;
-    setConfirmingId(r.id);
+  const openConfirmModal = (r, editMode = false) => {
     const tmpl = r.recurring_templates || {};
+    setConfirmTarget({ reminder: r, tmpl, editMode });
+    setConfirmForm({
+      date:   todayStr(),
+      amount: String(tmpl.amount || ""),
+      notes:  "",
+    });
+    setConfirmModal(true);
+  };
+
+  const doConfirmReminder = async () => {
+    if (!confirmTarget) return;
+    const { reminder, tmpl } = confirmTarget;
+    setConfirmSaving(true);
+    const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
     try {
-      await recurringApi.confirmReminder(r.id);
-      setReminders?.(p => p.filter(x => x.id !== r.id));
-      showToast(`✓ Confirmed: ${tmpl.name || "Reminder"}`);
-      await onRefresh?.();
-    } catch (e) {
-      showToast(e.message, "error");
-    }
-    setConfirmingId(null);
+      // Create ledger entry from template
+      const isIncome  = tmpl.tx_type === "income";
+      const isExpense = tmpl.tx_type === "expense";
+      if (isIncome || isExpense) {
+        const entry = {
+          tx_date:     confirmForm.date || todayStr(),
+          description: tmpl.name,
+          amount:      sn(confirmForm.amount),
+          currency:    tmpl.currency || "IDR",
+          amount_idr:  sn(confirmForm.amount),
+          tx_type:     tmpl.tx_type,
+          entity:      "Personal",
+          notes:       confirmForm.notes || null,
+          category_id: tmpl.category_id || null,
+          merchant_name: null, attachment_url: null,
+          ai_categorized: false, ai_confidence: null,
+          installment_id: null, scan_batch_id: null,
+          ...(isIncome
+            ? { from_type: "income_source", from_id: null, to_type: "account",  to_id: tmpl.to_id || null }
+            : { from_type: "account",       from_id: tmpl.from_id || null, to_type: "expense", to_id: null }
+          ),
+        };
+        const created = await ledgerApi.create(user.id, entry, accounts);
+        if (created) setLedger?.(p => [created, ...p]);
+      }
+      await recurringApi.confirmReminder(reminder.id);
+      setReminders?.(p => p.filter(x => x.id !== reminder.id));
+      showToast(`✓ ${tmpl.name || "Reminder"} confirmed`);
+      setConfirmModal(false);
+    } catch (e) { showToast(e.message, "error"); }
+    setConfirmSaving(false);
   };
 
   const skipReminder = async (r) => {
@@ -314,91 +441,41 @@ export default function Dashboard({
           <MiniBarChart data={cashFlowData} max={maxCF} />
         </div>
 
-        {/* [7] Upcoming Reminders */}
-        <div style={BENTO_WHITE}>
-          <div style={{ ...CARD_ROW, marginBottom: 8 }}>
-            <div style={CARD_TITLE}>Upcoming</div>
-            {(upcomingReminders.length > 0 || upcomingInstallments.length > 0) && (
-              <button onClick={() => setTab?.("upcoming")} style={LINK_BTN}>See all →</button>
-            )}
-          </div>
-          {upcomingReminders.length === 0 && upcomingInstallments.length === 0 ? (
-            <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 8 }}>
-              No upcoming items
+        {/* [7] Upcoming — grouped by date */}
+        <div style={{ ...BENTO_WHITE, gridColumn: "span 3" }}>
+          <div style={CARD_TITLE}>Upcoming — Next 7 Days</div>
+
+          {upcomingGroups.length === 0 ? (
+            <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 10 }}>
+              🎉 All clear — nothing due this week
             </div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {upcomingReminders.map(r => {
-                const tmpl      = r.recurring_templates || {};
-                const daysLeft  = Math.ceil(daysUntilDate(r.due_date));
-                const isOverdue = daysLeft <= 0;
-                const isUrgent  = daysLeft <= 3;
-                const dotColor  = isOverdue ? "#dc2626" : isUrgent ? "#d97706" : "#059669";
-                return (
-                  <div key={r.id} style={{
-                    display:   "flex",
-                    alignItems: "flex-start",
-                    gap:       8,
-                    padding:   "8px 10px",
-                    background: isOverdue ? "#fff1f2" : isUrgent ? "#fffbeb" : "#f9fafb",
-                    borderRadius: 10,
-                    border:    `1px solid ${isOverdue ? "#fecaca" : isUrgent ? "#fde68a" : "#f3f4f6"}`,
-                  }}>
-                    <div style={{
-                      width: 8, height: 8, borderRadius: "50%",
-                      background: dotColor, flexShrink: 0, marginTop: 4,
-                    }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{
-                        fontSize: 12, fontWeight: 600, color: "#111827",
-                        fontFamily: "Figtree, sans-serif",
-                        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                      }}>
-                        {tmpl.name || "Reminder"}
-                      </div>
-                      <div style={{ fontSize: 10, color: dotColor, fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
-                        {isOverdue ? "Overdue!" : daysLeft === 0 ? "Today" : daysLeft === 1 ? "Tomorrow" : `${daysLeft}d`}
-                        {" · "}{fmtIDR(Number(tmpl.amount || 0), true)}
-                      </div>
-                    </div>
-                    <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-                      <button
-                        onClick={() => confirmReminder(r)}
-                        disabled={confirmingId === r.id}
-                        style={REMIND_BTN_PRIMARY}
-                      >
-                        {confirmingId === r.id ? "…" : "✓"}
-                      </button>
-                      <button onClick={() => skipReminder(r)} style={REMIND_BTN_GHOST}>
-                        ✕
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-
-              {/* CC Installments — info only */}
-              {upcomingInstallments.map(inst => (
-                <div key={inst.id} style={{
-                  display: "flex", alignItems: "flex-start", gap: 8,
-                  padding: "8px 10px", background: "#f9fafb",
-                  borderRadius: 10, border: "1px solid #f3f4f6",
-                }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 10 }}>
+              {upcomingGroups.map(([date, group]) => (
+                <div key={date}>
+                  {/* Date group header */}
                   <div style={{
-                    width: 8, height: 8, borderRadius: "50%",
-                    background: "#9ca3af", flexShrink: 0, marginTop: 4,
-                  }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{
-                      fontSize: 12, fontWeight: 600, color: "#6b7280",
-                      fontFamily: "Figtree, sans-serif",
-                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                    }}>
-                      📅 {inst.description}
-                    </div>
-                    <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
-                      {inst.ccName} · {inst.paid_months}/{inst.months} paid · {fmtIDR(inst.monthly_amount, true)}/mo
-                    </div>
+                    fontSize: 10, fontWeight: 700, color: "#9ca3af",
+                    letterSpacing: "0.08em", fontFamily: "Figtree, sans-serif",
+                    marginBottom: 6, textTransform: "uppercase",
+                  }}>
+                    {group.label}
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {group.items.map(item => (
+                      <UpcomingRow
+                        key={item.id}
+                        item={item}
+                        onConfirm={item.type === "reminder" ? () => openConfirmModal(item.raw) : null}
+                        onEdit={item.type === "reminder" ? () => openConfirmModal(item.raw, true) : null}
+                        onSkip={item.type === "reminder" ? () => skipReminder(item.raw) : null}
+                        onNavigate={
+                          item.type === "loan" || item.type === "receivable"
+                            ? () => setTab?.("receivables")
+                            : null
+                        }
+                      />
+                    ))}
                   </div>
                 </div>
               ))}
@@ -430,9 +507,178 @@ export default function Dashboard({
         )}
       </div>
 
+      {/* ── CONFIRM / EDIT REMINDER MODAL ── */}
+      <Modal
+        isOpen={confirmModal && !!confirmTarget}
+        onClose={() => setConfirmModal(false)}
+        title={confirmTarget?.editMode ? `Edit — ${confirmTarget?.tmpl?.name || ""}` : `Confirm — ${confirmTarget?.tmpl?.name || ""}`}
+        footer={
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            {confirmTarget?.type !== "info" && (
+              <Button variant="ghost" size="md" onClick={() => { skipReminder(confirmTarget?.reminder); setConfirmModal(false); }}>
+                Skip
+              </Button>
+            )}
+            <Button variant="secondary" size="md" onClick={() => setConfirmModal(false)}>Cancel</Button>
+            <Button variant="primary" size="md" busy={confirmSaving} onClick={doConfirmReminder}>
+              {confirmTarget?.tmpl?.tx_type === "income" ? "✓ Record Income" : "✓ Record Expense"}
+            </Button>
+          </div>
+        }
+      >
+        {confirmTarget && (() => {
+          const tmpl = confirmTarget.tmpl || {};
+          const allCats = [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES_LIST];
+          const cat = allCats.find(c => c.id === tmpl.category_id);
+          const fromAcc = accounts.find(a => a.id === tmpl.from_id);
+          const toAcc   = accounts.find(a => a.id === tmpl.to_id);
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {/* Template info banner */}
+              <div style={{
+                background: "#f9fafb", borderRadius: 10, padding: "10px 14px",
+                display: "flex", flexDirection: "column", gap: 4,
+              }}>
+                {cat && (
+                  <div style={{ fontSize: 11, color: "#6b7280" }}>
+                    {cat.icon} {cat.label}
+                  </div>
+                )}
+                {fromAcc && (
+                  <div style={{ fontSize: 11, color: "#6b7280" }}>From: {fromAcc.name}</div>
+                )}
+                {toAcc && (
+                  <div style={{ fontSize: 11, color: "#6b7280" }}>To: {toAcc.name}</div>
+                )}
+              </div>
+              <FormRow>
+                <AmountInput
+                  label="Amount"
+                  value={confirmForm.amount}
+                  onChange={v => setConfirmForm(f => ({ ...f, amount: v }))}
+                  currency={tmpl.currency || "IDR"}
+                />
+                <Field label="Date">
+                  <Input
+                    type="date"
+                    value={confirmForm.date}
+                    onChange={e => setConfirmForm(f => ({ ...f, date: e.target.value }))}
+                  />
+                </Field>
+              </FormRow>
+              <Field label="Notes (optional)">
+                <Input
+                  value={confirmForm.notes}
+                  onChange={e => setConfirmForm(f => ({ ...f, notes: e.target.value }))}
+                  placeholder="Add note…"
+                />
+              </Field>
+            </div>
+          );
+        })()}
+      </Modal>
+
     </div>
   );
 }
+
+// ─── UPCOMING ROW ─────────────────────────────────────────────
+function UpcomingRow({ item, onConfirm, onEdit, onSkip, onNavigate }) {
+  const isInfo = item.infoOnly;
+  return (
+    <div style={{
+      display:      "flex",
+      alignItems:   "center",
+      gap:          10,
+      padding:      "10px 12px",
+      background:   isInfo ? "#f9fafb" : "#ffffff",
+      border:       `1px solid ${isInfo ? "#f3f4f6" : "#e5e7eb"}`,
+      borderRadius: 12,
+      opacity:      isInfo ? 0.8 : 1,
+    }}>
+      {/* Icon */}
+      <div style={{
+        width: 32, height: 32, borderRadius: 9, flexShrink: 0,
+        background: item.iconBg,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 14,
+      }}>
+        {item.icon}
+      </div>
+
+      {/* Content */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: 13, fontWeight: isInfo ? 500 : 600,
+          color: isInfo ? "#9ca3af" : "#111827",
+          fontFamily: "Figtree, sans-serif",
+          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+        }}>
+          {item.title}
+        </div>
+        {item.sub && (
+          <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
+            {item.sub}
+          </div>
+        )}
+      </div>
+
+      {/* Amount */}
+      {item.amount > 0 && (
+        <div style={{
+          fontSize: 13, fontWeight: 700, flexShrink: 0,
+          color: isInfo ? "#9ca3af" : item.amountColor,
+          fontFamily: "Figtree, sans-serif",
+        }}>
+          {item.amountSign}{fmtIDR(item.amount, true)}
+        </div>
+      )}
+
+      {/* Info badge */}
+      {isInfo && (
+        <div style={{
+          fontSize: 9, fontWeight: 700, color: "#9ca3af",
+          background: "#f3f4f6", borderRadius: 5, padding: "2px 6px",
+          fontFamily: "Figtree, sans-serif", flexShrink: 0,
+        }}>
+          AUTO
+        </div>
+      )}
+
+      {/* Action buttons */}
+      {!isInfo && (
+        <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+          {onEdit && (
+            <button onClick={onEdit} style={RUPT_GHOST} title="Edit">✏️</button>
+          )}
+          {onConfirm && (
+            <button onClick={onConfirm} style={RUPT_PRIMARY} title="Confirm">✓</button>
+          )}
+          {onSkip && (
+            <button onClick={onSkip} style={RUPT_GHOST} title="Skip">✕</button>
+          )}
+          {onNavigate && (
+            <button onClick={onNavigate} style={RUPT_GHOST} title="View">→</button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const RUPT_PRIMARY = {
+  width: 28, height: 28, borderRadius: 8, border: "none",
+  background: "#dcfce7", color: "#059669", fontSize: 12, fontWeight: 700,
+  cursor: "pointer", fontFamily: "Figtree, sans-serif",
+  display: "flex", alignItems: "center", justifyContent: "center",
+};
+const RUPT_GHOST = {
+  width: 28, height: 28, borderRadius: 8,
+  border: "1px solid #e5e7eb", background: "#f9fafb",
+  color: "#9ca3af", fontSize: 11, cursor: "pointer",
+  fontFamily: "Figtree, sans-serif",
+  display: "flex", alignItems: "center", justifyContent: "center",
+};
 
 // ─── BENTO TILE ───────────────────────────────────────────────
 function BentoTile({ bg, icon, iconBg, label, value, sub, badge, badgeColor, onClick }) {
@@ -641,35 +887,3 @@ const LINK_BTN = {
   padding:     0,
 };
 
-const REMIND_BTN_PRIMARY = {
-  width:        26,
-  height:       26,
-  borderRadius: 7,
-  border:       "none",
-  background:   "#dcfce7",
-  color:        "#059669",
-  fontSize:     12,
-  fontWeight:   700,
-  cursor:       "pointer",
-  fontFamily:   "Figtree, sans-serif",
-  display:      "flex",
-  alignItems:   "center",
-  justifyContent: "center",
-  flexShrink:   0,
-};
-
-const REMIND_BTN_GHOST = {
-  width:        26,
-  height:       26,
-  borderRadius: 7,
-  border:       "1px solid #e5e7eb",
-  background:   "#f9fafb",
-  color:        "#9ca3af",
-  fontSize:     11,
-  cursor:       "pointer",
-  fontFamily:   "Figtree, sans-serif",
-  display:      "flex",
-  alignItems:   "center",
-  justifyContent: "center",
-  flexShrink:   0,
-};

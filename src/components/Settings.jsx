@@ -3,7 +3,7 @@ import { supabase } from "../lib/supabase";
 import PILogo from "./PILogo";
 import { fxApi, merchantApi, settingsApi, recurringApi, gmailApi } from "../api";
 import { fmtIDR } from "../utils";
-import { CURRENCIES, EXPENSE_CATEGORIES, ENTITIES, FREQUENCIES, TX_TYPES, APP_VERSION, APP_BUILD } from "../constants";
+import { CURRENCIES, EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST, TX_TYPES, APP_VERSION, APP_BUILD } from "../constants";
 import { LIGHT, DARK } from "../theme";
 import {
   Modal, Button,
@@ -69,7 +69,7 @@ export default function Settings({
   const [editRecur, setEditRecur]     = useState(null);
   const [recurForm, setRecurForm]     = useState({
     name: "", tx_type: "expense", amount: "", currency: "IDR",
-    frequency: "Monthly", category: "", entity: "Personal", notes: "",
+    frequency: "Monthly", category_id: "", notes: "",
     from_id: "", to_id: "", day_of_month: "",
   });
 
@@ -168,9 +168,10 @@ export default function Settings({
     if (t) {
       setEditRecur(t);
       setRecurForm({
-        name: t.name, tx_type: t.tx_type, amount: String(t.amount),
-        currency: t.currency || "IDR", frequency: t.frequency || "Monthly",
-        category: t.category || "", entity: t.entity || "Personal", notes: t.notes || "",
+        name: t.name, tx_type: t.tx_type || "expense", amount: String(t.amount),
+        currency: t.currency || "IDR",
+        frequency: t.frequency || (t.tx_type === "income" ? "Monthly" : "Monthly"),
+        category_id: t.category_id || "", notes: t.notes || "",
         from_id: t.from_id || "", to_id: t.to_id || "",
         day_of_month: t.day_of_month ? String(t.day_of_month) : "",
       });
@@ -178,7 +179,7 @@ export default function Settings({
       setEditRecur(null);
       setRecurForm({
         name: "", tx_type: "expense", amount: "", currency: "IDR",
-        frequency: "Monthly", category: "", entity: "Personal", notes: "",
+        frequency: "Monthly", category_id: "", notes: "",
         from_id: "", to_id: "", day_of_month: "",
       });
     }
@@ -192,11 +193,17 @@ export default function Settings({
       const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
       const toUUID = (v) => (!v || v === "") ? null : v;
       const payload = {
-        ...recurForm,
+        name:         recurForm.name,
+        tx_type:      recurForm.tx_type,
         amount:       sn(recurForm.amount),
+        currency:     recurForm.currency,
+        frequency:    recurForm.frequency,
+        category_id:  toUUID(recurForm.category_id),
+        notes:        recurForm.notes || null,
         from_id:      toUUID(recurForm.from_id),
         to_id:        toUUID(recurForm.to_id),
         day_of_month: recurForm.day_of_month ? Number(recurForm.day_of_month) : null,
+        entity:       "Personal",
       };
       if (editRecur) {
         const updated = await recurringApi.updateTemplate(editRecur.id, payload);
@@ -478,9 +485,12 @@ export default function Settings({
                       <div style={{ fontSize: 11, color: T.text3, marginTop: 3 }}>
                         {t.frequency} · {txDef?.label || t.tx_type}
                         {t.day_of_month && ` · day ${t.day_of_month}`}
-                        {t.category && ` · ${t.category}`}
-                        {t.entity && t.entity !== "Personal" && ` · ${t.entity}`}
                         {t.from_id && (() => { const a = accounts.find(x => x.id === t.from_id); return a ? ` · from ${a.name}` : ""; })()}
+                        {t.to_id && (() => { const a = accounts.find(x => x.id === t.to_id); return a ? ` · to ${a.name}` : ""; })()}
+                        {t.category_id && (() => {
+                          const c = [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES_LIST].find(c => c.id === t.category_id);
+                          return c ? ` · ${c.icon} ${c.label}` : "";
+                        })()}
                       </div>
                     </div>
                     <div style={{ textAlign: "right" }}>
@@ -650,29 +660,41 @@ export default function Settings({
         }
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* Type toggle */}
+          <div style={{ display: "flex", background: T.sur2, borderRadius: 10, padding: 3, gap: 2 }}>
+            {["income", "expense"].map(t => (
+              <button
+                key={t}
+                onClick={() => setRecurForm(f => ({
+                  ...f, tx_type: t,
+                  frequency: t === "income" ? "Monthly" : "Monthly",
+                  from_id: "", to_id: "", category_id: "",
+                }))}
+                style={{
+                  flex: 1, height: 34, border: "none", borderRadius: 8,
+                  fontFamily: "Figtree, sans-serif", fontSize: 13, cursor: "pointer",
+                  background: recurForm.tx_type === t ? "#fff" : "transparent",
+                  color:      recurForm.tx_type === t ? "#111827" : "#9ca3af",
+                  fontWeight: recurForm.tx_type === t ? 700 : 500,
+                  boxShadow:  recurForm.tx_type === t ? "0 1px 4px rgba(0,0,0,0.08)" : "none",
+                  transition: "all 0.15s",
+                }}
+              >
+                {t === "income" ? "💰 Income" : "↑ Expense"}
+              </button>
+            ))}
+          </div>
+
+          {/* Name */}
           <Field label="Name *">
             <Input
               value={recurForm.name}
               onChange={e => setRecurForm(f => ({ ...f, name: e.target.value }))}
-              placeholder="e.g. Netflix subscription"
+              placeholder={recurForm.tx_type === "income" ? "e.g. Monthly Salary" : "e.g. Netflix subscription"}
             />
           </Field>
-          <FormRow>
-            <Field label="Type">
-              <Select
-                value={recurForm.tx_type}
-                onChange={e => setRecurForm(f => ({ ...f, tx_type: e.target.value }))}
-                options={TX_TYPES.filter(t => ["expense", "income"].includes(t.id)).map(t => ({ value: t.id, label: t.label }))}
-              />
-            </Field>
-            <Field label="Frequency">
-              <Select
-                value={recurForm.frequency}
-                onChange={e => setRecurForm(f => ({ ...f, frequency: e.target.value }))}
-                options={FREQUENCIES.map(fr => ({ value: fr, label: fr }))}
-              />
-            </Field>
-          </FormRow>
+
+          {/* Amount + Currency */}
           <FormRow>
             <AmountInput
               label="Amount *"
@@ -688,56 +710,106 @@ export default function Settings({
               />
             </Field>
           </FormRow>
+
+          {/* Frequency + Day of month */}
           <FormRow>
-            <Field label="Category">
+            <Field label="Frequency">
               <Select
-                value={recurForm.category}
-                onChange={e => setRecurForm(f => ({ ...f, category: e.target.value }))}
-                options={EXPENSE_CATEGORIES.map(c => ({ value: c.id, label: `${c.icon} ${c.label}` }))}
-                placeholder="None"
+                value={recurForm.frequency}
+                onChange={e => setRecurForm(f => ({ ...f, frequency: e.target.value }))}
+                options={
+                  recurForm.tx_type === "income"
+                    ? ["Monthly", "Quarterly", "Annual"].map(fr => ({ value: fr, label: fr }))
+                    : ["Monthly", "Weekly", "Annual"].map(fr => ({ value: fr, label: fr }))
+                }
               />
             </Field>
-            <Field label="Entity">
-              <Select
-                value={recurForm.entity}
-                onChange={e => setRecurForm(f => ({ ...f, entity: e.target.value }))}
-                options={ENTITIES.map(e => ({ value: e, label: e }))}
+            <Field label="Day of Month">
+              <input
+                type="number" min="1" max="31"
+                value={recurForm.day_of_month}
+                onChange={e => setRecurForm(f => ({ ...f, day_of_month: e.target.value }))}
+                placeholder="e.g. 25"
+                style={{
+                  border: `1.5px solid ${T.border}`, borderRadius: 10,
+                  padding: "0 14px", fontFamily: "Figtree, sans-serif",
+                  fontSize: 14, fontWeight: 500, outline: "none",
+                  color: T.text, background: T.surface, height: 44,
+                  width: "100%", boxSizing: "border-box",
+                }}
               />
             </Field>
           </FormRow>
-          <FormRow>
-            <Field label="From Account">
-              <Select
-                value={recurForm.from_id}
-                onChange={e => setRecurForm(f => ({ ...f, from_id: e.target.value }))}
-                options={[...bankAccounts, ...creditCards].map(a => ({ value: a.id, label: a.name }))}
-                placeholder="Any / not set"
-              />
-            </Field>
-            <Field label="To Account">
-              <Select
-                value={recurForm.to_id}
-                onChange={e => setRecurForm(f => ({ ...f, to_id: e.target.value }))}
-                options={bankAccounts.map(a => ({ value: a.id, label: a.name }))}
-                placeholder="Any / not set"
-              />
-            </Field>
-          </FormRow>
-          <Field label="Day of Month (billing day)">
-            <input
-              type="number" min="1" max="31"
-              value={recurForm.day_of_month}
-              onChange={e => setRecurForm(f => ({ ...f, day_of_month: e.target.value }))}
-              placeholder="e.g. 15"
-              style={{
-                border: "1.5px solid #e5e7eb", borderRadius: 10,
-                padding: "0 14px", fontFamily: "Figtree, sans-serif",
-                fontSize: 14, fontWeight: 500, outline: "none",
-                color: "#111827", background: "#fff", height: 44,
-                width: "100%", boxSizing: "border-box",
-              }}
-            />
-          </Field>
+
+          {/* INCOME-specific: To Account + Category */}
+          {recurForm.tx_type === "income" && (
+            <>
+              <Field label="To Account (bank)">
+                <Select
+                  value={recurForm.to_id}
+                  onChange={e => setRecurForm(f => ({ ...f, to_id: e.target.value }))}
+                  options={bankAccounts.map(a => ({ value: a.id, label: a.name }))}
+                  placeholder="Select bank account…"
+                />
+              </Field>
+              <Field label="Category">
+                <Select
+                  value={recurForm.category_id}
+                  onChange={e => setRecurForm(f => ({ ...f, category_id: e.target.value }))}
+                  options={INCOME_CATEGORIES_LIST.map(c => ({ value: c.id, label: `${c.icon} ${c.label}` }))}
+                  placeholder="None"
+                />
+              </Field>
+            </>
+          )}
+
+          {/* EXPENSE-specific: From Account (bank/CC toggle) + Category */}
+          {recurForm.tx_type === "expense" && (
+            <>
+              <Field label="From Account">
+                {/* Bank/CC toggle */}
+                <div>
+                  <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
+                    {[
+                      { key: "bank", label: "🏦 Bank" },
+                      { key: "cc",   label: "💳 Credit Card" },
+                    ].map(({ key, label }) => {
+                      return (
+                        <button
+                          key={key}
+                          onClick={() => setRecurForm(f => ({ ...f, from_id: "" }))}
+                          style={{
+                            padding: "5px 12px", borderRadius: 8, border: "none",
+                            cursor: "pointer", fontSize: 12, fontWeight: 600,
+                            fontFamily: "Figtree, sans-serif",
+                            background: "#f3f4f6", color: "#6b7280",
+                          }}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <Select
+                    value={recurForm.from_id}
+                    onChange={e => setRecurForm(f => ({ ...f, from_id: e.target.value }))}
+                    options={[...bankAccounts, ...creditCards].map(a => ({ value: a.id, label: a.name }))}
+                    placeholder="Select account…"
+                  />
+                </div>
+              </Field>
+              <Field label="Category">
+                <Select
+                  value={recurForm.category_id}
+                  onChange={e => setRecurForm(f => ({ ...f, category_id: e.target.value }))}
+                  options={EXPENSE_CATEGORIES.map(c => ({ value: c.id, label: `${c.icon} ${c.label}` }))}
+                  placeholder="None"
+                />
+              </Field>
+            </>
+          )}
+
+          {/* Notes */}
           <Field label="Notes">
             <Input
               value={recurForm.notes}
