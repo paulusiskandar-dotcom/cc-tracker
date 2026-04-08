@@ -24,8 +24,25 @@ const CURRENCIES = [
   {code:"EUR",symbol:"€",rate:17800,flag:"🇪🇺"},
   {code:"AUD",symbol:"A$",rate:10500,flag:"🇦🇺"},
 ];
-const CC_CATS   = ["Belanja","Makan & Minum","Transport","Tagihan","Hotel/Travel","Elektronik","Kesehatan","Hiburan","Lainnya"];
-const BNK_CATS  = ["Gaji","Transfer Masuk","Tarik Tunai","Belanja","Makan & Minum","Transport","Tagihan","Investasi","Lainnya"];
+const EXPENSE_CATEGORIES = [
+  {id:"food",       label:"Makan & Minum",      icon:"🍽️", keywords:["restaurant","cafe","kopi","makan","warung","grab food","gofood","shopee food","mcdonalds","kfc","indomaret","alfamart","supermarket","bakso","warteg","padang","sushi","pizza","burger"]},
+  {id:"home",       label:"Rumah & Utilitas",   icon:"🏠", keywords:["pln","listrik","pdam","air","internet","indihome","firstmedia","telkom","gas","pertamina","sewa","kost","iuran","pbb","tagihan"]},
+  {id:"transport",  label:"Transport",           icon:"🚗", keywords:["grab","gojek","uber","parkir","tol","spbu","shell","pertamax","bensin","servis","bengkel","taxi","busway","ojek","damri","kereta","mrt"]},
+  {id:"health",     label:"Kesehatan",           icon:"💊", keywords:["apotek","kimia farma","klinik","rumah sakit","dokter","gym","fitness","halodoc","alodokter","asuransi","puskesmas","bpjs","obat"]},
+  {id:"shopping",   label:"Belanja Pribadi",     icon:"👕", keywords:["shopee","tokopedia","lazada","blibli","zalora","zara","h&m","uniqlo","electronic","samsung","apple","iphone","laptop","gadget","fashion"]},
+  {id:"education",  label:"Pendidikan",          icon:"🎓", keywords:["sekolah","kursus","udemy","coursera","buku","gramedia","ruangguru","zenius","les","kuliah","spp","pendidikan"]},
+  {id:"entertainment",label:"Travel & Hiburan", icon:"✈️", keywords:["hotel","airbnb","traveloka","tiket.com","netflix","spotify","youtube","bioskop","disney","booking","tiket","wisata"]},
+  {id:"business",   label:"Bisnis & Operasional",icon:"💼", keywords:["hamasa","sdc","travelio","vendor","supplier","invoice","operasional","kantor","atk","printing","material"]},
+  {id:"finance",    label:"Keuangan",            icon:"💰", keywords:["asuransi","premi","cicilan","angsuran","investasi","reksa dana","bibit","bareksa","admin","fee","bunga","provisi"]},
+  {id:"family",     label:"Keluarga",            icon:"👨‍👩‍👧", keywords:["pembantu","asisten","spp anak","uang saku","susu","pampers","popok","mainan","anak","keluarga"]},
+  {id:"social",     label:"Sosial & Hadiah",     icon:"🎁", keywords:["hadiah","kado","donasi","sedekah","kondangan","wedding","ulang tahun","flowers","gereja","masjid"]},
+  {id:"other",      label:"Lainnya",             icon:"❓", keywords:[]},
+];
+const EXPENSE_LABELS = EXPENSE_CATEGORIES.map(c=>c.label);
+// CC_CATS kept as alias for any legacy references
+// eslint-disable-next-line no-unused-vars
+const CC_CATS   = EXPENSE_LABELS;
+const BNK_CATS  = ["Gaji","Transfer Masuk","Tarik Tunai",...EXPENSE_LABELS.filter(l=>l!=="Lainnya"),"Lainnya"];
 const ENTITIES  = ["Pribadi","Hamasa","SDC","Travelio","Lainnya"];
 const CC_ENTS   = ["Pribadi","Hamasa","SDC","Travelio"];
 const BANKS_L   = ["BCA","Mandiri","BNI","CIMB","BRI","Permata","Danamon","OCBC","Jenius","SeaBank","Lainnya"];
@@ -107,7 +124,7 @@ function parseJSON(text,fallback){
 }
 
 async function aiScanReceipt(b64,mime) {
-  const d=await aiCall({model:"claude-sonnet-4-20250514",max_tokens:800,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:mime,data:b64}},{type:"text",text:`Ekstrak data struk/nota/invoice ini. Response HANYA JSON tanpa markdown:\n{"amount":<angka>,"currency":"IDR","date":"YYYY-MM-DD","merchant":"<nama toko/vendor>","category":"<Belanja|Makan & Minum|Transport|Tagihan|Hotel/Travel|Elektronik|Kesehatan|Hiburan|Lainnya>","fee":0,"type":"out","notes":""}`}]}]});
+  const d=await aiCall({model:"claude-sonnet-4-20250514",max_tokens:800,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:mime,data:b64}},{type:"text",text:`Ekstrak data struk/nota/invoice ini. Response HANYA JSON tanpa markdown:\n{"amount":<angka>,"currency":"IDR","date":"YYYY-MM-DD","merchant":"<nama toko/vendor>","category":"<Makan & Minum|Rumah & Utilitas|Transport|Kesehatan|Belanja Pribadi|Pendidikan|Travel & Hiburan|Bisnis & Operasional|Keuangan|Keluarga|Sosial & Hadiah|Lainnya>","fee":0,"type":"out","card_last4":"<4 digit terakhir kartu jika terlihat>","notes":""}`}]}]});
   const text=d.content?.[0]?.text||"{}";
   console.log("[aiScanReceipt] raw:",text);
   return parseJSON(text,{});
@@ -134,7 +151,7 @@ async function aiSmartImport(b64,mime,ctxHint="bank") {
   const isPdf=mime==="application/pdf";
   const contentBlock=isPdf?{type:"document",source:{type:"base64",media_type:"application/pdf",data:b64}}:{type:"image",source:{type:"base64",media_type:mime,data:b64}};
   const ctxLabel=ctxHint==="cc"?"Tagihan/transaksi kartu kredit":ctxHint==="income"?"Pemasukan/income":"Mutasi rekening bank";
-  const prompt=`Ekstrak SEMUA transaksi dari ${isPdf?"dokumen mutasi/tagihan":"gambar struk/screenshot mutasi"} ini.\nKonteks: ${ctxLabel}.\n\nResponse HANYA JSON array tanpa markdown:\n[{"date":"YYYY-MM-DD","description":"keterangan transaksi","amount":<angka_positif>,"currency":"IDR","type":"out|in|transfer|cc_payment","category":"Belanja|Makan & Minum|Transport|Tagihan|Hotel/Travel|Gaji|Transfer Masuk|Investasi|Lainnya","from_account":"nama bank asal jika terdeteksi","to_account":"nama tujuan jika transfer","is_cc_payment":false,"is_transfer":false,"confidence":0.9}]\n\nRules:\n- TRSF/TRF/Transfer/TF/BG/OVERBOOKING → type=transfer, is_transfer=true\n- Nama kartu/CC/bayar tagihan → type=cc_payment, is_cc_payment=true\n- TOP UP/SETOR/KREDIT/CR/Gaji/Masuk → type=in\n- Jumlah negatif → type=out, pakai nilai absolut\n- confidence<0.7 = perlu review user\n- Ekstrak SEMUA transaksi, jangan lewatkan satu pun`;
+  const prompt=`Ekstrak SEMUA transaksi dari ${isPdf?"dokumen mutasi/tagihan":"gambar struk/screenshot mutasi"} ini.\nKonteks: ${ctxLabel}.\n\nResponse HANYA JSON array tanpa markdown:\n[{"date":"YYYY-MM-DD","description":"keterangan transaksi","amount":<angka_positif>,"currency":"IDR","type":"out|in|transfer|cc_payment","category":"Makan & Minum|Rumah & Utilitas|Transport|Kesehatan|Belanja Pribadi|Pendidikan|Travel & Hiburan|Bisnis & Operasional|Keuangan|Keluarga|Sosial & Hadiah|Gaji|Transfer Masuk|Tarik Tunai|Lainnya","from_account":"nama bank asal jika terdeteksi","to_account":"nama tujuan jika transfer","from_account_no":"nomor rekening asal jika ada","to_account_no":"nomor rekening tujuan jika ada","card_last4":"4 digit terakhir kartu jika ada","is_cc_payment":false,"is_transfer":false,"confidence":0.9}]\n\nRules:\n- TRSF/TRF/Transfer/TF/BG/OVERBOOKING → type=transfer, is_transfer=true\n- Bayar CC/Kartu/Tagihan kartu kredit → type=cc_payment, is_cc_payment=true, isi card_last4 jika terlihat\n- TOP UP/SETOR/KREDIT/CR/Gaji/Masuk → type=in\n- Jumlah negatif → type=out, pakai nilai absolut\n- confidence<0.7 = perlu review user\n- Ekstrak SEMUA transaksi, jangan lewatkan satu pun`;
   const d=await aiCall({model:"claude-sonnet-4-20250514",max_tokens:8000,messages:[{role:"user",content:[contentBlock,{type:"text",text:prompt}]}]});
   const text=d.content?.[0]?.text||"[]";
   const rows=parseJSON(text,[]);
@@ -414,6 +431,9 @@ function Finance({user,signOut}){
   const [smartSel,setSmartSel]   = useState({});
   const [smartError,setSmartError] = useState(null);
   const [smartAccId,setSmartAccId] = useState("");   // default account id for import
+  const [merchantCats,setMerchantCats] = useState({});  // merchant → category learning
+  const [showExpConfirm,setShowExpConfirm] = useState(false);
+  const [expConfirmRows,setExpConfirmRows] = useState([]); // rows pending category confirm
 
   // AI
   const [aiMsgs,setAiMsgs]   = useState([]);
@@ -433,10 +453,10 @@ function Finance({user,signOut}){
   const curMonth = ym(today());
 
   // Empty forms
-  const ET = {tx_date:today(),card_id:"",description:"",amount:"",currency:"IDR",fee:"",category:"Belanja",entity:"Pribadi",reimbursed:false,notes:"",tx_type:"out"};
+  const ET = {tx_date:today(),card_id:"",description:"",amount:"",currency:"IDR",fee:"",category:"Belanja Pribadi",entity:"Pribadi",reimbursed:false,notes:"",tx_type:"out"};
   const EC = {name:"",bank:"BCA",last4:"",color:"#1d4ed8",accent:"#60a5fa",card_limit:"",statement_day:25,due_day:17,monthly_target:"",network:"Visa"};
   const EI = {card_id:"",description:"",total_amount:"",months:12,start_date:today(),currency:"IDR",entity:"Pribadi"};
-  const ER = {card_id:"",description:"",amount:"",currency:"IDR",fee:"",category:"Tagihan",entity:"Pribadi",frequency:"Bulanan",day_of_month:1,active:true};
+  const ER = {card_id:"",description:"",amount:"",currency:"IDR",fee:"",category:"Rumah & Utilitas",entity:"Pribadi",frequency:"Bulanan",day_of_month:1,active:true};
   const EBA= {name:"",bank:"BCA",account_no:"",type:"pribadi",owner_entity:"",currency:"IDR",initial_balance:"",color:"#1d4ed8",accent:"#60a5fa",include_networth:true};
   const EMU= {account_id:"",mut_date:today(),description:"",amount:"",type:"out",category:"Lainnya",entity:"Pribadi",notes:"",transfer_to_account_id:"",transfer_fee:"",is_cc_payment:false,cc_card_id:"",cc_admin_fee:"",cc_materai:"",is_piutang:false,piutang_entity:"",piutang_description:""};
   const ERA= {entity:"Hamasa",description:"",color:"#0ca678"};
@@ -483,6 +503,7 @@ function Finance({user,signOut}){
       setBankAccs(ba);setMuts(mu);setReimbAccs(ra);setReimbTx(rt);
       setEmpLoans(el);setEmpPayments(ep);setIsDark(dark);
       setAssets(as);setLiabilities(ls);setAssetHistory(ah);setIncomes(inc);
+      const mc=await api.settings.get(user.id,"merchant_categories",{});setMerchantCats(mc);
       setLoading(false);
     })();
   },[user.id]);
@@ -877,6 +898,85 @@ function Finance({user,signOut}){
     setShowSmartImport(true);
   };
   const editSmartRow=(i,key,val)=>setSmartRows(p=>p.map((r,idx)=>idx===i?{...r,[key]:val}:r));
+
+  // ── Auto-categorize by keywords (client-side, no AI call)
+  const autoCategory=(desc,merchantCatsMap)=>{
+    const d=(desc||"").toLowerCase();
+    // 1. Check learned merchant mapping first
+    for(const[merchant,cat] of Object.entries(merchantCatsMap||{})){
+      if(d.includes(merchant.toLowerCase()))return cat;
+    }
+    // 2. Keyword matching
+    for(const cat of EXPENSE_CATEGORIES){
+      if(cat.keywords.some(kw=>d.includes(kw)))return cat.label;
+    }
+    return"Lainnya";
+  };
+
+  // ── Smart match: enrich AI row with user's accounts/cards
+  const smartMatchRow=(row,cds,banks,accId,mcMap)=>{
+    const desc=(row.description||"").toLowerCase();
+    const toAcc=(row.to_account||"").toLowerCase();
+    const fromAcc=(row.from_account||"").toLowerCase();
+
+    // 1. Match card by last4
+    let matchedCard=null;
+    if(row.card_last4){
+      matchedCard=cds.find(c=>c.last4===String(row.card_last4));
+    }
+    if(!matchedCard){
+      // Try match by bank name in description or to_account
+      matchedCard=cds.find(c=>{
+        const cname=(c.name||"").toLowerCase();
+        const cbank=(c.bank||"").toLowerCase();
+        return toAcc.includes(cname)||toAcc.includes(cbank)||
+               desc.includes(cname)||
+               (row.to_account_no&&c.last4&&row.to_account_no.endsWith(c.last4));
+      });
+    }
+
+    // 2. Match bank account by account_no or name
+    let matchedFromBank=banks.find(b=>{
+      const bno=(b.account_no||"").replace(/\s/g,"");
+      const bname=(b.name||"").toLowerCase();
+      const bbank=(b.bank||"").toLowerCase();
+      const fromNo=(row.from_account_no||"").replace(/\s/g,"");
+      return(fromNo&&bno&&(bno===fromNo||bno.includes(fromNo)||fromNo.includes(bno)))||
+             fromAcc.includes(bname)||fromAcc.includes(bbank)||
+             desc.includes(bname);
+    })||banks.find(b=>b.id===accId)||banks[0];
+
+    let matchedToBank=banks.find(b=>{
+      const bno=(b.account_no||"").replace(/\s/g,"");
+      const bname=(b.name||"").toLowerCase();
+      const toNo=(row.to_account_no||"").replace(/\s/g,"");
+      return(toNo&&bno&&(bno===toNo||bno.includes(toNo)||toNo.includes(bno)))||
+             toAcc.includes(bname);
+    });
+
+    // 3. CC payment detection
+    const isCCPayment=row.is_cc_payment||row.type==="cc_payment"||
+      /bayar.*cc|bayar.*kartu|cc.*payment|credit.*card|tagihan.*cc/i.test(row.description||"");
+
+    // 4. Auto-categorize for "out" transactions
+    let category=row.category||"Lainnya";
+    if((row.type==="out"||!row.type)&&category==="Lainnya"){
+      category=autoCategory(row.description,mcMap);
+    }
+
+    return{
+      ...row,
+      category,
+      type:isCCPayment?"cc_payment":row.type||"out",
+      is_cc_payment:isCCPayment||row.is_cc_payment||false,
+      _bank_id:matchedFromBank?.id||accId||banks[0]?.id||"",
+      _to_bank_id:matchedToBank?.id||"",
+      _card_id:matchedCard?.id||(isCCPayment?cds[0]?.id:"")||"",
+      _matched_card:matchedCard,
+      _matched_from_bank:matchedFromBank,
+      entity:"Pribadi",
+    };
+  };
   const handleSmartFile=e=>{
     const f=e.target.files?.[0];if(!f)return;
     const mime=f.type||"image/jpeg";
@@ -887,17 +987,7 @@ function Finance({user,signOut}){
       setSmartLoading(true);
       try{
         const rows=await aiSmartImport(b64,mime,smartCtx);
-        const enriched=rows.map(row=>{
-          const matchBank=bankAccs.find(b=>
-            (row.from_account&&b.name.toLowerCase().includes(row.from_account.toLowerCase()))||
-            (row.from_account&&b.bank.toLowerCase().includes(row.from_account.toLowerCase()))
-          );
-          const matchCard=cards.find(c=>
-            (row.to_account&&c.name.toLowerCase().includes(row.to_account.toLowerCase()))||
-            (row.to_account&&(c.bank||"").toLowerCase().includes(row.to_account.toLowerCase()))
-          );
-          return{...row,_bank_id:matchBank?.id||smartAccId||bankAccs[0]?.id||"",_card_id:matchCard?.id||cards[0]?.id||"",entity:"Pribadi"};
-        });
+        const enriched=rows.map(row=>smartMatchRow(row,cards,bankAccs,smartAccId,merchantCats));
         setSmartRows(enriched);
         const sel={};enriched.forEach((_,i)=>{sel[i]=true;});setSmartSel(sel);
       }catch(e){
@@ -908,13 +998,38 @@ function Finance({user,signOut}){
     };
     reader.readAsDataURL(f);
   };
-  const importSmartRows=async()=>{
-    const selected=smartRows.filter((_,i)=>smartSel[i]);
+  const importSmartRows=async(rowsOverride=null)=>{
+    const selected=(rowsOverride||smartRows.filter((_,i)=>smartSel[i]));
     if(!selected.length)return;
+
+    // Check if any "out" rows still need category confirmation
+    if(!rowsOverride){
+      const needsConfirm=selected.filter(r=>
+        r.type==="out"&&(r.category==="Lainnya"||(r.confidence||1)<0.7)
+      );
+      if(needsConfirm.length>0){
+        setExpConfirmRows(needsConfirm.map(r=>({...r})));
+        setShowExpConfirm(true);
+        return;
+      }
+    }
+
     setSaving(true);let ok=0;
     try{
+      // Learn merchant → category mappings from confirmed rows
+      const newMerchantCats={...merchantCats};
+      selected.forEach(row=>{
+        if(row.type==="out"&&row.category&&row.category!=="Lainnya"&&row.description){
+          const key=(row.description||"").toLowerCase().slice(0,30).trim();
+          if(key)newMerchantCats[key]=row.category;
+        }
+      });
+
       for(const row of selected){
         const amt=Number(row.amount||0);
+        const isCC=row.is_cc_payment||row.type==="cc_payment";
+        const isT=row.is_transfer||row.type==="transfer";
+
         if(smartCtx==="cc"){
           const d={tx_date:row.date||today(),card_id:row._card_id||cards[0]?.id||"",description:row.description,amount:amt,currency:row.currency||"IDR",fee:0,category:row.category||"Lainnya",entity:row.entity||"Pribadi",reimbursed:false,notes:"AI Smart Import",tx_type:row.type==="in"?"in":"out",amount_idr:toIDR(amt,row.currency||"IDR",fxRates)};
           const r=await api.tx.create(user.id,d);if(r)setTxList(p=>[r,...p]);
@@ -922,14 +1037,32 @@ function Finance({user,signOut}){
           const d={income_date:row.date||today(),category:row.category||"Lainnya",description:row.description,amount:amt,currency:row.currency||"IDR",amount_idr:toIDR(amt,row.currency||"IDR",fxRates),entity:row.entity||"Pribadi",bank_account_id:row._bank_id||"",notes:"AI Smart Import"};
           const r=await api.income.create(user.id,d);if(r)setIncomes(p=>[r,...p]);
         } else {
-          const isCC=row.is_cc_payment||row.type==="cc_payment";
-          const isT=row.is_transfer||row.type==="transfer";
-          const d={account_id:row._bank_id||bankAccs[0]?.id||"",mut_date:row.date||today(),description:row.description,amount:amt,type:isT?"transfer":row.type==="in"?"in":"out",category:row.category||"Lainnya",entity:row.entity||"Pribadi",notes:"AI Smart Import",is_cc_payment:isCC,cc_card_id:isCC?row._card_id:"",transfer_to_account_id:isT&&!isCC?row._card_id:""};
+          const d={
+            account_id:row._bank_id||bankAccs[0]?.id||"",
+            mut_date:row.date||today(),
+            description:row.description,
+            amount:amt,
+            type:isCC?"out":isT?"transfer":row.type==="in"?"in":"out",
+            category:row.category||"Lainnya",
+            entity:row.entity||"Pribadi",
+            notes:"AI Smart Import",
+            is_cc_payment:isCC,
+            cc_card_id:isCC?(row._card_id||""):"",
+            cc_payment_amount:isCC?amt:null,
+            transfer_to_account_id:isT&&!isCC?(row._to_bank_id||""):"",
+          };
           const r=await api.mut.create(user.id,d);if(r)setMuts(p=>[r,...p]);
         }
         ok++;
       }
-      setShowSmartImport(false);setSmartRows([]);setSmartSel({});
+
+      // Save learned merchant categories
+      if(Object.keys(newMerchantCats).length>Object.keys(merchantCats).length){
+        await api.settings.set(user.id,"merchant_categories",newMerchantCats);
+        setMerchantCats(newMerchantCats);
+      }
+
+      setShowSmartImport(false);setSmartRows([]);setSmartSel({});setShowExpConfirm(false);
       alert(`✅ ${ok} transaksi berhasil diimport!`);
     }catch(e){console.error("[importSmart]",e);alert(`⚠️ ${ok} berhasil, error: ${e.message}`);}
     setSaving(false);
@@ -2315,7 +2448,7 @@ function Finance({user,signOut}){
             <F label="Fee Gestun (Rp)" th={th}><input className="inp" type="number" placeholder="0" value={txForm.fee} onChange={e=>setTxForm(f=>({...f,fee:e.target.value}))}/></F>
           </R2>
           <R2>
-            <F label="Kategori" th={th}><select className="inp" value={txForm.category} onChange={e=>setTxForm(f=>({...f,category:e.target.value}))}>{CC_CATS.map(c=><option key={c}>{c}</option>)}</select></F>
+            <F label="Kategori" th={th}><select className="inp" value={txForm.category} onChange={e=>setTxForm(f=>({...f,category:e.target.value}))}>{EXPENSE_CATEGORIES.map(c=><option key={c.label} value={c.label}>{c.icon} {c.label}</option>)}</select></F>
             <F label="Entitas" th={th}><select className="inp" value={txForm.entity} onChange={e=>setTxForm(f=>({...f,entity:e.target.value}))}>{CC_ENTS.map(e=><option key={e}>{e}</option>)}</select></F>
           </R2>
           <div className="tog-row" onClick={()=>setTxForm(f=>({...f,reimbursed:!f.reimbursed}))} style={{borderColor:txForm.reimbursed?th.gr:th.bor,background:txForm.reimbursed?th.grBg:th.sur2}}>
@@ -2409,7 +2542,7 @@ function Finance({user,signOut}){
           <R2><F label="Tanggal" th={th}><input className="inp" type="date" value={mutForm.mut_date} onChange={e=>setMutForm(f=>({...f,mut_date:e.target.value}))}/></F><F label="Rekening" th={th}><select className="inp" value={mutForm.account_id} onChange={e=>setMutForm(f=>({...f,account_id:e.target.value}))}><option value="">Pilih...</option>{bankAccs.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}</select></F></R2>
           <F label="Keterangan" th={th}><input className="inp" placeholder="Gaji bulan April..." value={mutForm.description} onChange={e=>setMutForm(f=>({...f,description:e.target.value}))}/></F>
           <R2><F label="Jumlah (Rp)" th={th}><input className="inp" type="number" placeholder="0" value={mutForm.amount} onChange={e=>setMutForm(f=>({...f,amount:e.target.value}))}/></F><F label="Tipe" th={th}><select className="inp" value={mutForm.type} onChange={e=>setMutForm(f=>({...f,type:e.target.value}))}><option value="in">↓ Masuk</option><option value="out">↑ Keluar</option><option value="transfer">↔ Transfer</option></select></F></R2>
-          <R2><F label="Kategori" th={th}><select className="inp" value={mutForm.category} onChange={e=>setMutForm(f=>({...f,category:e.target.value}))}>{BNK_CATS.map(c=><option key={c}>{c}</option>)}</select></F><F label="Entitas" th={th}><select className="inp" value={mutForm.entity} onChange={e=>setMutForm(f=>({...f,entity:e.target.value}))}>{ENTITIES.map(e=><option key={e}>{e}</option>)}</select></F></R2>
+          <R2><F label="Kategori" th={th}><select className="inp" value={mutForm.category} onChange={e=>setMutForm(f=>({...f,category:e.target.value}))}>{BNK_CATS.map(c=>{const ec=EXPENSE_CATEGORIES.find(x=>x.label===c);return<option key={c} value={c}>{ec?`${ec.icon} `:""}{c}</option>;})}</select></F><F label="Entitas" th={th}><select className="inp" value={mutForm.entity} onChange={e=>setMutForm(f=>({...f,entity:e.target.value}))}>{ENTITIES.map(e=><option key={e}>{e}</option>)}</select></F></R2>
           {mutForm.type==="transfer"&&<><F label="Transfer ke Rekening" th={th}><select className="inp" value={mutForm.transfer_to_account_id} onChange={e=>setMutForm(f=>({...f,transfer_to_account_id:e.target.value}))}><option value="">Pilih...</option>{bankAccs.filter(b=>b.id!==mutForm.account_id).map(b=><option key={b.id} value={b.id}>{b.name}</option>)}</select></F><F label="Biaya Transfer" th={th}><input className="inp" type="number" placeholder="0" value={mutForm.transfer_fee} onChange={e=>setMutForm(f=>({...f,transfer_fee:e.target.value}))}/></F></>}
           <div className="tog-row" onClick={()=>setMutForm(f=>({...f,is_piutang:!f.is_piutang}))} style={{borderColor:mutForm.is_piutang?th.te:th.bor,background:mutForm.is_piutang?th.teBg:th.sur2}}>
             <div className="tog-dot" style={{background:mutForm.is_piutang?th.te:th.bor}}>{mutForm.is_piutang?"✓":""}</div>
@@ -2643,7 +2776,7 @@ function Finance({user,signOut}){
               </div>
               {uniTxForm.currency!=="IDR"&&uniTxForm.amount&&<div style={{fontSize:10,color:th.tx3,marginTop:3}}>≈ {fmtIDR(toIDR(Number(uniTxForm.amount),uniTxForm.currency,fxRates))}</div>}
             </F>
-            <F label="Kategori" th={th}><select className="inp" value={uniTxForm.category} onChange={e=>setUniTxForm(f=>({...f,category:e.target.value}))}>{[...BNK_CATS,...CC_CATS.filter(c=>!BNK_CATS.includes(c))].map(c=><option key={c}>{c}</option>)}</select></F>
+            <F label="Kategori" th={th}><select className="inp" value={uniTxForm.category} onChange={e=>setUniTxForm(f=>({...f,category:e.target.value}))}>{BNK_CATS.map(c=>{const ec=EXPENSE_CATEGORIES.find(x=>x.label===c);return<option key={c} value={c}>{ec?`${ec.icon} `:""}{c}</option>;})}</select></F>
           </R2>
           {/* Dari (Source) */}
           <F label="Dari (Sumber)" th={th}>
@@ -2736,49 +2869,60 @@ function Finance({user,signOut}){
             </div>
 
             {/* Legend */}
-            <div style={{display:"flex",gap:12,fontSize:10,color:th.tx3}}>
-              <span style={{background:th.amBg,color:th.am,padding:"2px 8px",borderRadius:4,fontWeight:600}}>⚠️ Kuning = confidence rendah, perlu review</span>
-              <span>Edit langsung di tabel sebelum import</span>
+            <div style={{display:"flex",gap:8,fontSize:10,color:th.tx3,flexWrap:"wrap"}}>
+              <span style={{background:th.amBg,color:th.am,padding:"2px 8px",borderRadius:4,fontWeight:600}}>⚠️ Kuning = confidence rendah</span>
+              <span style={{background:"#fff0f6",color:"#c2255c",padding:"2px 8px",borderRadius:4,fontWeight:600}}>💳 = Pembayaran CC terdeteksi</span>
+              <span style={{color:th.tx3}}>Edit langsung di tabel</span>
             </div>
 
             {/* Header row */}
-            <div style={{display:"grid",gridTemplateColumns:"24px 96px 1fr 84px 90px 120px 100px",gap:4,padding:"5px 8px",fontSize:9,fontWeight:700,color:th.tx3,textTransform:"uppercase",letterSpacing:.5}}>
-              <span/>
-              <span>Tanggal</span>
-              <span>Deskripsi</span>
-              <span>Jumlah</span>
-              <span>Tipe</span>
-              <span>Rekening</span>
-              <span>Kategori</span>
+            <div style={{display:"grid",gridTemplateColumns:"24px 88px 1fr 80px 88px 110px 110px",gap:4,padding:"5px 8px",fontSize:9,fontWeight:700,color:th.tx3,textTransform:"uppercase",letterSpacing:.5}}>
+              <span/><span>Tanggal</span><span>Deskripsi</span><span>Jumlah</span><span>Tipe</span><span>Rekening/Kartu</span><span>Kategori</span>
             </div>
 
             <div style={{maxHeight:360,overflowY:"auto",display:"flex",flexDirection:"column",gap:3}}>
               {smartRows.map((row,i)=>{
                 const lowConf=(row.confidence||1)<0.7;
+                const isCCPay=row.type==="cc_payment"||row.is_cc_payment;
+                const catNeedsReview=row.type==="out"&&(row.category==="Lainnya"||(row.confidence||1)<0.7);
+                const rowBg=isCCPay?"#fff0f6":lowConf?th.amBg:i%2===0?th.sur:th.sur2;
+                const rowBor=isCCPay?"1px solid #f06595":lowConf?`1px solid ${th.am}55`:"1px solid transparent";
                 return(
-                  <div key={i} style={{display:"grid",gridTemplateColumns:"24px 96px 1fr 84px 90px 120px 100px",gap:4,padding:"6px 8px",background:lowConf?th.amBg:i%2===0?th.sur:th.sur2,borderRadius:8,alignItems:"center",border:lowConf?`1px solid ${th.am}55`:`1px solid transparent`,opacity:smartSel[i]?1:.45}}>
+                  <div key={i} style={{display:"grid",gridTemplateColumns:"24px 88px 1fr 80px 88px 110px 110px",gap:4,padding:"6px 8px",background:rowBg,borderRadius:8,alignItems:"center",border:rowBor,opacity:smartSel[i]?1:.45}}>
                     <input type="checkbox" checked={!!smartSel[i]} onChange={e=>setSmartSel(s=>({...s,[i]:e.target.checked}))} style={{cursor:"pointer",width:15,height:15,accentColor:th.ac}}/>
                     <input className="inp" type="date" value={row.date||""} onChange={e=>editSmartRow(i,"date",e.target.value)} style={{padding:"3px 5px",fontSize:10,background:th.sur,borderColor:th.bor2}}/>
-                    <input className="inp" value={row.description||""} onChange={e=>editSmartRow(i,"description",e.target.value)} style={{padding:"3px 5px",fontSize:11,background:th.sur,borderColor:th.bor2}}/>
+                    <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                      <input className="inp" value={row.description||""} onChange={e=>editSmartRow(i,"description",e.target.value)} style={{padding:"3px 5px",fontSize:11,background:th.sur,borderColor:th.bor2}}/>
+                      {isCCPay&&row._matched_card&&<span style={{fontSize:9,color:"#c2255c",fontWeight:700}}>💳 {row._matched_card.name}</span>}
+                    </div>
                     <input className="inp" type="number" value={row.amount||""} onChange={e=>editSmartRow(i,"amount",e.target.value)} style={{padding:"3px 5px",fontSize:11,textAlign:"right",fontFamily:"'JetBrains Mono',monospace",background:th.sur,borderColor:th.bor2}}/>
-                    <select className="inp" value={row.type||"out"} onChange={e=>editSmartRow(i,"type",e.target.value)} style={{padding:"3px 4px",fontSize:10,background:th.sur,borderColor:th.bor2}}>
+                    <select className="inp" value={row.type||"out"} onChange={e=>{editSmartRow(i,"type",e.target.value);editSmartRow(i,"is_cc_payment",e.target.value==="cc_payment");}} style={{padding:"3px 4px",fontSize:10,background:th.sur,borderColor:th.bor2}}>
                       <option value="out">↑ Keluar</option>
                       <option value="in">↓ Masuk</option>
                       <option value="transfer">↔ Transfer</option>
                       <option value="cc_payment">💳 Bayar CC</option>
                     </select>
-                    {smartCtx==="cc"
-                      ?<select className="inp" value={row._card_id||""} onChange={e=>editSmartRow(i,"_card_id",e.target.value)} style={{padding:"3px 4px",fontSize:10,background:th.sur,borderColor:th.bor2}}>
-                          <option value="">Pilih kartu...</option>
-                          {cards.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+                    {isCCPay
+                      ?<select className="inp" value={row._card_id||""} onChange={e=>editSmartRow(i,"_card_id",e.target.value)} style={{padding:"3px 4px",fontSize:10,background:"#fff0f6",borderColor:"#f06595"}}>
+                          <option value="">Pilih kartu CC...</option>
+                          {cards.map(c=><option key={c.id} value={c.id}>{c.name}{c.last4?` ····${c.last4}`:""}</option>)}
                         </select>
-                      :<select className="inp" value={row._bank_id||""} onChange={e=>editSmartRow(i,"_bank_id",e.target.value)} style={{padding:"3px 4px",fontSize:10,background:th.sur,borderColor:th.bor2}}>
-                          <option value="">Pilih rekening...</option>
-                          {bankAccs.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
-                        </select>
+                      :smartCtx==="cc"
+                        ?<select className="inp" value={row._card_id||""} onChange={e=>editSmartRow(i,"_card_id",e.target.value)} style={{padding:"3px 4px",fontSize:10,background:th.sur,borderColor:th.bor2}}>
+                            <option value="">Pilih kartu...</option>
+                            {cards.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
+                        :<select className="inp" value={row._bank_id||""} onChange={e=>editSmartRow(i,"_bank_id",e.target.value)} style={{padding:"3px 4px",fontSize:10,background:th.sur,borderColor:th.bor2}}>
+                            <option value="">Pilih rekening...</option>
+                            {bankAccs.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+                          </select>
                     }
-                    <select className="inp" value={row.category||"Lainnya"} onChange={e=>editSmartRow(i,"category",e.target.value)} style={{padding:"3px 4px",fontSize:10,background:th.sur,borderColor:th.bor2}}>
-                      {[...new Set([...BNK_CATS,...CC_CATS,...INCOME_CATS])].map(c=><option key={c}>{c}</option>)}
+                    <select className="inp" value={row.category||"Lainnya"} onChange={e=>editSmartRow(i,"category",e.target.value)}
+                      style={{padding:"3px 4px",fontSize:10,background:catNeedsReview?th.amBg:th.sur,borderColor:catNeedsReview?th.am:th.bor2,color:catNeedsReview?th.am:th.tx}}>
+                      {[...new Set(["Gaji","Transfer Masuk","Tarik Tunai",...EXPENSE_LABELS,...INCOME_CATS])].map(c=>{
+                        const ec=EXPENSE_CATEGORIES.find(x=>x.label===c);
+                        return<option key={c} value={c}>{ec?`${ec.icon} ${c}`:c}</option>;
+                      })}
                     </select>
                   </div>
                 );
@@ -2797,6 +2941,45 @@ function Finance({user,signOut}){
           </>}
 
           {smartRows.length===0&&!smartLoading&&!smartError&&<button onClick={()=>setShowSmartImport(false)} style={{padding:"10px",borderRadius:9,border:`1px solid ${th.bor}`,background:th.sur2,color:th.tx3,fontFamily:"'Sora',sans-serif",fontWeight:600,fontSize:13,cursor:"pointer"}}>Batal</button>}
+        </div>
+      </Overlay>}
+
+      {/* ══ EXPENSE CATEGORY CONFIRM MODAL ══ */}
+      {showExpConfirm&&<Overlay onClose={()=>setShowExpConfirm(false)} th={th} title="🗂️ Konfirmasi Kategori Expense" sub={`${expConfirmRows.length} transaksi perlu dikonfirmasi kategorinya`} maxWidth={560}>
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{fontSize:12,color:th.tx2,padding:"8px 12px",background:th.amBg,border:`1px solid ${th.am}44`,borderRadius:8}}>
+            Transaksi berikut belum memiliki kategori yang spesifik. Pilih kategori yang tepat sebelum import.
+          </div>
+          <div style={{maxHeight:380,overflowY:"auto",display:"flex",flexDirection:"column",gap:8}}>
+            {expConfirmRows.map((row,i)=>{
+              return(
+                <div key={i} style={{display:"flex",gap:10,alignItems:"center",padding:"10px 12px",background:th.sur2,border:`1px solid ${th.bor}`,borderRadius:10}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:600,color:th.tx,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{row.description}</div>
+                    <div style={{fontSize:11,color:th.tx3,marginTop:2}}>{row.date} · <span style={{fontFamily:"'JetBrains Mono',monospace",color:th.rd}}>{fmtIDR(Number(row.amount||0),true)}</span></div>
+                  </div>
+                  <select value={row.category||"Lainnya"} onChange={e=>{const copy=[...expConfirmRows];copy[i]={...copy[i],category:e.target.value};setExpConfirmRows(copy);}}
+                    style={{padding:"5px 8px",borderRadius:8,border:`1px solid ${row.category==="Lainnya"?th.am:th.ac}`,background:row.category==="Lainnya"?th.amBg:th.acBg,fontFamily:"'Sora',sans-serif",fontSize:11,fontWeight:600,color:row.category==="Lainnya"?th.am:th.ac,cursor:"pointer",flexShrink:0}}>
+                    {EXPENSE_CATEGORIES.map(c=><option key={c.label} value={c.label}>{c.icon} {c.label}</option>)}
+                  </select>
+                </div>
+              );
+            })}
+          </div>
+          <BtnRow
+            onCancel={()=>setShowExpConfirm(false)}
+            onOk={async()=>{
+              // Merge confirmed categories back into smartRows, then import
+              const updatedSmart=smartRows.map(row=>{
+                const confirmed=expConfirmRows.find(r=>r.description===row.description&&r.date===row.date&&r.amount===row.amount);
+                return confirmed?{...row,category:confirmed.category}:row;
+              });
+              setSmartRows(updatedSmart);
+              const selected=updatedSmart.filter((_,i)=>smartSel[i]);
+              await importSmartRows(selected);
+            }}
+            label={`Konfirmasi & Import →`} th={th} saving={saving}
+          />
         </div>
       </Overlay>}
 
