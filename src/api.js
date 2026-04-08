@@ -620,6 +620,73 @@ export const gmailApi = {
   },
 };
 
+// ─── EMPLOYEE LOANS ───────────────────────────────────────────
+export const employeeLoanApi = {
+  getAll: async (userId) => {
+    const { data, error } = await supabase
+      .from("employee_loans")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return data || [];
+  },
+
+  create: async (userId, d) => {
+    const { data, error } = await supabase
+      .from("employee_loans")
+      .insert([{ ...d, user_id: userId }])
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return data;
+  },
+
+  update: async (id, d) => {
+    const { data, error } = await supabase
+      .from("employee_loans")
+      .update(d)
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return data;
+  },
+
+  delete: async (id) => {
+    const { error } = await supabase.from("employee_loans").delete().eq("id", id);
+    if (error) throw new Error(error.message);
+  },
+};
+
+// ─── EMPLOYEE LOAN PAYMENTS ───────────────────────────────────
+export const loanPaymentsApi = {
+  getAll: async (userId) => {
+    const { data, error } = await supabase
+      .from("employee_loan_payments")
+      .select("*")
+      .eq("user_id", userId)
+      .order("pay_date", { ascending: false });
+    if (error) throw new Error(error.message);
+    return data || [];
+  },
+
+  create: async (userId, d) => {
+    const { data, error } = await supabase
+      .from("employee_loan_payments")
+      .insert([{ ...d, user_id: userId }])
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return data;
+  },
+
+  delete: async (id) => {
+    const { error } = await supabase.from("employee_loan_payments").delete().eq("id", id);
+    if (error) throw new Error(error.message);
+  },
+};
+
 // ─── AI PROXY ─────────────────────────────────────────────────
 export async function aiCall(body) {
   const proxy = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/ai-proxy`;

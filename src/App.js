@@ -5,7 +5,7 @@ import { TABS, MOBILE_MAIN_TABS, MOBILE_MORE_TABS, CURRENCIES, APP_VERSION, APP_
 import {
   accountsApi, ledgerApi, categoriesApi, incomeSrcApi,
   installmentsApi, recurringApi, merchantApi, fxApi,
-  settingsApi, gmailApi,
+  settingsApi, gmailApi, employeeLoanApi, loanPaymentsApi,
 } from "./api";
 import { calcNetWorth, fmtIDR, todayStr, ym } from "./utils";
 import { Spinner, ToastContainer, showToast } from "./components/shared/index";
@@ -179,7 +179,9 @@ function Finance({ user, signOut }) {
   const [fxRates,        setFxRates]        = useState({
     USD: 16400, SGD: 12200, MYR: 3700, JPY: 110, EUR: 17800, AUD: 10500,
   });
-  const [pendingSyncs, setPendingSyncs] = useState([]);
+  const [pendingSyncs,   setPendingSyncs]   = useState([]);
+  const [employeeLoans,  setEmployeeLoans]  = useState([]);
+  const [loanPayments,   setLoanPayments]   = useState([]);
 
   const curMonth = ym(todayStr());
 
@@ -187,7 +189,7 @@ function Finance({ user, signOut }) {
   const loadData = useCallback(async () => {
     const safe = (p, fallback) => p.catch(e => { console.warn("[loadData]", e.message); return fallback; });
 
-    const [acc, led, cats, inc, inst, rtempl, rem, merch, fx, dark, pending] = await Promise.all([
+    const [acc, led, cats, inc, inst, rtempl, rem, merch, fx, dark, pending, loans, payments] = await Promise.all([
       safe(accountsApi.getAll(user.id),                      []),
       safe(ledgerApi.getAll(user.id, { limit: 500 }),        []),
       safe(categoriesApi.getAll(user.id),                    []),
@@ -199,6 +201,8 @@ function Finance({ user, signOut }) {
       safe(fxApi.getAll(user.id),                            {}),
       safe(settingsApi.get(user.id, "isDark", false),        false),
       safe(gmailApi.getPending(user.id),                     []),
+      safe(employeeLoanApi.getAll(user.id),                  []),
+      safe(loanPaymentsApi.getAll(user.id),                  []),
     ]);
 
     console.log("[loadData] accounts:", acc.length, "ledger:", led.length);
@@ -214,6 +218,8 @@ function Finance({ user, signOut }) {
     if (Object.keys(fx).length) setFxRates(fx);
     setIsDark(dark);
     setPendingSyncs(pending);
+    setEmployeeLoans(loans);
+    setLoanPayments(payments);
     setLoading(false);
   }, [user.id]);
 
@@ -259,6 +265,7 @@ function Finance({ user, signOut }) {
     isDark, dark: isDark,         // alias: new components use `dark`, old use `isDark`
     setIsDark, setDark: setIsDark,
     setTab, setPendingSyncs,
+    employeeLoans, setEmployeeLoans, loanPayments, setLoanPayments,
     setAccounts, setLedger, setCategories, setIncomeSrcs,
     setInstallments, setRecurTemplates, setReminders,
     setMerchantMaps, setFxRates,
