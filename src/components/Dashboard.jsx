@@ -1,14 +1,67 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
-import { fmtIDR, ym, mlShort, daysUntil, todayStr } from "../api";
+import { ledgerApi, recurringApi, fmtIDR, ym, mlShort, daysUntil, todayStr } from "../api";
 import { EXPENSE_CATEGORIES, ENT_COL } from "../constants";
-import { StatCard, EntityTag, CatPill, ProgressBar, Empty, SectionHeader, Tag, calcNetWorth } from "./shared";
+import { StatCard, EntityTag, CatPill, ProgressBar, Empty, SectionHeader, Tag, calcNetWorth, showToast } from "./shared";
 
 export default function Dashboard({
   th, user, accounts, ledger, thisMonthLedger, categories, reminders,
   recurTemplates, netWorth, bankAccounts, creditCards, curMonth,
   fxRates, CURRENCIES, onRefresh, setTab,
+  pendingSyncs, setPendingSyncs,
+  setLedger, setReminders,
 }) {
+  const [confirmingId, setConfirmingId] = useState(null);
+
+  const confirmReminder = async (r) => {
+    if (confirmingId === r.id) return;
+    setConfirmingId(r.id);
+    const tmpl = r.recurring_templates || {};
+    try {
+      // If it's a loan collection, create a ledger entry
+      if (tmpl.type === "collect_loan" && tmpl.from_account_id) {
+        const fromAcc = accounts.find(a => a.id === tmpl.from_account_id);
+        const toAccId = tmpl.to_account_id || bankAccounts[0]?.id || "";
+        if (fromAcc) {
+          const entry = {
+            date: todayStr(),
+            description: `${tmpl.name} — confirmed`,
+            amount: Number(tmpl.amount || 0),
+            currency: tmpl.currency || "IDR",
+            amount_idr: Number(tmpl.amount || 0),
+            type: "collect_loan",
+            from_account_id: tmpl.from_account_id,
+            to_account_id: toAccId,
+            entity: tmpl.entity || "Personal",
+            notes: `Via reminder confirmation`,
+          };
+          const created = await ledgerApi.create(user.id, entry, accounts);
+          if (created) setLedger?.(p => [created, ...p]);
+          // Check if loan fully paid
+          const recAcc = accounts.find(a => a.id === tmpl.from_account_id);
+          if (recAcc && Number(recAcc.outstanding_amount || 0) - Number(tmpl.amount || 0) <= 0) {
+            showToast(`🎉 ${tmpl.name} — loan fully paid!`);
+          } else {
+            showToast(`Collected ${fmtIDR(tmpl.amount||0,true)} — ${tmpl.name}`);
+          }
+        }
+      } else {
+        showToast(`Confirmed: ${tmpl.name}`);
+      }
+      await recurringApi.confirmReminder(r.id);
+      setReminders?.(p => p.filter(x => x.id !== r.id));
+      await onRefresh?.();
+    } catch (e) { showToast(e.message, "error"); }
+    setConfirmingId(null);
+  };
+
+  const skipReminder = async (r) => {
+    try {
+      await recurringApi.skipReminder(r.id);
+      setReminders?.(p => p.filter(x => x.id !== r.id));
+      showToast("Skipped");
+    } catch (e) { showToast(e.message, "error"); }
+  };
   // ── Derived stats
   const nw = netWorth || calcNetWorth(accounts);
 
@@ -95,6 +148,31 @@ export default function Dashboard({
           ))}
         </div>
       </div>
+
+      {/* ── PENDING EMAIL SYNC BANNER ── */}
+      {pendingSyncs?.length > 0 && (
+        <div style={{
+          padding:"12px 16px", background:"#e3fafc", border:"1px solid #99e9f2",
+          borderRadius:12, display:"flex", justifyContent:"space-between", alignItems:"center",
+        }}>
+          <div>
+            <div style={{ fontSize:13, fontWeight:700, color:"#0c8599" }}>
+              📧 {pendingSyncs.length} transaction{pendingSyncs.length>1?"s":""} pending from email
+            </div>
+            <div style={{ fontSize:11, color:"#0c8599", opacity:.8, marginTop:2 }}>
+              {pendingSyncs[0]?.sender_email
+                ? `From: ${pendingSyncs[0].sender_email}`
+                : "Gmail sync found new transactions"}
+            </div>
+          </div>
+          <div style={{ display:"flex", gap:8 }}>
+            <button onClick={() => setTab?.("transactions")} className="btn btn-primary"
+              style={{ fontSize:11, padding:"6px 12px", background:"#0c8599", border:"none" }}>
+              Review Now
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── ALERTS ── */}
       {(alertCC.length > 0 || overdueReminders.length > 0) && (
@@ -198,23 +276,46 @@ export default function Dashboard({
         <div style={{ background:th.sur, border:`1px solid ${th.bor}`, borderRadius:14, padding:"16px" }}>
           <SectionHeader title={`Reminders (${reminders.length})`} th={th}/>
           <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-            {reminders.slice(0,4).map(r => {
+            {reminders.slice(0,5).map(r => {
               const tmpl = r.recurring_templates || {};
               const daysLeft = Math.ceil((new Date(r.due_date)-new Date())/86400000);
+              const isLoan = tmpl.type === "collect_loan";
+              const isIncome = tmpl.type === "income";
+              const icon = isLoan ? "💼" : isIncome ? "💰" : "💳";
+              const confirmLabel = isLoan ? "✓ Confirm Received" : isIncome ? "✓ Confirm Received" : "✓ Mark Paid";
+              const urgentColor = daysLeft <= 0 ? th.rd : daysLeft <= 3 ? th.am : th.tx3;
               return (
-                <div key={r.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"10px 12px", background:th.sur2, borderRadius:10 }}>
-                  <div>
-                    <div style={{ fontSize:12, fontWeight:700, color:th.tx }}>{tmpl.name || "Recurring"}</div>
-                    <div style={{ fontSize:11, color:th.tx3 }}>
-                      Due {new Date(r.due_date).toLocaleDateString("en-US",{month:"short",day:"numeric"})}
-                      {daysLeft <= 0 ? <span style={{ color:th.rd, marginLeft:4 }}>· Overdue!</span>
-                        : daysLeft <= 3 ? <span style={{ color:th.am, marginLeft:4 }}>· In {daysLeft}d</span>
-                        : <span style={{ marginLeft:4, color:th.tx3 }}>· In {daysLeft}d</span>}
+                <div key={r.id} style={{
+                  padding:"10px 12px", background:th.sur2, borderRadius:10,
+                  border:`1px solid ${daysLeft<=0?th.rd+"44":daysLeft<=3?th.am+"33":"transparent"}`,
+                }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
+                    <div>
+                      <div style={{ fontSize:12, fontWeight:700, color:th.tx }}>
+                        {icon} {tmpl.name || "Recurring"}
+                      </div>
+                      <div style={{ fontSize:11, color:urgentColor, marginTop:2 }}>
+                        {daysLeft <= 0 ? "⏰ Overdue!"
+                          : daysLeft === 0 ? "⏰ Today"
+                          : daysLeft === 1 ? "⏰ Tomorrow"
+                          : `Due in ${daysLeft} days`}
+                        {" · "}{new Date(r.due_date).toLocaleDateString("en-US",{month:"short",day:"numeric"})}
+                      </div>
+                    </div>
+                    <div className="num" style={{ fontSize:13, fontWeight:800, color:th.tx, textAlign:"right" }}>
+                      {fmtIDR(Number(tmpl.amount||0),true)}
+                      <div style={{ marginTop:2 }}><EntityTag entity={tmpl.entity||"Personal"} small/></div>
                     </div>
                   </div>
-                  <div style={{ textAlign:"right" }}>
-                    <div className="num" style={{ fontSize:13, fontWeight:800, color:th.tx }}>{fmtIDR(Number(tmpl.amount||0),true)}</div>
-                    <EntityTag entity={tmpl.entity||"Personal"} small/>
+                  <div style={{ display:"flex", gap:6 }}>
+                    <button onClick={() => confirmReminder(r)} disabled={confirmingId===r.id} className="btn btn-primary"
+                      style={{ fontSize:10, padding:"4px 10px", flex:1 }}>
+                      {confirmingId===r.id ? "…" : confirmLabel}
+                    </button>
+                    <button onClick={() => skipReminder(r)} className="btn btn-ghost"
+                      style={{ fontSize:10, padding:"4px 10px", color:th.tx3, borderColor:th.bor }}>
+                      Skip
+                    </button>
                   </div>
                 </div>
               );

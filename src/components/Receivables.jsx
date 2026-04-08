@@ -183,36 +183,100 @@ export default function Receivables({
       {subTab==="loans" && (
         <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
           {loanAccs.length===0
-            ? <Empty icon="👤" message="No employee loans. Add from Accounts (type: Receivable, type: employee_loan)." th={th}/>
+            ? <Empty icon="👤" message="No employee loans. Add from Accounts (type: Receivable, subtype: employee_loan)." th={th}/>
             : recStats.filter(r=>r.receivable_type==="employee_loan").map(r=>{
-                const outstanding = Number(r.outstanding_amount||0);
+                const outstanding    = Number(r.outstanding_amount||0);
+                const total          = Number(r.total_loan_amount||r.outstanding_amount||0);
+                const paid           = Math.max(0, total - outstanding);
+                const paidPct        = total > 0 ? (paid/total)*100 : 0;
+                const monthly        = Number(r.monthly_installment||0);
+                const paidMonths     = monthly > 0 ? Math.floor(paid/monthly) : 0;
+                const totalMonths    = monthly > 0 ? Math.ceil(total/monthly) : 0;
+                // Next due date: same day-of-month as start_date
+                const nextDue = (() => {
+                  if (!r.start_date || !monthly) return null;
+                  const day = new Date(r.start_date).getDate();
+                  const now = new Date();
+                  let d = new Date(now.getFullYear(), now.getMonth(), day);
+                  if (d <= now) d = new Date(now.getFullYear(), now.getMonth()+1, day);
+                  return d.toLocaleDateString("en-US",{day:"numeric",month:"short",year:"numeric"});
+                })();
+                // Expected end date
+                const endDate = (() => {
+                  if (!r.start_date || !totalMonths) return null;
+                  const d = new Date(r.start_date);
+                  d.setMonth(d.getMonth() + totalMonths);
+                  return d.toLocaleDateString("en-US",{month:"short",year:"numeric"});
+                })();
+                const isFullyPaid = outstanding <= 0;
+
                 return(
-                  <div key={r.id} style={{ background:th.sur, border:`1px solid ${th.bor}`, borderRadius:13, padding:"14px 16px" }}>
-                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                  <div key={r.id} style={{ background:th.sur, border:`1px solid ${isFullyPaid?"#b2f2e8":th.bor}`, borderRadius:13, padding:"14px 16px", borderLeft:`4px solid ${isFullyPaid?"#0ca678":th.am}` }}>
+                    {/* Header */}
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
                       <div>
-                        <div style={{ fontSize:14, fontWeight:700, color:th.tx }}>{r.contact_name||r.name}</div>
-                        <div style={{ fontSize:11, color:th.tx3 }}>{r.contact_dept||"—"}</div>
+                        <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                          <span style={{ fontSize:18 }}>👤</span>
+                          <div>
+                            <div style={{ fontSize:14, fontWeight:700, color:th.tx }}>{r.contact_name||r.name}</div>
+                            <div style={{ fontSize:11, color:th.tx3 }}>{r.contact_dept||""}{r.deduction_method==="direct_payment"?" · Direct Payment":" · Salary Deduction"}</div>
+                          </div>
+                        </div>
                         {r.aging&&outstanding>0&&<div style={{ marginTop:4 }}><Tag bg={r.aging.color+"22"} color={r.aging.color} small>{r.aging.label}</Tag></div>}
                       </div>
                       <div style={{ textAlign:"right" }}>
-                        <div className="num" style={{ fontSize:18, fontWeight:800, color:outstanding>0?th.am:th.gr }}>{fmtIDR(outstanding)}</div>
-                        <div style={{ fontSize:10, color:th.tx3 }}>outstanding</div>
-                        {r.monthly_installment>0&&<div style={{ fontSize:10, color:th.tx3 }}>{fmtIDR(r.monthly_installment,true)}/mo</div>}
+                        {isFullyPaid
+                          ? <div style={{ fontSize:13, fontWeight:800, color:"#0ca678" }}>🎉 Fully Paid</div>
+                          : <>
+                              <div className="num" style={{ fontSize:18, fontWeight:800, color:th.am }}>{fmtIDR(outstanding,true)}</div>
+                              <div style={{ fontSize:10, color:th.tx3 }}>remaining</div>
+                            </>
+                        }
+                        {monthly > 0 && <div style={{ fontSize:10, color:th.tx3, marginTop:2 }}>{fmtIDR(monthly,true)}/mo</div>}
                       </div>
                     </div>
-                    <div style={{ display:"flex", gap:6, marginTop:10 }}>
-                      <button onClick={()=>{setSelectedRec(r);setLoanForm({amount:"",bank_id:bankAccounts[0]?.id||"",date:todayStr(),notes:""});setShowLoan(true);}} className="btn btn-ghost" style={{ fontSize:11, padding:"6px 12px", color:th.am, borderColor:th.am }}>↗ Give Loan</button>
-                      {outstanding>0&&<button onClick={()=>{setSelectedRec(r);setLoanForm({amount:r.monthly_installment||"",bank_id:bankAccounts[0]?.id||"",date:todayStr(),notes:""});setShowCollect(true);}} className="btn btn-primary" style={{ fontSize:11, padding:"6px 12px" }}>↙ Collect</button>}
-                    </div>
+
+                    {/* Progress bar */}
+                    {total > 0 && (
+                      <>
+                        <ProgressBar value={paid} max={total} color={isFullyPaid?"#0ca678":"#0ca678"} height={6} th={th}/>
+                        <div style={{ display:"flex", justifyContent:"space-between", fontSize:10, color:th.tx3, marginTop:3 }}>
+                          <span>{paidPct.toFixed(0)}% paid · {totalMonths>0?`${paidMonths}/${totalMonths} months`:fmtIDR(paid,true)+" paid"}</span>
+                          <span className="num">{fmtIDR(paid,true)} / {fmtIDR(total,true)}</span>
+                        </div>
+                      </>
+                    )}
+
+                    {/* Schedule info */}
+                    {!isFullyPaid && (nextDue || endDate) && (
+                      <div style={{ display:"flex", gap:16, marginTop:8, fontSize:11, color:th.tx3 }}>
+                        {nextDue && <span>📅 Next: <strong style={{ color:th.tx }}>{nextDue}</strong></span>}
+                        {endDate && <span>🏁 End: <strong style={{ color:th.tx }}>{endDate}</strong></span>}
+                      </div>
+                    )}
+
+                    {/* Actions */}
+                    {!isFullyPaid && (
+                      <div style={{ display:"flex", gap:6, marginTop:12 }}>
+                        <button onClick={()=>{setSelectedRec(r);setLoanForm({amount:monthly||"",bank_id:r.default_bank_id||bankAccounts[0]?.id||"",date:todayStr(),notes:""});setShowCollect(true);}} className="btn btn-primary" style={{ fontSize:11, padding:"6px 14px" }}>+ Record Payment</button>
+                        <button onClick={()=>{setSelectedRec(r);setLoanForm({amount:"",bank_id:bankAccounts[0]?.id||"",date:todayStr(),notes:""});setShowLoan(true);}} className="btn btn-ghost" style={{ fontSize:11, padding:"6px 12px", color:th.tx2, borderColor:th.bor }}>↗ Disburse More</button>
+                      </div>
+                    )}
+
                     {/* Recent entries */}
-                    {r.entries.slice(0,2).map(e=>(
-                      <div key={e.id} style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:th.tx3, marginTop:4 }}>
-                        <span>{e.date} · {e.description}</span>
-                        <span className="num" style={{ color:e.type==="collect_loan"?th.gr:th.am }}>
-                          {e.type==="collect_loan"?"-":"+"}{fmtIDR(Number(e.amount||0),true)}
-                        </span>
+                    {r.entries.length > 0 && (
+                      <div style={{ borderTop:`1px solid ${th.bor}`, marginTop:10, paddingTop:8 }}>
+                        {r.entries.slice(0,3).map(e=>(
+                          <div key={e.id} style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:th.tx3, marginBottom:3 }}>
+                            <span>{e.date} · {e.description}</span>
+                            <span className="num" style={{ color:e.type==="collect_loan"?th.gr:th.am }}>
+                              {e.type==="collect_loan"?"-":"+"}{fmtIDR(Number(e.amount||0),true)}
+                            </span>
+                          </div>
+                        ))}
+                        {r.entries.length>3&&<div style={{ fontSize:10, color:th.tx3 }}>+{r.entries.length-3} more</div>}
                       </div>
-                    ))}
+                    )}
                   </div>
                 );
               })

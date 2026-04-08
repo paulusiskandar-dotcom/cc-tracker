@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { accountsApi, ledgerApi, fmtIDR, todayStr } from "../api";
+import { accountsApi, recurringApi, fmtIDR, todayStr } from "../api";
 import { ENTITIES, BANKS_L, NETWORKS, ASSET_SUBTYPES, LIAB_SUBTYPES, ACC_TYPE_LABEL, ACC_TYPE_ICON } from "../constants";
 import { Overlay, F, R2, BtnRow, SubTabs, Input, Select, Textarea, Tag, EntityTag,
          ProgressBar, Empty, SectionHeader, confirmDelete, showToast, ColorDot } from "./shared";
@@ -14,7 +14,7 @@ const SUBTABS = [
 ];
 
 export default function Accounts({
-  th, user, accounts, ledger, onRefresh, setAccounts, CURRENCIES,
+  th, user, accounts, ledger, onRefresh, setAccounts, setRecurTemplates, CURRENCIES,
 }) {
   const [subTab, setSubTab]     = useState("all");
   const [showForm, setShowForm] = useState(false);
@@ -53,7 +53,27 @@ export default function Accounts({
       } else {
         const created = await accountsApi.create(user.id, { ...form, type: formType, is_active: true, sort_order: accounts.length });
         setAccounts(p => [...p, created]);
-        showToast("Account created");
+
+        // Auto-create recurring template for employee loans
+        if (formType === "receivable" && form.receivable_type === "employee_loan" && form.monthly_installment) {
+          try {
+            const tmpl = await recurringApi.createTemplate(user.id, {
+              name: `Loan — ${form.contact_name || form.name}`,
+              type: "collect_loan",
+              amount: Number(form.monthly_installment),
+              currency: "IDR",
+              frequency: "Monthly",
+              entity: "Personal",
+              notes: `Auto-created for employee loan: ${form.contact_name || form.name}`,
+              from_account_id: created.id,
+              to_account_id: form.default_bank_id || "",
+            });
+            setRecurTemplates?.(p => [tmpl, ...p]);
+            showToast(`Account + monthly reminder created for ${form.contact_name || form.name}`);
+          } catch { /* non-fatal — main account was created */ }
+        } else {
+          showToast("Account created");
+        }
       }
       setShowForm(false);
     } catch (e) { showToast(e.message, "error"); }
@@ -343,9 +363,33 @@ function AccountForm({ type, form, setForm, th, accounts, CURRENCIES: C }) {
             <>
               <R2>
                 <F label="Employee Name" th={th}><Input value={form.contact_name||""} onChange={e=>set("contact_name",e.target.value)} placeholder="Full name" th={th}/></F>
-                <F label="Department" th={th}><Input value={form.contact_dept||""} onChange={e=>set("contact_dept",e.target.value)} placeholder="Dept" th={th}/></F>
+                <F label="Department" th={th}><Input value={form.contact_dept||""} onChange={e=>set("contact_dept",e.target.value)} placeholder="e.g. Engineering" th={th}/></F>
               </R2>
-              <F label="Monthly Installment" th={th}><Input type="number" value={form.monthly_installment||""} onChange={e=>set("monthly_installment",e.target.value)} placeholder="0" th={th} style={{ fontFamily:"'JetBrains Mono',monospace" }}/></F>
+              <R2>
+                <F label="Monthly Installment (IDR)" th={th}><Input type="number" value={form.monthly_installment||""} onChange={e=>set("monthly_installment",e.target.value)} placeholder="500000" th={th} style={{ fontFamily:"'JetBrains Mono',monospace" }}/></F>
+                <F label="Total Loan Amount (IDR)" th={th}><Input type="number" value={form.total_loan_amount||form.outstanding_amount||""} onChange={e=>{set("total_loan_amount",e.target.value);set("outstanding_amount",e.target.value);}} placeholder="6000000" th={th} style={{ fontFamily:"'JetBrains Mono',monospace" }}/></F>
+              </R2>
+              <R2>
+                <F label="Start Date" th={th}><Input type="date" value={form.start_date||""} onChange={e=>set("start_date",e.target.value)} th={th}/></F>
+                <F label="Deduction Method" th={th}>
+                  <Select value={form.deduction_method||"salary_deduction"} onChange={e=>set("deduction_method",e.target.value)} th={th}>
+                    <option value="salary_deduction">Salary Deduction</option>
+                    <option value="direct_payment">Direct Payment</option>
+                  </Select>
+                </F>
+              </R2>
+              <F label="Default Collection Account" th={th}>
+                <Select value={form.default_bank_id||""} onChange={e=>set("default_bank_id",e.target.value)} th={th}>
+                  <option value="">Select bank account…</option>
+                  {bankAccounts.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
+                </Select>
+              </F>
+              {form.monthly_installment && form.outstanding_amount && Number(form.monthly_installment) > 0 && (
+                <div style={{ fontSize:11, color:th.tx3, padding:"8px 10px", background:th.sur2, borderRadius:8 }}>
+                  Duration: {Math.ceil(Number(form.outstanding_amount||0)/Number(form.monthly_installment))} months
+                  {form.start_date && ` · Ends ~${new Date(new Date(form.start_date).setMonth(new Date(form.start_date).getMonth()+Math.ceil(Number(form.outstanding_amount)/Number(form.monthly_installment)))).toLocaleDateString("en-US",{month:"short",year:"numeric"})}`}
+                </div>
+              )}
             </>
           )}
         </>
@@ -379,6 +423,6 @@ function emptyForm(type) {
   if (type==="debit_card") return { ...base, card_last4:"", linked_account_id:"" };
   if (type==="asset") return { ...base, subtype:"Property", current_value:0, purchase_value:0, purchase_date:"" };
   if (type==="liability") return { ...base, subtype:"Mortgage", creditor:"", outstanding_amount:0, original_amount:0, monthly_payment:0, interest_rate:0, start_date:"", end_date:"" };
-  if (type==="receivable") return { ...base, receivable_type:"reimburse", outstanding_amount:0, entity:"Hamasa", contact_name:"", contact_dept:"", monthly_installment:0 };
+  if (type==="receivable") return { ...base, receivable_type:"reimburse", outstanding_amount:0, entity:"Hamasa", contact_name:"", contact_dept:"", monthly_installment:0, total_loan_amount:0, start_date:todayStr(), deduction_method:"salary_deduction", default_bank_id:"" };
   return base;
 }

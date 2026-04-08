@@ -13,7 +13,7 @@ const SUBTABS = [
 
 export default function Income({
   th, user, accounts, ledger, thisMonthLedger, incomeSrcs, fxRates, CURRENCIES,
-  curMonth, onRefresh, setLedger, setIncomeSrcs,
+  curMonth, onRefresh, setLedger, setIncomeSrcs, receivables,
 }) {
   const [subTab, setSubTab]       = useState("sources");
   const [showSrcForm, setShowSrcForm] = useState(false);
@@ -25,13 +25,16 @@ export default function Income({
   const [saving, setSaving]       = useState(false);
 
   const bankAccounts = useMemo(()=>accounts.filter(a=>a.type==="bank"),[accounts]);
+  const loanAccs = useMemo(()=>(receivables||accounts.filter(a=>a.type==="receivable")).filter(a=>a.receivable_type==="employee_loan"&&Number(a.outstanding_amount||0)>0),[receivables,accounts]);
+  const totalLoanRecovery = loanAccs.reduce((s,l)=>s+Number(l.monthly_installment||0),0);
   const incomeLedger = useMemo(()=>ledger.filter(e=>e.type==="income"),[ledger]);
 
   const thisMonthIncome = useMemo(()=>
     incomeLedger.filter(e=>ym(e.date)===filterMonth), [incomeLedger, filterMonth]);
 
   const totalThisMonth = thisMonthIncome.reduce((s,e)=>s+Number(e.amount_idr||e.amount||0),0);
-  const expectedThisMonth = incomeSrcs.filter(s=>s.is_active).reduce((s,src)=>s+Number(src.expected_amount||0),0);
+  const expectedThisMonth = incomeSrcs.filter(s=>s.is_active).reduce((s,src)=>s+Number(src.expected_amount||0),0)
+    + totalLoanRecovery;
 
   // Cash flow last 12 months
   const cashFlow = useMemo(() => {
@@ -112,7 +115,50 @@ export default function Income({
       {/* ── SOURCES ── */}
       {subTab==="sources" && (
         <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-          {incomeSrcs.length===0
+          {/* Loan recovery section */}
+          {loanAccs.length > 0 && (
+            <div style={{ background:th.sur, border:`1px solid ${th.bor}`, borderRadius:13, padding:"14px 16px" }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                <div style={{ fontSize:12, fontWeight:700, color:th.tx3, textTransform:"uppercase", letterSpacing:.5 }}>💼 Loan Recovery</div>
+                <div className="num" style={{ fontSize:13, fontWeight:800, color:th.gr }}>{fmtIDR(totalLoanRecovery,true)}/mo</div>
+              </div>
+              {loanAccs.map(l=>{
+                const outstanding = Number(l.outstanding_amount||0);
+                const total = Number(l.total_loan_amount||outstanding);
+                const monthly = Number(l.monthly_installment||0);
+                const remainMonths = monthly > 0 ? Math.ceil(outstanding/monthly) : 0;
+                const nextDue = (() => {
+                  if (!l.start_date || !monthly) return null;
+                  const day = new Date(l.start_date).getDate();
+                  const now = new Date();
+                  let d = new Date(now.getFullYear(), now.getMonth(), day);
+                  if (d <= now) d = new Date(now.getFullYear(), now.getMonth()+1, day);
+                  return d.toLocaleDateString("en-US",{day:"numeric",month:"short"});
+                })();
+                return (
+                  <div key={l.id} style={{ padding:"10px 12px", background:th.sur2, borderRadius:9, marginBottom:6, display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                    <div>
+                      <div style={{ fontSize:13, fontWeight:700, color:th.tx }}>{l.contact_name||l.name}</div>
+                      <div style={{ fontSize:11, color:th.tx3, marginTop:2 }}>
+                        {remainMonths > 0 ? `${remainMonths} months remaining` : "Fully paid"}
+                        {nextDue && ` · Next: ${nextDue}`}
+                      </div>
+                      <div style={{ fontSize:10, color:th.tx3 }}>
+                        {l.deduction_method==="direct_payment" ? "Direct payment" : "Salary deduction"}
+                      </div>
+                    </div>
+                    <div style={{ textAlign:"right" }}>
+                      <div className="num" style={{ fontSize:14, fontWeight:800, color:th.gr }}>+{fmtIDR(monthly,true)}</div>
+                      <div style={{ fontSize:10, color:th.tx3 }}>per month</div>
+                      <Tag bg={th.grBg} color={th.gr} small>Active ●</Tag>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {incomeSrcs.length===0 && loanAccs.length===0
             ? <Empty icon="💰" message="No income sources. Add your salary, rent, etc." th={th}/>
             : incomeSrcs.map(src=>(
                 <div key={src.id} style={{ background:th.sur, border:`1px solid ${th.bor}`, borderRadius:12, padding:"14px 16px" }}>

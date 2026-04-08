@@ -50,31 +50,48 @@ export function Overlay({ children, onClose, th, title, sub, maxWidth = 480, noP
   useEffect(() => {
     const fn = e => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
     const timer = setTimeout(() => document.addEventListener("mousedown", fn), 50);
-    return () => { clearTimeout(timer); document.removeEventListener("mousedown", fn); };
+    // Prevent body scroll while modal is open
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("mousedown", fn);
+      document.body.style.overflow = prev;
+    };
   }, [onClose]);
 
   return (
     <div style={{
-      position:"fixed", inset:0, background:"rgba(0,0,0,.45)", zIndex:1000,
+      position:"fixed", inset:0, background:"rgba(0,0,0,.48)", zIndex:1000,
       display:"flex", alignItems:"flex-end", justifyContent:"center",
-      padding:"0 0 env(safe-area-inset-bottom)",
     }}>
       <div ref={ref} style={{
         background:th.sur, borderRadius:"18px 18px 0 0", width:"100%", maxWidth,
-        maxHeight:"92vh", overflowY:"auto", boxShadow:th.sh2,
-        animation:"fadeUp .2s ease both",
-        padding:noPad?0:"20px 20px 32px",
+        maxHeight:"90vh", display:"flex", flexDirection:"column",
+        boxShadow:th.sh2, animation:"fadeUp .2s ease both",
+        paddingBottom:"env(safe-area-inset-bottom)",
       }}>
-        {(title||sub) && (
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16 }}>
+        {/* Drag handle + sticky header */}
+        <div style={{ flexShrink:0, padding:"12px 20px 0" }}>
+          <div style={{ width:36, height:4, borderRadius:2, background:th.bor2, margin:"0 auto 12px" }}/>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start",
+            paddingBottom:12, borderBottom:`1px solid ${th.bor}` }}>
             <div>
-              <div style={{ fontSize:16, fontWeight:800, color:th.tx, letterSpacing:"-.3px" }}>{title}</div>
+              <div style={{ fontSize:16, fontWeight:800, color:th.tx, letterSpacing:"-.3px" }}>{title||""}</div>
               {sub && <div style={{ fontSize:11, color:th.tx3, marginTop:2 }}>{sub}</div>}
             </div>
-            <button onClick={onClose} style={{ background:"none", border:"none", cursor:"pointer", color:th.tx3, fontSize:20, padding:"0 0 0 8px", lineHeight:1 }}>×</button>
+            <button onClick={onClose} style={{ background:"none", border:"none", cursor:"pointer",
+              color:th.tx3, fontSize:22, padding:"0 0 0 12px", lineHeight:1, flexShrink:0 }}>×</button>
           </div>
-        )}
-        {children}
+        </div>
+        {/* Scrollable body */}
+        <div style={{
+          flex:1, overflowY:"auto", WebkitOverflowScrolling:"touch",
+          overscrollBehavior:"contain",
+          padding: noPad ? 0 : "16px 20px 28px",
+        }}>
+          {children}
+        </div>
       </div>
     </div>
   );
@@ -319,14 +336,15 @@ export function AmountInput({ value, onChange, currency, onCurrencyChange, curre
 export function calcNetWorth(accounts) {
   let bank = 0, assets = 0, receivables = 0, ccDebt = 0, liabilities = 0;
   (accounts||[]).forEach(a => {
-    if (a.type === "bank" && a.include_networth !== false)
+    // All bank accounts always included (reimburse/tracking accounts included)
+    if (a.type === "bank")
       bank += Number(a.current_balance || 0);
     else if (a.type === "asset")
       assets += Number(a.current_value || 0);
     else if (a.type === "receivable")
-      receivables += Number(a.outstanding_amount || 0);
+      receivables += Number(a.outstanding_amount || 0);  // money owed TO user
     else if (a.type === "credit_card")
-      ccDebt += Number(a.current_balance || 0);
+      ccDebt += Math.max(0, Number(a.current_balance || 0));  // only count positive debt
     else if (a.type === "liability")
       liabilities += Number(a.outstanding_amount || 0);
   });
