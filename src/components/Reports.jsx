@@ -88,7 +88,7 @@ export default function Reports({ user, ledger, accounts, dark }) {
     const assetNow = accounts.filter(a => a.type === "asset").reduce((s, a) => s + Number(a.current_value || 0), 0);
     const ccNow    = accounts.filter(a => a.type === "credit_card").reduce((s, a) => s + Number(a.current_balance || 0), 0);
     const liabNow  = accounts.filter(a => a.type === "liability").reduce((s, a) => s + Number(a.outstanding_amount || 0), 0);
-    const recvNow  = accounts.filter(a => a.type === "receivable").reduce((s, a) => s + Number(a.outstanding_amount || 0), 0);
+    const recvNow  = accounts.filter(a => a.type === "receivable").reduce((s, a) => s + Number(a.receivable_outstanding || 0), 0);
 
     return months.map(mo => {
       const futureEntries = ledger.filter(e => e.date?.slice(0, 7) > mo);
@@ -106,7 +106,7 @@ export default function Reports({ user, ledger, accounts, dark }) {
 
   // ── Receivables aging ───────────────────────────────────────
   const agingData = useMemo(() => {
-    const recvAccts = accounts.filter(a => a.type === "receivable" && Number(a.outstanding_amount || 0) > 0);
+    const recvAccts = accounts.filter(a => a.type === "receivable" && Number(a.receivable_outstanding || 0) > 0);
     return recvAccts.map(r => {
       const lastEntry = ledger.filter(e =>
         (e.from_account_id === r.id || e.to_account_id === r.id) &&
@@ -116,10 +116,10 @@ export default function Reports({ user, ledger, accounts, dark }) {
         ? Math.floor((Date.now() - new Date(lastEntry.date).getTime()) / 86400000)
         : null;
       return { ...r, daysSince, lastDate: lastEntry?.date };
-    }).sort((a, b) => Number(b.outstanding_amount || 0) - Number(a.outstanding_amount || 0));
+    }).sort((a, b) => Number(b.receivable_outstanding || 0) - Number(a.receivable_outstanding || 0));
   }, [accounts, ledger]);
 
-  const totalReceivable = agingData.reduce((s, r) => s + Number(r.outstanding_amount || 0), 0);
+  const totalReceivable = agingData.reduce((s, r) => s + Number(r.receivable_outstanding || 0), 0);
 
   // ── CSV Export ──────────────────────────────────────────────
   const exportCSV = (type) => {
@@ -367,7 +367,7 @@ export default function Reports({ user, ledger, accounts, dark }) {
               {[
                 { label: "Bank Accounts", value: accounts.filter(a => a.type === "bank").reduce((s, a) => s + Number(a.current_balance || 0), 0), color: "#3b5bdb" },
                 { label: "Assets",        value: accounts.filter(a => a.type === "asset").reduce((s, a) => s + Number(a.current_value || 0), 0), color: "#059669" },
-                { label: "Receivables",   value: accounts.filter(a => a.type === "receivable").reduce((s, a) => s + Number(a.outstanding_amount || 0), 0), color: "#0891b2" },
+                { label: "Receivables",   value: accounts.filter(a => a.type === "receivable").reduce((s, a) => s + Number(a.receivable_outstanding || 0), 0), color: "#0891b2" },
                 { label: "CC Debt",       value: -accounts.filter(a => a.type === "credit_card").reduce((s, a) => s + Math.max(0, Number(a.current_balance || 0)), 0), color: "#e67700" },
                 { label: "Liabilities",   value: -accounts.filter(a => a.type === "liability").reduce((s, a) => s + Number(a.outstanding_amount || 0), 0), color: "#dc2626" },
               ].map((item, i) => (
@@ -418,7 +418,7 @@ export default function Reports({ user, ledger, accounts, dark }) {
                       </div>
                       <div style={{ textAlign: "right" }}>
                         <div style={{ fontSize: 14, fontWeight: 800, color: "#e67700" }}>
-                          {fmtIDR(Number(r.outstanding_amount || 0), true)}
+                          {fmtIDR(Number(r.receivable_outstanding || 0), true)}
                         </div>
                         {days != null && (
                           <div style={{ fontSize: 10, color: agingColor, fontWeight: 700, marginTop: 2 }}>
@@ -445,7 +445,7 @@ export default function Reports({ user, ledger, accounts, dark }) {
                 { label: "> 90 days",  color: "#9f1239", filter: r => (r.daysSince || 0) > 90 },
               ].map((b, i) => {
                 const items = agingData.filter(b.filter);
-                const total = items.reduce((s, r) => s + Number(r.outstanding_amount || 0), 0);
+                const total = items.reduce((s, r) => s + Number(r.receivable_outstanding || 0), 0);
                 return (
                   <div key={i} style={{ ...card, background: T.sur2, border: "none", textAlign: "center" }}>
                     <div style={{ fontSize: 10, color: T.text3, marginBottom: 4 }}>{b.label}</div>

@@ -70,7 +70,7 @@ export default function Accounts({
     liabilities: accounts.filter(a => a.type === "liability")
                   .reduce((s, a) => s + Number(a.outstanding_amount || 0), 0),
     receivables: accounts.filter(a => a.type === "receivable")
-                  .reduce((s, a) => s + Number(a.outstanding_amount || 0), 0),
+                  .reduce((s, a) => s + Number(a.receivable_outstanding || 0), 0),
   }), [accounts]);
 
   // ─── OPEN ADD MODAL ─────────────────────────────────────────
@@ -114,7 +114,8 @@ export default function Accounts({
         monthly_target:     sn(form.monthly_target),
         statement_day:      sn(form.statement_day),
         due_day:            sn(form.due_day),
-        outstanding_amount: sn(form.outstanding_amount),
+        outstanding_amount:    sn(form.outstanding_amount),
+        receivable_outstanding: sn(form.receivable_outstanding),
         total_amount:    sn(form.total_amount),
         monthly_payment:    sn(form.monthly_payment),
         liability_interest_rate: sn(form.liability_interest_rate),
@@ -394,7 +395,7 @@ function AccountCard({ account: a, ledger, accounts, onEdit, onDelete, onHistory
       return { label: "Outstanding", value: v, color: "#dc2626", paid, pct, orig };
     }
     if (a.type === "receivable") {
-      const v = Number(a.outstanding_amount || 0);
+      const v = Number(a.receivable_outstanding || 0);
       return { label: "Outstanding", value: v, color: "#d97706" };
     }
     return { label: "Balance", value: 0, color: "#6b7280" };
@@ -730,8 +731,8 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
             options={["Hamasa", "SDC", "Travelio", "Personal", "Other"]}
             style={{ flex: 1 }} />
         </FormRow>
-        <AmountInput label="Outstanding Amount" value={form.outstanding_amount || ""}
-          onChange={v => set("outstanding_amount", v)} />
+        <AmountInput label="Outstanding Amount" value={form.receivable_outstanding || ""}
+          onChange={v => set("receivable_outstanding", v)} />
 
         {form.receivable_type === "employee_loan" && <>
           <FormRow>
@@ -744,7 +745,7 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
             <AmountInput label="Monthly Installment" value={form.monthly_installment || ""}
               onChange={v => set("monthly_installment", v)} style={{ flex: 1 }} />
             <AmountInput label="Total Loan Amount" value={form.receivable_total || ""}
-              onChange={v => { set("receivable_total", v); set("outstanding_amount", v); }} style={{ flex: 1 }} />
+              onChange={v => { set("receivable_total", v); set("receivable_outstanding", v); }} style={{ flex: 1 }} />
           </FormRow>
           <FormRow>
             <Input label="Start Date" type="date" value={form.start_date || ""}
@@ -759,15 +760,15 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
             placeholder="Select bank account…"
             options={bankAccounts.map(b => ({ value: b.id, label: b.name }))} />
 
-          {form.monthly_installment && form.outstanding_amount && Number(form.monthly_installment) > 0 && (
+          {form.monthly_installment && form.receivable_outstanding && Number(form.monthly_installment) > 0 && (
             <div style={{
               fontSize: 11, color: "#6b7280", padding: "10px 12px",
               background: "#f9fafb", borderRadius: 8, fontFamily: "Figtree, sans-serif",
             }}>
-              Duration: ~{Math.ceil(Number(form.outstanding_amount) / Number(form.monthly_installment))} months
+              Duration: ~{Math.ceil(Number(form.receivable_outstanding) / Number(form.monthly_installment))} months
               {form.start_date && (() => {
                 const end = new Date(form.start_date);
-                end.setMonth(end.getMonth() + Math.ceil(Number(form.outstanding_amount) / Number(form.monthly_installment)));
+                end.setMonth(end.getMonth() + Math.ceil(Number(form.receivable_outstanding) / Number(form.monthly_installment)));
                 return ` · Ends ${end.toLocaleDateString("en-US", { month: "short", year: "numeric" })}`;
               })()}
             </div>
@@ -812,7 +813,7 @@ function emptyForm(type) {
     case "credit_card": return { ...base, bank_name: "BCA", last4: "", network: "Visa", card_limit: "", monthly_target: "", statement_day: 25, due_day: 17, current_balance: 0 };
     case "asset":       return { ...base, subtype: "Property", current_value: "", purchase_price: "", purchase_date: "" };
     case "liability":   return { ...base, subtype: "Mortgage", creditor: "", outstanding_amount: "", total_amount: "", monthly_payment: "", liability_interest_rate: "", start_date: "", end_date: "" };
-    case "receivable":  return { ...base, entity: "Hamasa", receivable_type: "reimburse", outstanding_amount: "", contact_name: "", contact_dept: "", monthly_installment: "", receivable_total: "", start_date: todayStr(), deduction_method: "salary_deduction", default_bank_id: "" };
+    case "receivable":  return { ...base, entity: "Hamasa", receivable_type: "reimburse", receivable_outstanding: "", contact_name: "", contact_dept: "", monthly_installment: "", receivable_total: "", start_date: todayStr(), deduction_method: "salary_deduction", default_bank_id: "" };
     default:            return base;
   }
 }

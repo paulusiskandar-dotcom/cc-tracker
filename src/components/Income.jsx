@@ -47,7 +47,7 @@ export default function Income({
 
   const bankAccounts = useMemo(() => accounts.filter(a => a.type === "bank"), [accounts]);
   const loanAccs     = useMemo(() =>
-    accounts.filter(a => a.type === "receivable" && a.receivable_type === "employee_loan" && Number(a.outstanding_amount || 0) > 0)
+    accounts.filter(a => a.type === "receivable" && a.receivable_type === "employee_loan" && Number(a.receivable_outstanding || 0) > 0)
   , [accounts]);
 
   const totalLoanRecovery = loanAccs.reduce((s, l) => s + Number(l.monthly_installment || 0), 0);
@@ -223,7 +223,7 @@ export default function Income({
                 </div>
               </div>
               {loanAccs.map(l => {
-                const outstanding  = Number(l.outstanding_amount || 0);
+                const outstanding  = Number(l.receivable_outstanding || 0);
                 const monthly      = Number(l.monthly_installment || 0);
                 const remainMonths = monthly > 0 ? Math.ceil(outstanding / monthly) : 0;
                 const nextDue = (() => {

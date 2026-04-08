@@ -404,7 +404,7 @@ export function calcNetWorth(accounts) {
     else if (a.type === "asset")
       assets += Number(a.current_value || 0);
     else if (a.type === "receivable")
-      receivables += Number(a.outstanding_amount || 0);  // money owed TO user
+      receivables += Number(a.receivable_outstanding || 0);  // money owed TO user
     else if (a.type === "credit_card")
       ccDebt += Math.max(0, Number(a.current_balance || 0));  // only count positive debt
     else if (a.type === "liability")

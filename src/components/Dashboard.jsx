@@ -46,7 +46,7 @@ export default function Dashboard({
   [assets]);
 
   const totalReceivables = useMemo(() =>
-    receivables.reduce((s, r) => s + Number(r.outstanding_amount || 0), 0),
+    receivables.reduce((s, r) => s + Number(r.receivable_outstanding || 0), 0),
   [receivables]);
 
   // Last 6 months cash flow (for mini chart)

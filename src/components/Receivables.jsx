@@ -211,8 +211,8 @@ export default function Receivables({ user, accounts, ledger, onRefresh, setAcco
       {/* ── HEADER ──────────────────────────────────────── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ fontSize: 10, fontWeight: 700, color: T.text3, letterSpacing: "0.06em" }}>
-          {reimburseAccs.reduce((s, a) => s + Number(a.outstanding_amount || 0), 0) > 0 &&
-            `${fmtIDR(reimburseAccs.reduce((s, a) => s + Number(a.outstanding_amount || 0), 0), true)} outstanding`}
+          {reimburseAccs.reduce((s, a) => s + Number(a.receivable_outstanding || 0), 0) > 0 &&
+            `${fmtIDR(reimburseAccs.reduce((s, a) => s + Number(a.receivable_outstanding || 0), 0), true)} outstanding`}
         </div>
         <Button variant="primary" size="sm" onClick={() => {
           setOutForm({ date: todayStr(), description: "", amount: "", entity: "Hamasa", from_id: spendAccounts[0]?.id || "", notes: "" });
@@ -258,7 +258,7 @@ export default function Receivables({ user, accounts, ledger, onRefresh, setAcco
             />
           ) : (
             recStats.filter(r => r.receivable_type === "reimburse").map(r => {
-              const outstanding = Number(r.outstanding_amount || 0);
+              const outstanding = Number(r.receivable_outstanding || 0);
               const entCol      = ENT_COL[r.entity] || T.ac;
               const entBg       = ENT_BG[r.entity]  || T.sur2;
               const recentEntries = r.entries.slice(0, 3);
@@ -364,8 +364,8 @@ export default function Receivables({ user, accounts, ledger, onRefresh, setAcco
             />
           ) : (
             recStats.filter(r => r.receivable_type === "employee_loan").map(r => {
-              const outstanding = Number(r.outstanding_amount || 0);
-              const total       = Number(r.receivable_total || r.outstanding_amount || 0);
+              const outstanding = Number(r.receivable_outstanding || 0);
+              const total       = Number(r.receivable_total || r.receivable_outstanding || 0);
               const paid        = Math.max(0, total - outstanding);
               const pct         = total > 0 ? (paid / total) * 100 : 0;
               const monthly     = Number(r.monthly_installment || 0);
@@ -660,7 +660,7 @@ export default function Receivables({ user, accounts, ledger, onRefresh, setAcco
             }}>
               <div style={{ fontSize: 12, color: T.text2 }}>Outstanding — {selectedRec.entity}</div>
               <div style={{ fontSize: 16, fontWeight: 800, color: ENT_COL[selectedRec.entity] || T.ac }}>
-                {fmtIDR(Number(selectedRec.outstanding_amount || 0))}
+                {fmtIDR(Number(selectedRec.receivable_outstanding || 0))}
               </div>
             </div>
 
@@ -784,7 +784,7 @@ export default function Receivables({ user, accounts, ledger, onRefresh, setAcco
             }}>
               <div style={{ fontSize: 12, color: T.text2 }}>Outstanding</div>
               <div style={{ fontSize: 16, fontWeight: 800, color: "#d97706" }}>
-                {fmtIDR(Number(selectedRec.outstanding_amount || 0))}
+                {fmtIDR(Number(selectedRec.receivable_outstanding || 0))}
               </div>
             </div>
 

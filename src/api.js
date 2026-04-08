@@ -5,7 +5,8 @@ const balField = (type) => {
   if (type === "bank")                               return "current_balance";
   if (type === "credit_card")                        return "current_balance";
   if (type === "asset")                              return "current_value";
-  if (type === "liability" || type === "receivable") return "outstanding_amount";
+  if (type === "liability")  return "outstanding_amount";
+  if (type === "receivable") return "receivable_outstanding";
   return null;
 };
 

@@ -99,7 +99,7 @@ export const calcNetWorth = (accounts) => {
     } else if (a.type === "asset") {
       assets += Number(a.current_value || 0);
     } else if (a.type === "receivable") {
-      receivables += Number(a.outstanding_amount || 0);
+      receivables += Number(a.receivable_outstanding || 0);
     } else if (a.type === "liability") {
       liabilities += Number(a.outstanding_amount || 0);
     }
