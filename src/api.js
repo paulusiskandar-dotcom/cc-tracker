@@ -26,11 +26,13 @@ const validateLedgerEntry = (entry) => {
   if (!entry.from_type) throw new Error("from_type is required");
   if (!entry.to_type)   throw new Error("to_type is required");
   if (!entry.tx_date)   throw new Error("Date is required");
-  if (!entry.description) throw new Error("Description is required");
   if (!entry.amount || Number(entry.amount) <= 0) throw new Error("Amount must be greater than 0");
   if (!entry.tx_type)   throw new Error("Transaction type is required");
   return true;
 };
+
+// Sanitize UUID — never send "" to Supabase UUID columns
+const toUUID = (v) => (!v || v === "") ? null : v;
 
 // ─── BALANCE FIELD PER ACCOUNT TYPE ───────────────────────────
 const balField = (type) => {
@@ -182,17 +184,26 @@ export const ledgerApi = {
   // Create entry + update balances
   create: async (userId, entry, accounts = []) => {
     validateLedgerEntry(entry);
+    // Sanitize all UUID fields — empty string is invalid for UUID columns
+    const safeEntry = {
+      ...entry,
+      from_id:        toUUID(entry.from_id),
+      to_id:          toUUID(entry.to_id),
+      category_id:    toUUID(entry.category_id),
+      scan_batch_id:  toUUID(entry.scan_batch_id),
+      installment_id: toUUID(entry.installment_id),
+    };
     const { data, error } = await supabase
       .from("ledger")
-      .insert([{ ...entry, user_id: userId }])
+      .insert([{ ...safeEntry, user_id: userId }])
       .select()
       .single();
     if (error) throw new Error(error.message);
 
-    const amount  = Number(entry.amount_idr || entry.amount || 0);
-    const deltas  = getDeltas(entry.tx_type, amount);
-    const fromAcc = accounts.find(a => a.id === entry.from_id);
-    const toAcc   = accounts.find(a => a.id === entry.to_id);
+    const amount  = Number(safeEntry.amount_idr || safeEntry.amount || 0);
+    const deltas  = getDeltas(safeEntry.tx_type, amount);
+    const fromAcc = accounts.find(a => a.id === safeEntry.from_id);
+    const toAcc   = accounts.find(a => a.id === safeEntry.to_id);
 
     if (fromAcc && deltas.from?.[fromAcc.type] !== undefined)
       await applyBalanceDelta(fromAcc.id, fromAcc.type, deltas.from[fromAcc.type]);

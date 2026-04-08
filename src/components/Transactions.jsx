@@ -165,23 +165,60 @@ export default function Transactions({
 
   // ── Save ──
   const save = async () => {
-    if (!form.description || !form.amount) {
-      showToast("Description and amount are required", "error");
+    const type = form.tx_type;
+
+    if (!form.amount || Number(form.amount) <= 0) {
+      showToast("Amount is required", "error");
       return;
     }
+    // Description required only for these types
+    if (["expense", "income", "reimburse_out"].includes(type) && !form.description?.trim()) {
+      showToast("Description is required", "error");
+      return;
+    }
+    // Both accounts required
+    if (["transfer", "pay_cc", "fx_exchange", "buy_asset", "sell_asset", "pay_liability"].includes(type)) {
+      if (!form.from_id || !form.to_id) {
+        showToast("Both From and To accounts are required", "error");
+        return;
+      }
+    }
+
     setSaving(true);
     try {
-      const cat   = categories.find(c => c.id === form.category_id);
-      const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
-      const { from_type, to_type } = getTxFromToTypes(form.tx_type);
+      const cat = categories.find(c => c.id === form.category_id);
+      const sn  = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
+      const { from_type, to_type } = getTxFromToTypes(type);
+
+      // Auto-generate description for types that don't require manual input
+      let description = form.description?.trim() || "";
+      if (!description) {
+        const toAcc   = accounts.find(a => a.id === form.to_id);
+        const fromAcc = accounts.find(a => a.id === form.from_id);
+        if      (type === "transfer")      description = `Transfer to ${toAcc?.name || "account"}`;
+        else if (type === "pay_cc")        description = `CC Payment — ${toAcc?.name || "credit card"}`;
+        else if (type === "buy_asset")     description = `Buy ${toAcc?.name || "asset"}`;
+        else if (type === "sell_asset")    description = `Sell ${fromAcc?.name || "asset"}`;
+        else if (type === "give_loan")     description = `Loan to ${toAcc?.name || ""}`.trim();
+        else if (type === "collect_loan")  description = `Loan payment from ${fromAcc?.name || ""}`.trim();
+        else if (type === "pay_liability") description = `Payment — ${toAcc?.name || "liability"}`;
+        else if (type === "reimburse_in")  description = `${fromAcc?.name || ""} reimbursed`.trim();
+        else if (type === "fx_exchange")   description = `FX Exchange`.trim();
+      }
+
       const entry = {
         ...form,
+        description,
         amount:        sn(form.amount),
         amount_idr:    sn(amtIDR),
         from_type,
         to_type,
+        from_id:       form.from_id || null,
+        to_id:         form.to_id   || null,
         category_id:   form.category_id || null,
         category_name: cat?.name || form.category_name || null,
+        entity:        type === "reimburse_out" ? (form.entity || "Personal") : "Personal",
+        is_reimburse:  type === "reimburse_out",
       };
       if (editEntry) {
         const updated = await ledgerApi.update(editEntry.id, entry);
@@ -194,8 +231,8 @@ export default function Transactions({
         await onRefresh();
       }
       // Save merchant mapping
-      if (form.description && form.category_id) {
-        merchantApi.upsert(user.id, form.description, form.category_id, cat?.name || "").catch(() => {});
+      if (description && form.category_id) {
+        merchantApi.upsert(user.id, description, form.category_id, cat?.name || "").catch(() => {});
       }
       setModal(null);
     } catch (e) {
@@ -674,21 +711,13 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
         />
       )}
 
-      {/* Entity */}
-      <Select
-        label="Entity"
-        value={form.entity}
-        onChange={e => set("entity", e.target.value)}
-        options={ENTITIES}
-      />
-
-      {/* Is Reimburse toggle (expense only, non-Personal entity) */}
-      {type === "expense" && form.entity !== "Personal" && (
-        <Toggle
-          label="This is a reimbursable expense"
-          hint="Will be tracked as a receivable from the entity"
-          checked={form.is_reimburse}
-          onChange={v => set("is_reimburse", v)}
+      {/* Entity — only for reimburse_out */}
+      {type === "reimburse_out" && (
+        <Select
+          label="Entity"
+          value={form.entity}
+          onChange={e => set("entity", e.target.value)}
+          options={ENTITIES}
         />
       )}
 
