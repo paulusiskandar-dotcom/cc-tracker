@@ -23,7 +23,7 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
   const [gmailLoading, setGmailLoading] = useState(false);
   const [gmailLoaded, setGmailLoaded]   = useState(false);
 
-  const bankAccounts = accounts.filter(a => a.type === "bank" || a.type === "debit_card");
+  const bankAccounts = accounts.filter(a => a.type === "bank");
   const ccAccounts   = accounts.filter(a => a.type === "credit_card");
   const spendAccounts = [...bankAccounts, ...ccAccounts];
 

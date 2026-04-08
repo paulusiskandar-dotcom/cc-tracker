@@ -242,7 +242,7 @@ function Finance({ user, signOut }) {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Derived data ──
-  const bankAccounts  = useMemo(() => accounts.filter(a => a.type === "bank" || a.type === "debit_card"), [accounts]);
+  const bankAccounts  = useMemo(() => accounts.filter(a => a.type === "bank"), [accounts]);
   const creditCards   = useMemo(() => accounts.filter(a => a.type === "credit_card"), [accounts]);
   const assets        = useMemo(() => accounts.filter(a => a.type === "asset"), [accounts]);
   const liabilities   = useMemo(() => accounts.filter(a => a.type === "liability"), [accounts]);

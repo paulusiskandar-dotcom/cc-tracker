@@ -11,6 +11,13 @@ import Input, { Field, AmountInput, FormRow } from "./shared/Input";
 import Select from "./shared/Select";
 import { EmptyState, Spinner, showToast, Badge } from "./shared/Card";
 
+// ─── SANITIZE NUMERIC ────────────────────────────────────────
+const sn = (val) => {
+  if (val === "" || val === null || val === undefined) return 0;
+  const n = Number(val);
+  return isNaN(n) ? 0 : n;
+};
+
 // ─── SUBTABS ─────────────────────────────────────────────────
 const SUBTABS = [
   { id: "all",         label: "All" },
@@ -24,13 +31,13 @@ const SUBTABS = [
 // ─── TYPE COLORS / BG ────────────────────────────────────────
 const TYPE_BG = {
   bank:        "#e8f4fd", credit_card: "#fde8e8",
-  debit_card:  "#e8f4fd", asset:       "#e8fdf0",
-  liability:   "#fff0f0", receivable:  "#fdf6e8",
+  asset:       "#e8fdf0", liability:   "#fff0f0",
+  receivable:  "#fdf6e8",
 };
 const TYPE_COLOR = {
   bank:        "#3b5bdb", credit_card: "#dc2626",
-  debit_card:  "#3b5bdb", asset:       "#059669",
-  liability:   "#dc2626", receivable:  "#d97706",
+  asset:       "#059669", liability:   "#dc2626",
+  receivable:  "#d97706",
 };
 
 export default function Accounts({
@@ -54,7 +61,7 @@ export default function Accounts({
 
   // ─── SUMMARY TOTALS ─────────────────────────────────────────
   const totals = useMemo(() => ({
-    bank:       accounts.filter(a => a.type === "bank" || a.type === "debit_card")
+    bank:       accounts.filter(a => a.type === "bank")
                   .reduce((s, a) => s + Number(a.current_balance || 0), 0),
     cc:         accounts.filter(a => a.type === "credit_card")
                   .reduce((s, a) => s + Number(a.current_balance || 0), 0),
@@ -96,24 +103,44 @@ export default function Accounts({
     if (!form.name?.trim()) { showToast("Name is required", "error"); return; }
     setSaving(true);
     try {
+      // Sanitize all numeric fields before insert/update
+      const clean = {
+        ...form,
+        current_balance:    sn(form.current_balance),
+        initial_balance:    sn(form.initial_balance),
+        current_value:      sn(form.current_value),
+        purchase_value:     sn(form.purchase_value),
+        card_limit:         sn(form.card_limit),
+        monthly_target:     sn(form.monthly_target),
+        statement_day:      sn(form.statement_day),
+        due_day:            sn(form.due_day),
+        outstanding_amount: sn(form.outstanding_amount),
+        original_amount:    sn(form.original_amount),
+        monthly_payment:    sn(form.monthly_payment),
+        interest_rate:      sn(form.interest_rate),
+        monthly_installment:sn(form.monthly_installment),
+        total_loan_amount:  sn(form.total_loan_amount),
+        sort_order:         sn(form.sort_order),
+      };
+
       if (editAcc) {
-        const updated = await accountsApi.update(editAcc.id, form);
+        const updated = await accountsApi.update(editAcc.id, clean);
         setAccounts(p => p.map(a => a.id === editAcc.id ? updated : a));
         showToast("Account updated");
       } else {
         const created = await accountsApi.create(user.id, {
-          ...form, type: formType, is_active: true, sort_order: accounts.length,
+          ...clean, type: formType, is_active: true, sort_order: accounts.length,
         });
         setAccounts(p => [...p, created]);
 
         // Auto-create recurring template for employee loans
-        if (formType === "receivable" && form.receivable_type === "employee_loan" && form.monthly_installment) {
+        if (formType === "receivable" && form.receivable_type === "employee_loan" && sn(form.monthly_installment) > 0) {
           try {
             const bankAccounts = accounts.filter(a => a.type === "bank");
             const tmpl = await recurringApi.createTemplate(user.id, {
               name:            `Loan — ${form.contact_name || form.name}`,
               type:            "collect_loan",
-              amount:          Number(form.monthly_installment),
+              amount:          sn(form.monthly_installment),
               currency:        "IDR",
               frequency:       "Monthly",
               entity:          "Personal",
@@ -264,7 +291,6 @@ export default function Accounts({
               {[
                 { id: "bank",        icon: "🏦", label: "Bank Account",  bg: "#e8f4fd", color: "#3b5bdb" },
                 { id: "credit_card", icon: "💳", label: "Credit Card",   bg: "#fde8e8", color: "#dc2626" },
-                { id: "debit_card",  icon: "💸", label: "Debit Card",    bg: "#e8f4fd", color: "#3b5bdb" },
                 { id: "asset",       icon: "📈", label: "Asset",         bg: "#e8fdf0", color: "#059669" },
                 { id: "liability",   icon: "📉", label: "Liability",     bg: "#fff0f0", color: "#dc2626" },
                 { id: "receivable",  icon: "📋", label: "Receivable",    bg: "#fdf6e8", color: "#d97706" },
@@ -342,7 +368,7 @@ function AccountCard({ account: a, ledger, accounts, onEdit, onDelete, onHistory
 
   // Balance display per type
   const bal = (() => {
-    if (a.type === "bank" || a.type === "debit_card") {
+    if (a.type === "bank") {
       const v = Number(a.current_balance || 0);
       return { label: "Balance", value: v, color: v >= 0 ? "#059669" : "#dc2626" };
     }
@@ -645,19 +671,6 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
         </FormRow>
       </>}
 
-      {/* DEBIT CARD */}
-      {type === "debit_card" && <>
-        <FormRow>
-          <Select label="Bank" value={form.bank_name || "BCA"} onChange={e => set("bank_name", e.target.value)}
-            options={BANKS_L} style={{ flex: 1 }} />
-          <Input label="Card Last 4" value={form.card_last4 || ""} onChange={e => set("card_last4", e.target.value)}
-            placeholder="5678" style={{ flex: 1 }} />
-        </FormRow>
-        <Select label="Linked Bank Account" value={form.linked_account_id || ""}
-          onChange={e => set("linked_account_id", e.target.value)}
-          placeholder="Select bank…"
-          options={bankAccounts.map(b => ({ value: b.id, label: b.name }))} />
-      </>}
 
       {/* ASSET */}
       {type === "asset" && <>
@@ -796,7 +809,6 @@ function emptyForm(type) {
   switch (type) {
     case "bank":        return { ...base, bank_name: "BCA", account_no: "", currency: "IDR", initial_balance: "", current_balance: 0, include_networth: true };
     case "credit_card": return { ...base, bank_name: "BCA", last4: "", network: "Visa", card_limit: "", monthly_target: "", statement_day: 25, due_day: 17, current_balance: 0 };
-    case "debit_card":  return { ...base, bank_name: "BCA", card_last4: "", linked_account_id: "" };
     case "asset":       return { ...base, subtype: "Property", current_value: "", purchase_value: "", purchase_date: "" };
     case "liability":   return { ...base, subtype: "Mortgage", creditor: "", outstanding_amount: "", original_amount: "", monthly_payment: "", interest_rate: "", start_date: "", end_date: "" };
     case "receivable":  return { ...base, entity: "Hamasa", receivable_type: "reimburse", outstanding_amount: "", contact_name: "", contact_dept: "", monthly_installment: "", total_loan_amount: "", start_date: todayStr(), deduction_method: "salary_deduction", default_bank_id: "" };

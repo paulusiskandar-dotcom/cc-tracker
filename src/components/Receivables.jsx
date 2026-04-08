@@ -57,8 +57,8 @@ export default function Receivables({ user, accounts, ledger, onRefresh, setAcco
   const receivables    = useMemo(() => accounts.filter(a => a.type === "receivable"), [accounts]);
   const reimburseAccs  = useMemo(() => receivables.filter(a => a.receivable_type === "reimburse"), [receivables]);
   const loanAccs       = useMemo(() => receivables.filter(a => a.receivable_type === "employee_loan"), [receivables]);
-  const bankAccounts   = useMemo(() => accounts.filter(a => a.type === "bank" || a.type === "debit_card"), [accounts]);
-  const spendAccounts  = useMemo(() => accounts.filter(a => ["bank", "debit_card", "credit_card"].includes(a.type)), [accounts]);
+  const bankAccounts   = useMemo(() => accounts.filter(a => a.type === "bank"), [accounts]);
+  const spendAccounts  = useMemo(() => accounts.filter(a => ["bank", "credit_card"].includes(a.type)), [accounts]);
 
   const recStats = useMemo(() => receivables.map(r => {
     const entries = ledger
@@ -88,7 +88,8 @@ export default function Receivables({ user, accounts, ledger, onRefresh, setAcco
         setSaving(false);
         return;
       }
-      const amt = Number(outForm.amount);
+      const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
+      const amt = sn(outForm.amount);
       const entry = {
         date:            outForm.date,
         description:     outForm.description,
@@ -116,7 +117,8 @@ export default function Receivables({ user, accounts, ledger, onRefresh, setAcco
       return showToast("Fill all required fields", "error");
     setSaving(true);
     try {
-      const amt = Number(inForm.amount);
+      const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
+      const amt = sn(inForm.amount);
       const entry = {
         date:            inForm.date || todayStr(),
         description:     `${selectedRec.entity} reimburse received`,
@@ -143,7 +145,8 @@ export default function Receivables({ user, accounts, ledger, onRefresh, setAcco
       return showToast("Fill all required fields", "error");
     setSaving(true);
     try {
-      const amt = Number(loanForm.amount);
+      const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
+      const amt = sn(loanForm.amount);
       const entry = {
         date:            loanForm.date,
         description:     `Loan to ${selectedRec.contact_name || selectedRec.name}`,
@@ -170,7 +173,8 @@ export default function Receivables({ user, accounts, ledger, onRefresh, setAcco
       return showToast("Fill all required fields", "error");
     setSaving(true);
     try {
-      const amt = Number(loanForm.amount);
+      const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
+      const amt = sn(loanForm.amount);
       const entry = {
         date:            loanForm.date,
         description:     `Loan repayment — ${selectedRec.contact_name || selectedRec.name}`,

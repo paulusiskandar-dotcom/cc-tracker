@@ -45,7 +45,7 @@ export default function Income({
     amount: "", currency: "IDR", to_account_id: "", entity: "Personal", notes: "",
   });
 
-  const bankAccounts = useMemo(() => accounts.filter(a => a.type === "bank" || a.type === "debit_card"), [accounts]);
+  const bankAccounts = useMemo(() => accounts.filter(a => a.type === "bank"), [accounts]);
   const loanAccs     = useMemo(() =>
     accounts.filter(a => a.type === "receivable" && a.receivable_type === "employee_loan" && Number(a.outstanding_amount || 0) > 0)
   , [accounts]);
@@ -89,7 +89,8 @@ export default function Income({
     if (!srcForm.name || !srcForm.expected_amount) return showToast("Fill name and amount", "error");
     setSaving(true);
     try {
-      const d = { ...srcForm, expected_amount: Number(srcForm.expected_amount) };
+      const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
+      const d = { ...srcForm, expected_amount: sn(srcForm.expected_amount) };
       if (editSrcId) {
         const r = await incomeSrcApi.update(editSrcId, d);
         setIncomeSrcs(prev => prev.map(s => s.id === editSrcId ? r : s));
@@ -128,7 +129,8 @@ export default function Income({
       return showToast("Fill all required fields", "error");
     setSaving(true);
     try {
-      const amt = Number(incForm.amount);
+      const sn2 = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
+      const amt = sn2(incForm.amount);
       const src = incomeSrcs.find(s => s.id === incForm.income_source_id);
       const entry = {
         date:             incForm.date,

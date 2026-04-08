@@ -177,12 +177,13 @@ export default function Settings({
     if (!recurForm.name || !recurForm.amount) return showToast("Fill name and amount", "error");
     setSaving(true);
     try {
+      const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
       if (editRecur) {
-        const updated = await recurringApi.updateTemplate(editRecur.id, { ...recurForm, amount: Number(recurForm.amount) });
+        const updated = await recurringApi.updateTemplate(editRecur.id, { ...recurForm, amount: sn(recurForm.amount) });
         setRecurTemplates(prev => prev.map(t => t.id === editRecur.id ? { ...t, ...updated } : t));
         showToast("Template updated");
       } else {
-        const created = await recurringApi.createTemplate(user.id, { ...recurForm, amount: Number(recurForm.amount) });
+        const created = await recurringApi.createTemplate(user.id, { ...recurForm, amount: sn(recurForm.amount) });
         setRecurTemplates(prev => [created, ...prev]);
         showToast("Template created");
       }

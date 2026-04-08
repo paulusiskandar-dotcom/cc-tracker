@@ -169,10 +169,11 @@ export default function Transactions({
     setSaving(true);
     try {
       const cat   = categories.find(c => c.id === form.category_id);
+      const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
       const entry = {
         ...form,
-        amount:         Number(form.amount),
-        amount_idr:     amtIDR,
+        amount:         sn(form.amount),
+        amount_idr:     sn(amtIDR),
         category_label: cat?.name || form.category_label || "",
       };
       if (editEntry) {

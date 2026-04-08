@@ -103,9 +103,10 @@ export default function CreditCards({
     }
     setSaving(true);
     try {
-      const amt  = Number(payForm.amount);
+      const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
+      const amt  = sn(payForm.amount);
       const cc   = accounts.find(a => a.id === payForm.cardId);
-      const total = amt + Number(payForm.admin_fee || 0) + Number(payForm.materai || 0);
+      const total = amt + sn(payForm.admin_fee) + sn(payForm.materai);
       const entry = {
         date:            todayStr(),
         description:     `Pay ${cc?.name || "CC"} bill`,
@@ -158,12 +159,13 @@ export default function CreditCards({
       const newPaid = Math.min(inst.paid_months + 1, inst.months);
       await installmentsApi.update(inst.id, { paid_months: newPaid });
       setInstallments(p => p.map(x => x.id === inst.id ? { ...x, paid_months: newPaid } : x));
+      const sn2 = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
       const entry = {
         date:            todayStr(),
         description:     `${inst.description} — Month ${newPaid}/${inst.months}`,
-        amount:          Number(inst.monthly_amount),
+        amount:          sn2(inst.monthly_amount),
         currency:        inst.currency || "IDR",
-        amount_idr:      Number(inst.monthly_amount),
+        amount_idr:      sn2(inst.monthly_amount),
         type:            "cc_installment",
         from_account_id: inst.account_id,
         entity:          inst.entity || "Personal",
@@ -198,12 +200,13 @@ export default function CreditCards({
   const applyRecurringNow = async (r) => {
     try {
       const cc = accounts.find(a => a.id === r.from_account_id);
+      const sn3 = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
       const entry = {
         date:            todayStr(),
         description:     r.name,
-        amount:          Number(r.amount),
+        amount:          sn3(r.amount),
         currency:        r.currency || "IDR",
-        amount_idr:      Number(r.amount),
+        amount_idr:      sn3(r.amount),
         type:            r.type || "expense",
         from_account_id: r.from_account_id || "",
         to_account_id:   r.to_account_id   || "",

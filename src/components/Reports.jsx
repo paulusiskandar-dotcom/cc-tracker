@@ -84,7 +84,7 @@ export default function Reports({ user, ledger, accounts, dark }) {
 
   // ── Net worth trend ─────────────────────────────────────────
   const netWorthData = useMemo(() => {
-    const bankNow  = accounts.filter(a => a.type === "bank" || a.type === "debit_card").reduce((s, a) => s + Number(a.current_balance || 0), 0);
+    const bankNow  = accounts.filter(a => a.type === "bank").reduce((s, a) => s + Number(a.current_balance || 0), 0);
     const assetNow = accounts.filter(a => a.type === "asset").reduce((s, a) => s + Number(a.current_value || 0), 0);
     const ccNow    = accounts.filter(a => a.type === "credit_card").reduce((s, a) => s + Number(a.current_balance || 0), 0);
     const liabNow  = accounts.filter(a => a.type === "liability").reduce((s, a) => s + Number(a.outstanding_amount || 0), 0);
@@ -365,7 +365,7 @@ export default function Reports({ user, ledger, accounts, dark }) {
             <SectionHeader title="Current Portfolio Breakdown" />
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
               {[
-                { label: "Bank Accounts", value: accounts.filter(a => a.type === "bank" || a.type === "debit_card").reduce((s, a) => s + Number(a.current_balance || 0), 0), color: "#3b5bdb" },
+                { label: "Bank Accounts", value: accounts.filter(a => a.type === "bank").reduce((s, a) => s + Number(a.current_balance || 0), 0), color: "#3b5bdb" },
                 { label: "Assets",        value: accounts.filter(a => a.type === "asset").reduce((s, a) => s + Number(a.current_value || 0), 0), color: "#059669" },
                 { label: "Receivables",   value: accounts.filter(a => a.type === "receivable").reduce((s, a) => s + Number(a.outstanding_amount || 0), 0), color: "#0891b2" },
                 { label: "CC Debt",       value: -accounts.filter(a => a.type === "credit_card").reduce((s, a) => s + Math.max(0, Number(a.current_balance || 0)), 0), color: "#e67700" },

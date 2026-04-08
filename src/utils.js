@@ -92,7 +92,7 @@ export const calcNetWorth = (accounts) => {
 
   for (const a of accounts) {
     if (!a.is_active) continue;
-    if (a.type === "bank" || a.type === "debit_card") {
+    if (a.type === "bank") {
       bank += Number(a.current_balance || 0);
     } else if (a.type === "credit_card") {
       ccDebt += Number(a.current_balance || 0);

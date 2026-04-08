@@ -95,7 +95,7 @@ export default function Assets({ user, accounts, ledger, onRefresh, setAccounts,
   // ── DERIVED ────────────────────────────────────────────────
   const assets      = useMemo(() => accounts.filter(a => a.type === "asset"),       [accounts]);
   const liabilities = useMemo(() => accounts.filter(a => a.type === "liability"),   [accounts]);
-  const bankAccounts= useMemo(() => accounts.filter(a => a.type === "bank" || a.type === "debit_card"), [accounts]);
+  const bankAccounts= useMemo(() => accounts.filter(a => a.type === "bank"), [accounts]);
 
   const totalAssets   = assets.reduce((s, a) => s + Number(a.current_value || 0), 0);
   const totalLiab     = liabilities.reduce((s, l) => s + Number(l.outstanding_amount || 0), 0);
@@ -152,7 +152,8 @@ export default function Assets({ user, accounts, ledger, onRefresh, setAccounts,
       return showToast("Fill all required fields", "error");
     setSaving(true);
     try {
-      const amt  = Number(payForm.amount);
+      const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
+      const amt  = sn(payForm.amount);
       const liab = accounts.find(a => a.id === payForm.liabId);
       const entry = {
         date:            payForm.date,

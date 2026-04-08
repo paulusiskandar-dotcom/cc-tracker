@@ -20,7 +20,6 @@ export const ENTITIES = ["Personal", "Hamasa", "SDC", "Travelio"];
 export const ACC_TYPES = {
   BANK:        "bank",
   CREDIT_CARD: "credit_card",
-  DEBIT_CARD:  "debit_card",
   ASSET:       "asset",
   LIABILITY:   "liability",
   RECEIVABLE:  "receivable",
@@ -29,7 +28,6 @@ export const ACC_TYPES = {
 export const ACC_TYPE_LABEL = {
   bank:        "Bank Account",
   credit_card: "Credit Card",
-  debit_card:  "Debit Card",
   asset:       "Asset",
   liability:   "Liability",
   receivable:  "Receivable",
@@ -38,7 +36,6 @@ export const ACC_TYPE_LABEL = {
 export const ACC_TYPE_ICON = {
   bank:        "🏦",
   credit_card: "💳",
-  debit_card:  "💳",
   asset:       "📈",
   liability:   "📉",
   receivable:  "📋",

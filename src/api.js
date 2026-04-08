@@ -2,9 +2,9 @@ import { supabase } from "./lib/supabase";
 
 // ─── BALANCE FIELD PER ACCOUNT TYPE ───────────────────────────
 const balField = (type) => {
-  if (type === "bank" || type === "debit_card") return "current_balance";
-  if (type === "credit_card")                   return "current_balance";
-  if (type === "asset")                         return "current_value";
+  if (type === "bank")                               return "current_balance";
+  if (type === "credit_card")                        return "current_balance";
+  if (type === "asset")                              return "current_value";
   if (type === "liability" || type === "receivable") return "outstanding_amount";
   return null;
 };
@@ -14,19 +14,19 @@ const balField = (type) => {
 const getDeltas = (txType, amount) => {
   const a = amount;
   const map = {
-    expense:         { from: { bank: -a, debit_card: -a, credit_card: +a }, to: null },
-    income:          { from: null, to: { bank: +a, debit_card: +a } },
-    transfer:        { from: { bank: -a, debit_card: -a }, to: { bank: +a, debit_card: +a } },
-    pay_cc:          { from: { bank: -a, debit_card: -a }, to: { credit_card: -a } },
-    buy_asset:       { from: { bank: -a, debit_card: -a, credit_card: +a }, to: { asset: +a } },
-    sell_asset:      { from: { asset: -a }, to: { bank: +a, debit_card: +a } },
-    pay_liability:   { from: { bank: -a, debit_card: -a }, to: { liability: -a } },
-    reimburse_out:   { from: { bank: -a, debit_card: -a, credit_card: +a }, to: { receivable: +a } },
-    reimburse_in:    { from: { receivable: -a }, to: { bank: +a, debit_card: +a } },
-    give_loan:       { from: { bank: -a, debit_card: -a }, to: { receivable: +a } },
-    collect_loan:    { from: { receivable: -a }, to: { bank: +a, debit_card: +a } },
-    fx_exchange:     { from: { bank: -a, debit_card: -a }, to: { bank: +a, debit_card: +a } },
-    opening_balance: { from: null, to: { bank: +a, debit_card: +a, credit_card: +a, asset: +a, liability: +a, receivable: +a } },
+    expense:         { from: { bank: -a, credit_card: +a }, to: null },
+    income:          { from: null,        to: { bank: +a } },
+    transfer:        { from: { bank: -a }, to: { bank: +a } },
+    pay_cc:          { from: { bank: -a }, to: { credit_card: -a } },
+    buy_asset:       { from: { bank: -a, credit_card: +a }, to: { asset: +a } },
+    sell_asset:      { from: { asset: -a }, to: { bank: +a } },
+    pay_liability:   { from: { bank: -a }, to: { liability: -a } },
+    reimburse_out:   { from: { bank: -a, credit_card: +a }, to: { receivable: +a } },
+    reimburse_in:    { from: { receivable: -a }, to: { bank: +a } },
+    give_loan:       { from: { bank: -a }, to: { receivable: +a } },
+    collect_loan:    { from: { receivable: -a }, to: { bank: +a } },
+    fx_exchange:     { from: { bank: -a }, to: { bank: +a } },
+    opening_balance: { from: null, to: { bank: +a, credit_card: +a, asset: +a, liability: +a, receivable: +a } },
     cc_installment:  { from: { credit_card: +a }, to: null },
   };
   return map[txType] || { from: null, to: null };
@@ -61,8 +61,9 @@ export const accountsApi = {
       .from("accounts")
       .select("*")
       .eq("user_id", userId)
-      .eq("is_active", true)
-      .order("sort_order");
+      .neq("is_active", false)
+      .order("sort_order", { nullsLast: true })
+      .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
     return data || [];
   },
@@ -82,7 +83,7 @@ export const accountsApi = {
   create: async (userId, d) => {
     const { data, error } = await supabase
       .from("accounts")
-      .insert([{ ...d, user_id: userId }])
+      .insert([{ ...d, user_id: userId, is_active: true }])
       .select()
       .single();
     if (error) throw new Error(error.message);
