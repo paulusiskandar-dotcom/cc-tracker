@@ -248,23 +248,24 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
           : String(amount);
 
         return {
-          _id:         i,
-          tx_date:     txDate,
-          description: desc,
-          amount:      String(amount),        // original foreign amount (or IDR)
+          _id:          i,
+          tx_date:      txDate,
+          description:  desc,
+          merchant_name: r.merchant_name || "",
+          amount:       String(amount),        // original foreign amount (or IDR)
           currency,
-          fx_rate:     fxRate,               // editable rate
-          amount_idr:  amtIDR,               // IDR equivalent, auto-recalculated
-          tx_type:     txType,
-          from_id:     fromId,
-          to_id:       toId,
-          entity:      REIMBURSE_ENTITIES.includes(r.entity) ? r.entity : "Hamasa",
-          category_id: catId,
-          ai_category: aiCatId,
-          learned_cat: learnedCat,
-          notes:       r.notes || "",
+          fx_rate:      fxRate,               // editable rate
+          amount_idr:   amtIDR,               // IDR equivalent, auto-recalculated
+          tx_type:      txType,
+          from_id:      fromId,
+          to_id:        toId,
+          entity:       REIMBURSE_ENTITIES.includes(r.entity) ? r.entity : "Hamasa",
+          category_id:  catId,
+          ai_category:  aiCatId,
+          learned_cat:  learnedCat,
+          notes:        r.notes || "",
           flagged,
-          status:      checkDuplicate(txDate, amtIDR, desc) ? "possible_duplicate" : "new",
+          status:       checkDuplicate(txDate, amtIDR, desc) ? "possible_duplicate" : "new",
         };
       });
       setResults(items);
@@ -595,13 +596,16 @@ function DesktopTable({
   const hasReimburse = results.some(r => REIMBURSE_TYPES.has(r.tx_type) || r.flagged);
 
   // Build columns dynamically based on optional Entity + FX columns
-  // Base: ☑=44 Date=72 Desc=flex Type=130 Cat=140 Acc=180 Amt=110 Actions=90
-  let cols = "44px 72px 1fr 130px 140px 180px";
+  // Base: ☑=3% Date=7% Desc=22% Type=10% Cat=12% Acc=16% Amt=12% Actions=6%
+  // When entity present: borrow 4% from Desc
+  // When FX present: add Rate=7% IDR=9% cols (replace Amount col)
+  const descPct = hasReimburse && hasFX ? "12%" : hasReimburse || hasFX ? "17%" : "22%";
+  let cols = `3% 7% ${descPct} 10% 12% 16%`;
   let hdr  = ["Date", "Description", "Type", "Category", "Account"];
-  if (hasReimburse) { cols += " 90px"; hdr.push("Entity"); }
-  if (hasFX)        { cols += " 80px 100px"; hdr.push("Rate", "≈ IDR"); }
-  else              { cols += " 110px"; hdr.push("Amount"); }
-  cols += " 90px"; hdr.push("");
+  if (hasReimburse) { cols += " 7%"; hdr.push("Entity"); }
+  if (hasFX)        { cols += " 7% 9%"; hdr.push("Rate", "≈ IDR"); }
+  else              { cols += " 12%"; hdr.push("Amount"); }
+  cols += " 9%"; hdr.push("");
   const COLS = cols;
   const HDR  = hdr;
 
@@ -817,12 +821,18 @@ function DesktopTable({
                     <AmountCell r={r} color={color} T={T} updateRow={updateRow} />
                   )}
 
-                  {/* Actions — ✓ import + ✕ skip only */}
-                  <div style={{ padding: "4px 8px", display: "flex", gap: 4, justifyContent: "flex-end" }}>
+                  {/* Actions — ✏️ notes + ✓ import + ✕ skip */}
+                  <div style={{ padding: "4px 4px", display: "flex", gap: 3, justifyContent: "flex-end" }}>
+                    <button
+                      onClick={() => toggleNotes(r._id)}
+                      style={ACT_BTN({ background: isNotes ? "#dbeafe" : "#f9fafb", color: isNotes ? "#3b5bdb" : "#6b7280", width: 28, height: 28 })}
+                      title="Notes">
+                      ✏️
+                    </button>
                     <button
                       onClick={() => importOne(r)}
                       disabled={isSkipped || importingId === r._id}
-                      style={ACT_BTN({ background: "#dcfce7", color: "#059669", border: "1px solid #bbf7d0", width: 32, height: 32 })}
+                      style={ACT_BTN({ background: "#dcfce7", color: "#059669", border: "1px solid #bbf7d0", width: 28, height: 28 })}
                       title="Import">
                       {importingId === r._id ? "…" : "✓"}
                     </button>
@@ -831,7 +841,7 @@ function DesktopTable({
                         setSkipped(s => { const ns = new Set(s); ns.has(r._id) ? ns.delete(r._id) : ns.add(r._id); return ns; });
                         setSelected(s => ({ ...s, [r._id]: false }));
                       }}
-                      style={ACT_BTN({ color: isSkipped ? "#059669" : "#9ca3af", width: 32, height: 32 })}
+                      style={ACT_BTN({ color: isSkipped ? "#059669" : "#9ca3af", width: 28, height: 28 })}
                       title={isSkipped ? "Restore" : "Skip"}>
                       {isSkipped ? "↩" : "✕"}
                     </button>
