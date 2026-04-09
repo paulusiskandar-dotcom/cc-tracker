@@ -18,6 +18,7 @@ import Assets       from "./components/Assets";
 import Receivables  from "./components/Receivables";
 import Income       from "./components/Income";
 import Reports      from "./components/Reports";
+import Calendar     from "./components/Calendar";
 import Settings     from "./components/Settings";
 import AIImport     from "./components/AIImport";
 
@@ -323,6 +324,7 @@ function Finance({ user, signOut }) {
       case "receivables":  return <Receivables  {...shared} />;
       case "income":       return <Income       {...shared} />;
       case "reports":      return <Reports      {...shared} />;
+      case "calendar":     return <Calendar     {...shared} />;
       case "settings":     return <Settings     {...shared} signOut={signOut} />;
       case "aiimport":     return <AIImport     {...shared} />;
       default:             return <Dashboard    {...shared} />;

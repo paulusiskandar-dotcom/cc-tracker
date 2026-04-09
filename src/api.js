@@ -519,7 +519,7 @@ export const settingsApi = {
 // ─── SCAN BATCHES ─────────────────────────────────────────────
 export const scanApi = {
   // Scan a file (image/PDF) via AI proxy → returns array of transaction objects
-  scan: async (userId, file) => {
+  scan: async (userId, file, { accounts = [], employeeLoans = [] } = {}) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = async (e) => {
@@ -541,6 +541,14 @@ export const scanApi = {
               file_base64: base64,
               file_mime: mime,
               file_name: file.name,
+              accounts: accounts.map(a => ({
+                id: a.id, name: a.name, type: a.type,
+                bank_name: a.bank_name, account_no: a.account_no,
+                last4: a.last4, entity: a.entity,
+              })),
+              employee_loans: employeeLoans.map(l => ({
+                id: l.id, employee_name: l.employee_name,
+              })),
             }),
           });
           if (!r.ok) { const e2 = await r.json().catch(() => ({})); throw new Error(e2.error || `HTTP ${r.status}`); }

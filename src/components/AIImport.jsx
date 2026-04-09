@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { ledgerApi, gmailApi, scanApi, getTxFromToTypes } from "../api";
+import { ledgerApi, gmailApi, scanApi, merchantApi, getTxFromToTypes } from "../api";
 import { fmtIDR, todayStr } from "../utils";
 import { LIGHT, DARK } from "../theme";
 import { Modal, Button, Field, Input, AmountInput, FormRow, Select, EmptyState, Spinner, showToast } from "./shared/index";
@@ -107,7 +107,14 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
           notes:           r.notes || "",
         };
         const created = await ledgerApi.create(user.id, entry, accounts);
-        if (created) { setLedger(prev => [created, ...prev]); ok++; }
+        if (created) {
+          setLedger(prev => [created, ...prev]);
+          ok++;
+          // Merchant learning: remember description→category mapping
+          if (r.description && (r.category || entry.category_name)) {
+            merchantApi.upsert(user.id, r.description, r.category || entry.category_name, r.category || entry.category_name).catch(() => {});
+          }
+        }
       } catch { /* continue */ }
     }
     await onRefresh();

@@ -18,6 +18,7 @@ export default function Dashboard({
   const [confirmTarget, setConfirmTarget] = useState(null);  // { reminder, tmpl, editMode }
   const [confirmForm,   setConfirmForm]   = useState({ date: todayStr(), amount: "", notes: "" });
   const [confirmSaving, setConfirmSaving] = useState(false);
+  const [dismissed,     setDismissed]     = useState(new Set()); // dismissed upcoming item ids
 
   // ─── DERIVED STATS ───────────────────────────────────────────
   const nw = netWorth || { total: 0, bank: 0, assets: 0, receivables: 0, ccDebt: 0, liabilities: 0 };
@@ -170,9 +171,10 @@ export default function Dashboard({
       });
 
     return all
+      .filter(item => !dismissed.has(item.id))
       .sort((a, b) => a.date.localeCompare(b.date) || (a.type === "installment" ? 1 : -1))
       .slice(0, 10);
-  }, [reminders, loansWithStats, receivables, installments, creditCards]);
+  }, [reminders, loansWithStats, receivables, installments, creditCards, dismissed]);
 
   // Group upcoming by date
   const upcomingGroups = useMemo(() => {
@@ -272,13 +274,30 @@ export default function Dashboard({
     }
   };
 
+  const dismissUpcoming = (itemId) => {
+    setDismissed(prev => new Set([...prev, itemId]));
+  };
+
   // ─── RENDER ──────────────────────────────────────────────────
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
 
-      {/* ── GREETING ── */}
-      <div style={{ fontSize: 15, fontWeight: 600, color: "#6b7280", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>
-        {getGreeting()}, Paulus 👋
+      {/* ── GREETING + CAMERA BUTTON ── */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ fontSize: 15, fontWeight: 600, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
+          {getGreeting()}, Paulus 👋
+        </div>
+        <button
+          onClick={() => setTab?.("aiimport")}
+          title="AI Import"
+          style={{
+            background: "#111827", border: "none", borderRadius: 10,
+            width: 36, height: 36, cursor: "pointer", fontSize: 17,
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          📷
+        </button>
       </div>
 
       {/* ── GMAIL PENDING BANNER ── */}
@@ -466,13 +485,20 @@ export default function Dashboard({
                       <UpcomingRow
                         key={item.id}
                         item={item}
-                        onConfirm={item.type === "reminder" ? () => openConfirmModal(item.raw) : null}
-                        onEdit={item.type === "reminder" ? () => openConfirmModal(item.raw, true) : null}
-                        onSkip={item.type === "reminder" ? () => skipReminder(item.raw) : null}
-                        onNavigate={
-                          item.type === "loan" || item.type === "receivable"
-                            ? () => setTab?.("receivables")
-                            : null
+                        onEdit={
+                          item.type === "reminder"   ? () => openConfirmModal(item.raw, true) :
+                          item.type === "loan" || item.type === "receivable" ? () => setTab?.("receivables") :
+                          null
+                        }
+                        onConfirm={
+                          item.type === "reminder"   ? () => openConfirmModal(item.raw) :
+                          item.type === "loan" || item.type === "receivable" ? () => setTab?.("receivables") :
+                          null
+                        }
+                        onSkip={
+                          item.type === "reminder"   ? () => skipReminder(item.raw) :
+                          item.type === "loan" || item.type === "receivable" ? () => dismissUpcoming(item.id) :
+                          null
                         }
                       />
                     ))}
@@ -583,7 +609,7 @@ export default function Dashboard({
 }
 
 // ─── UPCOMING ROW ─────────────────────────────────────────────
-function UpcomingRow({ item, onConfirm, onEdit, onSkip, onNavigate }) {
+function UpcomingRow({ item, onConfirm, onEdit, onSkip }) {
   const isInfo = item.infoOnly;
   return (
     <div style={{
@@ -656,9 +682,6 @@ function UpcomingRow({ item, onConfirm, onEdit, onSkip, onNavigate }) {
           )}
           {onSkip && (
             <button onClick={onSkip} style={RUPT_GHOST} title="Skip">✕</button>
-          )}
-          {onNavigate && (
-            <button onClick={onNavigate} style={RUPT_GHOST} title="View">→</button>
           )}
         </div>
       )}

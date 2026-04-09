@@ -145,6 +145,7 @@ export const TABS = [
   { id: "receivables",  icon: "◎",  label: "Receivables" },
   { id: "income",       icon: "↓",  label: "Income" },
   { id: "reports",      icon: "◻",  label: "Reports" },
+  { id: "calendar",     icon: "📅", label: "Calendar" },
   { id: "settings",     icon: "◑",  label: "Settings" },
 ];
 
@@ -154,6 +155,7 @@ export const MOBILE_MORE_TABS = [
   { id: "receivables", label: "Receivables" },
   { id: "income",      label: "Income" },
   { id: "reports",     label: "Reports" },
+  { id: "calendar",    label: "Calendar" },
   { id: "settings",    label: "Settings" },
 ];
 
