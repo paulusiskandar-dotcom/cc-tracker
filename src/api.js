@@ -633,13 +633,18 @@ export const scanApi = {
           const prompt = `You are a financial transaction extractor. Extract ALL transactions from this document.
 
 ${accountsCtx ? `Known accounts:\n${accountsCtx}\n` : ""}${loansCtx ? `Employee loans:\n${loansCtx}\n` : ""}
+IMPORTANT RULES:
+- Account number 0830267743 is "BCA Reimburse" — any credit/incoming to this account is type "reimburse_in"
+- If account name or description includes "reimburse", treat as reimburse_in (credit) or reimburse_out (debit)
+- For reimburse_in, from_account_id = the receivable/reimburse account id, to_account_id = bank account
+
 Return a JSON object with a "transactions" array. Each item must have:
 - date: "YYYY-MM-DD"
 - description: merchant or narration
 - amount: number (positive)
 - currency: "IDR" (or detected currency code)
 - amount_idr: number in IDR (use 1:1 if IDR)
-- type: one of expense|income|transfer|pay_cc|bank_interest|cashback|bank_charges|materai|tax
+- type: one of expense|income|transfer|pay_cc|reimburse_in|reimburse_out|bank_interest|cashback|bank_charges|materai|tax
 - from_account_id: matched account id or null
 - to_account_id: matched account id or null
 - category: expense category slug (food|transport|health|shopping|home|education|entertainment|business|finance|family|social|cash_advance_fee|other)

@@ -44,18 +44,20 @@ export const ACC_TYPE_ICON = {
 // ─── ASSET SUBTYPES ───────────────────────────────────────────
 export const ASSET_SUBTYPES = [
   "Property", "Vehicle", "Stock", "Mutual Fund",
-  "Crypto", "Gold", "Deposit", "Valuables", "FX/Cash",
+  "Crypto", "Gold", "Deposit", "Valuables", "FX/Cash", "PT Investment",
 ];
 
 export const ASSET_ICON = {
   Property: "🏠", Vehicle: "🚗", Stock: "📈", "Mutual Fund": "💼",
   Crypto: "🪙", Gold: "🏅", Deposit: "🏦", Valuables: "💎", "FX/Cash": "💵",
+  "PT Investment": "🏢",
 };
 
 export const ASSET_COL = {
   Property: "#3b5bdb", Vehicle: "#0891b2", Stock: "#059669",
   "Mutual Fund": "#7c3aed", Crypto: "#d97706", Gold: "#d4a017",
   Deposit: "#2563eb", Valuables: "#9333ea", "FX/Cash": "#0891b2",
+  "PT Investment": "#1d4ed8",
 };
 
 // ─── LIABILITY SUBTYPES ───────────────────────────────────────

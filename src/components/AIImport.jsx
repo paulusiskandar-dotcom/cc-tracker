@@ -83,6 +83,14 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
   const updateRow = (id, patch) =>
     setResults(prev => prev.map(r => r._id === id ? { ...r, ...patch } : r));
 
+  // ── Detect if an account is a reimburse account ──────────────
+  const isReimburseAccount = (acc) =>
+    String(acc.account_no || "").includes("0830267743") ||
+    acc.name?.toLowerCase().includes("reimburse") ||
+    acc.subtype === "reimburse";
+
+  const reimburseAccounts = accounts.filter(isReimburseAccount);
+
   // ── File scan ──────────────────────────────────────────────
   const handleFile = async (file) => {
     if (!file) return;
@@ -94,12 +102,32 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
     try {
       const parsed = await scanApi.scan(user.id, file, { accounts });
       const items = (parsed || []).map((r, i) => {
-        const txType = r.type || r.tx_type || "expense";
+        let txType = r.type || r.tx_type || "expense";
         // Default from/to based on type
         const defaultFrom = SHOW_EXPENSE_CAT.has(txType) || txType === "pay_cc" || txType === "reimburse_out"
           ? (spendAccounts[0]?.id || "") : "";
         const defaultTo = SHOW_INCOME_CAT.has(txType) || txType === "transfer" || txType === "reimburse_in"
           ? (bankAccounts[0]?.id || "") : "";
+        let fromId = r.from_account_id || defaultFrom;
+        let toId   = r.to_account_id   || defaultTo;
+        let flagged = false;
+
+        // Auto-detect reimburse_in: if to_account matches a reimburse account
+        if (txType !== "reimburse_in" && toId) {
+          const toAcc = accounts.find(a => a.id === toId);
+          if (toAcc && isReimburseAccount(toAcc)) {
+            txType = "reimburse_in";
+            flagged = true;
+          }
+        }
+        // Also detect by from_account for reimburse_in (credit to bank from receivable)
+        if (txType === "reimburse_in" && fromId) {
+          const fromAcc = accounts.find(a => a.id === fromId);
+          if (fromAcc && isReimburseAccount(fromAcc)) flagged = true;
+        }
+        // If AI returned reimburse_in, mark as flagged
+        if (txType === "reimburse_in") flagged = true;
+
         // Category: use AI suggestion directly (ids match slugs)
         const catId = r.category || r.suggested_category || "other";
         return {
@@ -110,12 +138,13 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
           currency:    r.currency || "IDR",
           amount_idr:  String(r.amount_idr || r.amount || ""),
           tx_type:     txType,
-          from_id:     r.from_account_id || defaultFrom,
-          to_id:       r.to_account_id   || defaultTo,
+          from_id:     fromId,
+          to_id:       toId,
           entity:      REIMBURSE_ENTITIES.includes(r.entity) ? r.entity : "Hamasa",
           category_id: NO_CAT.has(txType) ? null : catId,
           ai_category: catId, // remember AI suggestion for badge
           notes:       r.notes || "",
+          flagged,
         };
       });
       setResults(items);
@@ -329,8 +358,8 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
 
                 return (
                   <div key={r._id} style={{
-                    border: `1.5px solid ${isSkipped ? T.border : isSelected ? "#3b5bdb44" : T.border}`,
-                    borderRadius: 12, background: T.surface,
+                    border: `1.5px solid ${isSkipped ? T.border : r.flagged ? "#f97316" : isSelected ? "#3b5bdb44" : T.border}`,
+                    borderRadius: 12, background: r.flagged ? "#fff7ed" : T.surface,
                     opacity: isSkipped ? 0.45 : 1,
                     transition: "opacity .15s",
                   }}>
@@ -467,8 +496,8 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
                           <AccountSelectors r={r} updateRow={updateRow} T={T}
                             bankAccounts={bankAccounts} ccAccounts={ccAccounts} spendAccounts={spendAccounts} />
 
-                          {/* Entity — reimburse only */}
-                          {REIMBURSE_TYPES.has(r.tx_type) && (
+                          {/* Entity — reimburse types or flagged rows */}
+                          {(REIMBURSE_TYPES.has(r.tx_type) || r.flagged) && (
                             <div style={{ flex: "1 1 160px" }}>
                               <label style={LBL}>Entity</label>
                               <div style={{ display: "flex", gap: 4 }}>

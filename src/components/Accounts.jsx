@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
-import { accountsApi, accountCurrenciesApi } from "../api";
+import { accountsApi, accountCurrenciesApi, ledgerApi, getTxFromToTypes } from "../api";
 import {
-  ENTITIES, BANKS_L, NETWORKS, ASSET_SUBTYPES, LIAB_SUBTYPES,
+  BANKS_L, NETWORKS, ASSET_SUBTYPES, LIAB_SUBTYPES,
   ACC_TYPE_LABEL, ACC_TYPE_ICON,
 } from "../constants";
 import { fmtIDR, fmtCur } from "../utils";
@@ -48,7 +48,7 @@ export default function Accounts({
   setAccounts, setAccountCurrencies, accountCurrencies = [], CURRENCIES = [], fxRates = {},
 }) {
   const [subTab,   setSubTab]   = useState("all");
-  const [modal,    setModal]    = useState(null); // null | "add" | "edit" | "history" | "delete"
+  const [modal,    setModal]    = useState(null); // null | "add" | "edit" | "history" | "delete" | "updateNilai"
   const [step,     setStep]     = useState(1);
   const [formType, setFormType] = useState("bank");
   const [editAcc,  setEditAcc]  = useState(null);
@@ -56,6 +56,10 @@ export default function Accounts({
   const [saving,   setSaving]   = useState(false);
   const [histAcc,  setHistAcc]  = useState(null);
   const [deleteAcc, setDeleteAcc] = useState(null);
+  // PT Investment "Update Nilai"
+  const [nilaiAcc,  setNilaiAcc]  = useState(null);
+  const [nilaiForm, setNilaiForm] = useState({ value: "", date: "", notes: "" });
+  const [nilaiSaving, setNilaiSaving] = useState(false);
 
   // ─── FILTERED ACCOUNTS ──────────────────────────────────────
   const filtered = useMemo(() => {
@@ -138,10 +142,11 @@ export default function Accounts({
 
       let savedAccount;
       if (editAcc) {
-        // For cash type, map back to bank
-        const updateData = formType === "cash"
+        // For cash type, map back to bank; strip entity for non-receivable
+        let updateData = formType === "cash"
           ? { ...clean, type: "bank", subtype: "cash" }
-          : clean;
+          : { ...clean };
+        if (formType !== "receivable") updateData.entity = null;
         savedAccount = await accountsApi.update(editAcc.id, updateData);
         setAccounts(p => p.map(a => a.id === editAcc.id ? savedAccount : a));
         showToast("Account updated");
@@ -155,7 +160,7 @@ export default function Accounts({
             currency:        form.currency || "IDR",
             initial_balance: sn(form.initial_balance),
             current_balance: sn(form.initial_balance),
-            entity:          form.entity || "Personal",
+            entity:          null,
             notes:           form.notes || null,
             include_networth: true,
             is_active:       true,
@@ -173,11 +178,29 @@ export default function Accounts({
             sort_order:             accounts.length,
           };
         } else {
-          insertData = { ...clean, type: formType, is_active: true, sort_order: accounts.length };
+          insertData = { ...clean, type: formType, entity: null, is_active: true, sort_order: accounts.length };
         }
         savedAccount = await accountsApi.create(user.id, insertData);
         setAccounts(p => [...p, savedAccount]);
         showToast("Account created");
+
+        // PT Investment: create buy_asset ledger entry if "Deduct from bank?" is checked
+        if (formType === "asset" && form.subtype === "PT Investment" && form.deductFromBank && form.bankDeductId && savedAccount?.id) {
+          try {
+            const { from_type, to_type } = getTxFromToTypes("buy_asset");
+            await ledgerApi.create(user.id, {
+              tx_type:     "buy_asset",
+              tx_date:     form.purchase_date || new Date().toISOString().slice(0, 10),
+              amount:      sn(form.purchase_price),
+              amount_idr:  sn(form.purchase_price),
+              description: `Invest: ${form.name?.trim()}`,
+              from_id:     form.bankDeductId,
+              to_id:       savedAccount.id,
+              from_type,
+              to_type,
+            }, accounts);
+          } catch (le) { showToast("Account created but ledger entry failed: " + le.message, "error"); }
+        }
       }
 
       // Handle multicurrency fx balances
@@ -209,8 +232,29 @@ export default function Accounts({
     setDeleteAcc(null);
   };
 
+  const bankAccountsOnly = useMemo(() => accounts.filter(a => a.type === "bank" && a.subtype !== "cash"), [accounts]);
   const bankAccounts = useMemo(() => accounts.filter(a => a.type === "bank"), [accounts]);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  // ─── UPDATE NILAI (PT Investment) ────────────────────────────
+  const openUpdateNilai = (acc) => {
+    setNilaiAcc(acc);
+    setNilaiForm({ value: String(acc.current_value || ""), date: new Date().toISOString().slice(0, 10), notes: "" });
+    setModal("updateNilai");
+  };
+
+  const saveNilai = async () => {
+    if (!nilaiAcc) return;
+    const newValue = Number(nilaiForm.value) || 0;
+    setNilaiSaving(true);
+    try {
+      const updated = await accountsApi.update(nilaiAcc.id, { current_value: newValue });
+      setAccounts(p => p.map(a => a.id === nilaiAcc.id ? updated : a));
+      showToast("Nilai updated");
+      setModal(null);
+    } catch (e) { showToast(e.message, "error"); }
+    setNilaiSaving(false);
+  };
 
   // ─── RENDER ──────────────────────────────────────────────────
   return (
@@ -290,6 +334,7 @@ export default function Accounts({
               onEdit={() => openEdit(a)}
               onDelete={() => setDeleteAcc(a)}
               onHistory={() => { setHistAcc(a); setModal("history"); }}
+              onUpdateNilai={() => openUpdateNilai(a)}
             />
           ))}
         </div>
@@ -397,12 +442,44 @@ export default function Accounts({
         danger
       />
 
+      {/* ── UPDATE NILAI MODAL (PT Investment) ── */}
+      <Modal
+        isOpen={modal === "updateNilai"}
+        onClose={() => setModal(null)}
+        title="Update Nilai Investasi"
+        footer={
+          <Button fullWidth onClick={saveNilai} busy={nilaiSaving}>Update Nilai</Button>
+        }
+      >
+        {nilaiAcc && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ background: "#f0f9ff", borderRadius: 10, padding: "10px 14px", fontFamily: "Figtree, sans-serif" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{nilaiAcc.name}</div>
+              {nilaiAcc.interest_rate > 0 && (
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+                  Kepemilikan {nilaiAcc.interest_rate}% · Modal {fmtIDR(Number(nilaiAcc.purchase_price || 0), true)}
+                </div>
+              )}
+              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+                Nilai sekarang: {fmtIDR(Number(nilaiAcc.current_value || 0), true)}
+              </div>
+            </div>
+            <AmountInput label="Nilai Buku Baru (Rp)" value={nilaiForm.value}
+              onChange={v => setNilaiForm(f => ({ ...f, value: v }))} />
+            <Input label="Tanggal Update" type="date" value={nilaiForm.date}
+              onChange={e => setNilaiForm(f => ({ ...f, date: e.target.value }))} />
+            <Input label="Catatan (opsional)" value={nilaiForm.notes}
+              onChange={e => setNilaiForm(f => ({ ...f, notes: e.target.value }))} />
+          </div>
+        )}
+      </Modal>
+
     </div>
   );
 }
 
 // ─── ACCOUNT CARD ────────────────────────────────────────────
-function AccountCard({ account: a, ledger, accounts, accountCurrencies = [], fxRates = {}, onEdit, onDelete, onHistory }) {
+function AccountCard({ account: a, ledger, accounts, accountCurrencies = [], fxRates = {}, onEdit, onDelete, onHistory, onUpdateNilai }) {
   const isCash = a.type === "bank" && a.subtype === "cash";
   const bg    = isCash ? "#f0fdf4" : (TYPE_BG[a.type]    || "#f9fafb");
   const color = isCash ? "#059669" : (TYPE_COLOR[a.type] || "#6b7280");
@@ -492,7 +569,7 @@ function AccountCard({ account: a, ledger, accounts, accountCurrencies = [], fxR
                 {a.currency}
               </span>
             )}
-            {a.entity && a.entity !== "Personal" && (
+            {a.type === "receivable" && a.entity && a.entity !== "Personal" && (
               <span style={{
                 fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 4,
                 background: color + "18", color, fontFamily: "Figtree, sans-serif",
@@ -588,8 +665,8 @@ function AccountCard({ account: a, ledger, accounts, accountCurrencies = [], fxR
         </div>
       )}
 
-      {/* Asset gain/loss (non-Deposit) */}
-      {a.type === "asset" && a.subtype !== "Deposit" && bal.gain !== null && (
+      {/* Asset gain/loss (non-Deposit, non-PT Investment) */}
+      {a.type === "asset" && a.subtype !== "Deposit" && a.subtype !== "PT Investment" && bal.gain !== null && (
         <div style={{
           fontSize: 11, fontWeight: 600,
           color:    bal.gain >= 0 ? "#059669" : "#dc2626",
@@ -599,6 +676,43 @@ function AccountCard({ account: a, ledger, accounts, accountCurrencies = [], fxR
           {bal.pct !== null && ` (${bal.pct >= 0 ? "+" : ""}${bal.pct.toFixed(1)}%)`}
         </div>
       )}
+
+      {/* PT Investment details */}
+      {a.type === "asset" && a.subtype === "PT Investment" && (() => {
+        const capital   = Number(a.purchase_price || 0);
+        const bookVal   = Number(a.current_value || 0);
+        const ownership = Number(a.interest_rate || 0);
+        const since     = a.purchase_date ? new Date(a.purchase_date).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : null;
+        const gain      = capital > 0 ? bookVal - capital : null;
+        const gainPct   = capital > 0 ? ((bookVal - capital) / capital) * 100 : null;
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+              {ownership > 0 && (
+                <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
+                  Kepemilikan <strong style={{ color: "#374151" }}>{ownership}%</strong>
+                </span>
+              )}
+              {since && (
+                <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
+                  Sejak <strong style={{ color: "#374151" }}>{since}</strong>
+                </span>
+              )}
+            </div>
+            {capital > 0 && (
+              <div style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
+                Modal: {fmtIDR(capital, true)}
+                {gain !== null && (
+                  <span style={{ marginLeft: 8, fontWeight: 600, color: gain >= 0 ? "#059669" : "#dc2626" }}>
+                    {gain >= 0 ? "▲" : "▼"} {fmtIDR(Math.abs(gain), true)}
+                    {gainPct !== null && ` (${gainPct >= 0 ? "+" : ""}${gainPct.toFixed(1)}%)`}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Deposit card detail */}
       {a.type === "asset" && a.subtype === "Deposit" && (() => {
@@ -663,6 +777,11 @@ function AccountCard({ account: a, ledger, accounts, accountCurrencies = [], fxR
         <button onClick={onHistory} style={ACTION_BTN}>
           📋 History ({txCount})
         </button>
+        {a.type === "asset" && a.subtype === "PT Investment" && (
+          <button onClick={onUpdateNilai} style={{ ...ACTION_BTN, background: "#e8f4fd", color: "#3b5bdb", border: "1px solid #bfdbfe" }}>
+            📊 Update Nilai
+          </button>
+        )}
         <button onClick={onEdit} style={ACTION_BTN}>
           ✏️ Edit
         </button>
@@ -783,25 +902,16 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
 
       {/* CASH */}
       {type === "cash" && <>
-        <FormRow>
-          <Select label="Currency" value={form.currency || "IDR"} onChange={e => set("currency", e.target.value)}
-            options={C.map(c => ({ value: c.code, label: `${c.flag} ${c.code}` }))}
-            style={{ flex: 1 }} />
-          <Select label="Entity" value={form.entity || "Personal"} onChange={e => set("entity", e.target.value)}
-            options={ENTITIES} style={{ flex: 1 }} />
-        </FormRow>
+        <Select label="Currency" value={form.currency || "IDR"} onChange={e => set("currency", e.target.value)}
+          options={C.map(c => ({ value: c.code, label: `${c.flag} ${c.code}` }))} />
         <AmountInput label="Initial Balance" value={form.initial_balance || ""}
           onChange={v => { set("initial_balance", v); set("current_balance", v); }} />
       </>}
 
       {/* BANK */}
       {type === "bank" && <>
-        <FormRow>
-          <Select label="Bank" value={form.bank_name || "BCA"} onChange={e => set("bank_name", e.target.value)}
-            options={BANKS_L} style={{ flex: 1 }} />
-          <Select label="Entity" value={form.entity || "Personal"} onChange={e => set("entity", e.target.value)}
-            options={ENTITIES} style={{ flex: 1 }} />
-        </FormRow>
+        <Select label="Bank" value={form.bank_name || "BCA"} onChange={e => set("bank_name", e.target.value)}
+          options={BANKS_L} />
         <FormRow>
           <Input label="Account No." value={form.account_no || ""} onChange={e => set("account_no", e.target.value)}
             placeholder="Last 4 digits" style={{ flex: 1 }} />
@@ -874,12 +984,8 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
           <Select label="Network" value={form.network || "Visa"} onChange={e => set("network", e.target.value)}
             options={NETWORKS} style={{ flex: 1 }} />
         </FormRow>
-        <FormRow>
-          <Input label="Last 4 Digits" value={form.last4 || ""} onChange={e => set("last4", e.target.value)}
-            placeholder="1234" style={{ flex: 1 }} />
-          <Select label="Entity" value={form.entity || "Personal"} onChange={e => set("entity", e.target.value)}
-            options={ENTITIES} style={{ flex: 1 }} />
-        </FormRow>
+        <Input label="Last 4 Digits" value={form.last4 || ""} onChange={e => set("last4", e.target.value)}
+          placeholder="1234" />
         <AmountInput label="Credit Limit" value={form.card_limit || ""}
           onChange={v => set("card_limit", v)} />
         <AmountInput label="Monthly Spend Target (optional)" value={form.monthly_target || ""}
@@ -894,12 +1000,8 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
 
       {/* ASSET — common fields */}
       {type === "asset" && <>
-        <FormRow>
-          <Select label="Category" value={form.subtype || "Property"} onChange={e => set("subtype", e.target.value)}
-            options={ASSET_SUBTYPES} style={{ flex: 1 }} />
-          <Select label="Entity" value={form.entity || "Personal"} onChange={e => set("entity", e.target.value)}
-            options={ENTITIES} style={{ flex: 1 }} />
-        </FormRow>
+        <Select label="Category" value={form.subtype || "Property"} onChange={e => set("subtype", e.target.value)}
+          options={ASSET_SUBTYPES} />
 
         {/* Deposit-specific fields */}
         {isDeposit ? (<>
@@ -983,8 +1085,38 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
               ))}
             </div>
           )}
+        </>) : form.subtype === "PT Investment" ? (<>
+          {/* PT Investment fields */}
+          <Input label="Ownership %" type="number" value={form.interest_rate || ""}
+            onChange={e => set("interest_rate", e.target.value)} placeholder="e.g. 30" />
+          <AmountInput label="Capital Invested (Rp)" value={form.purchase_price || ""}
+            onChange={v => set("purchase_price", v)} />
+          <Input label="Investment Date" type="date" value={form.purchase_date || ""}
+            onChange={e => set("purchase_date", e.target.value)} />
+          <AmountInput label="Current Book Value (Rp)" value={form.current_value || ""}
+            onChange={v => set("current_value", v)} />
+          {/* Deduct from bank toggle */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input type="checkbox" id="deduct_bank" checked={form.deductFromBank || false}
+              onChange={e => set("deductFromBank", e.target.checked)}
+              style={{ accentColor: "#3b5bdb", width: 16, height: 16 }} />
+            <label htmlFor="deduct_bank" style={{ fontSize: 13, color: "#374151", cursor: "pointer", fontFamily: "Figtree, sans-serif" }}>
+              Deduct from bank account (creates Buy Asset entry)
+            </label>
+          </div>
+          {form.deductFromBank && (
+            <Select
+              label="Deduct from Bank"
+              value={form.bankDeductId || ""}
+              onChange={e => set("bankDeductId", e.target.value)}
+              options={[
+                { value: "", label: "— select bank —" },
+                ...(bankAccounts || []).map(b => ({ value: b.id, label: b.name })),
+              ]}
+            />
+          )}
         </>) : (<>
-          {/* Non-deposit asset fields */}
+          {/* Non-deposit, non-PT asset fields */}
           <AmountInput label="Current Value" value={form.current_value || ""}
             onChange={v => set("current_value", v)} />
           <AmountInput label="Purchase Price (optional)" value={form.purchase_price || ""}
@@ -996,12 +1128,8 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
 
       {/* LIABILITY */}
       {type === "liability" && <>
-        <FormRow>
-          <Select label="Type" value={form.subtype || "Mortgage"} onChange={e => set("subtype", e.target.value)}
-            options={LIAB_SUBTYPES} style={{ flex: 1 }} />
-          <Select label="Entity" value={form.entity || "Personal"} onChange={e => set("entity", e.target.value)}
-            options={ENTITIES} style={{ flex: 1 }} />
-        </FormRow>
+        <Select label="Type" value={form.subtype || "Mortgage"} onChange={e => set("subtype", e.target.value)}
+          options={LIAB_SUBTYPES} />
         <Input label="Creditor / Lender" value={form.creditor || ""} onChange={e => set("creditor", e.target.value)}
           placeholder="e.g. BCA" />
         <FormRow>
@@ -1065,7 +1193,7 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
 
 // ─── EMPTY FORM DEFAULTS ─────────────────────────────────────
 function emptyForm(type) {
-  const base = { name: "", entity: "Personal", color: "#3b5bdb", notes: "", is_active: true };
+  const base = { name: "", color: "#3b5bdb", notes: "", is_active: true };
   switch (type) {
     case "bank":        return { ...base, bank_name: "BCA", account_no: "", currency: "IDR", initial_balance: "", current_balance: 0, include_networth: true, is_multicurrency: false, fxBalances: [] };
     case "cash":        return { ...base, currency: "IDR", initial_balance: "", current_balance: 0 };
