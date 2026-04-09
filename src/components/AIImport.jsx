@@ -257,8 +257,21 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
 
         let aiCatId  = r.category || r.suggested_category || "other";
         const txDate = r.date || r.tx_date || todayStr();
-        const amount = r.amount_idr || r.amount || 0;
         const desc   = r.description || r.merchant_name || "";
+
+        // FX setup — must happen before amount_idr calc
+        const currency = (r.currency || "IDR").toUpperCase();
+        const isFX     = currency !== "IDR";
+        const fxRate   = isFX
+          ? String(r.fx_rate_used || r.rate || getDefaultRate(currency))
+          : "1";
+        // For FX: amount = raw foreign amount (e.g. 6.66 USD)
+        // For IDR: amount = IDR amount from AI
+        const amount   = Number(r.amount || 0);
+        // Always compute IDR from rate — never trust AI's amount_idr for FX rows
+        const amtIDR   = isFX
+          ? String(Math.round(amount * Number(fxRate)))
+          : String(r.amount_idr || amount);
 
         // Normalise pseudo-types (bank_charges, materai, tax, bank_interest, cashback)
         const norm = normaliseTxType(txType, aiCatId);
@@ -271,7 +284,8 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
         if (fixed.to_account_id === null) toId = "";
 
         // Apply keyword-based auto-classification (overrides AI suggestion)
-        const kwMatch = applyKeywordRules(desc, amount);
+        // Pass IDR-equivalent for maxAmount threshold check
+        const kwMatch = applyKeywordRules(desc, isFX ? Number(amtIDR) : amount);
         if (kwMatch) {
           txType  = kwMatch.tx_type;
           aiCatId = kwMatch.category_id;
@@ -285,16 +299,6 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
           learnedCat = learned;
           if (learned.confidence >= 2) catId = learned.category_id; // confident → override
         }
-
-        const currency = (r.currency || "IDR").toUpperCase();
-        const isFX     = currency !== "IDR";
-        const fxRate   = isFX
-          ? String(r.fx_rate_used || r.rate || getDefaultRate(currency))
-          : "1";
-        // If AI gave amount_idr use it, else calculate from rate
-        const amtIDR   = isFX
-          ? String(r.amount_idr || Math.round(Number(amount) * Number(fxRate)) || amount)
-          : String(amount);
 
         return {
           _id:          i,
