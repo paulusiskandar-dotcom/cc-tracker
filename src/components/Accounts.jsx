@@ -43,6 +43,12 @@ const TYPE_COLOR = {
   receivable:  "#d97706",
 };
 
+const CARD_PALETTE = [
+  "#3b5bdb", "#0891b2", "#059669", "#d97706", "#7c3aed",
+  "#e03131", "#0f766e", "#b45309", "#1d4ed8", "#9333ea",
+  "#0e7490", "#16a34a", "#ca8a04", "#c026d3", "#0284c7",
+];
+
 export default function Accounts({
   user, accounts, ledger, onRefresh,
   setAccounts, setAccountCurrencies, accountCurrencies = [], CURRENCIES = [], fxRates = {},
@@ -325,13 +331,39 @@ export default function Accounts({
         <Button onClick={openAdd} size="sm">+ Add Account</Button>
       </div>
 
-      {/* ── SUMMARY BAR (only on "All" view) ── */}
-      {!locked && (
-        <div style={{
-          display:             "grid",
-          gridTemplateColumns: "repeat(3, 1fr)",
-          gap:                 8,
-        }}>
+      {/* ── BANK PAGE ── */}
+      {locked && initialSubTab === "bank" && (
+        filtered.length === 0
+          ? <EmptyState icon="🏦" title="No bank accounts" message="Add a bank account to get started." />
+          : <BankPageContent
+              accounts={filtered}
+              ledger={ledger}
+              accountCurrencies={accountCurrencies}
+              fxRates={fxRates}
+              onEdit={openEdit}
+              onDelete={(a) => setDeleteAcc(a)}
+              onHistory={(a) => { setHistAcc(a); setModal("history"); }}
+            />
+      )}
+
+      {/* ── CASH PAGE ── */}
+      {locked && initialSubTab === "cash" && (
+        filtered.length === 0
+          ? <EmptyState icon="💵" title="No cash accounts" message="Add a cash account to get started." />
+          : <CashPageContent
+              accounts={filtered}
+              fxRates={fxRates}
+              CURRENCIES={CURRENCIES}
+              ledger={ledger}
+              onEdit={openEdit}
+              onDelete={(a) => setDeleteAcc(a)}
+              onHistory={(a) => { setHistAcc(a); setModal("history"); }}
+            />
+      )}
+
+      {/* ── ALL ACCOUNTS (unlocked) ── */}
+      {!locked && (<>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
           {[
             { label: "Bank",        value: totals.bank,        color: "#3b5bdb", bg: "#e8f4fd" },
             { label: "CC Debt",     value: totals.cc,          color: "#dc2626", bg: "#fde8e8" },
@@ -339,11 +371,7 @@ export default function Accounts({
             { label: "Receivables", value: totals.receivables, color: "#d97706", bg: "#fdf6e8" },
             { label: "Liabilities", value: totals.liabilities, color: "#dc2626", bg: "#fff0f0" },
           ].filter(s => s.value > 0).slice(0, 3).map(s => (
-            <div key={s.label} style={{
-              background:   s.bg,
-              borderRadius: 12,
-              padding:      "12px 14px",
-            }}>
+            <div key={s.label} style={{ background: s.bg, borderRadius: 12, padding: "12px 14px" }}>
               <div style={{ fontSize: 9, fontWeight: 700, color: s.color, textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 4, opacity: 0.75 }}>
                 {s.label}
               </div>
@@ -353,85 +381,46 @@ export default function Accounts({
             </div>
           ))}
         </div>
-      )}
 
-      {/* ── Locked page summary ── */}
-      {locked && filtered.length > 0 && (() => {
-        const total = filtered.reduce((s, a) => s + Number(a.current_balance || a.current_value || 0), 0);
-        const label = subTab === "bank" ? "Bank Balance" : subTab === "cash" ? "Cash Balance"
-          : subTab === "credit_card" ? "CC Debt" : subTab === "asset" ? "Total Value"
-          : subTab === "receivable" ? "Total Receivable" : "Total";
-        const color = subTab === "credit_card" ? "#dc2626" : subTab === "receivable" ? "#d97706" : "#3b5bdb";
-        const bg    = subTab === "credit_card" ? "#fde8e8" : subTab === "receivable" ? "#fdf6e8" : "#e8f4fd";
-        return (
-          <div style={{ display: "flex", gap: 8 }}>
-            <div style={{ background: bg, borderRadius: 12, padding: "12px 14px", flex: 1 }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color, textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 4, opacity: 0.75 }}>
-                {label}
-              </div>
-              <div style={{ fontSize: 14, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
-                {fmtIDR(total, true)}
-              </div>
-            </div>
-            <div style={{ background: "#f3f4f6", borderRadius: 12, padding: "12px 14px" }}>
-              <div style={{ fontSize: 9, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 4 }}>
-                Accounts
-              </div>
-              <div style={{ fontSize: 14, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
-                {filtered.length}
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* ── SUBTABS (only on "All" view) ── */}
-      {!locked && (
         <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
           {SUBTABS.map(t => {
             const active = subTab === t.id;
             return (
               <button key={t.id} onClick={() => setSubTab(t.id)} style={{
-                height:       30,
-                padding:      "0 12px",
-                borderRadius: 20,
-                border:       `1.5px solid ${active ? "#111827" : "#e5e7eb"}`,
-                background:   active ? "#111827" : "#fff",
-                color:        active ? "#fff" : "#6b7280",
-                fontSize:     12,
-                fontWeight:   active ? 700 : 500,
-                cursor:       "pointer",
-                fontFamily:   "Figtree, sans-serif",
-                transition:   "all 0.15s",
+                height: 30, padding: "0 12px", borderRadius: 20,
+                border: `1.5px solid ${active ? "#111827" : "#e5e7eb"}`,
+                background: active ? "#111827" : "#fff",
+                color: active ? "#fff" : "#6b7280",
+                fontSize: 12, fontWeight: active ? 700 : 500,
+                cursor: "pointer", fontFamily: "Figtree, sans-serif", transition: "all 0.15s",
               }}>
                 {t.label}
               </button>
             );
-        })}
-      </div>
-      )}
-
-      {/* ── ACCOUNT LIST ── */}
-      {filtered.length === 0 ? (
-        <EmptyState icon="🏦" title="No accounts" message="Add your first account to get started." />
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {filtered.map(a => (
-            <AccountCard
-              key={a.id}
-              account={a}
-              ledger={ledger}
-              accounts={accounts}
-              accountCurrencies={accountCurrencies}
-              fxRates={fxRates}
-              onEdit={() => openEdit(a)}
-              onDelete={() => setDeleteAcc(a)}
-              onHistory={() => { setHistAcc(a); setModal("history"); }}
-              onUpdateNilai={() => openUpdateNilai(a)}
-            />
-          ))}
+          })}
         </div>
-      )}
+
+        {filtered.length === 0 ? (
+          <EmptyState icon="🏦" title="No accounts" message="Add your first account to get started." />
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {filtered.map(a => (
+              <AccountCard
+                key={a.id}
+                account={a}
+                ledger={ledger}
+                accounts={accounts}
+                accountCurrencies={accountCurrencies}
+                fxRates={fxRates}
+                onEdit={() => openEdit(a)}
+                onDelete={() => setDeleteAcc(a)}
+                onHistory={() => { setHistAcc(a); setModal("history"); }}
+                onUpdateNilai={() => openUpdateNilai(a)}
+              />
+            ))}
+          </div>
+        )}
+      </>)}
 
       {/* ── ADD / EDIT MODAL ── */}
       <Modal
@@ -567,6 +556,267 @@ export default function Accounts({
         )}
       </Modal>
 
+    </div>
+  );
+}
+
+// ─── SHARED BUTTON STYLES ────────────────────────────────────
+const ACCT_BTN = {
+  height: 30, padding: "0 12px", borderRadius: 8, border: "1px solid #e5e7eb",
+  background: "#f9fafb", color: "#374151", fontSize: 12, fontWeight: 600,
+  cursor: "pointer", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap",
+};
+
+// ─── DISTRIBUTION BAR (Bank page) ────────────────────────────
+function DistributionBar({ accounts, total }) {
+  if (total <= 0 || accounts.length === 0) return null;
+  return (
+    <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", padding: "16px 18px" }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif", marginBottom: 12 }}>
+        Distribution
+      </div>
+      {/* Stacked bar */}
+      <div style={{ display: "flex", height: 10, borderRadius: 10, overflow: "hidden", marginBottom: 14 }}>
+        {accounts.map((a, i) => {
+          const pct = (Number(a.current_balance || 0) / total) * 100;
+          return pct > 0.5 ? (
+            <div key={a.id} style={{ width: `${pct}%`, background: CARD_PALETTE[i % CARD_PALETTE.length] }} />
+          ) : null;
+        })}
+      </div>
+      {/* Legend */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+        {accounts.map((a, i) => {
+          const bal = Number(a.current_balance || 0);
+          const pct = total > 0 ? (bal / total) * 100 : 0;
+          const color = CARD_PALETTE[i % CARD_PALETTE.length];
+          return (
+            <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ width: 10, height: 10, borderRadius: 3, background: color, flexShrink: 0 }} />
+              <span style={{ fontSize: 12, color: "#374151", fontFamily: "Figtree, sans-serif", flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{a.name}</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: "#374151", fontFamily: "Figtree, sans-serif", flexShrink: 0 }}>{fmtIDR(bal, true)}</span>
+              <span style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", flexShrink: 0, minWidth: 32, textAlign: "right" }}>{pct.toFixed(0)}%</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── BANK ACCOUNT CARD ───────────────────────────────────────
+function BankAccountCard({ account: a, ledger, accountCurrencies = [], fxRates = {}, color, onEdit, onDelete, onHistory }) {
+  const txCount = ledger.filter(e => e.from_id === a.id || e.to_id === a.id).length;
+  const bal = Number(a.current_balance || 0);
+  const balColor = bal >= 0 ? "#059669" : "#dc2626";
+  const fxRows = accountCurrencies.filter(r => r.account_id === a.id);
+
+  return (
+    <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      <div style={{ height: 3, background: color }} />
+      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
+        {/* Icon + Name */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: "#e8f4fd", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>🏦</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {a.name}
+            </div>
+            <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
+              {a.bank_name || "Bank"}{a.account_no ? ` · ···${String(a.account_no).slice(-4)}` : ""}
+            </div>
+          </div>
+        </div>
+
+        {/* Balance */}
+        {a.is_multicurrency ? (
+          <div>
+            {fxRows.map(r => (
+              <div key={r.currency} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>{r.currency}</span>
+                <div style={{ textAlign: "right" }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif" }}>{fmtCur(r.balance, r.currency)}</span>
+                  {r.currency !== "IDR" && (
+                    <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginLeft: 6 }}>
+                      ≈ {fmtIDR(Number(r.balance || 0) * (fxRates[r.currency] || 1), true)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#3b5bdb", fontFamily: "Figtree, sans-serif", marginTop: 4 }}>Multi-currency</div>
+          </div>
+        ) : (
+          <div>
+            <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 3 }}>Balance</div>
+            <div style={{ fontSize: 24, fontWeight: 800, color: balColor, fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
+              {fmtIDR(Math.abs(bal))}
+            </div>
+            {a.currency && a.currency !== "IDR" && (
+              <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>{a.currency}</div>
+            )}
+          </div>
+        )}
+
+        {/* Actions */}
+        <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
+          <button onClick={onHistory} style={ACCT_BTN}>📋 {txCount}</button>
+          <button onClick={onEdit} style={{ ...ACCT_BTN, flex: 1 }}>✏️ Edit</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CASH ACCOUNT CARD ───────────────────────────────────────
+function CashAccountCard({ account: a, fxRates = {}, CURRENCIES: C = [], ledger, color, onEdit, onHistory }) {
+  const txCount = ledger.filter(e => e.from_id === a.id || e.to_id === a.id).length;
+  const bal = Number(a.current_balance || 0);
+  const cur = C.find(c => c.code === (a.currency || "IDR"));
+  const isForeign = a.currency && a.currency !== "IDR";
+  const rate = fxRates[a.currency] || (cur?.rate) || 1;
+  const idrEquiv = isForeign ? Math.round(bal * rate) : bal;
+
+  return (
+    <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      <div style={{ height: 3, background: color }} />
+      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
+        {/* Flag + Name */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: "#f0fdf4", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>
+            {cur?.flag || "💵"}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {a.name}
+            </div>
+            <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
+              {a.currency || "IDR"} Cash
+            </div>
+          </div>
+        </div>
+
+        {/* Balance */}
+        <div>
+          <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 3 }}>Balance</div>
+          {isForeign ? (
+            <>
+              <div style={{ fontSize: 22, fontWeight: 800, color: "#059669", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
+                {cur?.symbol || a.currency} {bal.toLocaleString("id-ID")}
+              </div>
+              <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 3 }}>
+                ≈ {fmtIDR(idrEquiv, true)}
+              </div>
+              <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
+                Rate: {fmtIDR(rate, true)}/{a.currency}
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize: 24, fontWeight: 800, color: "#059669", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
+              {fmtIDR(bal)}
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
+          <button onClick={onHistory} style={ACCT_BTN}>📋 {txCount}</button>
+          <button onClick={onEdit} style={{ ...ACCT_BTN, flex: 1 }}>✏️ Edit</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── BANK PAGE CONTENT ───────────────────────────────────────
+function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, onEdit, onDelete, onHistory }) {
+  const total    = accounts.reduce((s, a) => s + Number(a.current_balance || 0), 0);
+  const largest  = accounts.reduce((best, a) => Number(a.current_balance || 0) > Number(best.current_balance || 0) ? a : best, accounts[0]);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* 3 Summary cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+        {[
+          { label: "Total Bank Balance", value: fmtIDR(total, true), color: "#3b5bdb", bg: "#e8f4fd" },
+          { label: "Accounts", value: accounts.length, color: "#0891b2", bg: "#e0f7fa" },
+          { label: "Largest", value: largest?.name || "—", sub: fmtIDR(Number(largest?.current_balance || 0), true), color: "#059669", bg: "#e8fdf0" },
+        ].map(s => (
+          <div key={s.label} style={{ background: s.bg, borderRadius: 14, padding: "14px 14px" }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: s.color, textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 5, opacity: 0.8 }}>{s.label}</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif", lineHeight: 1.2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.value}</div>
+            {s.sub && <div style={{ fontSize: 11, color: s.color, fontFamily: "Figtree, sans-serif", marginTop: 2, fontWeight: 600 }}>{s.sub}</div>}
+          </div>
+        ))}
+      </div>
+
+      {/* Distribution bar */}
+      <DistributionBar accounts={accounts} total={total} />
+
+      {/* 3-col grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
+        {accounts.map((a, i) => (
+          <BankAccountCard
+            key={a.id}
+            account={a}
+            ledger={ledger}
+            accountCurrencies={accountCurrencies}
+            fxRates={fxRates}
+            color={CARD_PALETTE[i % CARD_PALETTE.length]}
+            onEdit={() => onEdit(a)}
+            onDelete={() => onDelete(a)}
+            onHistory={() => onHistory(a)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── CASH PAGE CONTENT ───────────────────────────────────────
+function CashPageContent({ accounts, fxRates, CURRENCIES: C = [], ledger, onEdit, onDelete, onHistory }) {
+  const idrAccts    = accounts.filter(a => !a.currency || a.currency === "IDR");
+  const foreignAccts = accounts.filter(a => a.currency && a.currency !== "IDR");
+  const totalIDR    = idrAccts.reduce((s, a) => s + Number(a.current_balance || 0), 0);
+  const foreignIDR  = foreignAccts.reduce((a2, a) => {
+    const cur = C.find(c => c.code === a.currency);
+    const rate = fxRates[a.currency] || cur?.rate || 1;
+    return a2 + Math.round(Number(a.current_balance || 0) * rate);
+  }, 0);
+  const grandTotal = totalIDR + foreignIDR;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* 3 Summary cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+        {[
+          { label: "IDR Cash", value: fmtIDR(totalIDR, true), color: "#059669", bg: "#e8fdf0" },
+          { label: "Foreign Cash (≈IDR)", value: fmtIDR(foreignIDR, true), color: "#0891b2", bg: "#e0f7fa" },
+          { label: "Total Cash", value: fmtIDR(grandTotal, true), color: "#3b5bdb", bg: "#e8f4fd" },
+        ].map(s => (
+          <div key={s.label} style={{ background: s.bg, borderRadius: 14, padding: "14px 14px" }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: s.color, textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 5, opacity: 0.8 }}>{s.label}</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif", lineHeight: 1.2 }}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* 3-col grid */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
+        {accounts.map((a, i) => (
+          <CashAccountCard
+            key={a.id}
+            account={a}
+            fxRates={fxRates}
+            CURRENCIES={C}
+            ledger={ledger}
+            color={CARD_PALETTE[i % CARD_PALETTE.length]}
+            onEdit={() => onEdit(a)}
+            onDelete={() => onDelete(a)}
+            onHistory={() => onHistory(a)}
+          />
+        ))}
+      </div>
     </div>
   );
 }

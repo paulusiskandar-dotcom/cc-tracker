@@ -24,6 +24,18 @@ const NETWORK_STYLE = {
   UnionPay:   { text: "UnionPay",   style: { fontWeight: 700, fontSize: 9 } },
 };
 
+const CARD_PALETTE = [
+  "#3b5bdb", "#0891b2", "#059669", "#d97706", "#7c3aed",
+  "#e03131", "#0f766e", "#b45309", "#1d4ed8", "#9333ea",
+  "#0e7490", "#16a34a", "#ca8a04", "#c026d3", "#0284c7",
+];
+
+const CC_BTN = (bg, color, border = "transparent") => ({
+  height: 30, padding: "0 10px", borderRadius: 8, border: `1px solid ${border}`,
+  background: bg, color, fontSize: 11, fontWeight: 700, cursor: "pointer",
+  fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap",
+});
+
 // Derive a darker accent from hex color
 function darkenHex(hex, amount = 40) {
   const n = parseInt(hex.replace("#", ""), 16);
@@ -304,29 +316,73 @@ export default function CreditCards({
       {subTab === "overview" && (
         creditCards.length === 0
           ? <EmptyState icon="💳" title="No credit cards" message="Add a credit card from Accounts." />
-          : <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              {/* Shared-limit groups */}
-              {Object.values(groupMap).map(g => (
-                <SharedLimitGroupCard
-                  key={g.id}
-                  group={g}
-                  cardStats={cardStats}
-                  onPay={(cardId) => {
-                    const s = cardStats.find(c => c.id === cardId);
-                    setPayForm(f => ({ ...f, cardId, amount: s?.debt || "" }));
-                    setModal("pay");
-                  }}
-                  onTransactions={(cardId) => { setSelectedCard(cardId); setSubTab("transactions"); }}
-                />
-              ))}
-              {/* Standalone (non-grouped) cards */}
-              {cardStats.filter(cc => !groupedCardIds.has(cc.id)).map(cc => (
-                <CCCard key={cc.id} cc={cc}
-                  onPay={() => { setPayForm(f => ({ ...f, cardId: cc.id, amount: cc.debt })); setModal("pay"); }}
-                  onTransactions={() => { setSelectedCard(cc.id); setSubTab("transactions"); }}
-                />
-              ))}
-            </div>
+          : (() => {
+              const totalDebt  = cardStats.reduce((s, c) => s + c.debt, 0);
+              const totalLimit = (() => {
+                // Sum limits without double-counting shared groups
+                const groupedIds = new Set(Object.values(groupMap).flatMap(g => g.members.map(m => m.id)));
+                const standaloneLimitTotal = cardStats
+                  .filter(c => !groupedIds.has(c.id))
+                  .reduce((s, c) => s + (Number(c.card_limit) || 0), 0);
+                const groupLimitTotal = Object.values(groupMap).reduce((s, g) => s + g.sharedLimit, 0);
+                return standaloneLimitTotal + groupLimitTotal;
+              })();
+              const overallUtil = totalLimit > 0 ? (totalDebt / totalLimit) * 100 : 0;
+              const utilColor   = overallUtil > 80 ? "#dc2626" : overallUtil > 60 ? "#d97706" : "#059669";
+              const standaloneCards = cardStats.filter(cc => !groupedCardIds.has(cc.id));
+              let paletteIdx = 0;
+
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                  {/* 3 Summary cards */}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+                    <div style={{ background: "#fde8e8", borderRadius: 14, padding: "14px 14px" }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, color: "#dc2626", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 5, opacity: 0.8 }}>Total Debt</div>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif" }}>{fmtIDR(totalDebt, true)}</div>
+                    </div>
+                    <div style={{ background: "#e8f4fd", borderRadius: 14, padding: "14px 14px" }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, color: "#3b5bdb", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 5, opacity: 0.8 }}>Total Limit</div>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif" }}>{fmtIDR(totalLimit, true)}</div>
+                    </div>
+                    <div style={{ background: overallUtil > 80 ? "#fde8e8" : "#e8fdf0", borderRadius: 14, padding: "14px 14px" }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, color: utilColor, textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 5, opacity: 0.8 }}>Utilization</div>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: utilColor, fontFamily: "Figtree, sans-serif" }}>{overallUtil.toFixed(1)}%</div>
+                    </div>
+                  </div>
+
+                  {/* Shared-limit groups (full width) */}
+                  {Object.values(groupMap).map(g => (
+                    <SharedLimitGroupCard
+                      key={g.id}
+                      group={g}
+                      cardStats={cardStats}
+                      paletteStart={(() => { const s = paletteIdx; paletteIdx += g.members.length; return s; })()}
+                      onPay={(cardId) => {
+                        const s = cardStats.find(c => c.id === cardId);
+                        setPayForm(f => ({ ...f, cardId, amount: s?.debt || "" }));
+                        setModal("pay");
+                      }}
+                      onTransactions={(cardId) => { setSelectedCard(cardId); setSubTab("transactions"); }}
+                      onInstallments={() => setSubTab("installments")}
+                    />
+                  ))}
+
+                  {/* Standalone cards in 3-col grid */}
+                  {standaloneCards.length > 0 && (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
+                      {standaloneCards.map((cc, i) => (
+                        <CCCard key={cc.id} cc={cc}
+                          color={CARD_PALETTE[(paletteIdx + i) % CARD_PALETTE.length]}
+                          onPay={() => { setPayForm(f => ({ ...f, cardId: cc.id, amount: cc.debt })); setModal("pay"); }}
+                          onTransactions={() => { setSelectedCard(cc.id); setSubTab("transactions"); }}
+                          onInstallments={() => setSubTab("installments")}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()
       )}
 
       {/* ══ TRANSACTIONS ══ */}
@@ -644,101 +700,69 @@ export default function CreditCards({
 }
 
 // ─── SHARED LIMIT GROUP CARD ─────────────────────────────────
-function SharedLimitGroupCard({ group, cardStats, onPay, onTransactions }) {
+function SharedLimitGroupCard({ group, cardStats, paletteStart = 0, onPay, onTransactions, onInstallments }) {
   const { name, sharedLimit, totalDebt, members } = group;
   const available  = Math.max(0, sharedLimit - totalDebt);
   const util       = sharedLimit > 0 ? (totalDebt / sharedLimit) * 100 : 0;
   const utilColor  = util > 80 ? "#dc2626" : util > 60 ? "#d97706" : "#059669";
 
   return (
-    <div style={{ background: "#ffffff", borderRadius: 16, border: "1.5px solid #e5e7eb", overflow: "hidden" }}>
+    <div style={{ background: "#ffffff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden" }}>
 
       {/* ── Group header ── */}
       <div style={{ padding: "16px 18px", borderBottom: "1px solid #f3f4f6" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-          <span style={{ fontSize: 20 }}>🏦</span>
+          <span style={{ fontSize: 18 }}>🏦</span>
           <span style={{ fontSize: 15, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif", flex: 1 }}>
             {name}
           </span>
-          <span style={{
-            fontSize: 10, fontWeight: 700, background: "#eff6ff", color: "#3b5bdb",
-            padding: "2px 8px", borderRadius: 4, fontFamily: "Figtree, sans-serif",
-          }}>
+          <span style={{ fontSize: 10, fontWeight: 700, background: "#eff6ff", color: "#3b5bdb", padding: "2px 8px", borderRadius: 4, fontFamily: "Figtree, sans-serif" }}>
             Shared Limit
           </span>
         </div>
-
-        {/* Usage row */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
           <span style={{ fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
-            {fmtIDR(totalDebt, true)} / {fmtIDR(sharedLimit, true)} used
+            {fmtIDR(totalDebt, true)} / {fmtIDR(sharedLimit, true)} used · Available: <strong style={{ color: "#059669" }}>{fmtIDR(available, true)}</strong>
           </span>
           <span style={{ fontSize: 12, fontWeight: 800, color: utilColor, fontFamily: "Figtree, sans-serif" }}>
             {util.toFixed(0)}%
           </span>
         </div>
-        <BarSimple value={totalDebt} max={sharedLimit || 1} color={utilColor} height={7} />
-        <div style={{ fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif", marginTop: 6 }}>
-          Available: <strong style={{ color: "#059669" }}>{fmtIDR(available, true)}</strong>
-        </div>
+        <BarSimple value={totalDebt} max={sharedLimit || 1} color={utilColor} height={6} />
       </div>
 
-      {/* ── Member cards ── */}
-      <div style={{ padding: "4px 0 8px" }}>
+      {/* ── Member cards in 3-col grid ── */}
+      <div style={{ padding: "12px 14px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
         {members.map((cc, i) => {
           const stats  = cardStats.find(s => s.id === cc.id);
           const debt   = stats?.debt ?? Number(cc.current_balance || 0);
           const dueIn  = stats?.dueIn ?? null;
-          const isLast = i === members.length - 1;
+          const color  = CARD_PALETTE[(paletteStart + i) % CARD_PALETTE.length];
           return (
-            <div key={cc.id} style={{
-              display: "flex", alignItems: "center", gap: 10,
-              padding: "8px 18px",
-              borderBottom: isLast ? "none" : "1px solid #f9fafb",
-            }}>
-              {/* Tree line */}
-              <span style={{ fontSize: 12, color: "#d1d5db", flexShrink: 0, fontFamily: "monospace" }}>
-                {isLast ? "└" : "├"}
-              </span>
-              {/* Color dot */}
-              <div style={{
-                width: 8, height: 8, borderRadius: "50%",
-                background: cc.color || "#3b5bdb", flexShrink: 0,
-              }} />
-              {/* Card info */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
-                  {cc.name}
-                  {cc.is_limit_group_master && (
-                    <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, background: "#fef3c7", color: "#d97706", padding: "1px 4px", borderRadius: 3, verticalAlign: "middle" }}>
-                      MASTER
-                    </span>
-                  )}
+            <div key={cc.id} style={{ background: "#f9fafb", borderRadius: 12, border: "0.5px solid #e5e7eb", overflow: "hidden" }}>
+              <div style={{ height: 3, background: color }} />
+              <div style={{ padding: "12px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", display: "flex", alignItems: "center", gap: 6 }}>
+                    {cc.name}
+                    {cc.is_limit_group_master && (
+                      <span style={{ fontSize: 9, fontWeight: 700, background: "#fef3c7", color: "#d97706", padding: "1px 5px", borderRadius: 3 }}>MASTER</span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
+                    {cc.bank_name}{cc.last4 ? ` · ···· ${cc.last4}` : ""}
+                    {dueIn !== null && (
+                      <span style={{ marginLeft: 6, fontWeight: 600, color: dueIn <= 3 ? "#dc2626" : dueIn <= 7 ? "#d97706" : "#9ca3af" }}>
+                        · Due {dueIn}d
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
-                  {cc.bank_name}{cc.network ? ` · ${cc.network}` : ""}{cc.last4 ? ` ····${cc.last4}` : ""}
-                  {dueIn !== null && (
-                    <span style={{ marginLeft: 6, color: dueIn <= 3 ? "#dc2626" : dueIn <= 7 ? "#d97706" : "#9ca3af" }}>
-                      · Due {dueIn}d
-                    </span>
-                  )}
+                <div style={{ fontSize: 16, fontWeight: 800, color: debt > 0 ? "#dc2626" : "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+                  {fmtIDR(debt, true)}
                 </div>
+                <button onClick={() => onPay(cc.id)} style={CC_BTN("#fde8e8", "#dc2626", "#fecaca")}>💳 Pay</button>
               </div>
-              {/* Debt */}
-              <div style={{ fontSize: 14, fontWeight: 700, color: "#dc2626", fontFamily: "Figtree, sans-serif", flexShrink: 0 }}>
-                {fmtIDR(debt, true)}
-              </div>
-              {/* Pay button */}
-              <button
-                onClick={() => onPay(cc.id)}
-                style={{
-                  padding: "4px 10px", borderRadius: 7, border: "none",
-                  background: "#fde8e8", color: "#dc2626",
-                  fontSize: 11, fontWeight: 700, cursor: "pointer",
-                  fontFamily: "Figtree, sans-serif", flexShrink: 0,
-                }}>
-                Pay
-              </button>
             </div>
           );
         })}
@@ -747,134 +771,90 @@ function SharedLimitGroupCard({ group, cardStats, onPay, onTransactions }) {
   );
 }
 
-// ─── CC VISUAL CARD ──────────────────────────────────────────
-function CCCard({ cc, onPay, onTransactions }) {
-  const base      = cc.color || "#3b5bdb";
-  const dark      = darkenHex(base, 50);
+// ─── CC CARD (new compact design) ───────────────────────────
+function CCCard({ cc, color, onPay, onTransactions, onInstallments }) {
   const utilColor = cc.util > 80 ? "#dc2626" : cc.util > 60 ? "#d97706" : "#059669";
-  const netw      = NETWORK_STYLE[cc.network] || NETWORK_STYLE.Visa;
+  const netw      = NETWORK_STYLE[cc.network];
 
   return (
-    <div style={{ background: "#ffffff", borderRadius: 16, border: "1px solid #f3f4f6", overflow: "hidden" }}>
+    <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      {/* Color bar */}
+      <div style={{ height: 3, background: color || "#3b5bdb" }} />
 
-      {/* ── Visual card face ── */}
-      <div style={{
-        background:  `linear-gradient(135deg, ${base} 0%, ${dark} 100%)`,
-        padding:     "20px 20px 18px",
-        color:       "#fff",
-        position:    "relative",
-        overflow:    "hidden",
-        minHeight:   140,
-      }}>
-        {/* Decorative circles */}
-        <div style={{ position: "absolute", top: -20, right: -20, width: 100, height: 100, background: "rgba(255,255,255,0.07)", borderRadius: "50%" }} />
-        <div style={{ position: "absolute", bottom: -30, left: 40,  width: 80,  height: 80,  background: "rgba(255,255,255,0.05)", borderRadius: "50%" }} />
-
-        {/* Row 1: bank · network */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, position: "relative" }}>
-          <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.8, fontFamily: "Figtree, sans-serif" }}>
-            {cc.bank_name || "Bank"}{cc.entity && cc.entity !== "Personal" ? ` · ${cc.entity}` : ""}
+      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 11, flex: 1 }}>
+        {/* Card name + last4 + network */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {cc.name}
+            </div>
+            <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
+              {cc.bank_name || "Bank"}{cc.last4 ? ` · ···· ${cc.last4}` : ""}
+            </div>
           </div>
-          <div style={{ fontSize: 14, color: "#fff", fontFamily: "Figtree, sans-serif", ...netw.style, opacity: 0.9 }}>
-            {netw.text}
-          </div>
+          {netw && (
+            <span style={{ fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif", flexShrink: 0, marginLeft: 8, ...netw.style }}>
+              {netw.text}
+            </span>
+          )}
         </div>
 
-        {/* Card number */}
-        <div style={{
-          fontSize:      17,
-          fontWeight:    700,
-          letterSpacing: "3px",
-          fontFamily:    "Figtree, sans-serif",
-          marginBottom:  16,
-          position:      "relative",
-        }}>
-          ···· ···· ···· {cc.last4 || "????"}
-        </div>
-
-        {/* Row 3: Debt + Available */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", position: "relative" }}>
-          <div>
-            <div style={{ fontSize: 9, fontWeight: 600, opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>Current Debt</div>
-            <div style={{ fontSize: 22, fontWeight: 900, fontFamily: "Figtree, sans-serif", lineHeight: 1 }}>
+        {/* Debt + Available */}
+        <div style={{ display: "flex", gap: 10 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>Debt</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: cc.debt > 0 ? "#dc2626" : "#9ca3af", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
               {fmtIDR(cc.debt, true)}
             </div>
           </div>
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: 9, fontWeight: 600, opacity: 0.6, textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>Available</div>
-            <div style={{ fontSize: 14, fontWeight: 700, fontFamily: "Figtree, sans-serif" }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>Available</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#059669", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
               {fmtIDR(cc.avail, true)}
             </div>
           </div>
         </div>
-      </div>
 
-      {/* ── Stats section ── */}
-      <div style={{ padding: "14px 16px" }}>
-
-        {/* Utilization bar */}
-        <div style={{ marginBottom: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
-            <span style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
-              Limit: {fmtIDR(cc.limit, true)}
-            </span>
-            <span style={{ fontSize: 11, fontWeight: 700, color: utilColor, fontFamily: "Figtree, sans-serif" }}>
-              {cc.util.toFixed(0)}% used
-            </span>
-          </div>
-          <BarSimple value={cc.debt} max={cc.limit || 1} color={utilColor} height={6} />
-        </div>
-
-        {/* Monthly target bar (with target marker) */}
-        {cc.target > 0 && (
-          <div style={{ marginBottom: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
-              <span style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>This month</span>
-              <span style={{
-                fontSize: 11, fontWeight: 700, fontFamily: "Figtree, sans-serif",
-                color: cc.monthSpent > cc.target ? "#dc2626" : "#059669",
-              }}>
-                {fmtIDR(cc.monthSpent, true)} / {fmtIDR(cc.target, true)}
-              </span>
+        {/* Utilization bar (4px) */}
+        {cc.limit > 0 && (
+          <div>
+            <div style={{ height: 4, background: "#f3f4f6", borderRadius: 4, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${Math.min(cc.util, 100)}%`, background: utilColor, borderRadius: 4, transition: "width 0.3s" }} />
             </div>
-            <BarWithTarget value={cc.monthSpent} max={cc.target * 1.5} target={cc.target}
-              color={cc.monthSpent > cc.target ? "#dc2626" : "#059669"} />
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
+              <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>Limit {fmtIDR(cc.limit, true)}</span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: utilColor, fontFamily: "Figtree, sans-serif" }}>{cc.util.toFixed(0)}%</span>
+            </div>
           </div>
         )}
 
-        {/* Due / Statement dates */}
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
-          {cc.dueIn !== null && (
-            <div style={{
-              display: "flex", alignItems: "center", gap: 5,
-              padding: "5px 10px", borderRadius: 8,
-              background: cc.dueIn <= 3 ? "#fee2e2" : cc.dueIn <= 7 ? "#fef3c7" : "#f9fafb",
-              border: `1px solid ${cc.dueIn <= 3 ? "#fecaca" : cc.dueIn <= 7 ? "#fde68a" : "#f3f4f6"}`,
-            }}>
-              <span style={{ fontSize: 12 }}>{cc.dueIn <= 3 ? "🔴" : cc.dueIn <= 7 ? "🟡" : "🟢"}</span>
-              <span style={{ fontSize: 11, fontWeight: 600, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
-                Due in {cc.dueIn}d
+        {/* Due + Statement badges */}
+        {(cc.dueIn !== null || cc.stmtIn !== null) && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {cc.dueIn !== null && (
+              <span style={{
+                fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 6,
+                fontFamily: "Figtree, sans-serif",
+                background: cc.dueIn <= 3 ? "#fee2e2" : cc.dueIn <= 7 ? "#fef3c7" : "#f9fafb",
+                color: cc.dueIn <= 3 ? "#dc2626" : cc.dueIn <= 7 ? "#d97706" : "#6b7280",
+                border: `1px solid ${cc.dueIn <= 3 ? "#fecaca" : cc.dueIn <= 7 ? "#fde68a" : "#f3f4f6"}`,
+              }}>
+                Due {cc.dueIn}d
               </span>
-            </div>
-          )}
-          {cc.stmtIn !== null && (
-            <div style={{
-              display: "flex", alignItems: "center", gap: 5,
-              padding: "5px 10px", borderRadius: 8,
-              background: "#f9fafb", border: "1px solid #f3f4f6",
-            }}>
-              <span style={{ fontSize: 12 }}>📄</span>
-              <span style={{ fontSize: 11, fontWeight: 600, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
-                Statement in {cc.stmtIn}d
+            )}
+            {cc.stmtIn !== null && (
+              <span style={{ fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 6, fontFamily: "Figtree, sans-serif", background: "#f9fafb", color: "#6b7280", border: "1px solid #f3f4f6" }}>
+                Stmt {cc.stmtIn}d
               </span>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
 
         {/* Action buttons */}
-        <div style={{ display: "flex", gap: 8 }}>
-          <Button size="sm" fullWidth onClick={onPay}>💳 Pay Bill</Button>
-          <Button size="sm" variant="secondary" onClick={onTransactions}>📋 Transactions</Button>
+        <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
+          <button onClick={onPay}          style={CC_BTN("#fde8e8", "#dc2626", "#fecaca")}>💳 Pay</button>
+          <button onClick={onTransactions} style={CC_BTN("#f3f4f6", "#374151", "#e5e7eb")}>Txns</button>
+          <button onClick={onInstallments} style={CC_BTN("#f3f4f6", "#374151", "#e5e7eb")}>Install.</button>
         </div>
       </div>
     </div>
