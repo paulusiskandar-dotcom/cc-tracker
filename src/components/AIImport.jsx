@@ -19,18 +19,67 @@ const IMPORT_TX_TYPES = [
 ];
 
 // ── Normalise AI pseudo-types to real tx_type + category ─────────
-// bank_charges/materai/tax → expense; bank_interest/cashback → income
 const PSEUDO_TYPE_MAP = {
-  bank_charges:  { tx_type: "expense", category_id: "finance",    category_name: "Bank Charges"  },
-  materai:       { tx_type: "expense", category_id: "finance",    category_name: "Materai"       },
-  tax:           { tx_type: "expense", category_id: "finance",    category_name: "Tax"           },
+  bank_charges:  { tx_type: "expense", category_id: "finance",      category_name: "Bank Charges"  },
+  materai:       { tx_type: "expense", category_id: "finance",      category_name: "Materai"       },
+  tax:           { tx_type: "expense", category_id: "finance",      category_name: "Tax"           },
   bank_interest: { tx_type: "income",  category_id: "other_income", category_name: "Bank Interest" },
-  cashback:      { tx_type: "income",  category_id: "other_income", category_name: "Cashback"    },
+  cashback:      { tx_type: "income",  category_id: "other_income", category_name: "Cashback"      },
 };
 const normaliseTxType = (raw, catId) => {
   const mapped = PSEUDO_TYPE_MAP[raw];
   if (mapped) return { tx_type: mapped.tx_type, category_id: mapped.category_id };
   return { tx_type: raw || "expense", category_id: catId };
+};
+
+// ── Keyword-based auto-classification ───────────────────────────
+// Applied after AI extraction; overrides AI suggestion when matched.
+const KEYWORD_RULES = [
+  {
+    match: /biaya\s*adm|admin\s*fee|bi-?fast\s*fee|transfer\s*fee|provisi|biaya\s*transfer|administration\s*fee|service\s*charge/i,
+    tx_type: "expense", category_id: "finance", category_name: "Bank Charges",
+  },
+  {
+    // BI-Fast / bifast ≤ Rp 5.000 → bank charges
+    match: /bi-?fast|bifast/i,
+    maxAmount: 5000,
+    tx_type: "expense", category_id: "finance", category_name: "Bank Charges",
+  },
+  {
+    match: /materai|stamp\s*duty|bea\s*materai/i,
+    tx_type: "expense", category_id: "finance", category_name: "Materai",
+  },
+  {
+    match: /\bpph\b|pajak|withholding\s*tax|interest\s*tax|pph\s*bunga/i,
+    tx_type: "expense", category_id: "finance", category_name: "Tax",
+  },
+  {
+    // "tax" alone only when NOT "cashback" or "interest" context
+    match: /\btax\b/i,
+    notMatch: /cashback|interest|bunga/i,
+    tx_type: "expense", category_id: "finance", category_name: "Tax",
+  },
+  {
+    match: /bunga\s*tabungan|bunga\s*deposito|jasa\s*giro|bank\s*interest|bunga\b/i,
+    notMatch: /pph|pajak|tax/i,
+    tx_type: "income", category_id: "other_income", category_name: "Bank Interest",
+  },
+  {
+    match: /cashback|cash\s*back|reward\s*points|poin\s*reward/i,
+    tx_type: "income", category_id: "other_income", category_name: "Cashback",
+  },
+];
+
+const applyKeywordRules = (desc, amount) => {
+  const d = (desc || "").toLowerCase();
+  const amt = Number(amount) || 0;
+  for (const rule of KEYWORD_RULES) {
+    if (!rule.match.test(d)) continue;
+    if (rule.notMatch && rule.notMatch.test(d)) continue;
+    if (rule.maxAmount !== undefined && amt > rule.maxAmount) continue;
+    return { tx_type: rule.tx_type, category_id: rule.category_id };
+  }
+  return null;
 };
 
 // ── Category visibility ─────────────────────────────────────────
@@ -220,6 +269,13 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
         const fixed = fixTransferType({ tx_type: txType, from_account_id: fromId, to_account_id: toId, to_account_no: r.to_account_no, from_account_no: r.from_account_no });
         txType = fixed.tx_type;
         if (fixed.to_account_id === null) toId = "";
+
+        // Apply keyword-based auto-classification (overrides AI suggestion)
+        const kwMatch = applyKeywordRules(desc, amount);
+        if (kwMatch) {
+          txType  = kwMatch.tx_type;
+          aiCatId = kwMatch.category_id;
+        }
 
         // Apply merchant learning
         const learned = lookupLearned(desc);
@@ -539,10 +595,23 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
   );
 }
 
-// ── Amount formatter (Rp 5.000.000) ─────────────────────────────
+// ── Amount formatter — rounds to whole IDR, dot thousands separator
 const fmtAmt = (v) => {
-  const n = Number(v) || 0;
-  return "Rp " + n.toLocaleString("id-ID");
+  const n = Math.round(Number(v) || 0);
+  return "Rp " + n.toLocaleString("id-ID", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+};
+
+// ── Type → text color ─────────────────────────────────────────────
+const TYPE_COLOR = {
+  income:       "#3B6D11",
+  collect_loan: "#3B6D11",
+  reimburse_in: "#3B6D11",
+  expense:      "#A32D2D",
+  reimburse_out:"#c05e00",
+  give_loan:    "#6b21a8",
+  transfer:     "#185FA5",
+  pay_cc:       "#185FA5",
+  fx_exchange:  "#185FA5",
 };
 
 // ── Amount sign helper ────────────────────────────────────────────
@@ -672,14 +741,12 @@ function TxCard({
     ? `${sign}${r.currency} ${Number(r.amount || 0).toLocaleString("id-ID")} ≈ ${fmtAmt(r.amount_idr || 0)}`
     : `${sign}${fmtAmt(r.amount_idr || r.amount || 0)}`;
 
-  // Badge
+  // Badge — only Learned / Suggest; no AI badge
   const badge = showCat
     ? (r.learned_cat && r.learned_cat.confidence >= 2 && r.learned_cat.category_id === r.category_id)
         ? { label: "✓ Learned", bg: "#dcfce7", color: "#059669" }
       : (r.learned_cat && r.learned_cat.confidence === 1)
         ? { label: "Suggest",   bg: "#fef9c3", color: "#a16207" }
-      : (r.ai_category && r.ai_category === r.category_id)
-        ? { label: "AI",        bg: "#dbeafe", color: "#3b5bdb" }
       : null
     : null;
 
@@ -758,15 +825,18 @@ function TxCard({
         display: "flex", alignItems: "center", flexWrap: "wrap", gap: 5,
         padding: "2px 12px 9px 35px",
       }}>
-        {/* Type */}
-        <select style={{ ...sel11, width: 100 }}
+        {/* Type — colored text based on type */}
+        <select
+          style={{ ...sel11, width: 100, color: TYPE_COLOR[r.tx_type] || T.text, fontWeight: 600 }}
           value={r.tx_type}
           onChange={e => {
             const t = e.target.value;
             updateRow(r._id, { tx_type: t, category_id: NO_CAT.has(t) ? null : r.category_id });
           }}>
           {IMPORT_TX_TYPES.map(t => (
-            <option key={t.value} value={t.value}>{t.label}</option>
+            <option key={t.value} value={t.value} style={{ color: TYPE_COLOR[t.value] || "inherit", fontWeight: 600 }}>
+              {t.label}
+            </option>
           ))}
         </select>
 
