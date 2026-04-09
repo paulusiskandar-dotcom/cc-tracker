@@ -551,7 +551,13 @@ export const scanApi = {
               })),
             }),
           });
-          if (!r.ok) { const e2 = await r.json().catch(() => ({})); throw new Error(e2.error || `HTTP ${r.status}`); }
+          if (!r.ok) {
+            const e2  = await r.json().catch(() => ({}));
+            const msg = e2?.error?.message || e2?.message ||
+                        (typeof e2?.error === "string" ? e2.error : null) ||
+                        `HTTP ${r.status}`;
+            throw new Error(msg);
+          }
           const d = await r.json();
           resolve(d.transactions || d.data || []);
         } catch (err) { reject(err); }
