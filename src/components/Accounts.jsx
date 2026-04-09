@@ -720,11 +720,11 @@ function AccountCard({ account: a, ledger, accounts, accountCurrencies = [], fxR
         const principal = Number(a.current_value || 0);
         const netRate = rate * 0.8;
         const netMonthly = principal * (netRate / 100) / 12;
-        const daysLeft = a.end_date
-          ? Math.ceil((new Date(a.end_date) - new Date()) / 86400000)
+        const daysLeft = a.maturity_date
+          ? Math.ceil((new Date(a.maturity_date) - new Date()) / 86400000)
           : null;
-        const maturityStr = a.end_date
-          ? new Date(a.end_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+        const maturityStr = a.maturity_date
+          ? new Date(a.maturity_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
           : null;
         const rolloverLabel = {
           non_aro: "Non ARO", aro: "ARO", aro_plus: "ARO+",
@@ -1012,11 +1012,11 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
           <FormRow>
             <Input label="Interest Rate (% p.a.)" type="number" value={form.interest_rate || ""}
               onChange={e => set("interest_rate", e.target.value)} placeholder="5.5" style={{ flex: 1 }} />
-            <Select label="Tenor (months)" value={form.deposit_tenor || "6"}
+            <Select label="Tenor (months)" value={form.tenor_months || "6"}
               onChange={e => {
-                set("deposit_tenor", e.target.value);
+                set("tenor_months", e.target.value);
                 const mat = calcMaturity(form.start_date, e.target.value);
-                if (mat) set("end_date", mat);
+                if (mat) set("maturity_date", mat);
               }}
               options={["1","3","6","9","12","24"].map(v => ({ value: v, label: `${v} months` }))}
               style={{ flex: 1 }} />
@@ -1025,12 +1025,12 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
             <Input label="Start Date" type="date" value={form.start_date || ""}
               onChange={e => {
                 set("start_date", e.target.value);
-                const mat = calcMaturity(e.target.value, form.deposit_tenor || 6);
-                if (mat) set("end_date", mat);
+                const mat = calcMaturity(e.target.value, form.tenor_months || 6);
+                if (mat) set("maturity_date", mat);
               }}
               style={{ flex: 1 }} />
-            <Input label="Maturity Date" type="date" value={form.end_date || ""}
-              onChange={e => set("end_date", e.target.value)} style={{ flex: 1 }} />
+            <Input label="Maturity Date" type="date" value={form.maturity_date || ""}
+              onChange={e => set("maturity_date", e.target.value)} style={{ flex: 1 }} />
           </FormRow>
 
           {/* Rollover type */}
@@ -1198,7 +1198,7 @@ function emptyForm(type) {
     case "bank":        return { ...base, bank_name: "BCA", account_no: "", currency: "IDR", initial_balance: "", current_balance: 0, include_networth: true, is_multicurrency: false, fxBalances: [] };
     case "cash":        return { ...base, currency: "IDR", initial_balance: "", current_balance: 0 };
     case "credit_card": return { ...base, bank_name: "BCA", last4: "", network: "Visa", card_limit: "", monthly_target: "", statement_day: 25, due_day: 17, current_balance: 0 };
-    case "asset":       return { ...base, subtype: "Property", current_value: "", purchase_price: "", purchase_date: "", deposit_rollover_type: "non_aro", monthly_interest_payout: false, deposit_status: "active", deposit_tenor: "6" };
+    case "asset":       return { ...base, subtype: "Property", current_value: "", purchase_price: "", purchase_date: "", deposit_rollover_type: "non_aro", monthly_interest_payout: false, deposit_status: "active", tenor_months: "6" };
     case "liability":   return { ...base, subtype: "Mortgage", creditor: "", outstanding_amount: "", total_amount: "", monthly_payment: "", liability_interest_rate: "", start_date: "", end_date: "" };
     case "receivable":  return { ...base, entity: "Hamasa" };
     default:            return base;
