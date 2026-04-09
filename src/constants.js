@@ -68,8 +68,11 @@ export const LIAB_SUBTYPES = [
 // ─── NETWORKS / BANKS ─────────────────────────────────────────
 export const NETWORKS = ["Visa", "Mastercard", "JCB", "Amex", "UnionPay"];
 export const BANKS_L  = [
-  "BCA", "Mandiri", "BNI", "CIMB", "BRI", "Permata",
-  "Danamon", "OCBC", "Jenius", "SeaBank", "Other",
+  "BCA", "BNI", "BRI", "BTN", "CIMB", "Commonwealth",
+  "Danamon", "HSBC", "Jenius", "Mandiri", "Mayapada",
+  "Maybank", "Mega", "BLU", "Neobank", "OCBC",
+  "Panin", "Permata", "Standard Chartered",
+  "Superbank", "UOB", "Other",
 ];
 
 // ─── TRANSACTION TYPES ────────────────────────────────────────

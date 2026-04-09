@@ -745,6 +745,12 @@ function CashAccountCard({ account: a, fxRates = {}, CURRENCIES: C = [], ledger,
 
 // ─── BANK PAGE CONTENT ───────────────────────────────────────
 function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, CURRENCIES: C = [], onEdit, onDelete, onHistory }) {
+  const [bankFilter, setBankFilter] = useState("all");
+
+  const bankNames = useMemo(() =>
+    [...new Set(accounts.map(a => a.bank_name).filter(Boolean))].sort(),
+  [accounts]);
+
   // Sort highest balance first, preserve original index for palette color
   const sorted = useMemo(() =>
     accounts
@@ -752,7 +758,7 @@ function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, CURRENC
       .sort((x, y) => Number(y.a.current_balance || 0) - Number(x.a.current_balance || 0)),
   [accounts]);
 
-  const visible = sorted;
+  const visible = bankFilter === "all" ? sorted : sorted.filter(({ a }) => a.bank_name === bankFilter);
 
   const nonZero      = sorted.filter(({ a }) => Number(a.current_balance || 0) > 0);
   const idrAccts     = accounts.filter(a => !a.currency || a.currency === "IDR");
@@ -780,6 +786,27 @@ function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, CURRENC
           </div>
         ))}
       </div>
+
+      {/* Bank filter pills */}
+      {bankNames.length > 1 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {["all", ...bankNames].map(b => {
+            const active = bankFilter === b;
+            return (
+              <button key={b} onClick={() => setBankFilter(b)} style={{
+                height: 28, padding: "0 12px", borderRadius: 20, cursor: "pointer",
+                border: `1.5px solid ${active ? "#111827" : "#e5e7eb"}`,
+                background: active ? "#111827" : "#fff",
+                color: active ? "#fff" : "#6b7280",
+                fontSize: 12, fontWeight: active ? 700 : 500,
+                fontFamily: "Figtree, sans-serif", transition: "all 0.15s",
+              }}>
+                {b === "all" ? "All" : b}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* 3-col grid — same spacing as Cash page */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>

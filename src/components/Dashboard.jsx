@@ -412,7 +412,7 @@ export default function Dashboard({
             </div>
           </div>
           <button
-            onClick={() => setTab?.("transactions")}
+            onClick={() => setTab?.("aiimport")}
             style={{
               background:   "#d97706",
               color:        "#fff",

@@ -53,10 +53,18 @@ export default function Settings({
   const [newPass, setNewPass] = useState("");
 
   // ── Gmail ──────────────────────────────────────────────────
-  const [gmailToken, setGmailToken]   = useState(null);
-  const [gmailLoaded, setGmailLoaded] = useState(false);
-  const [clientId, setClientId]       = useState("");
-  const [syncingNow, setSyncingNow]   = useState(false);
+  const [gmailToken, setGmailToken]       = useState(null);
+  const [gmailLoaded, setGmailLoaded]     = useState(false);
+  const [clientId, setClientId]           = useState("");
+  const [syncingNow, setSyncingNow]       = useState(false);
+  const [syncFromDate, setSyncFromDate]   = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() - 7);
+    return d.toISOString().slice(0, 10);
+  });
+  const [syncToDate, setSyncToDate]       = useState(() => new Date().toISOString().slice(0, 10));
+  const [skippedRows, setSkippedRows]     = useState([]);
+  const [skippedLoaded, setSkippedLoaded] = useState(false);
+  const [skippedLoading, setSkippedLoading] = useState(false);
 
   // ── FX ─────────────────────────────────────────────────────
   const [rates, setRates] = useState(() => {
@@ -148,11 +156,39 @@ export default function Settings({
   const syncNow = async () => {
     setSyncingNow(true);
     try {
-      const result = await gmailApi.triggerSync(user.id);
+      const result = await gmailApi.triggerSync(user.id, syncFromDate, syncToDate);
       showToast(`Sync complete: ${result?.new_transactions || 0} new transactions`);
       await onRefresh?.();
     } catch (e) { showToast(e.message, "error"); }
     setSyncingNow(false);
+  };
+
+  const loadSkipped = async () => {
+    if (skippedLoaded) return;
+    setSkippedLoading(true);
+    try {
+      const data = await gmailApi.getSkipped(user.id);
+      setSkippedRows(data);
+      setSkippedLoaded(true);
+    } catch (e) { showToast(e.message, "error"); }
+    setSkippedLoading(false);
+  };
+
+  const restoreSkipped = async (id) => {
+    try {
+      await gmailApi.restoreSkipped(id);
+      setSkippedRows(prev => prev.filter(r => r.id !== id));
+      await onRefresh?.();
+      showToast("Restored to pending");
+    } catch (e) { showToast(e.message, "error"); }
+  };
+
+  const deleteSkipped = async (id) => {
+    try {
+      await gmailApi.deleteSkipped(id);
+      setSkippedRows(prev => prev.filter(r => r.id !== id));
+      showToast("Deleted");
+    } catch (e) { showToast(e.message, "error"); }
   };
 
   // ── Actions: FX ────────────────────────────────────────────
@@ -396,35 +432,86 @@ export default function Settings({
       {/* ══════════════════════════════════════════════════ */}
       {subTab === "email" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {/* Status */}
+
+          {/* ── Status card ── */}
           <div style={{ ...card, borderColor: gmailToken ? "#059669" : T.border }}>
             <SectionHeader title={gmailToken ? "✅ Gmail Connected" : "📧 Gmail Not Connected"} />
             {gmailToken ? (
-              <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: T.text, marginBottom: 4 }}>
-                  {gmailToken.gmail_email || user?.email}
-                </div>
+              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{gmailToken.gmail_email || user?.email}</div>
                 {gmailToken.last_sync && (
-                  <div style={{ fontSize: 11, color: T.text3, marginBottom: 8 }}>
-                    Last sync: {new Date(gmailToken.last_sync).toLocaleString()}
-                  </div>
+                  <div style={{ fontSize: 11, color: T.text3 }}>Last sync: {new Date(gmailToken.last_sync).toLocaleString()}</div>
                 )}
-                <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                  <Button variant="primary"   size="sm" busy={syncingNow} onClick={syncNow}>
-                    🔄 Sync Now
-                  </Button>
-                  <Button variant="danger"    size="sm" onClick={disconnectGmail}>Disconnect</Button>
-                </div>
+                <div style={{ fontSize: 11, color: T.text3 }}>Auto sync: Every 6 hours ✅</div>
               </div>
             ) : (
               <div style={{ marginTop: 8, fontSize: 12, color: T.text3, lineHeight: 1.6 }}>
                 Connect Gmail to auto-import bank transaction notifications.
-                Only <strong>gmail.readonly</strong> access — cannot send or delete emails.
+                Only <strong>gmail.readonly</strong> — cannot send or delete emails.
               </div>
             )}
           </div>
 
-          {/* Setup guide */}
+          {/* ── Manual sync with date range (only when connected) ── */}
+          {gmailToken && (() => {
+            const days = Math.round((new Date(syncToDate) - new Date(syncFromDate)) / 86400000);
+            const rangeWarning = days > 30;
+            return (
+              <div style={card}>
+                <SectionHeader title="Manual Sync" />
+                <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
+                  <FormRow>
+                    <Field label="From" style={{ flex: 1 }}>
+                      <Input type="date" value={syncFromDate} onChange={e => setSyncFromDate(e.target.value)} />
+                    </Field>
+                    <Field label="To" style={{ flex: 1 }}>
+                      <Input type="date" value={syncToDate} onChange={e => setSyncToDate(e.target.value)} />
+                    </Field>
+                  </FormRow>
+                  {rangeWarning && (
+                    <div style={{ fontSize: 11, color: "#d97706", background: "#fef9c3", borderRadius: 8, padding: "8px 12px" }}>
+                      ⚠️ Range is {days} days. Large ranges may take longer and could hit Gmail API limits.
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Button variant="primary" size="sm" busy={syncingNow} onClick={syncNow}>🔄 Sync Now</Button>
+                    <Button variant="danger"  size="sm" onClick={disconnectGmail}>Disconnect Gmail</Button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* ── Skipped transactions (only when connected) ── */}
+          {gmailToken && (
+            <div style={card}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <SectionHeader title="Skipped Transactions" />
+                {!skippedLoaded && (
+                  <Button variant="secondary" size="sm" onClick={loadSkipped} busy={skippedLoading}>Load</Button>
+                )}
+              </div>
+              {skippedLoading && <div style={{ fontSize: 12, color: T.text3, marginTop: 8 }}>Loading…</div>}
+              {skippedLoaded && skippedRows.length === 0 && (
+                <div style={{ fontSize: 12, color: T.text3, marginTop: 8 }}>No skipped transactions.</div>
+              )}
+              {skippedRows.map(row => (
+                <div key={row.id} style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "10px 0", borderBottom: `1px solid ${T.border}`,
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: T.text, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{row.subject || "(no subject)"}</div>
+                    <div style={{ fontSize: 11, color: T.text3 }}>{row.sender_email} · {row.received_at ? new Date(row.received_at).toLocaleDateString() : ""}</div>
+                  </div>
+                  <Button variant="secondary" size="sm" onClick={() => restoreSkipped(row.id)}>Restore</Button>
+                  <Button variant="danger"    size="sm" onClick={() => deleteSkipped(row.id)}>Delete</Button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── Setup guide (only when not connected) ── */}
           {!gmailToken && (
             <div style={card}>
               <SectionHeader title="Setup Guide" />
@@ -432,30 +519,20 @@ export default function Settings({
                 {SETUP_STEPS.map((step, i) => (
                   <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
                     <div style={{
-                      width: 22, height: 22, borderRadius: "50%",
-                      background: "#dbeafe", border: "1px solid #93c5fd44",
+                      width: 22, height: 22, borderRadius: "50%", background: "#dbeafe",
                       display: "flex", alignItems: "center", justifyContent: "center",
                       fontSize: 10, fontWeight: 800, color: "#3b5bdb", flexShrink: 0,
-                    }}>
-                      {i + 1}
-                    </div>
+                    }}>{i + 1}</div>
                     <div style={{ fontSize: 12, color: T.text2, lineHeight: 1.6 }}>{step}</div>
                   </div>
                 ))}
               </div>
-
               <div style={{ marginTop: 14 }}>
                 <Field label="Google Client ID">
-                  <Input
-                    value={clientId}
-                    onChange={e => setClientId(e.target.value)}
-                    placeholder="xxx.apps.googleusercontent.com"
-                  />
+                  <Input value={clientId} onChange={e => setClientId(e.target.value)} placeholder="xxx.apps.googleusercontent.com" />
                 </Field>
                 <div style={{ marginTop: 10 }}>
-                  <Button variant="accent" size="md" onClick={connectGmail}>
-                    Connect Gmail →
-                  </Button>
+                  <Button variant="accent" size="md" onClick={connectGmail}>Connect Gmail →</Button>
                 </div>
               </div>
             </div>

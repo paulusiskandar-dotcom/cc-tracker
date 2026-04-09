@@ -798,9 +798,12 @@ export const gmailApi = {
     await supabase.from("email_sync").update({ status: "skipped" }).eq("id", id).eq("user_id", userId);
   },
 
-  triggerSync: async (userId) => {
+  triggerSync: async (userId, fromDate, toDate) => {
     const key = process.env.REACT_APP_SUPABASE_ANON_KEY || "";
     const url = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/gmail-sync`;
+    const body = { user_id: userId };
+    if (fromDate) body.from_date = fromDate;
+    if (toDate)   body.to_date   = toDate;
     const r = await fetch(url, {
       method:  "POST",
       headers: {
@@ -808,13 +811,35 @@ export const gmailApi = {
         "apikey":        key,
         "Authorization": `Bearer ${key}`,
       },
-      body: JSON.stringify({ user_id: userId }),
+      body: JSON.stringify(body),
     });
     if (!r.ok) {
       const e = await r.json().catch(() => ({}));
       throw new Error(e.error || `HTTP ${r.status}`);
     }
     return r.json();
+  },
+
+  getSkipped: async (userId) => {
+    const { data, error } = await supabase
+      .from("email_sync")
+      .select("id,subject,sender_email,received_at,extracted_count")
+      .eq("user_id", userId)
+      .eq("status", "skipped")
+      .order("received_at", { ascending: false })
+      .limit(50);
+    if (error) throw new Error(error.message);
+    return data || [];
+  },
+
+  restoreSkipped: async (id) => {
+    const { error } = await supabase.from("email_sync").update({ status: "pending" }).eq("id", id);
+    if (error) throw new Error(error.message);
+  },
+
+  deleteSkipped: async (id) => {
+    const { error } = await supabase.from("email_sync").delete().eq("id", id);
+    if (error) throw new Error(error.message);
   },
 };
 

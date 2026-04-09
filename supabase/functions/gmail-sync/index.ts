@@ -21,28 +21,30 @@ const CORS = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Bank sender whitelist
-const BANK_SENDERS = [
-  "info@klikbca.com", "notification@bca.co.id", "noreply@bca.co.id", "estatement@bca.co.id",
-  "mandiricare@bankmandiri.co.id", "notification@bankmandiri.co.id", "estatement@bankmandiri.co.id",
-  "bni@bni.co.id", "info@bni.co.id",
-  "notification@cimbniaga.co.id",
-  "callcenter@bri.co.id",
-  "hello@jenius.com",
-  "noreply@sea.com",
-  "noreply@gojek.com", "support@gopay.co.id",
-  "noreply@ovo.id",
-  "noreply@dana.id",
-  "noreply@shopee.co.id",
-  "klikbca@bca.co.id",
+// Bank/ewallet sender domains (domain-based matching, more robust than exact emails)
+const BANK_DOMAINS = [
+  "klikbca.com", "bca.co.id",
+  "bankmandiri.co.id", "mandiri.co.id",
+  "bni.co.id", "cimbniaga.co.id",
+  "bri.co.id", "jenius.com",
+  "gojek.com", "gopay.co.id",
+  "ovo.id", "dana.id", "shopee.co.id",
+  "blu.co.id", "ocbc.id",
+  "danamon.co.id", "maybank.co.id",
+  "uob.co.id", "citibank.co.id",
+  "hsbc.co.id", "mayapada.co.id",
+  "bankmega.com", "permatabank.com",
+  "btn.co.id", "superbank.id",
+  "neobank.id", "sea.com",
 ];
 
 // Keywords that indicate non-transactional emails to skip
 const SKIP_KEYWORDS = [
-  "promo", "penawaran", "offer", "diskon", "discount",
-  "newsletter", "OTP", "kode verifikasi", "verification code",
-  "reset password", "aktivasi", "activation",
-  "selamat datang", "welcome", "registration",
+  "promo", "penawaran", "diskon", "newsletter",
+  "otp", "password", "aktivasi", "selamat datang",
+  "survey", "feedback", "undian", "offer", "discount",
+  "kode verifikasi", "verification code", "reset password",
+  "activation", "welcome", "registration",
 ];
 
 const AI_EXTRACTION_PROMPT = (emailContent: string, accounts: any[]) => `
@@ -112,7 +114,7 @@ async function refreshAccessToken(token: any, clientSecret: string): Promise<str
   return data.access_token || null;
 }
 
-async function processUser(supabase: any, userId: string, anthropicKey: string, googleSecret: string) {
+async function processUser(supabase: any, userId: string, anthropicKey: string, googleSecret: string, fromDate?: string, toDate?: string) {
   // Load token
   const { data: tokenRow } = await supabase.from("gmail_tokens").select("*").eq("user_id", userId).single();
   if (!tokenRow) return { processed: 0, new_transactions: 0 };
@@ -132,11 +134,19 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
   const { data: accounts } = await supabase.from("accounts").select("id,name,type,last4,account_no,bank_name").eq("user_id", userId).eq("is_active", true);
   const userAccounts = accounts || [];
 
-  // Build Gmail search query
-  const lastSync = tokenRow.last_sync ? new Date(tokenRow.last_sync) : new Date(Date.now() - 7 * 86400000);
-  const afterDate = lastSync.toISOString().slice(0, 10).replace(/-/g, "/");
-  const senderQuery = BANK_SENDERS.map(s => `from:${s}`).join(" OR ");
-  const query = `(${senderQuery}) after:${afterDate}`;
+  // Build Gmail search query with date range
+  let afterDate: string;
+  let beforeDate: string | null = null;
+  if (fromDate) {
+    afterDate = fromDate.replace(/-/g, "/");
+    if (toDate) beforeDate = toDate.replace(/-/g, "/");
+  } else {
+    const lastSync = tokenRow.last_sync ? new Date(tokenRow.last_sync) : new Date(Date.now() - 7 * 86400000);
+    afterDate = lastSync.toISOString().slice(0, 10).replace(/-/g, "/");
+  }
+  const domainQuery = BANK_DOMAINS.map(d => `from:*@${d}`).join(" OR ");
+  let query = `(${domainQuery}) after:${afterDate}`;
+  if (beforeDate) query += ` before:${beforeDate}`;
 
   // Fetch messages list
   const listRes = await fetch(
@@ -281,9 +291,13 @@ Deno.serve(async (req: Request) => {
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY);
 
   let targetUserId: string | null = null;
+  let fromDate: string | undefined;
+  let toDate: string | undefined;
   try {
     const body = await req.json().catch(() => ({}));
     targetUserId = body.user_id || null;
+    fromDate = body.from_date || undefined;
+    toDate   = body.to_date   || undefined;
   } catch { /* cron call with no body */ }
 
   let userIds: string[] = [];
@@ -299,7 +313,7 @@ Deno.serve(async (req: Request) => {
   const results: any[] = [];
   for (const uid of userIds) {
     try {
-      const result = await processUser(supabase, uid, ANTHROPIC_KEY, GOOGLE_SECRET);
+      const result = await processUser(supabase, uid, ANTHROPIC_KEY, GOOGLE_SECRET, fromDate, toDate);
       results.push({ user_id: uid, ...result });
     } catch (e) {
       console.error(`[gmail-sync] Error for user ${uid}:`, e);

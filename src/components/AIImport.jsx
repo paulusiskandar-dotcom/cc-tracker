@@ -137,7 +137,7 @@ const ACT_BTN = (extra = {}) => ({
 });
 
 // ─────────────────────────────────────────────────────────────────
-export default function AIImport({ user, accounts, ledger, onRefresh, setLedger, dark, merchantMaps = [], fxRates = {}, CURRENCIES = [] }) {
+export default function AIImport({ user, accounts, ledger, onRefresh, setLedger, dark, merchantMaps = [], fxRates = {}, CURRENCIES = [], setPendingSyncs }) {
   const T = dark ? DARK : LIGHT;
   const fileRef = useRef();
 
@@ -150,7 +150,12 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
   const [importing,   setImporting]   = useState(false);
   const [importingId, setImportingId] = useState(null);
 
-  const [gmailPending, setGmailPending] = useState([]);
+  const [gmailPending, setGmailPending] = useState([]); // raw email_sync rows
+  const [gmailRows,   setGmailRows]    = useState([]); // flattened tx rows for TxCard
+  const [gmailSel,    setGmailSel]     = useState({});
+  const [gmailSkip,   setGmailSkip]    = useState(new Set());
+  const [gmailNotes,  setGmailNotes]   = useState(new Set());
+  const [gmailImpId,  setGmailImpId]   = useState(null);
   const [gmailLoading, setGmailLoading] = useState(false);
   const [gmailLoaded,  setGmailLoaded]  = useState(false);
 
@@ -398,38 +403,98 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
   };
 
   // ── Gmail ─────────────────────────────────────────────────────
+  // Convert email_sync rows → TxCard-compatible rows
+  const flattenEmailSync = (rows) => {
+    const out = [];
+    for (const es of rows) {
+      const txList = Array.isArray(es.ai_raw_result) ? es.ai_raw_result : [];
+      if (!txList.length) continue;
+      txList.forEach((tx, i) => {
+        const rawType = tx.suggested_tx_type || "expense";
+        const { tx_type, category_id: overrideCat } = normaliseTxType(rawType, tx.category_id);
+        out.push({
+          _id:             `${es.id}__${i}`,
+          _email_sync_id:  es.id,
+          _email_subject:  es.subject,
+          tx_date:         tx.date || es.received_at?.slice(0, 10) || todayStr(),
+          description:     tx.description || es.subject || "(no description)",
+          merchant_name:   tx.merchant_name || null,
+          amount:          Number(tx.amount || 0),
+          amount_idr:      Number(tx.amount_idr || tx.amount || 0),
+          currency:        tx.currency || "IDR",
+          fxRate:          1,
+          tx_type,
+          category_id:     overrideCat || tx.category_id || null,
+          category_name:   tx.suggested_category || null,
+          from_id:         tx.from_account_id || null,
+          to_id:           tx.to_account_id   || null,
+          status:          "new",
+          notes:           es.subject || "",
+          conf:            Number(tx.confidence || 0) >= 0.85 ? 1 : 0,
+          is_qris:         tx.is_qris || false,
+          learned_cat:     null,
+          flagged:         false,
+        });
+      });
+    }
+    return out;
+  };
+
   const loadGmailPending = async () => {
     if (gmailLoaded) return;
     setGmailLoading(true);
     try {
       const data = await gmailApi.getPending(user.id);
       setGmailPending(data || []);
+      const rows = flattenEmailSync(data || []);
+      setGmailRows(rows);
+      const sel = {};
+      rows.forEach(r => { sel[r._id] = true; });
+      setGmailSel(sel);
       setGmailLoaded(true);
     } catch { showToast("Could not load Gmail pending", "error"); }
     setGmailLoading(false);
   };
 
-  const importGmailItem = async (item) => {
+  const updateGmailRow = (id, patch) => {
+    setGmailRows(prev => prev.map(r => r._id === id ? { ...r, ...patch } : r));
+  };
+
+  const importOneGmail = async (r) => {
+    setGmailImpId(r._id);
     try {
+      const { from_type, to_type } = getTxFromToTypes(r.tx_type);
       const entry = {
-        tx_date: item.date || todayStr(), description: item.description,
-        amount: Number(item.amount), currency: "IDR", amount_idr: Number(item.amount),
-        tx_type: "expense", from_type: "account", to_type: "expense",
-        from_id: ccAccounts[0]?.id || spendAccounts[0]?.id || null,
-        to_id: null, entity: "Personal", category_id: item.category || null,
-        category_name: item.category || null, notes: item.email_subject || "",
+        tx_date: r.tx_date, description: r.description,
+        merchant_name: r.merchant_name,
+        amount: r.amount, currency: r.currency, amount_idr: r.amount_idr,
+        tx_type: r.tx_type, from_type, to_type,
+        from_id: r.from_id || null, to_id: r.to_id || null,
+        entity: "Personal",
+        category_id: r.category_id || null,
+        notes: r.notes || null,
+        ai_categorized: true, ai_confidence: r.conf || null,
+        scan_batch_id: null,
       };
       const created = await ledgerApi.create(user.id, entry, accounts);
       if (created) setLedger(prev => [created, ...prev]);
-      setGmailPending(prev => prev.filter(p => p.id !== item.id));
-      await gmailApi.markImported(user.id, item.id);
-      showToast(`Imported: ${item.description}`);
+      // Remove all rows from same email, mark email confirmed
+      const syncId = r._email_sync_id;
+      setGmailRows(prev => prev.filter(x => x._email_sync_id !== syncId));
+      setGmailPending(prev => prev.filter(x => x.id !== syncId));
+      setPendingSyncs?.(prev => (prev || []).filter(x => x.id !== syncId));
+      await gmailApi.markImported(user.id, syncId);
+      showToast(`Imported: ${r.description}`);
     } catch (e) { showToast(e.message, "error"); }
+    setGmailImpId(null);
   };
 
-  const skipGmailItem = async (item) => {
-    try { await gmailApi.markSkipped(user.id, item.id); } catch {}
-    setGmailPending(prev => prev.filter(p => p.id !== item.id));
+  const skipOneGmail = async (r) => {
+    const syncId = r._email_sync_id;
+    setGmailRows(prev => prev.filter(x => x._email_sync_id !== syncId));
+    setGmailPending(prev => prev.filter(x => x.id !== syncId));
+    setPendingSyncs?.(prev => (prev || []).filter(x => x.id !== syncId));
+    try { await gmailApi.markSkipped(user.id, syncId); } catch {}
   };
 
   // ── Summary ────────────────────────────────────────────────────
@@ -562,37 +627,43 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
               <Spinner size={24} />
               <div style={{ fontSize: 12, color: T.text3, marginTop: 8 }}>Loading Gmail…</div>
             </div>
-          ) : gmailPending.length === 0 ? (
+          ) : gmailRows.length === 0 ? (
             <EmptyState icon="✉️" message="No pending Gmail transactions. Connect Gmail in Settings → Email Sync." />
-          ) : gmailPending.map(item => (
-            <div key={item.id} style={{
-              background: T.surface, border: `1px solid ${T.border}`,
-              borderRadius: 14, padding: "14px 16px",
-            }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>
-                    {item.description}
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {/* Header */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>
+                    {gmailRows.length} transaction{gmailRows.length !== 1 ? "s" : ""} pending
                   </div>
                   <div style={{ fontSize: 11, color: T.text3, marginTop: 2, fontFamily: "Figtree, sans-serif" }}>
-                    {item.date} · {item.merchant || "—"}
+                    {gmailPending.length} email{gmailPending.length !== 1 ? "s" : ""} from Gmail
                   </div>
-                  {item.email_subject && (
-                    <div style={{ fontSize: 10, color: T.text3, marginTop: 2, fontStyle: "italic", fontFamily: "Figtree, sans-serif" }}>
-                      {item.email_subject}
-                    </div>
-                  )}
                 </div>
-                <div style={{ fontSize: 14, fontWeight: 800, color: "#dc2626", flexShrink: 0, marginLeft: 12, fontFamily: "Figtree, sans-serif" }}>
-                  {fmtIDR(Number(item.amount || 0), true)}
-                </div>
+                <Button variant="secondary" size="sm" onClick={() => {
+                  const all = {};
+                  gmailRows.forEach(r => { all[r._id] = true; });
+                  setGmailSel(all);
+                  setGmailSkip(new Set());
+                }}>Select All</Button>
               </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <Button variant="primary"   size="sm" onClick={() => importGmailItem(item)}>✓ Import</Button>
-                <Button variant="secondary" size="sm" onClick={() => skipGmailItem(item)}>Skip</Button>
-              </div>
+              {/* Cards — same TxCard style as scan tab */}
+              <TxCardList
+                results={gmailRows}
+                selected={gmailSel} skipped={gmailSkip} notesOpen={gmailNotes}
+                importingId={gmailImpId} T={T}
+                accounts={accounts}
+                updateRow={updateGmailRow}
+                setSelected={setGmailSel}
+                setSkipped={(fn) => {
+                  setGmailSkip(fn);
+                }}
+                toggleNotes={(id) => setGmailNotes(s => { const ns = new Set(s); ns.has(id) ? ns.delete(id) : ns.add(id); return ns; })}
+                importOne={importOneGmail}
+              />
             </div>
-          ))}
+          )}
         </div>
       )}
     </div>

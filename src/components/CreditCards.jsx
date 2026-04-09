@@ -53,6 +53,7 @@ export default function CreditCards({
 }) {
   const [subTab,       setSubTab]       = useState("overview");
   const [selectedCard, setSelectedCard] = useState(null);
+  const [ccBankFilter, setCcBankFilter] = useState("all");
   const [filterMonth,  setFilterMonth]  = useState(ym(todayStr()));
   const [modal,        setModal]        = useState(null);
   const [saving,       setSaving]       = useState(false);
@@ -367,10 +368,35 @@ export default function CreditCards({
                     />
                   ))}
 
+                  {/* Bank filter pills */}
+                  {(() => {
+                    const allBanks = [...new Set(cardStats.map(c => c.bank_name).filter(Boolean))].sort();
+                    if (allBanks.length < 2) return null;
+                    return (
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                        {["all", ...allBanks].map(b => {
+                          const active = (ccBankFilter || "all") === b;
+                          return (
+                            <button key={b} onClick={() => setCcBankFilter(b)} style={{
+                              height: 28, padding: "0 12px", borderRadius: 20, cursor: "pointer",
+                              border: `1.5px solid ${active ? "#111827" : "#e5e7eb"}`,
+                              background: active ? "#111827" : "#fff",
+                              color: active ? "#fff" : "#6b7280",
+                              fontSize: 12, fontWeight: active ? 700 : 500,
+                              fontFamily: "Figtree, sans-serif", transition: "all 0.15s",
+                            }}>
+                              {b === "all" ? "All" : b}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+
                   {/* Standalone cards in 3-col grid */}
-                  {standaloneCards.length > 0 && (
+                  {standaloneCards.filter(cc => !ccBankFilter || ccBankFilter === "all" || cc.bank_name === ccBankFilter).length > 0 && (
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
-                      {standaloneCards.map((cc, i) => (
+                      {standaloneCards.filter(cc => !ccBankFilter || ccBankFilter === "all" || cc.bank_name === ccBankFilter).map((cc, i) => (
                         <CCCard key={cc.id} cc={cc}
                           color={CARD_PALETTE[(paletteIdx + i) % CARD_PALETTE.length]}
                           onPay={() => { setPayForm(f => ({ ...f, cardId: cc.id, amount: cc.debt })); setModal("pay"); }}
