@@ -1,4 +1,9 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
+import {
+  Home, ArrowUpDown, Landmark, Wallet, CreditCard,
+  TrendingUp, ClipboardList, ArrowDownLeft, BarChart2,
+  Calendar as CalendarIcon, Settings as SettingsIcon, LayoutGrid,
+} from "lucide-react";
 import PILogo from "./components/PILogo";
 import { supabase } from "./lib/supabase";
 import { TABS, MOBILE_MAIN_TABS, MOBILE_MORE_TABS, CURRENCIES, APP_VERSION, APP_BUILD } from "./constants";
@@ -323,7 +328,9 @@ function Finance({ user, signOut }) {
     switch (tab) {
       case "dashboard":    return <Dashboard    {...shared} />;
       case "transactions": return <Transactions {...shared} />;
-      case "accounts":     return <Accounts     {...shared} />;
+      case "bank":         return <Accounts     {...shared} initialSubTab="bank" />;
+      case "cash":         return <Accounts     {...shared} initialSubTab="cash" />;
+      case "accounts":     return <Accounts     {...shared} initialSubTab="bank" />; // legacy redirect
       case "cards":        return <CreditCards  {...shared} />;
       case "assets":       return <Assets       {...shared} />;
       case "receivables":  return <Receivables  {...shared} />;
@@ -476,8 +483,11 @@ function Finance({ user, signOut }) {
                       background: active ? "#dbeafe" : "#ffffff",
                       color:      active ? "#3b5bdb" : "#374151",
                       fontWeight: active ? 700 : 500,
+                      display: "flex", flexDirection: "column",
+                      alignItems: "center", gap: 4,
                     }}
                   >
+                    <NAV_ICON id={t.id} />
                     {t.label}
                   </button>
                 );
@@ -493,98 +503,23 @@ function Finance({ user, signOut }) {
 }
 
 // ─── NAV ICONS ────────────────────────────────────────────────
-// Consistent outlined SVG icons — 22×22, stroke 1.8, no fill
+// Lucide outline icons — 20×20, strokeWidth 1.5
+const LUCIDE_PROPS = { size: 20, strokeWidth: 1.5 };
 function NAV_ICON({ id }) {
-  const props = {
-    width: 22, height: 22,
-    fill: "none", stroke: "currentColor",
-    strokeWidth: 1.8, strokeLinecap: "round", strokeLinejoin: "round",
-    viewBox: "0 0 24 24",
-  };
   switch (id) {
-    case "dashboard":
-      return (
-        <svg {...props}>
-          <path d="M3 12L12 3l9 9" />
-          <path d="M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9" />
-        </svg>
-      );
-    case "transactions":
-      return (
-        <svg {...props}>
-          <path d="M7 17V4m0 0L4 7m3-3 3 3" />
-          <path d="M17 7v13m0 0 3-3m-3 3-3-3" />
-        </svg>
-      );
-    case "accounts":
-      return (
-        <svg {...props}>
-          <path d="M3 21h18" />
-          <path d="M3 10h18" />
-          <path d="M5 6l7-3 7 3" />
-          <path d="M6 10v11M10 10v11M14 10v11M18 10v11" />
-        </svg>
-      );
-    case "cards":
-      return (
-        <svg {...props}>
-          <rect x="2" y="5" width="20" height="14" rx="2" />
-          <path d="M2 10h20" />
-        </svg>
-      );
-    case "assets":
-      return (
-        <svg {...props}>
-          <polyline points="22 7 13.5 15.5 8.5 10.5 2 17" />
-          <polyline points="16 7 22 7 22 13" />
-        </svg>
-      );
-    case "receivables":
-      return (
-        <svg {...props}>
-          <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" />
-          <rect x="9" y="3" width="6" height="4" rx="1" />
-          <path d="M9 12h6M9 16h4" />
-        </svg>
-      );
-    case "income":
-      return (
-        <svg {...props}>
-          <path d="M12 19V5m0 0l-7 7m7-7 7 7" />
-        </svg>
-      );
-    case "reports":
-      return (
-        <svg {...props}>
-          <path d="M3 3v18h18" />
-          <path d="M7 16l4-4 4 4 4-4" />
-        </svg>
-      );
-    case "calendar":
-      return (
-        <svg {...props}>
-          <rect x="3" y="4" width="18" height="18" rx="2" />
-          <path d="M16 2v4M8 2v4M3 10h18" />
-        </svg>
-      );
-    case "settings":
-      return (
-        <svg {...props}>
-          <circle cx="12" cy="12" r="3" />
-          <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
-        </svg>
-      );
-    case "more":
-      return (
-        <svg {...props}>
-          <rect x="3"  y="3"  width="7" height="7" rx="1.5" />
-          <rect x="14" y="3"  width="7" height="7" rx="1.5" />
-          <rect x="3"  y="14" width="7" height="7" rx="1.5" />
-          <rect x="14" y="14" width="7" height="7" rx="1.5" />
-        </svg>
-      );
-    default:
-      return null;
+    case "dashboard":    return <Home          {...LUCIDE_PROPS} />;
+    case "transactions": return <ArrowUpDown   {...LUCIDE_PROPS} />;
+    case "bank":         return <Landmark      {...LUCIDE_PROPS} />;
+    case "cash":         return <Wallet        {...LUCIDE_PROPS} />;
+    case "cards":        return <CreditCard    {...LUCIDE_PROPS} />;
+    case "assets":       return <TrendingUp    {...LUCIDE_PROPS} />;
+    case "receivables":  return <ClipboardList {...LUCIDE_PROPS} />;
+    case "income":       return <ArrowDownLeft {...LUCIDE_PROPS} />;
+    case "reports":      return <BarChart2     {...LUCIDE_PROPS} />;
+    case "calendar":     return <CalendarIcon  {...LUCIDE_PROPS} />;
+    case "settings":     return <SettingsIcon  {...LUCIDE_PROPS} />;
+    case "more":         return <LayoutGrid    {...LUCIDE_PROPS} />;
+    default:             return null;
   }
 }
 

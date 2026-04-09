@@ -1,12 +1,12 @@
 import { useState } from "react";
 import { supabase } from "../lib/supabase";
 import PILogo from "./PILogo";
-import { fxApi, merchantApi, settingsApi, recurringApi, gmailApi } from "../api";
+import { fxApi, merchantApi, settingsApi, recurringApi, gmailApi, accountsApi } from "../api";
 import { fmtIDR } from "../utils";
 import { CURRENCIES, EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST, TX_TYPES, APP_VERSION, APP_BUILD } from "../constants";
 import { LIGHT, DARK } from "../theme";
 import {
-  Modal, Button,
+  Modal, ConfirmModal, Button,
   Field, AmountInput, Input, FormRow,
   Select,
   SectionHeader, EmptyState, showToast,
@@ -14,6 +14,7 @@ import {
 
 const SUBTABS = [
   { id: "profile",    label: "Profile"    },
+  { id: "accounts",   label: "Accounts"   },
   { id: "email",      label: "Email Sync" },
   { id: "fx",         label: "FX Rates"   },
   { id: "recurring",  label: "Recurring"  },
@@ -37,7 +38,7 @@ export default function Settings({
   recurTemplates, setRecurTemplates,
   merchantMaps, setMerchantMaps,
   onRefresh,
-  accounts = [], bankAccounts = [], creditCards = [],
+  accounts = [], setAccounts, bankAccounts = [], creditCards = [],
 }) {
   const T = dark ? DARK : LIGHT;
 
@@ -368,6 +369,17 @@ export default function Settings({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════ */}
+      {/* ── ACCOUNTS ─────────────────────────────────── */}
+      {/* ══════════════════════════════════════════════════ */}
+      {subTab === "accounts" && (
+        <AccountsSection
+          user={user} T={T} card={card}
+          accounts={accounts} setAccounts={setAccounts}
+          onRefresh={onRefresh}
+        />
       )}
 
       {/* ══════════════════════════════════════════════════ */}
@@ -891,6 +903,128 @@ export default function Settings({
         )}
       </Modal>
 
+    </div>
+  );
+}
+
+// ─── ACCOUNTS SECTION (Liabilities + Receivables) ─────────────
+function AccountsSection({ user, T, card, accounts, setAccounts, onRefresh }) {
+  const liabilities  = accounts.filter(a => a.type === "liability");
+  const receivables  = accounts.filter(a => a.type === "receivable");
+
+  const [liabModal,  setLiabModal]  = useState(false);
+  const [editLiab,   setEditLiab]   = useState(null);
+  const [liabForm,   setLiabForm]   = useState({ name: "", current_balance: "" });
+  const [liabSaving, setLiabSaving] = useState(false);
+  const [delLiab,    setDelLiab]    = useState(null);
+
+  const openAdd  = () => { setEditLiab(null); setLiabForm({ name: "", current_balance: "" }); setLiabModal(true); };
+  const openEdit = (a) => { setEditLiab(a); setLiabForm({ name: a.name, current_balance: String(a.current_balance || 0) }); setLiabModal(true); };
+
+  const saveLiab = async () => {
+    if (!liabForm.name.trim()) return showToast("Name required", "error");
+    setLiabSaving(true);
+    try {
+      if (editLiab) {
+        await accountsApi.update(editLiab.id, { name: liabForm.name.trim(), current_balance: Number(liabForm.current_balance) || 0 });
+        setAccounts(prev => prev.map(a => a.id === editLiab.id ? { ...a, name: liabForm.name.trim(), current_balance: Number(liabForm.current_balance) || 0 } : a));
+      } else {
+        const created = await accountsApi.create(user.id, {
+          name: liabForm.name.trim(), type: "liability",
+          current_balance: Number(liabForm.current_balance) || 0,
+        });
+        if (created) setAccounts(prev => [...prev, created]);
+      }
+      showToast(editLiab ? "Liability updated" : "Liability added");
+      setLiabModal(false);
+    } catch (e) { showToast(e.message, "error"); }
+    setLiabSaving(false);
+  };
+
+  const deleteLiab = async () => {
+    try {
+      await accountsApi.delete(delLiab.id);
+      setAccounts(prev => prev.filter(a => a.id !== delLiab.id));
+      showToast("Deleted");
+    } catch (e) { showToast(e.message, "error"); }
+    setDelLiab(null);
+  };
+
+  const rowStyle = {
+    display: "flex", alignItems: "center", justifyContent: "space-between",
+    padding: "10px 0", borderBottom: `1px solid ${T.border}`,
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+      {/* ── Liabilities ── */}
+      <div style={card}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <SectionHeader title="Liabilities" />
+          <Button size="sm" variant="primary" onClick={openAdd}>+ Add</Button>
+        </div>
+        {liabilities.length === 0 ? (
+          <EmptyState icon="📋" message="No liabilities added yet." />
+        ) : (
+          liabilities.map((a, i) => (
+            <div key={a.id} style={{ ...rowStyle, borderBottom: i === liabilities.length - 1 ? "none" : `1px solid ${T.border}` }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>{a.name}</div>
+                <div style={{ fontSize: 11, color: "#dc2626", fontFamily: "Figtree, sans-serif" }}>
+                  {fmtIDR(Number(a.current_balance || 0), true)}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <Button size="sm" variant="secondary" onClick={() => openEdit(a)}>Edit</Button>
+                <Button size="sm" variant="danger"    onClick={() => setDelLiab(a)}>Delete</Button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* ── Receivables ── */}
+      <div style={card}>
+        <SectionHeader title="Receivables (Piutang)" />
+        <div style={{ marginTop: 8 }}>
+          {receivables.length === 0 ? (
+            <EmptyState icon="📎" message="No receivable accounts." />
+          ) : (
+            receivables.map((a, i) => (
+              <div key={a.id} style={{ ...rowStyle, borderBottom: i === receivables.length - 1 ? "none" : `1px solid ${T.border}` }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>{a.name}</div>
+                  <div style={{ fontSize: 11, color: "#d97706", fontFamily: "Figtree, sans-serif" }}>
+                    {fmtIDR(Number(a.current_balance || 0), true)}
+                  </div>
+                </div>
+                <div style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, sans-serif" }}>{a.entity || "—"}</div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* ── Liability modal ── */}
+      <Modal open={liabModal} onClose={() => setLiabModal(false)} title={editLiab ? "Edit Liability" : "Add Liability"}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <Input label="Name" value={liabForm.name} onChange={e => setLiabForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. KPR BCA" />
+          <AmountInput label="Current Balance" value={liabForm.current_balance} onChange={v => setLiabForm(f => ({ ...f, current_balance: v }))} />
+          <Button variant="primary" busy={liabSaving} onClick={saveLiab}>{editLiab ? "Save Changes" : "Add Liability"}</Button>
+        </div>
+      </Modal>
+
+      {/* ── Delete confirm ── */}
+      <ConfirmModal
+        open={!!delLiab}
+        title="Delete Liability"
+        message={`Delete "${delLiab?.name}"? This cannot be undone.`}
+        confirmLabel="Delete"
+        danger
+        onConfirm={deleteLiab}
+        onCancel={() => setDelLiab(null)}
+      />
     </div>
   );
 }

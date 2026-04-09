@@ -139,26 +139,28 @@ export const FREQUENCIES = ["Daily", "Weekly", "Monthly", "Quarterly", "Yearly"]
 
 // ─── NAVIGATION TABS ──────────────────────────────────────────
 export const TABS = [
-  { id: "dashboard",    icon: "⌂",  label: "Dashboard" },
-  { id: "transactions", icon: "↕",  label: "Transactions" },
-  { id: "accounts",     icon: "◫",  label: "Accounts" },
-  { id: "cards",        icon: "▭",  label: "Credit Cards" },
-  { id: "assets",       icon: "◈",  label: "Assets" },
-  { id: "receivables",  icon: "◎",  label: "Receivables" },
-  { id: "income",       icon: "↓",  label: "Income" },
-  { id: "reports",      icon: "◻",  label: "Reports" },
-  { id: "calendar",     icon: "📅", label: "Calendar" },
-  { id: "settings",     icon: "◑",  label: "Settings" },
+  { id: "dashboard",    label: "Dashboard"    },
+  { id: "transactions", label: "Transactions" },
+  { id: "bank",         label: "Bank"         },
+  { id: "cash",         label: "Cash"         },
+  { id: "cards",        label: "Credit Cards" },
+  { id: "assets",       label: "Assets"       },
+  { id: "receivables",  label: "Receivables"  },
+  { id: "income",       label: "Income"       },
+  { id: "reports",      label: "Reports"      },
+  { id: "calendar",     label: "Calendar"     },
+  { id: "settings",     label: "Settings"     },
 ];
 
-export const MOBILE_MAIN_TABS = ["dashboard", "transactions", "accounts", "assets"];
+export const MOBILE_MAIN_TABS = ["dashboard", "transactions", "bank", "assets"];
 export const MOBILE_MORE_TABS = [
+  { id: "cash",        label: "Cash"         },
   { id: "cards",       label: "Credit Cards" },
-  { id: "receivables", label: "Receivables" },
-  { id: "income",      label: "Income" },
-  { id: "reports",     label: "Reports" },
-  { id: "calendar",    label: "Calendar" },
-  { id: "settings",    label: "Settings" },
+  { id: "receivables", label: "Receivables"  },
+  { id: "income",      label: "Income"       },
+  { id: "reports",     label: "Reports"      },
+  { id: "calendar",    label: "Calendar"     },
+  { id: "settings",    label: "Settings"     },
 ];
 
 // ─── AI PROXY ─────────────────────────────────────────────────

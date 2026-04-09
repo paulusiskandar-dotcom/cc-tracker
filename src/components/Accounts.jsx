@@ -46,8 +46,9 @@ const TYPE_COLOR = {
 export default function Accounts({
   user, accounts, ledger, onRefresh,
   setAccounts, setAccountCurrencies, accountCurrencies = [], CURRENCIES = [], fxRates = {},
+  initialSubTab = "all",
 }) {
-  const [subTab,   setSubTab]   = useState("all");
+  const [subTab,   setSubTab]   = useState(initialSubTab);
   const [modal,    setModal]    = useState(null); // null | "add" | "edit" | "history" | "delete" | "updateNilai"
   const [step,     setStep]     = useState(1);
   const [formType, setFormType] = useState("bank");
