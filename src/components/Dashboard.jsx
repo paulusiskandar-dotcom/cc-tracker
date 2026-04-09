@@ -421,7 +421,7 @@ export default function Dashboard({
         {/* [1] Net Worth — dark hero, spans 2 cols */}
         <div className="bento-span2" style={{ ...BENTO_DARK, gridColumn: "span 2" }}>
           <div style={DARK_LABEL}>Total Net Worth</div>
-          <div style={DARK_VALUE}>{fmtIDR(nw.total)}</div>
+          <div className="nw-value" style={DARK_VALUE}>{fmtIDR(nw.total)}</div>
           {monthlyChange !== 0 && (
             <div style={{
               fontSize:   12,
@@ -433,7 +433,7 @@ export default function Dashboard({
               {monthlyChange >= 0 ? "↑" : "↓"} {fmtIDR(Math.abs(monthlyChange), true)} this month
             </div>
           )}
-          <div style={DARK_STATS}>
+          <div className="nw-stats" style={DARK_STATS}>
             {[
               { label: "Bank",    value: fmtIDR(nw.bank, true),              color: "#a5f3fc" },
               { label: "Assets",  value: fmtIDR(nw.assets, true),            color: "#86efac" },
@@ -448,7 +448,7 @@ export default function Dashboard({
                 <div style={{ fontSize: 9, fontWeight: 600, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>
                   {s.label}
                 </div>
-                <div style={{ fontSize: 12, fontWeight: 700, color: s.color, fontFamily: "Figtree, sans-serif" }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: s.color, fontFamily: "Figtree, sans-serif", wordBreak: "break-all" }}>
                   {s.value}
                 </div>
               </div>
@@ -589,7 +589,7 @@ export default function Dashboard({
 
         {/* [6] Cash Flow — spans 2 cols */}
         <div className="bento-span2" style={{ ...BENTO_WHITE, gridColumn: "span 2" }}>
-          <div style={CARD_ROW}>
+          <div className="cf-header" style={CARD_ROW}>
             <div style={CARD_TITLE}>Cash Flow</div>
             <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
               <LegendDot color="#059669" label="Income" />
@@ -933,16 +933,17 @@ function BentoTile({ bg, icon, iconBg, label, value, sub, badge, badgeColor, onC
         {label}
       </div>
       {/* Value */}
-      <div style={{
+      <div className="bento-value" style={{
         fontSize: 16, fontWeight: 800, color: "#111827",
         fontFamily: "Figtree, sans-serif", lineHeight: 1.2,
         marginBottom: sub ? 4 : 0,
+        wordBreak: "break-all",
       }}>
         {value}
       </div>
       {/* Sub */}
       {sub && (
-        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", wordBreak: "break-word", overflowWrap: "anywhere" }}>
           {sub}
         </div>
       )}
@@ -1024,6 +1025,7 @@ const BENTO_BASE = {
   padding:      "16px 16px 14px",
   position:     "relative",
   overflow:     "hidden",
+  minWidth:     0,  // prevent grid blowout
 };
 
 const BENTO_WHITE = {

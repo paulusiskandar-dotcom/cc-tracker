@@ -77,24 +77,44 @@ html, body {
   to { transform: rotate(360deg); }
 }
 
-/* Dashboard bento grid — collapse on mobile */
-@media (max-width: 600px) {
-  .bento-grid {
-    grid-template-columns: 1fr 1fr !important;
-  }
-  .bento-grid .bento-span2 {
-    grid-column: span 2 !important;
-  }
-  .bento-grid .bento-span3 {
-    grid-column: span 2 !important;
-  }
-}
-@media (max-width: 400px) {
+/* Dashboard bento grid — single column on mobile */
+@media (max-width: 768px) {
   .bento-grid {
     grid-template-columns: 1fr !important;
   }
   .bento-grid .bento-span2,
   .bento-grid .bento-span3 {
     grid-column: span 1 !important;
+  }
+
+  /* Net Worth value — scale to fit */
+  .nw-value {
+    font-size: clamp(22px, 7vw, 32px) !important;
+    letter-spacing: -1px !important;
+    word-break: break-all !important;
+  }
+
+  /* Net Worth sub stats — 2×2 grid */
+  .nw-stats {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  /* Cash Flow header — stack legend below title on mobile */
+  .cf-header {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 6px !important;
+  }
+
+  /* BentoTile value — cap font size */
+  .bento-value {
+    font-size: 20px !important;
+  }
+}
+
+/* Content area bottom padding above mobile nav */
+@media (max-width: 768px) {
+  .page-content {
+    padding-bottom: calc(80px + env(safe-area-inset-bottom)) !important;
   }
 }

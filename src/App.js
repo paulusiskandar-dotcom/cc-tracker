@@ -420,7 +420,7 @@ function Finance({ user, signOut }) {
         {/* Page content */}
         <main
           key={tab}
-          className="fade-up"
+          className="fade-up page-content"
           style={{ flex: 1, padding: "20px 24px", maxWidth: 840, width: "100%", margin: "0 auto", paddingBottom: 88 }}
         >
           {renderPage()}
