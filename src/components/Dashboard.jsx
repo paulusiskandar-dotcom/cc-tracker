@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { ledgerApi, recurringApi } from "../api";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
 import { fmtIDR, ym, mlShort, getGreeting, todayStr, groupByDate } from "../utils";
@@ -15,6 +15,13 @@ export default function Dashboard({
   setLedger, setReminders, onRefresh,
   employeeLoans = [], loanPayments = [],
 }) {
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  useEffect(() => {
+    const h = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, []);
+
   const [confirmModal,  setConfirmModal]  = useState(false);
   const [confirmTarget, setConfirmTarget] = useState(null);  // { reminder, tmpl, editMode }
   const [confirmForm,   setConfirmForm]   = useState({ date: todayStr(), amount: "", notes: "" });
@@ -347,6 +354,16 @@ export default function Dashboard({
     setSettleSaving(false);
   };
 
+  // ─── MOBILE NUMBER FORMATTING ────────────────────────────────
+  const fmtM = (n) => {
+    const v = Math.abs(Number(n) || 0);
+    const sign = Number(n) < 0 ? "-" : "";
+    if (v >= 1e9) return `${sign}Rp ${(v / 1e9).toFixed(1)}M`;
+    if (v >= 1e6) return `${sign}Rp ${(v / 1e6).toFixed(1)}jt`;
+    if (v >= 1e3) return `${sign}Rp ${(v / 1e3).toFixed(0)}rb`;
+    return `${sign}Rp ${v}`;
+  };
+
   // ─── RENDER ──────────────────────────────────────────────────
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -416,12 +433,24 @@ export default function Dashboard({
       )}
 
       {/* ── BENTO GRID ── */}
-      <div className="bento-grid" style={GRID}>
+      <div style={{
+        display:             "grid",
+        gridTemplateColumns: isMobile ? "1fr" : "repeat(3, 1fr)",
+        gap:                 isMobile ? 10 : 10,
+      }}>
 
-        {/* [1] Net Worth — dark hero, spans 2 cols */}
-        <div className="bento-span2" style={{ ...BENTO_DARK, gridColumn: "span 2" }}>
+        {/* [1] Net Worth — dark hero, spans 2 cols on desktop */}
+        <div style={{ ...BENTO_DARK, gridColumn: isMobile ? "span 1" : "span 2" }}>
           <div style={DARK_LABEL}>Total Net Worth</div>
-          <div className="nw-value" style={DARK_VALUE}>{fmtIDR(nw.total)}</div>
+          <div style={{
+            ...DARK_VALUE,
+            fontSize:     isMobile ? 26 : 28,
+            overflow:     "hidden",
+            textOverflow: isMobile ? "ellipsis" : "unset",
+            whiteSpace:   isMobile ? "nowrap" : "normal",
+          }}>
+            {isMobile ? fmtM(nw.total) : fmtIDR(nw.total)}
+          </div>
           {monthlyChange !== 0 && (
             <div style={{
               fontSize:   12,
@@ -433,23 +462,23 @@ export default function Dashboard({
               {monthlyChange >= 0 ? "↑" : "↓"} {fmtIDR(Math.abs(monthlyChange), true)} this month
             </div>
           )}
-          <div className="nw-stats" style={DARK_STATS}>
+          <div style={{
+            ...DARK_STATS,
+            gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)",
+          }}>
             {[
-              { label: "Bank",    value: fmtIDR(nw.bank, true),              color: "#a5f3fc" },
-              { label: "Assets",  value: fmtIDR(nw.assets, true),            color: "#86efac" },
-              { label: "Recv",    value: fmtIDR(nw.receivables, true),       color: "#fde68a" },
-              { label: "Loans",   value: fmtIDR(nw.employeeLoanTotal, true), color: "#fde68a" },
-              { label: "CC Debt", value: fmtIDR(nw.ccDebt, true),            color: "#fca5a5" },
-            ].filter(s => {
-              const n = Number(s.value.replace(/[^0-9]/g, ""));
-              return n > 0;
-            }).map(s => (
+              { label: "Bank",    raw: nw.bank,              color: "#a5f3fc" },
+              { label: "Assets",  raw: nw.assets,            color: "#86efac" },
+              { label: "Recv",    raw: nw.receivables,       color: "#fde68a" },
+              { label: "Loans",   raw: nw.employeeLoanTotal, color: "#fde68a" },
+              { label: "CC Debt", raw: nw.ccDebt,            color: "#fca5a5" },
+            ].filter(s => Number(s.raw) > 0).map(s => (
               <div key={s.label}>
                 <div style={{ fontSize: 9, fontWeight: 600, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>
                   {s.label}
                 </div>
-                <div style={{ fontSize: 12, fontWeight: 700, color: s.color, fontFamily: "Figtree, sans-serif", wordBreak: "break-all" }}>
-                  {s.value}
+                <div style={{ fontSize: isMobile ? 11 : 12, fontWeight: 700, color: s.color, fontFamily: "Figtree, sans-serif" }}>
+                  {isMobile ? fmtM(s.raw) : fmtIDR(s.raw, true)}
                 </div>
               </div>
             ))}
@@ -587,9 +616,14 @@ export default function Dashboard({
           onClick={() => setTab?.("receivables")}
         />
 
-        {/* [6] Cash Flow — spans 2 cols */}
-        <div className="bento-span2" style={{ ...BENTO_WHITE, gridColumn: "span 2" }}>
-          <div className="cf-header" style={CARD_ROW}>
+        {/* [6] Cash Flow — spans 2 cols on desktop, full width on mobile */}
+        <div style={{ ...BENTO_WHITE, gridColumn: isMobile ? "span 1" : "span 2" }}>
+          <div style={{
+            ...CARD_ROW,
+            flexDirection: isMobile ? "column" : "row",
+            alignItems:    isMobile ? "flex-start" : "center",
+            gap:           isMobile ? 6 : 0,
+          }}>
             <div style={CARD_TITLE}>Cash Flow</div>
             <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
               <LegendDot color="#059669" label="Income" />
@@ -619,8 +653,8 @@ export default function Dashboard({
           <MiniBarChart data={cashFlowData} max={maxCF} />
         </div>
 
-        {/* [7] Upcoming — grouped by date */}
-        <div style={{ ...BENTO_WHITE, gridColumn: "span 3" }}>
+        {/* [7] Upcoming — full width */}
+        <div style={{ ...BENTO_WHITE, gridColumn: isMobile ? "span 1" : "span 3" }}>
           <div style={CARD_TITLE}>Upcoming — Next 7 Days</div>
 
           {upcomingGroups.length === 0 ? (
@@ -1014,11 +1048,7 @@ function LegendDot({ color, label }) {
 }
 
 // ─── STYLES ───────────────────────────────────────────────────
-const GRID = {
-  display:             "grid",
-  gridTemplateColumns: "repeat(3, 1fr)",
-  gap:                 10,
-};
+// GRID is now applied inline in render (isMobile-aware)
 
 const BENTO_BASE = {
   borderRadius: 16,
@@ -1058,11 +1088,11 @@ const DARK_VALUE = {
 };
 
 const DARK_STATS = {
-  display:             "grid",
-  gridTemplateColumns: "repeat(4, 1fr)",
-  gap:                 8,
-  paddingTop:          12,
-  borderTop:           "1px solid rgba(255,255,255,0.08)",
+  display:    "grid",
+  // gridTemplateColumns set inline (isMobile: 2 cols, desktop: 4 cols)
+  gap:        8,
+  paddingTop: 12,
+  borderTop:  "1px solid rgba(255,255,255,0.08)",
 };
 
 const CARD_TITLE = {
