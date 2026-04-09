@@ -53,6 +53,35 @@ export default function Dashboard({
       .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0),
   [thisMonthLedger, creditCards]);
 
+  // ─── CC SHARED LIMIT GROUPS (for dashboard) ──────────────────
+  const { ccGroupMap, ccGroupedIds } = useMemo(() => {
+    const gm = {};
+    const gids = new Set();
+    creditCards.forEach(cc => {
+      if (!cc.shared_limit_group_id) return;
+      gids.add(cc.id);
+      if (!gm[cc.shared_limit_group_id]) {
+        gm[cc.shared_limit_group_id] = {
+          id: cc.shared_limit_group_id,
+          name: "", sharedLimit: 0, totalDebt: 0, members: [],
+        };
+      }
+      const g = gm[cc.shared_limit_group_id];
+      g.members.push(cc);
+      g.totalDebt += Number(cc.current_balance || 0);
+      if (cc.is_limit_group_master) {
+        g.sharedLimit = Number(cc.shared_limit || 0);
+        g.name = cc.notes || cc.name || "Shared Group";
+      }
+    });
+    // fallback name/limit from first member if no master
+    Object.values(gm).forEach(g => {
+      if (!g.name && g.members.length > 0) g.name = g.members[0].name || "Shared Group";
+      if (!g.sharedLimit && g.members.length > 0) g.sharedLimit = Number(g.members[0].card_limit || 0);
+    });
+    return { ccGroupMap: gm, ccGroupedIds: gids };
+  }, [creditCards]);
+
   const totalAssets = useMemo(() =>
     assets.reduce((s, a) => s + Number(a.current_value || 0), 0),
   [assets]);
@@ -428,14 +457,93 @@ export default function Dashboard({
         </div>
 
         {/* [2] CC This Month */}
-        <BentoTile
-          bg="#fde8e8" icon="💳" iconBg="rgba(220,38,38,0.12)"
-          label="CC This Month"
-          value={fmtIDR(thisMonthCCSpend)}
-          sub={`Debt: ${fmtIDR(totalCCDebt, true)}`}
-          badge={creditCards.length > 0 ? `${creditCards.length} cards` : null}
-          badgeColor="#dc2626"
-        />
+        <div style={{ ...BENTO_BASE, background: "#fde8e8" }}>
+          {/* badge */}
+          {creditCards.length > 0 && (
+            <div style={{
+              position: "absolute", top: 12, right: 12,
+              fontSize: 9, fontWeight: 700, fontFamily: "Figtree, sans-serif",
+              background: "#dc262620", color: "#dc2626",
+              padding: "2px 6px", borderRadius: 20,
+            }}>
+              {creditCards.length} cards
+            </div>
+          )}
+          {/* icon */}
+          <div style={{
+            width: 34, height: 34, borderRadius: 10,
+            background: "rgba(220,38,38,0.12)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 16, marginBottom: 10,
+          }}>💳</div>
+          {/* label */}
+          <div style={{
+            fontSize: 10, fontWeight: 700, color: "#9ca3af",
+            textTransform: "uppercase", letterSpacing: "0.5px",
+            fontFamily: "Figtree, sans-serif", marginBottom: 4,
+          }}>CC This Month</div>
+          {/* main value = this month spend */}
+          <div style={{
+            fontSize: 16, fontWeight: 800, color: "#111827",
+            fontFamily: "Figtree, sans-serif", lineHeight: 1.2, marginBottom: 2,
+          }}>{fmtIDR(thisMonthCCSpend)}</div>
+          {/* total debt */}
+          <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: 10 }}>
+            Total debt: {fmtIDR(totalCCDebt, true)}
+          </div>
+
+          {/* ── shared limit groups ── */}
+          {Object.values(ccGroupMap).map(g => {
+            const util = g.sharedLimit > 0 ? Math.min(100, (g.totalDebt / g.sharedLimit) * 100) : 0;
+            const utilColor = util > 80 ? "#dc2626" : util > 50 ? "#d97706" : "#059669";
+            return (
+              <div key={g.id} style={{ marginBottom: 8 }}>
+                <div style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "baseline",
+                  marginBottom: 3,
+                }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
+                    {g.name}
+                  </span>
+                  <span style={{ fontSize: 10, color: utilColor, fontWeight: 700, fontFamily: "Figtree, sans-serif" }}>
+                    {util.toFixed(0)}% of {fmtIDR(g.sharedLimit, true)}
+                  </span>
+                </div>
+                <div style={{ height: 5, borderRadius: 3, background: "#f3f4f6", overflow: "hidden" }}>
+                  <div style={{ width: `${util}%`, height: "100%", background: utilColor, borderRadius: 3, transition: "width 0.3s" }} />
+                </div>
+                <div style={{ fontSize: 9, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
+                  {g.members.map(m => m.name).join(" · ")}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* ── standalone cards (not in any group) ── */}
+          {creditCards.filter(c => !ccGroupedIds.has(c.id) && Number(c.current_balance || 0) > 0).map(c => {
+            const debt  = Number(c.current_balance || 0);
+            const limit = Number(c.card_limit || 0);
+            const util  = limit > 0 ? Math.min(100, (debt / limit) * 100) : 0;
+            const utilColor = util > 80 ? "#dc2626" : util > 50 ? "#d97706" : "#059669";
+            return (
+              <div key={c.id} style={{ marginBottom: 6 }}>
+                <div style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2,
+                }}>
+                  <span style={{ fontSize: 10, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>{c.name}</span>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
+                    {fmtIDR(debt, true)}
+                  </span>
+                </div>
+                {limit > 0 && (
+                  <div style={{ height: 3, borderRadius: 2, background: "#f3f4f6", overflow: "hidden" }}>
+                    <div style={{ width: `${util}%`, height: "100%", background: utilColor, borderRadius: 2 }} />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
 
         {/* [3] Bank & Cash Total */}
         {(() => {
