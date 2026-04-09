@@ -560,6 +560,36 @@ export const settingsApi = {
   },
 };
 
+// ─── AI RESPONSE JSON EXTRACTOR ───────────────────────────────
+function extractJSON(text) {
+  // Try 1: direct parse
+  try { return JSON.parse(text); } catch {}
+
+  // Try 2: code block (```json ... ```)
+  const codeBlock = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (codeBlock) {
+    try { return JSON.parse(codeBlock[1].trim()); } catch {}
+  }
+
+  // Try 3: JSON array anywhere in text
+  const arrayMatch = text.match(/\[[\s\S]*\]/);
+  if (arrayMatch) {
+    try { return JSON.parse(arrayMatch[0]); } catch {}
+  }
+
+  // Try 4: JSON object → wrap in array or unwrap .transactions
+  const objMatch = text.match(/\{[\s\S]*\}/);
+  if (objMatch) {
+    try {
+      const obj = JSON.parse(objMatch[0]);
+      return obj.transactions || [obj];
+    } catch {}
+  }
+
+  console.error("Could not parse AI response:", text.slice(0, 300));
+  throw new Error("Could not extract transactions from AI response");
+}
+
 // ─── SCAN BATCHES ─────────────────────────────────────────────
 export const scanApi = {
   // Scan a file (image/PDF) via AI proxy → returns array of transaction objects
@@ -636,17 +666,9 @@ Return ONLY valid JSON, no markdown.`;
           }
 
           const d = await r.json();
-          // Claude returns content[0].text with JSON
-          const raw = d?.content?.[0]?.text || "{}";
-          let parsed;
-          try {
-            parsed = JSON.parse(raw);
-          } catch {
-            // Try extracting JSON block from markdown
-            const match = raw.match(/\{[\s\S]*\}/);
-            parsed = match ? JSON.parse(match[0]) : {};
-          }
-          resolve(parsed.transactions || []);
+          const raw = d?.content?.[0]?.text || "";
+          console.log("AI raw response:", raw.slice(0, 500));
+          resolve(extractJSON(raw));
         } catch (err) { reject(err); }
       };
       reader.readAsDataURL(file);
