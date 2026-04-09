@@ -1,6 +1,6 @@
 // ─── APP VERSION ──────────────────────────────────────────────
-export const APP_VERSION = "2.2.0";
-export const APP_BUILD   = "2026-04-08";
+export const APP_VERSION = "2.3.0";
+export const APP_BUILD   = "2026-04-09";
 
 // ─── CURRENCIES ───────────────────────────────────────────────
 export const CURRENCIES = [

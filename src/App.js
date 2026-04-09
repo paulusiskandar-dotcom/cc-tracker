@@ -388,7 +388,7 @@ function Finance({ user, signOut }) {
             Net Worth
           </div>
           <div style={{ fontSize: 15, fontWeight: 800, color: nwColor, marginBottom: 12, fontFamily: "Figtree, sans-serif" }}>
-            {fmtIDR(netWorth.total, true)}
+            {"Rp " + Math.round(Number(netWorth.total || 0)).toLocaleString("id-ID")}
           </div>
           <button onClick={signOut} style={S.signOutBtn}>Sign out</button>
           <div style={{ marginTop: 8, fontSize: 10, color: "#d1d5db" }}>
