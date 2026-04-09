@@ -340,6 +340,7 @@ export default function Accounts({
               ledger={ledger}
               accountCurrencies={accountCurrencies}
               fxRates={fxRates}
+              CURRENCIES={CURRENCIES}
               onEdit={openEdit}
               onDelete={(a) => setDeleteAcc(a)}
               onHistory={(a) => { setHistAcc(a); setModal("history"); }}
@@ -605,57 +606,76 @@ function DistributionBar({ accounts, total }) {
 }
 
 // ─── BANK ACCOUNT CARD ───────────────────────────────────────
-function BankAccountCard({ account: a, ledger, accountCurrencies = [], fxRates = {}, color, onEdit, onHistory }) {
-  const txCount  = ledger.filter(e => e.from_id === a.id || e.to_id === a.id).length;
-  const bal      = Number(a.current_balance || 0);
-  const balColor = bal > 0 ? "#059669" : bal < 0 ? "#dc2626" : "#9ca3af";
-  const fxRows   = accountCurrencies.filter(r => r.account_id === a.id);
+function BankAccountCard({ account: a, ledger, accountCurrencies = [], fxRates = {}, CURRENCIES: C = [], color, onEdit, onHistory }) {
+  const txCount   = ledger.filter(e => e.from_id === a.id || e.to_id === a.id).length;
+  const bal       = Number(a.current_balance || 0);
+  const cur       = C.find(c => c.code === (a.currency || "IDR"));
+  const isForeign = a.currency && a.currency !== "IDR";
+  const rate      = fxRates[a.currency] || cur?.rate || 1;
+  const idrEquiv  = isForeign ? Math.round(bal * rate) : bal;
+  const fxRows    = accountCurrencies.filter(r => r.account_id === a.id);
 
   return (
-    <div style={{ background: "#fff", borderRadius: 14, border: "0.5px solid #e5e7eb", overflow: "hidden" }}>
+    <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <div style={{ height: 3, background: color }} />
-      <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-        {/* Name + account number */}
-        <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-          <span style={{ fontSize: 13, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1, minWidth: 0 }}>
-            🏦 {a.name}
-          </span>
-          {a.account_no && (
-            <span style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", flexShrink: 0 }}>
-              ···{String(a.account_no).slice(-4)}
-            </span>
-          )}
+      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
+        {/* Icon + Name */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: "#e8f4fd", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>
+            🏦
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {a.name}
+            </div>
+            <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
+              {a.bank_name || "Bank"}{a.account_no ? ` · ···${String(a.account_no).slice(-4)}` : ""}
+            </div>
+          </div>
         </div>
 
         {/* Balance */}
-        {a.is_multicurrency ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            {fxRows.map(r => (
-              <div key={r.currency} style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>{r.currency}</span>
-                <span style={{ fontSize: 12, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
-                  {fmtCur(r.balance, r.currency)}
-                  {r.currency !== "IDR" && (
-                    <span style={{ fontSize: 10, color: "#9ca3af", marginLeft: 4 }}>
-                      ≈{fmtIDR(Number(r.balance || 0) * (fxRates[r.currency] || 1), true)}
-                    </span>
-                  )}
-                </span>
+        <div>
+          <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 3 }}>Balance</div>
+          {a.is_multicurrency ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              {fxRows.map(r => (
+                <div key={r.currency} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>{r.currency}</span>
+                  <div style={{ textAlign: "right" }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif" }}>{fmtCur(r.balance, r.currency)}</span>
+                    {r.currency !== "IDR" && (
+                      <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginLeft: 4 }}>
+                        ≈{fmtIDR(Number(r.balance || 0) * (fxRates[r.currency] || 1), true)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#3b5bdb", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>Multi-currency</div>
+            </div>
+          ) : isForeign ? (
+            <>
+              <div style={{ fontSize: 24, fontWeight: 800, color: "#059669", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
+                {cur?.symbol || a.currency} {bal.toLocaleString("id-ID")}
               </div>
-            ))}
-          </div>
-        ) : (
-          <div style={{ fontSize: 16, fontWeight: 800, color: balColor, fontFamily: "Figtree, sans-serif", lineHeight: 1 }}>
-            {fmtIDR(Math.abs(bal))}
-            {a.currency && a.currency !== "IDR" && (
-              <span style={{ fontSize: 10, fontWeight: 500, color: "#9ca3af", marginLeft: 4 }}>{a.currency}</span>
-            )}
-          </div>
-        )}
+              <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 3 }}>
+                ≈ {fmtIDR(idrEquiv, true)}
+              </div>
+              <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
+                Rate: {fmtIDR(rate, true)}/{a.currency}
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize: 24, fontWeight: 800, color: "#059669", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
+              {fmtIDR(bal)}
+            </div>
+          )}
+        </div>
 
         {/* Actions */}
-        <div style={{ display: "flex", gap: 5 }}>
-          <button onClick={onHistory} style={ACCT_BTN}>{txCount} txns</button>
+        <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
+          <button onClick={onHistory} style={ACCT_BTN}>📋 {txCount}</button>
           <button onClick={onEdit}    style={{ ...ACCT_BTN, flex: 1 }}>✏️ Edit</button>
         </div>
       </div>
@@ -724,7 +744,7 @@ function CashAccountCard({ account: a, fxRates = {}, CURRENCIES: C = [], ledger,
 }
 
 // ─── BANK PAGE CONTENT ───────────────────────────────────────
-function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, onEdit, onDelete, onHistory }) {
+function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, CURRENCIES: C = [], onEdit, onDelete, onHistory }) {
   const [showZero, setShowZero] = useState(false);
 
   // Sort highest balance first, preserve original index for palette color
@@ -738,31 +758,34 @@ function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, onEdit,
   const zero    = sorted.filter(({ a }) => Number(a.current_balance || 0) <= 0);
   const visible = showZero ? sorted : nonZero;
 
-  const total   = accounts.reduce((s, a) => s + Number(a.current_balance || 0), 0);
-  const largest = nonZero.length > 0 ? nonZero[0].a : accounts[0];
+  const idrAccts     = accounts.filter(a => !a.currency || a.currency === "IDR");
+  const foreignAccts = accounts.filter(a => a.currency && a.currency !== "IDR");
+  const totalIDR     = idrAccts.reduce((s, a) => s + Number(a.current_balance || 0), 0);
+  const foreignIDR   = foreignAccts.reduce((sum, a) => {
+    const cur  = C.find(c => c.code === a.currency);
+    const rate = fxRates[a.currency] || cur?.rate || 1;
+    return sum + Math.round(Number(a.current_balance || 0) * rate);
+  }, 0);
+  const grandTotal = totalIDR + foreignIDR;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {/* 3 Summary cards */}
+      {/* 3 Summary cards — same style as Cash page */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
         {[
-          { label: "Total Bank Balance", value: fmtIDR(total, true), color: "#3b5bdb", bg: "#e8f4fd" },
-          { label: "Accounts", value: accounts.length, color: "#0891b2", bg: "#e0f7fa" },
-          { label: "Largest", value: largest?.name || "—", sub: fmtIDR(Number(largest?.current_balance || 0), true), color: "#059669", bg: "#e8fdf0" },
+          { label: "IDR Bank",           value: fmtIDR(totalIDR, true),   color: "#3b5bdb", bg: "#e8f4fd" },
+          { label: "Foreign Bank (≈IDR)", value: fmtIDR(foreignIDR, true), color: "#0891b2", bg: "#e0f7fa" },
+          { label: "Total Bank",          value: fmtIDR(grandTotal, true), color: "#059669", bg: "#e8fdf0" },
         ].map(s => (
           <div key={s.label} style={{ background: s.bg, borderRadius: 14, padding: "14px 14px" }}>
             <div style={{ fontSize: 9, fontWeight: 700, color: s.color, textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 5, opacity: 0.8 }}>{s.label}</div>
-            <div style={{ fontSize: 15, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif", lineHeight: 1.2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.value}</div>
-            {s.sub && <div style={{ fontSize: 11, color: s.color, fontFamily: "Figtree, sans-serif", marginTop: 2, fontWeight: 600 }}>{s.sub}</div>}
+            <div style={{ fontSize: 15, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif", lineHeight: 1.2 }}>{s.value}</div>
           </div>
         ))}
       </div>
 
-      {/* Distribution bar */}
-      <DistributionBar accounts={nonZero.map(x => x.a)} total={total} />
-
-      {/* 3-col grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
+      {/* 3-col grid — same spacing as Cash page */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
         {visible.map(({ a, i }) => (
           <BankAccountCard
             key={a.id}
@@ -770,6 +793,7 @@ function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, onEdit,
             ledger={ledger}
             accountCurrencies={accountCurrencies}
             fxRates={fxRates}
+            CURRENCIES={C}
             color={CARD_PALETTE[i % CARD_PALETTE.length]}
             onEdit={() => onEdit(a)}
             onDelete={() => onDelete(a)}
