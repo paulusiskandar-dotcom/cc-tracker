@@ -526,8 +526,49 @@ export const scanApi = {
         try {
           const base64 = e.target.result.split(",")[1];
           const mime   = file.type || "image/jpeg";
-          const key    = process.env.REACT_APP_SUPABASE_ANON_KEY || "";
-          const url    = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/ai-proxy`;
+
+          const accountsCtx = accounts.map(a =>
+            `- ${a.name} (${a.type}${a.bank_name ? ", " + a.bank_name : ""}${a.last4 ? " ****" + a.last4 : ""}) id:${a.id}`
+          ).join("\n");
+          const loansCtx = employeeLoans.map(l =>
+            `- ${l.employee_name} id:${l.id}`
+          ).join("\n");
+
+          const prompt = `You are a financial transaction extractor. Extract ALL transactions from this document.
+
+${accountsCtx ? `Known accounts:\n${accountsCtx}\n` : ""}${loansCtx ? `Employee loans:\n${loansCtx}\n` : ""}
+Return a JSON object with a "transactions" array. Each item must have:
+- date: "YYYY-MM-DD"
+- description: merchant or narration
+- amount: number (positive)
+- currency: "IDR" (or detected currency code)
+- amount_idr: number in IDR (use 1:1 if IDR)
+- type: one of expense|income|transfer|pay_cc|bank_interest|cashback|bank_charges|materai|tax
+- from_account_id: matched account id or null
+- to_account_id: matched account id or null
+- category: expense category slug (food|transport|health|shopping|home|education|entertainment|business|finance|family|social|cash_advance_fee|other)
+- entity: "Personal"
+- notes: any extra detail
+
+Return ONLY valid JSON, no markdown.`;
+
+          const contentParts = [];
+          // PDFs must use document type; images use image type
+          if (mime === "application/pdf") {
+            contentParts.push({
+              type: "document",
+              source: { type: "base64", media_type: "application/pdf", data: base64 },
+            });
+          } else {
+            contentParts.push({
+              type: "image",
+              source: { type: "base64", media_type: mime, data: base64 },
+            });
+          }
+          contentParts.push({ type: "text", text: prompt });
+
+          const key = process.env.REACT_APP_SUPABASE_ANON_KEY || "";
+          const url = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/ai-proxy`;
           const r = await fetch(url, {
             method:  "POST",
             headers: {
@@ -536,21 +577,12 @@ export const scanApi = {
               "Authorization": `Bearer ${key}`,
             },
             body: JSON.stringify({
-              action: "scan_document",
-              user_id: userId,
-              file_base64: base64,
-              file_mime: mime,
-              file_name: file.name,
-              accounts: accounts.map(a => ({
-                id: a.id, name: a.name, type: a.type,
-                bank_name: a.bank_name, account_no: a.account_no,
-                last4: a.last4, entity: a.entity,
-              })),
-              employee_loans: employeeLoans.map(l => ({
-                id: l.id, employee_name: l.employee_name,
-              })),
+              model:      "claude-sonnet-4-20250514",
+              max_tokens: 4000,
+              messages: [{ role: "user", content: contentParts }],
             }),
           });
+
           if (!r.ok) {
             const e2  = await r.json().catch(() => ({}));
             const msg = e2?.error?.message || e2?.message ||
@@ -558,8 +590,19 @@ export const scanApi = {
                         `HTTP ${r.status}`;
             throw new Error(msg);
           }
+
           const d = await r.json();
-          resolve(d.transactions || d.data || []);
+          // Claude returns content[0].text with JSON
+          const raw = d?.content?.[0]?.text || "{}";
+          let parsed;
+          try {
+            parsed = JSON.parse(raw);
+          } catch {
+            // Try extracting JSON block from markdown
+            const match = raw.match(/\{[\s\S]*\}/);
+            parsed = match ? JSON.parse(match[0]) : {};
+          }
+          resolve(parsed.transactions || []);
         } catch (err) { reject(err); }
       };
       reader.readAsDataURL(file);
@@ -721,10 +764,14 @@ export const loanPaymentsApi = {
   },
 };
 
+const AI_MODEL = "claude-sonnet-4-20250514";
+
 // ─── AI PROXY ─────────────────────────────────────────────────
 export async function aiCall(body) {
   const proxy = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/ai-proxy`;
   const key   = process.env.REACT_APP_SUPABASE_ANON_KEY || "";
+  // Always ensure model is set — Anthropic rejects requests without it
+  const payload = { model: AI_MODEL, max_tokens: 1024, ...body };
   const r = await fetch(proxy, {
     method:  "POST",
     headers: {
@@ -732,7 +779,7 @@ export async function aiCall(body) {
       "apikey":        key,
       "Authorization": `Bearer ${key}`,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   });
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
