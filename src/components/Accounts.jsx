@@ -605,63 +605,58 @@ function DistributionBar({ accounts, total }) {
 }
 
 // ─── BANK ACCOUNT CARD ───────────────────────────────────────
-function BankAccountCard({ account: a, ledger, accountCurrencies = [], fxRates = {}, color, onEdit, onDelete, onHistory }) {
-  const txCount = ledger.filter(e => e.from_id === a.id || e.to_id === a.id).length;
-  const bal = Number(a.current_balance || 0);
-  const balColor = bal >= 0 ? "#059669" : "#dc2626";
-  const fxRows = accountCurrencies.filter(r => r.account_id === a.id);
+function BankAccountCard({ account: a, ledger, accountCurrencies = [], fxRates = {}, color, onEdit, onHistory }) {
+  const txCount  = ledger.filter(e => e.from_id === a.id || e.to_id === a.id).length;
+  const bal      = Number(a.current_balance || 0);
+  const balColor = bal > 0 ? "#059669" : bal < 0 ? "#dc2626" : "#9ca3af";
+  const fxRows   = accountCurrencies.filter(r => r.account_id === a.id);
 
   return (
-    <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+    <div style={{ background: "#fff", borderRadius: 14, border: "0.5px solid #e5e7eb", overflow: "hidden" }}>
       <div style={{ height: 3, background: color }} />
-      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
-        {/* Icon + Name */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: "#e8f4fd", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>🏦</div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {a.name}
-            </div>
-            <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
-              {a.bank_name || "Bank"}{a.account_no ? ` · ···${String(a.account_no).slice(-4)}` : ""}
-            </div>
-          </div>
+      <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+        {/* Name + account number */}
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: 1, minWidth: 0 }}>
+            🏦 {a.name}
+          </span>
+          {a.account_no && (
+            <span style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", flexShrink: 0 }}>
+              ···{String(a.account_no).slice(-4)}
+            </span>
+          )}
         </div>
 
         {/* Balance */}
         {a.is_multicurrency ? (
-          <div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
             {fxRows.map(r => (
-              <div key={r.currency} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+              <div key={r.currency} style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>{r.currency}</span>
-                <div style={{ textAlign: "right" }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif" }}>{fmtCur(r.balance, r.currency)}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
+                  {fmtCur(r.balance, r.currency)}
                   {r.currency !== "IDR" && (
-                    <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginLeft: 6 }}>
-                      ≈ {fmtIDR(Number(r.balance || 0) * (fxRates[r.currency] || 1), true)}
+                    <span style={{ fontSize: 10, color: "#9ca3af", marginLeft: 4 }}>
+                      ≈{fmtIDR(Number(r.balance || 0) * (fxRates[r.currency] || 1), true)}
                     </span>
                   )}
-                </div>
+                </span>
               </div>
             ))}
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#3b5bdb", fontFamily: "Figtree, sans-serif", marginTop: 4 }}>Multi-currency</div>
           </div>
         ) : (
-          <div>
-            <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 3 }}>Balance</div>
-            <div style={{ fontSize: 24, fontWeight: 800, color: balColor, fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
-              {fmtIDR(Math.abs(bal))}
-            </div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: balColor, fontFamily: "Figtree, sans-serif", lineHeight: 1 }}>
+            {fmtIDR(Math.abs(bal))}
             {a.currency && a.currency !== "IDR" && (
-              <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>{a.currency}</div>
+              <span style={{ fontSize: 10, fontWeight: 500, color: "#9ca3af", marginLeft: 4 }}>{a.currency}</span>
             )}
           </div>
         )}
 
         {/* Actions */}
-        <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
-          <button onClick={onHistory} style={ACCT_BTN}>📋 {txCount}</button>
-          <button onClick={onEdit} style={{ ...ACCT_BTN, flex: 1 }}>✏️ Edit</button>
+        <div style={{ display: "flex", gap: 5 }}>
+          <button onClick={onHistory} style={ACCT_BTN}>{txCount} txns</button>
+          <button onClick={onEdit}    style={{ ...ACCT_BTN, flex: 1 }}>✏️ Edit</button>
         </div>
       </div>
     </div>
@@ -730,8 +725,21 @@ function CashAccountCard({ account: a, fxRates = {}, CURRENCIES: C = [], ledger,
 
 // ─── BANK PAGE CONTENT ───────────────────────────────────────
 function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, onEdit, onDelete, onHistory }) {
-  const total    = accounts.reduce((s, a) => s + Number(a.current_balance || 0), 0);
-  const largest  = accounts.reduce((best, a) => Number(a.current_balance || 0) > Number(best.current_balance || 0) ? a : best, accounts[0]);
+  const [showZero, setShowZero] = useState(false);
+
+  // Sort highest balance first, preserve original index for palette color
+  const sorted = useMemo(() =>
+    accounts
+      .map((a, i) => ({ a, i }))
+      .sort((x, y) => Number(y.a.current_balance || 0) - Number(x.a.current_balance || 0)),
+  [accounts]);
+
+  const nonZero = sorted.filter(({ a }) => Number(a.current_balance || 0) > 0);
+  const zero    = sorted.filter(({ a }) => Number(a.current_balance || 0) <= 0);
+  const visible = showZero ? sorted : nonZero;
+
+  const total   = accounts.reduce((s, a) => s + Number(a.current_balance || 0), 0);
+  const largest = nonZero.length > 0 ? nonZero[0].a : accounts[0];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -751,11 +759,11 @@ function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, onEdit,
       </div>
 
       {/* Distribution bar */}
-      <DistributionBar accounts={accounts} total={total} />
+      <DistributionBar accounts={nonZero.map(x => x.a)} total={total} />
 
       {/* 3-col grid */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
-        {accounts.map((a, i) => (
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
+        {visible.map(({ a, i }) => (
           <BankAccountCard
             key={a.id}
             account={a}
@@ -769,6 +777,16 @@ function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, onEdit,
           />
         ))}
       </div>
+
+      {/* Zero-balance toggle */}
+      {zero.length > 0 && (
+        <button
+          onClick={() => setShowZero(v => !v)}
+          style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif", padding: "4px 0", textAlign: "left" }}
+        >
+          {showZero ? `▲ Hide ${zero.length} zero-balance account${zero.length > 1 ? "s" : ""}` : `▼ Show ${zero.length} zero-balance account${zero.length > 1 ? "s" : ""}`}
+        </button>
+      )}
     </div>
   );
 }
