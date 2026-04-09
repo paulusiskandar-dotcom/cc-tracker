@@ -1,13 +1,13 @@
 import { useState, useMemo } from "react";
-import { accountsApi, ledgerApi, getTxFromToTypes } from "../api";
+import { accountsApi } from "../api";
 import { fmtIDR, todayStr } from "../utils";
-import { ASSET_SUBTYPES, ASSET_ICON, ASSET_COL, LIAB_SUBTYPES } from "../constants";
+import { ASSET_SUBTYPES, ASSET_ICON, ASSET_COL } from "../constants";
 import { LIGHT, DARK } from "../theme";
 import {
   Modal, Button,
   Field, AmountInput, Input, FormRow,
   Select,
-  SectionHeader, EmptyState, Spinner, showToast,
+  SectionHeader, EmptyState, showToast,
 } from "./shared/index";
 
 // ─── PROGRESS BAR ─────────────────────────────────────────────
@@ -72,12 +72,11 @@ function DonutChart({ data, colors, size = 120, thickness = 24 }) {
 }
 
 const SUBTABS = [
-  { id: "overview",    label: "Overview"     },
-  { id: "assets",      label: "Assets"       },
-  { id: "liabilities", label: "Liabilities"  },
+  { id: "overview", label: "Overview" },
+  { id: "assets",   label: "Assets"   },
 ];
 
-export default function Assets({ user, accounts, ledger, onRefresh, setAccounts, setLedger, dark }) {
+export default function Assets({ user, accounts, setAccounts, dark }) {
   const T = dark ? DARK : LIGHT;
 
   const [subTab, setSubTab]     = useState("overview");
@@ -88,18 +87,17 @@ export default function Assets({ user, accounts, ledger, onRefresh, setAccounts,
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [updateForm, setUpdateForm] = useState({ value: "", date: todayStr(), notes: "" });
 
-  // Pay liability modal
-  const [payModal, setPayModal] = useState(false);
-  const [payForm, setPayForm]   = useState({ liabId: "", bankId: "", amount: "", date: todayStr(), notes: "" });
+  // Add asset modal
+  const emptyAssetForm = () => ({ name: "", subtype: "", current_value: "", purchase_price: "", notes: "" });
+  const [addAssetModal, setAddAssetModal] = useState(false);
+  const [addAssetForm, setAddAssetForm]   = useState(emptyAssetForm());
+  const setAF = (k, v) => setAddAssetForm(f => ({ ...f, [k]: v }));
 
   // ── DERIVED ────────────────────────────────────────────────
-  const assets      = useMemo(() => accounts.filter(a => a.type === "asset"),       [accounts]);
-  const liabilities = useMemo(() => accounts.filter(a => a.type === "liability"),   [accounts]);
-  const bankAccounts= useMemo(() => accounts.filter(a => a.type === "bank"), [accounts]);
+  const assets = useMemo(() => accounts.filter(a => a.type === "asset"), [accounts]);
 
-  const totalAssets   = assets.reduce((s, a) => s + Number(a.current_value || 0), 0);
-  const totalLiab     = liabilities.reduce((s, l) => s + Number(l.outstanding_amount || 0), 0);
-  const netAssets     = totalAssets - totalLiab;
+  const totalAssets = assets.reduce((s, a) => s + Number(a.current_value || 0), 0);
+  const netAssets   = totalAssets;
   const totalPurchase = assets.reduce((s, a) => s + Number(a.purchase_price || 0), 0);
   const totalGain     = totalAssets - totalPurchase;
 
@@ -142,41 +140,28 @@ export default function Assets({ user, accounts, ledger, onRefresh, setAccounts,
     setSaving(false);
   };
 
-  const openPayModal = (liabId = "") => {
-    setPayForm({ liabId, bankId: "", amount: "", date: todayStr(), notes: "" });
-    setPayModal(true);
-  };
-
-  const handlePayLiability = async () => {
-    if (!payForm.liabId || !payForm.bankId || !payForm.amount)
-      return showToast("Fill all required fields", "error");
+  const handleAddAsset = async () => {
+    if (!addAssetForm.name) return showToast("Asset name is required", "error");
     setSaving(true);
     try {
-      const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
-      const amt  = sn(payForm.amount);
-      const liab = accounts.find(a => a.id === payForm.liabId);
-      const entry = {
-        tx_date:         payForm.date,
-        description:     `Pay ${liab?.name || "Liability"}`,
-        amount:          amt,
-        currency:        "IDR",
-        amount_idr:      amt,
-        tx_type:         "pay_liability",
-        from_type:       "account",
-        to_type:         "account",
-        from_id:         payForm.bankId,
-        to_id:           payForm.liabId,
-        entity:          liab?.entity || "Personal",
-        notes:           payForm.notes || "",
+      const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? null : n; };
+      const data = {
+        name:           addAssetForm.name.trim(),
+        subtype:        addAssetForm.subtype || null,
+        current_value:  sn(addAssetForm.current_value) ?? 0,
+        purchase_price: sn(addAssetForm.purchase_price),
+        notes:          addAssetForm.notes || null,
+        type:           "asset",
+        entity:         null,
+        is_active:      true,
+        sort_order:     accounts.length,
       };
-      const r = await ledgerApi.create(user.id, entry, accounts);
-      if (r) setLedger(prev => [r, ...prev]);
-      await onRefresh();
-      showToast(`Paid ${fmtIDR(amt, true)} towards ${liab?.name}`);
-      setPayModal(false);
-    } catch (e) {
-      showToast(e.message, "error");
-    }
+      const created = await accountsApi.create(user.id, data);
+      if (created) setAccounts(prev => [...prev, created]);
+      showToast("Asset added");
+      setAddAssetModal(false);
+      setAddAssetForm(emptyAssetForm());
+    } catch (e) { showToast(e.message, "error"); }
     setSaving(false);
   };
 
@@ -190,6 +175,13 @@ export default function Assets({ user, accounts, ledger, onRefresh, setAccounts,
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+      {/* ── HEADER ─────────────────────────────────────────── */}
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <Button size="sm" onClick={() => { setAddAssetForm(emptyAssetForm()); setAddAssetModal(true); }}>
+          + Add Asset
+        </Button>
+      </div>
 
       {/* ── SUB-TABS ─────────────────────────────────────── */}
       <div style={{ display: "flex", gap: 4 }}>
@@ -221,37 +213,19 @@ export default function Assets({ user, accounts, ledger, onRefresh, setAccounts,
       {subTab === "overview" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
-          {/* Hero */}
-          <div style={{
-            background:   "linear-gradient(135deg, #059669 0%, #0891b2 100%)",
-            borderRadius: 20,
-            padding:      "22px 22px 20px",
-            color:        "#fff",
-          }}>
-            <div style={{ fontSize: 11, fontWeight: 700, opacity: .7, marginBottom: 4, letterSpacing: "0.06em" }}>
-              NET ASSET VALUE
+          {/* Summary stat cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+            <div style={{ background: T.assetBg || "#e8fdf0", borderRadius: 14, padding: "14px 14px" }}>
+              <div style={{ fontSize: 9, fontWeight: 700, color: "#059669", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 5, opacity: 0.8 }}>Total Assets</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: T.text, fontFamily: "Figtree, sans-serif" }}>{fmtIDR(totalAssets, true)}</div>
             </div>
-            <div style={{ fontSize: 32, fontWeight: 900, letterSpacing: "-0.02em" }}>
-              {fmtIDR(netAssets)}
+            <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 14, padding: "14px 14px" }}>
+              <div style={{ fontSize: 9, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 5, opacity: 0.8 }}>Unrealised P&amp;L</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: totalGain >= 0 ? "#059669" : "#dc2626", fontFamily: "Figtree, sans-serif" }}>{totalGain >= 0 ? "+" : ""}{fmtIDR(totalGain, true)}</div>
             </div>
-            <div style={{ display: "flex", gap: 20, marginTop: 14, flexWrap: "wrap" }}>
-              <div>
-                <div style={{ fontSize: 10, opacity: .65, fontWeight: 600 }}>TOTAL ASSETS</div>
-                <div style={{ fontSize: 14, fontWeight: 800, marginTop: 2 }}>{fmtIDR(totalAssets, true)}</div>
-              </div>
-              <div>
-                <div style={{ fontSize: 10, opacity: .65, fontWeight: 600 }}>LIABILITIES</div>
-                <div style={{ fontSize: 14, fontWeight: 800, marginTop: 2 }}>−{fmtIDR(totalLiab, true)}</div>
-              </div>
-              <div>
-                <div style={{ fontSize: 10, opacity: .65, fontWeight: 600 }}>UNREALISED</div>
-                <div style={{
-                  fontSize: 14, fontWeight: 800, marginTop: 2,
-                  color: totalGain >= 0 ? "#a7f3d0" : "#fca5a5",
-                }}>
-                  {totalGain >= 0 ? "+" : ""}{fmtIDR(totalGain, true)}
-                </div>
-              </div>
+            <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 14, padding: "14px 14px" }}>
+              <div style={{ fontSize: 9, fontWeight: 700, color: "#3b5bdb", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 5, opacity: 0.8 }}>Net Value</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: T.text, fontFamily: "Figtree, sans-serif" }}>{fmtIDR(netAssets, true)}</div>
             </div>
           </div>
 
@@ -286,22 +260,14 @@ export default function Assets({ user, accounts, ledger, onRefresh, setAccounts,
               </div>
             </div>
           ) : (
-            <EmptyState icon="📈" message="No assets yet. Add them from Accounts." />
+            <EmptyState icon="📈" message="No assets yet. Tap '+ Add Asset' to get started." />
           )}
 
-          {/* Summary stats */}
-          {(assets.length > 0 || liabilities.length > 0) && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <div style={{ ...card, background: T.assetBg, border: "none" }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "#059669", letterSpacing: "0.05em" }}>ASSETS</div>
-                <div style={{ fontSize: 20, fontWeight: 900, color: T.text, marginTop: 4 }}>{assets.length}</div>
-                <div style={{ fontSize: 12, color: T.text2 }}>items</div>
-              </div>
-              <div style={{ ...card, background: T.ccBg, border: "none" }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "#dc2626", letterSpacing: "0.05em" }}>LIABILITIES</div>
-                <div style={{ fontSize: 20, fontWeight: 900, color: T.text, marginTop: 4 }}>{liabilities.length}</div>
-                <div style={{ fontSize: 12, color: T.text2 }}>items</div>
-              </div>
+          {/* Cost basis row */}
+          {totalPurchase > 0 && (
+            <div style={{ ...card, padding: "10px 14px" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: T.text3, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Cost Basis</div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: T.text }}>{fmtIDR(totalPurchase, true)}</div>
             </div>
           )}
         </div>
@@ -313,7 +279,7 @@ export default function Assets({ user, accounts, ledger, onRefresh, setAccounts,
       {subTab === "assets" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {assets.length === 0 ? (
-            <EmptyState icon="📈" message="No assets yet. Add them from Accounts." />
+            <EmptyState icon="📈" message="No assets yet. Tap '+ Add Asset' to get started." />
           ) : (
             assets.map(a => {
               const cur     = Number(a.current_value || 0);
@@ -404,84 +370,37 @@ export default function Assets({ user, accounts, ledger, onRefresh, setAccounts,
         </div>
       )}
 
+
       {/* ══════════════════════════════════════════════════ */}
-      {/* ── LIABILITIES TAB ──────────────────────────── */}
+      {/* ── ADD ASSET MODAL ──────────────────────────── */}
       {/* ══════════════════════════════════════════════════ */}
-      {subTab === "liabilities" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <Button variant="primary" size="sm" onClick={() => openPayModal()}>
-              + Make Payment
-            </Button>
-          </div>
-
-          {liabilities.length === 0 ? (
-            <EmptyState icon="📉" message="No liabilities. Add them from Accounts." />
-          ) : (
-            liabilities.map(l => {
-              const outstanding = Number(l.outstanding_amount || 0);
-              const original    = Number(l.total_amount || 0);
-              const paid        = original > 0 ? original - outstanding : 0;
-              const pct         = original > 0 ? (paid / original) * 100 : 0;
-
-              return (
-                <div key={l.id} style={card}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-                    {/* Left */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: T.text }}>{l.name}</div>
-                      <div style={{ fontSize: 11, color: T.text3, marginTop: 2 }}>
-                        {[l.creditor, l.subtype, l.liability_interest_rate > 0 && `${l.liability_interest_rate}% p.a.`]
-                          .filter(Boolean).join(" · ")}
-                      </div>
-                    </div>
-
-                    {/* Right */}
-                    <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 12 }}>
-                      <div style={{ fontSize: 10, color: T.text3, marginBottom: 2 }}>Outstanding</div>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: "#e67700" }}>
-                        {fmtIDR(outstanding, true)}
-                      </div>
-                      {l.monthly_payment > 0 && (
-                        <div style={{ fontSize: 10, color: T.text3 }}>
-                          {fmtIDR(l.monthly_payment, true)}/mo
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {original > 0 && (
-                    <>
-                      <ProgressBar value={paid} max={original} color="#059669" height={6} />
-                      <div style={{ fontSize: 10, color: T.text3, marginTop: 4 }}>
-                        {pct.toFixed(1)}% paid &nbsp;·&nbsp;
-                        {fmtIDR(paid, true)} of {fmtIDR(original, true)}
-                      </div>
-                    </>
-                  )}
-
-                  {l.end_date && (
-                    <div style={{ fontSize: 10, color: T.text3, marginTop: 4 }}>
-                      Ends: {l.end_date}
-                    </div>
-                  )}
-
-                  <div style={{ marginTop: 12 }}>
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      onClick={() => openPayModal(l.id)}
-                    >
-                      Make Payment →
-                    </Button>
-                  </div>
-                </div>
-              );
-            })
-          )}
+      <Modal
+        isOpen={addAssetModal}
+        onClose={() => setAddAssetModal(false)}
+        title="+ Add Asset"
+        footer={<Button fullWidth onClick={handleAddAsset} busy={saving}>Add Asset →</Button>}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <Field label="Asset Name *">
+            <Input value={addAssetForm.name} onChange={e => setAF("name", e.target.value)} placeholder="e.g. Rumah Jagakarsa" />
+          </Field>
+          <Field label="Type">
+            <Select
+              value={addAssetForm.subtype}
+              onChange={e => setAF("subtype", e.target.value)}
+              options={ASSET_SUBTYPES.map(s => ({ value: s, label: `${ASSET_ICON[s] || "📦"} ${s}` }))}
+              placeholder="Select type…"
+            />
+          </Field>
+          <FormRow>
+            <AmountInput label="Current Value (IDR)" value={addAssetForm.current_value} onChange={v => setAF("current_value", v)} currency="IDR" />
+            <AmountInput label="Purchase Price (IDR)" value={addAssetForm.purchase_price} onChange={v => setAF("purchase_price", v)} currency="IDR" />
+          </FormRow>
+          <Field label="Notes">
+            <Input value={addAssetForm.notes} onChange={e => setAF("notes", e.target.value)} placeholder="Optional notes…" />
+          </Field>
         </div>
-      )}
+      </Modal>
 
       {/* ══════════════════════════════════════════════════ */}
       {/* ── UPDATE VALUE MODAL ───────────────────────── */}
@@ -565,88 +484,6 @@ export default function Assets({ user, accounts, ledger, onRefresh, setAccounts,
             )}
           </div>
         )}
-      </Modal>
-
-      {/* ══════════════════════════════════════════════════ */}
-      {/* ── PAY LIABILITY MODAL ──────────────────────── */}
-      {/* ══════════════════════════════════════════════════ */}
-      <Modal
-        isOpen={payModal}
-        onClose={() => setPayModal(false)}
-        title="Make Liability Payment"
-        footer={
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <Button variant="secondary" size="md" onClick={() => setPayModal(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              size="md"
-              busy={saving}
-              disabled={!payForm.liabId || !payForm.bankId || !payForm.amount}
-              onClick={handlePayLiability}
-            >
-              Record Payment
-            </Button>
-          </div>
-        }
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <Field label="Liability *">
-            <Select
-              value={payForm.liabId}
-              onChange={e => {
-                const liab = accounts.find(a => a.id === e.target.value);
-                setPayForm(f => ({
-                  ...f,
-                  liabId: e.target.value,
-                  amount: liab ? String(liab.monthly_payment || "") : f.amount,
-                }));
-              }}
-              options={liabilities.map(l => ({
-                value: l.id,
-                label: `${l.name} — ${fmtIDR(l.outstanding_amount || 0, true)} remaining`,
-              }))}
-              placeholder="Select liability…"
-            />
-          </Field>
-
-          <Field label="From Account *">
-            <Select
-              value={payForm.bankId}
-              onChange={e => setPayForm(f => ({ ...f, bankId: e.target.value }))}
-              options={bankAccounts.map(b => ({
-                value: b.id,
-                label: `${b.name} — ${fmtIDR(b.current_balance || 0, true)}`,
-              }))}
-              placeholder="Select account…"
-            />
-          </Field>
-
-          <FormRow>
-            <AmountInput
-              label="Amount (IDR) *"
-              value={payForm.amount}
-              onChange={v => setPayForm(f => ({ ...f, amount: v }))}
-              currency="IDR"
-            />
-            <Field label="Date">
-              <Input
-                type="date"
-                value={payForm.date}
-                onChange={e => setPayForm(f => ({ ...f, date: e.target.value }))}
-              />
-            </Field>
-          </FormRow>
-
-          <Field label="Notes">
-            <Input
-              value={payForm.notes}
-              onChange={e => setPayForm(f => ({ ...f, notes: e.target.value }))}
-              placeholder="Optional"
-            />
-          </Field>
-        </div>
       </Modal>
 
     </div>

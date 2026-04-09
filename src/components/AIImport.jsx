@@ -165,9 +165,12 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
 
   // ── FX rate lookup ────────────────────────────────────────────
   const getDefaultRate = (currency) => {
-    if (!currency || currency === "IDR") return 1;
-    if (fxRates[currency]) return fxRates[currency];
-    const c = CURRENCIES.find(c => c.code === currency);
+    if (!currency || currency.toUpperCase() === "IDR") return 1;
+    const upper = currency.toUpperCase();
+    // fxRates keys may be uppercase or lowercase — check both
+    const rate = fxRates[upper] || fxRates[currency] || fxRates[upper.toLowerCase()];
+    if (rate) return rate;
+    const c = CURRENCIES.find(c => c.code.toUpperCase() === upper);
     return c ? c.rate : 1;
   };
 
@@ -412,6 +415,13 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
       txList.forEach((tx, i) => {
         const rawType = tx.suggested_tx_type || "expense";
         const { tx_type, category_id: overrideCat } = normaliseTxType(rawType, tx.category_id);
+        const txCurrency = (tx.currency || "IDR").toUpperCase();
+        const txIsFX     = txCurrency !== "IDR";
+        const txAmount   = Number(tx.amount || 0);
+        const txRate     = txIsFX ? getDefaultRate(txCurrency) : 1;
+        const txAmtIDR   = txIsFX
+          ? Math.round(txAmount * txRate)
+          : Number(tx.amount_idr || tx.amount || 0);
         out.push({
           _id:             `${es.id}__${i}`,
           _email_sync_id:  es.id,
@@ -419,10 +429,10 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
           tx_date:         tx.date || es.received_at?.slice(0, 10) || todayStr(),
           description:     tx.description || es.subject || "(no description)",
           merchant_name:   tx.merchant_name || null,
-          amount:          Number(tx.amount || 0),
-          amount_idr:      Number(tx.amount_idr || tx.amount || 0),
-          currency:        tx.currency || "IDR",
-          fxRate:          1,
+          amount:          txAmount,
+          amount_idr:      txAmtIDR,
+          currency:        txCurrency,
+          fx_rate:         String(txRate),
           tx_type,
           category_id:     overrideCat || tx.category_id || null,
           category_name:   tx.suggested_category || null,
@@ -957,7 +967,7 @@ function TxCard({
             <input
               type="number"
               style={inInp(T, { width: 64, fontSize: 11, textAlign: "right" })}
-              value={r.fx_rate || ""}
+              value={r.fx_rate ?? ""}
               onChange={e => {
                 const rate = e.target.value;
                 const idr  = Math.round(Number(r.amount || 0) * Number(rate || 0));

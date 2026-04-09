@@ -287,7 +287,7 @@ export function Toggle({ label, checked, onChange, hint }) {
 // ─── FORM ROW (2 equal columns) ───────────────────────────────
 export function FormRow({ children, style = {} }) {
   return (
-    <div style={{ display: "flex", gap: 12, ...style }}>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, ...style }}>
       {children}
     </div>
   );

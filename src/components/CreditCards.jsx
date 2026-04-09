@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
-import { ledgerApi, installmentsApi, recurringApi, getTxFromToTypes } from "../api";
-import { ENTITIES } from "../constants";
+import { ledgerApi, installmentsApi, recurringApi, getTxFromToTypes, accountsApi } from "../api";
+import { ENTITIES, BANKS_L, NETWORKS } from "../constants";
 import { fmtIDR, todayStr, ym, daysUntil } from "../utils";
 import Modal, { ConfirmModal } from "./shared/Modal";
 import Button from "./shared/Button";
@@ -58,6 +58,11 @@ export default function CreditCards({
   const [modal,        setModal]        = useState(null);
   const [saving,       setSaving]       = useState(false);
   const [deleteInstId, setDeleteInstId] = useState(null);
+
+  // Add CC form
+  const emptyCardForm = () => ({ name: "", bank_name: "", last4: "", network: "", card_limit: "", monthly_target: "", statement_day: "", due_day: "" });
+  const [addCardForm, setAddCardForm] = useState(emptyCardForm());
+  const setAC = (k, v) => setAddCardForm(f => ({ ...f, [k]: v }));
 
   // Pay CC form
   const [payForm, setPayForm] = useState({
@@ -280,12 +285,45 @@ export default function CreditCards({
     } catch (e) { showToast(e.message, "error"); }
   };
 
+  // ── Add Card ──
+  const saveAddCard = async () => {
+    if (!addCardForm.name) { showToast("Card name is required", "error"); return; }
+    setSaving(true);
+    try {
+      const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? null : n; };
+      const data = {
+        name:           addCardForm.name.trim(),
+        bank_name:      addCardForm.bank_name || null,
+        last4:          addCardForm.last4 || null,
+        network:        addCardForm.network || null,
+        card_limit:     sn(addCardForm.card_limit),
+        monthly_target: sn(addCardForm.monthly_target),
+        statement_day:  sn(addCardForm.statement_day),
+        due_day:        sn(addCardForm.due_day),
+        current_balance: 0,
+        type:           "credit_card",
+        entity:         null,
+        is_active:      true,
+        sort_order:     accounts.length,
+      };
+      const created = await accountsApi.create(user.id, data);
+      if (created) setAccounts(p => [...p, created]);
+      showToast("Credit card added");
+      setModal(null);
+      setAddCardForm(emptyCardForm());
+    } catch (e) { showToast(e.message, "error"); }
+    setSaving(false);
+  };
+
   // ─── RENDER ────────────────────────────────────────────────
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
       {/* ── HEADER ── */}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <Button variant="secondary" size="sm" onClick={() => { setAddCardForm(emptyCardForm()); setModal("add_card"); }}>
+          + Add Card
+        </Button>
         <Button variant="secondary" size="sm" onClick={() => { setInstForm({ account_id: "", description: "", total_amount: "", months: 12, monthly_amount: "", start_date: todayStr(), entity: "Personal" }); setModal("inst"); }}>
           + Installment
         </Button>
@@ -712,6 +750,45 @@ export default function CreditCards({
         </div>
       </Modal>
 
+      {/* ══ ADD CARD MODAL ══ */}
+      <Modal
+        isOpen={modal === "add_card"}
+        onClose={() => setModal(null)}
+        title="+ Add Credit Card"
+        footer={<Button fullWidth onClick={saveAddCard} busy={saving}>Add Card →</Button>}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <Input label="Card Name *" value={addCardForm.name} onChange={e => setAC("name", e.target.value)} placeholder="e.g. BCA Everyday" />
+          <FormRow>
+            <Field label="Bank">
+              <Select value={addCardForm.bank_name} onChange={e => setAC("bank_name", e.target.value)}
+                options={BANKS_L.map(b => ({ value: b, label: b }))} placeholder="Select bank…" />
+            </Field>
+            <Field label="Network">
+              <Select value={addCardForm.network} onChange={e => setAC("network", e.target.value)}
+                options={NETWORKS.map(n => ({ value: n, label: n }))} placeholder="Select network…" />
+            </Field>
+          </FormRow>
+          <FormRow>
+            <Input label="Last 4 Digits" value={addCardForm.last4} onChange={e => setAC("last4", e.target.value)} placeholder="e.g. 1234" maxLength={4} />
+            <AmountInput label="Credit Limit" value={addCardForm.card_limit} onChange={v => setAC("card_limit", v)} currency="IDR" />
+          </FormRow>
+          <FormRow>
+            <Field label="Statement Day">
+              <input type="number" min={1} max={31} value={addCardForm.statement_day} onChange={e => setAC("statement_day", e.target.value)}
+                placeholder="e.g. 25"
+                style={{ width: "100%", height: 44, padding: "0 12px", border: "1.5px solid #e5e7eb", borderRadius: 10, fontFamily: "Figtree, sans-serif", fontSize: 14, fontWeight: 700, color: "#111827", background: "#fff", outline: "none", boxSizing: "border-box" }} />
+            </Field>
+            <Field label="Due Day">
+              <input type="number" min={1} max={31} value={addCardForm.due_day} onChange={e => setAC("due_day", e.target.value)}
+                placeholder="e.g. 15"
+                style={{ width: "100%", height: 44, padding: "0 12px", border: "1.5px solid #e5e7eb", borderRadius: 10, fontFamily: "Figtree, sans-serif", fontSize: 14, fontWeight: 700, color: "#111827", background: "#fff", outline: "none", boxSizing: "border-box" }} />
+            </Field>
+          </FormRow>
+          <AmountInput label="Monthly Spend Target (optional)" value={addCardForm.monthly_target} onChange={v => setAC("monthly_target", v)} currency="IDR" />
+        </div>
+      </Modal>
+
       {/* Delete confirm */}
       <ConfirmModal
         isOpen={!!deleteInstId}
@@ -776,7 +853,7 @@ function SharedLimitGroupCard({ group, cardStats, paletteStart = 0, onPay, onTra
                     )}
                   </div>
                   <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
-                    {cc.bank_name}{cc.last4 ? ` · ···· ${cc.last4}` : ""}
+                    {(cc.bank_name && cc.bank_name !== "Other") ? cc.bank_name : ""}{cc.last4 ? `${(cc.bank_name && cc.bank_name !== "Other") ? " · " : ""}···· ${cc.last4}` : ""}
                     {dueIn !== null && (
                       <span style={{ marginLeft: 6, fontWeight: 600, color: dueIn <= 3 ? "#dc2626" : dueIn <= 7 ? "#d97706" : "#9ca3af" }}>
                         · Due {dueIn}d
@@ -814,9 +891,11 @@ function CCCard({ cc, color, onPay, onTransactions, onInstallments }) {
             <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {cc.name}
             </div>
-            <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
-              {cc.bank_name || "Bank"}{cc.last4 ? ` · ···· ${cc.last4}` : ""}
-            </div>
+            {(cc.bank_name && cc.bank_name !== "Other") || cc.last4 ? (
+              <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
+                {(cc.bank_name && cc.bank_name !== "Other") ? cc.bank_name : ""}{cc.last4 ? `${(cc.bank_name && cc.bank_name !== "Other") ? " · " : ""}···· ${cc.last4}` : ""}
+              </div>
+            ) : null}
           </div>
           {netw && (
             <span style={{ fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif", flexShrink: 0, marginLeft: 8, ...netw.style }}>
