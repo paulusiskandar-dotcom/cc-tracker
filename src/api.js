@@ -474,6 +474,43 @@ export const merchantApi = {
   },
 };
 
+// ─── ACCOUNT CURRENCIES ───────────────────────────────────────
+export const accountCurrenciesApi = {
+  getForAccount: async (accountId) => {
+    const { data, error } = await supabase
+      .from("account_currencies")
+      .select("*")
+      .eq("account_id", accountId);
+    if (error) throw new Error(error.message);
+    return data || [];
+  },
+  getAll: async (userId) => {
+    const { data, error } = await supabase
+      .from("account_currencies")
+      .select("*, accounts!inner(user_id)")
+      .eq("accounts.user_id", userId);
+    if (error) throw new Error(error.message);
+    return data || [];
+  },
+  upsert: async (accountId, currency, balance, initialBalance) => {
+    const { error } = await supabase
+      .from("account_currencies")
+      .upsert(
+        { account_id: accountId, currency, balance, initial_balance: initialBalance ?? balance },
+        { onConflict: "account_id,currency" }
+      );
+    if (error) throw new Error(error.message);
+  },
+  delete: async (accountId, currency) => {
+    const { error } = await supabase
+      .from("account_currencies")
+      .delete()
+      .eq("account_id", accountId)
+      .eq("currency", currency);
+    if (error) throw new Error(error.message);
+  },
+};
+
 // ─── FX RATES ─────────────────────────────────────────────────
 export const fxApi = {
   getAll: async (userId) => {
@@ -493,6 +530,13 @@ export const fxApi = {
       .from("fx_rates")
       .upsert(rows, { onConflict: "user_id,currency" });
     if (error) throw new Error(error.message);
+  },
+
+  saveHistory: async (userId, ratesObj) => {
+    const rows = Object.entries(ratesObj).map(([currency, rate_to_idr]) => ({
+      currency, rate_to_idr, recorded_at: new Date().toISOString(),
+    }));
+    await supabase.from("fx_rate_history").insert(rows);
   },
 };
 

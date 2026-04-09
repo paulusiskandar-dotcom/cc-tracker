@@ -6,6 +6,7 @@ import {
   accountsApi, ledgerApi, categoriesApi, incomeSrcApi,
   installmentsApi, recurringApi, merchantApi, fxApi,
   settingsApi, gmailApi, employeeLoanApi, loanPaymentsApi,
+  accountCurrenciesApi,
 } from "./api";
 import { calcNetWorth, fmtIDR, todayStr, ym } from "./utils";
 import { Spinner, ToastContainer, showToast } from "./components/shared/index";
@@ -181,8 +182,9 @@ function Finance({ user, signOut }) {
     USD: 16400, SGD: 12200, MYR: 3700, JPY: 110, EUR: 17800, AUD: 10500,
   });
   const [pendingSyncs,   setPendingSyncs]   = useState([]);
-  const [employeeLoans,  setEmployeeLoans]  = useState([]);
-  const [loanPayments,   setLoanPayments]   = useState([]);
+  const [employeeLoans,     setEmployeeLoans]     = useState([]);
+  const [loanPayments,      setLoanPayments]      = useState([]);
+  const [accountCurrencies, setAccountCurrencies] = useState([]);
 
   const curMonth = ym(todayStr());
 
@@ -190,7 +192,7 @@ function Finance({ user, signOut }) {
   const loadData = useCallback(async () => {
     const safe = (p, fallback) => p.catch(e => { console.warn("[loadData]", e.message); return fallback; });
 
-    const [acc, led, cats, inc, inst, rtempl, rem, merch, fx, dark, pending, loans, payments] = await Promise.all([
+    const [acc, led, cats, inc, inst, rtempl, rem, merch, fx, dark, pending, loans, payments, accs] = await Promise.all([
       safe(accountsApi.getAll(user.id),                      []),
       safe(ledgerApi.getAll(user.id, { limit: 500 }),        []),
       safe(categoriesApi.getAll(user.id),                    []),
@@ -204,6 +206,7 @@ function Finance({ user, signOut }) {
       safe(gmailApi.getPending(user.id),                     []),
       safe(employeeLoanApi.getAll(user.id),                  []),
       safe(loanPaymentsApi.getAll(user.id),                  []),
+      safe(accountCurrenciesApi.getAll(user.id),             []),
     ]);
 
     console.log("[loadData] accounts:", acc.length, "ledger:", led.length);
@@ -244,6 +247,7 @@ function Finance({ user, signOut }) {
     setPendingSyncs(pending);
     setEmployeeLoans(loans);
     setLoanPayments(payments);
+    setAccountCurrencies(accs);
     setLoading(false);
   }, [user.id]);
 
@@ -274,7 +278,7 @@ function Finance({ user, signOut }) {
   const assets        = useMemo(() => accounts.filter(a => a.type === "asset"), [accounts]);
   const liabilities   = useMemo(() => accounts.filter(a => a.type === "liability"), [accounts]);
   const receivables   = useMemo(() => accounts.filter(a => a.type === "receivable"), [accounts]);
-  const netWorth      = useMemo(() => calcNetWorth(accounts, { employeeLoans, loanPayments }), [accounts, employeeLoans, loanPayments]);
+  const netWorth      = useMemo(() => calcNetWorth(accounts, { employeeLoans, loanPayments, fxRates, accountCurrencies }), [accounts, employeeLoans, loanPayments, fxRates, accountCurrencies]);
   const thisMonthLedger = useMemo(
     () => ledger.filter(e => ym(e.tx_date) === curMonth),
     [ledger, curMonth]
@@ -290,6 +294,7 @@ function Finance({ user, signOut }) {
     setIsDark, setDark: setIsDark,
     setTab, setPendingSyncs,
     employeeLoans, setEmployeeLoans, loanPayments, setLoanPayments,
+    accountCurrencies, setAccountCurrencies,
     setAccounts, setLedger, setCategories, setIncomeSrcs,
     setInstallments, setRecurTemplates, setReminders,
     setMerchantMaps, setFxRates,

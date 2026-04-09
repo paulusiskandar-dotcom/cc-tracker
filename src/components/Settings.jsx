@@ -153,12 +153,32 @@ export default function Settings({
   };
 
   // ── Actions: FX ────────────────────────────────────────────
+  const [fxEditCode, setFxEditCode] = useState(null);
+  const [fxEditVal,  setFxEditVal]  = useState("");
+
   const saveFxRates = async () => {
     setSaving(true);
     try {
       await fxApi.upsertAll(user.id, rates);
+      await fxApi.saveHistory(user.id, rates);
       setFxRates(rates);
       showToast("FX rates saved");
+    } catch (e) { showToast(e.message, "error"); }
+    setSaving(false);
+  };
+
+  const saveSingleRate = async (code) => {
+    const newRate = Number(fxEditVal);
+    if (!newRate || newRate <= 0) { showToast("Enter a valid rate", "error"); return; }
+    const newRates = { ...rates, [code]: newRate };
+    setSaving(true);
+    try {
+      await fxApi.upsertAll(user.id, { [code]: newRate });
+      await fxApi.saveHistory(user.id, { [code]: newRate });
+      setRates(newRates);
+      setFxRates(newRates);
+      setFxEditCode(null);
+      showToast(`${code} rate updated`);
     } catch (e) { showToast(e.message, "error"); }
     setSaving(false);
   };
@@ -429,35 +449,59 @@ export default function Settings({
         <div style={card}>
           <SectionHeader title="Exchange Rates to IDR" />
           <div style={{ fontSize: 11, color: T.text3, marginBottom: 12, marginTop: 4 }}>
-            Used to convert foreign currency transactions to IDR.
+            Used to convert foreign currency balances and transactions to IDR.
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {CURRENCIES.filter(c => c.code !== "IDR").map(c => (
               <div key={c.code} style={{
                 display: "flex", alignItems: "center", gap: 10,
-                padding: "8px 12px", background: T.sur2, borderRadius: 10,
+                padding: "10px 12px", background: T.sur2, borderRadius: 10,
               }}>
                 <span style={{ fontSize: 18 }}>{c.flag}</span>
                 <span style={{ fontWeight: 700, fontSize: 13, color: T.text, minWidth: 36 }}>{c.code}</span>
-                <span style={{ fontSize: 11, color: T.text3, flex: 1 }}>1 {c.code} =</span>
-                <input
-                  type="number"
-                  value={rates[c.code] || ""}
-                  onChange={e => setRates(r => ({ ...r, [c.code]: Number(e.target.value) }))}
-                  style={{
-                    width: 100, padding: "6px 8px", borderRadius: 8,
-                    border: `1px solid ${T.border}`, background: T.surface,
-                    color: T.text, fontSize: 12, fontFamily: "Figtree, sans-serif",
-                    textAlign: "right",
-                  }}
-                />
-                <span style={{ fontSize: 11, color: T.text3 }}>IDR</span>
+                {fxEditCode === c.code ? (
+                  <>
+                    <span style={{ fontSize: 11, color: T.text3 }}>1 {c.code} =</span>
+                    <input
+                      type="number"
+                      value={fxEditVal}
+                      onChange={e => setFxEditVal(e.target.value)}
+                      autoFocus
+                      style={{
+                        width: 110, padding: "6px 8px", borderRadius: 8,
+                        border: `1.5px solid #3b5bdb`, background: T.surface,
+                        color: T.text, fontSize: 13, fontFamily: "Figtree, sans-serif",
+                        textAlign: "right",
+                      }}
+                    />
+                    <span style={{ fontSize: 11, color: T.text3 }}>IDR</span>
+                    <Button variant="primary" size="sm" busy={saving} onClick={() => saveSingleRate(c.code)}>Save</Button>
+                    <Button variant="secondary" size="sm" onClick={() => setFxEditCode(null)}>Cancel</Button>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ fontSize: 11, color: T.text3, flex: 1 }}>1 {c.code} =</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>
+                      Rp {(rates[c.code] || 0).toLocaleString("id-ID")}
+                    </span>
+                    <button
+                      onClick={() => { setFxEditCode(c.code); setFxEditVal(String(rates[c.code] || "")); }}
+                      style={{
+                        border: `1px solid ${T.border}`, background: T.surface, color: T.text2,
+                        borderRadius: 7, padding: "4px 10px", fontSize: 11, fontWeight: 600,
+                        cursor: "pointer", fontFamily: "Figtree, sans-serif",
+                      }}
+                    >
+                      Edit
+                    </button>
+                  </>
+                )}
               </div>
             ))}
           </div>
-          <div style={{ marginTop: 14 }}>
+          <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
             <Button variant="primary" size="md" busy={saving} onClick={saveFxRates}>
-              💾 Save Rates
+              Save All Rates
             </Button>
           </div>
         </div>

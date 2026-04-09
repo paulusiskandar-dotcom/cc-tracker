@@ -397,15 +397,26 @@ export default function Dashboard({
           badgeColor="#dc2626"
         />
 
-        {/* [3] Bank Total */}
-        <BentoTile
-          bg="#e8f4fd" icon="🏦" iconBg="rgba(59,91,219,0.12)"
-          label="Bank & Cash"
-          value={fmtIDR(nw.bank)}
-          sub={`${bankAccounts.length} account${bankAccounts.length !== 1 ? "s" : ""}`}
-          badge={bankAccounts.length > 0 ? `${bankAccounts.length} accs` : null}
-          badgeColor="#3b5bdb"
-        />
+        {/* [3] Bank & Cash Total */}
+        {(() => {
+          const cashAccs  = bankAccounts.filter(a => a.subtype === "cash");
+          const bankOnly  = bankAccounts.filter(a => a.subtype !== "cash");
+          const cashTotal = cashAccs.reduce((s, a) => s + Number(a.current_balance || 0), 0);
+          const bankTotal = nw.bank - cashTotal;
+          const sub = cashTotal > 0
+            ? `Bank: ${fmtIDR(bankTotal, true)} · Cash: ${fmtIDR(cashTotal, true)}`
+            : `${bankOnly.length} account${bankOnly.length !== 1 ? "s" : ""}`;
+          return (
+            <BentoTile
+              bg="#e8f4fd" icon="🏦" iconBg="rgba(59,91,219,0.12)"
+              label="Bank & Cash"
+              value={fmtIDR(nw.bank)}
+              sub={sub}
+              badge={bankAccounts.length > 0 ? `${bankAccounts.length} accs` : null}
+              badgeColor="#3b5bdb"
+            />
+          );
+        })()}
 
         {/* [4] Assets */}
         <BentoTile

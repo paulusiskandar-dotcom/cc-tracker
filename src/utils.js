@@ -14,9 +14,11 @@ export const fmtIDR = (n, short = false) => {
 };
 
 export const fmtCur = (amount, currency) => {
-  if (currency === "IDR") return fmtIDR(amount);
-  const symbols = { USD: "$", SGD: "S$", MYR: "RM", JPY: "¥", EUR: "€", AUD: "A$" };
-  return (symbols[currency] || currency) + " " + Number(amount || 0).toFixed(2);
+  if (!currency || currency === "IDR") return fmtIDR(amount);
+  const symbols = { USD: "$", SGD: "S$", MYR: "RM", JPY: "¥", EUR: "€", AUD: "A$", GBP: "£" };
+  const sym = symbols[currency] || currency + " ";
+  const num = Number(amount || 0);
+  return sym + num.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 };
 
 export const fmtPct = (n) => {
@@ -87,13 +89,23 @@ export const agingLabel = (dateStr) => {
 };
 
 // ─── NET WORTH CALCULATION ───────────────────────────────────
-export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [] } = {}) => {
+export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], fxRates = {}, accountCurrencies = [] } = {}) => {
   let bank = 0, assets = 0, receivables = 0, ccDebt = 0, liabilities = 0;
+
+  const toIDRValue = (amount, currency) => {
+    if (!currency || currency === "IDR") return Number(amount || 0);
+    return Number(amount || 0) * (fxRates[currency] || 1);
+  };
 
   for (const a of accounts) {
     if (!a.is_active) continue;
     if (a.type === "bank") {
-      bank += Number(a.current_balance || 0);
+      if (a.is_multicurrency) {
+        const rows = accountCurrencies.filter(r => r.account_id === a.id);
+        for (const r of rows) bank += toIDRValue(r.balance, r.currency);
+      } else {
+        bank += toIDRValue(a.current_balance, a.currency);
+      }
     } else if (a.type === "credit_card") {
       ccDebt += Number(a.current_balance || 0);
     } else if (a.type === "asset") {

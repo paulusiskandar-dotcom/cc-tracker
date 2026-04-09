@@ -1,15 +1,17 @@
 import { useState, useMemo } from "react";
-import { accountsApi } from "../api";
+import { accountsApi, accountCurrenciesApi } from "../api";
 import {
   ENTITIES, BANKS_L, NETWORKS, ASSET_SUBTYPES, LIAB_SUBTYPES,
   ACC_TYPE_LABEL, ACC_TYPE_ICON,
 } from "../constants";
-import { fmtIDR, todayStr } from "../utils";
+import { fmtIDR, fmtCur } from "../utils";
 import Modal, { ConfirmModal } from "./shared/Modal";
 import Button from "./shared/Button";
 import Input, { Field, AmountInput, FormRow } from "./shared/Input";
 import Select from "./shared/Select";
-import { EmptyState, Spinner, showToast, Badge } from "./shared/Card";
+import { EmptyState, showToast } from "./shared/Card";
+
+const MULTICURRENCY_BANKS = ["BCA", "OCBC", "Jenius", "Danamon"];
 
 // ─── SANITIZE NUMERIC ────────────────────────────────────────
 const sn = (val) => {
@@ -22,6 +24,7 @@ const sn = (val) => {
 const SUBTABS = [
   { id: "all",         label: "All" },
   { id: "bank",        label: "Bank" },
+  { id: "cash",        label: "Cash" },
   { id: "credit_card", label: "Credit Cards" },
   { id: "asset",       label: "Assets" },
   { id: "liability",   label: "Liabilities" },
@@ -42,7 +45,7 @@ const TYPE_COLOR = {
 
 export default function Accounts({
   user, accounts, ledger, onRefresh,
-  setAccounts, CURRENCIES,
+  setAccounts, setAccountCurrencies, accountCurrencies = [], CURRENCIES = [], fxRates = {},
 }) {
   const [subTab,   setSubTab]   = useState("all");
   const [modal,    setModal]    = useState(null); // null | "add" | "edit" | "history" | "delete"
@@ -55,9 +58,12 @@ export default function Accounts({
   const [deleteAcc, setDeleteAcc] = useState(null);
 
   // ─── FILTERED ACCOUNTS ──────────────────────────────────────
-  const filtered = useMemo(() =>
-    accounts.filter(a => subTab === "all" || a.type === subTab),
-  [accounts, subTab]);
+  const filtered = useMemo(() => {
+    if (subTab === "all") return accounts;
+    if (subTab === "cash") return accounts.filter(a => a.type === "bank" && a.subtype === "cash");
+    if (subTab === "bank") return accounts.filter(a => a.type === "bank" && a.subtype !== "cash");
+    return accounts.filter(a => a.type === subTab);
+  }, [accounts, subTab]);
 
   // ─── SUMMARY TOTALS ─────────────────────────────────────────
   const totals = useMemo(() => ({
@@ -85,8 +91,12 @@ export default function Accounts({
   // ─── OPEN EDIT MODAL ────────────────────────────────────────
   const openEdit = (a) => {
     setEditAcc(a);
-    setFormType(a.type);
-    setForm({ ...a });
+    const ft = (a.type === "bank" && a.subtype === "cash") ? "cash" : a.type;
+    setFormType(ft);
+    const fxBalances = accountCurrencies
+      .filter(r => r.account_id === a.id)
+      .map(r => ({ currency: r.currency, balance: r.balance }));
+    setForm({ ...a, fxBalances });
     setStep(2); // go straight to form when editing
     setModal("edit");
   };
@@ -104,8 +114,9 @@ export default function Accounts({
     setSaving(true);
     try {
       // Sanitize all numeric fields before insert/update
+      const { fxBalances: _fb, ...formWithoutFx } = form;
       const clean = {
-        ...form,
+        ...formWithoutFx,
         current_balance:    sn(form.current_balance),
         initial_balance:    sn(form.initial_balance),
         current_value:      sn(form.current_value),
@@ -125,29 +136,63 @@ export default function Accounts({
         sort_order:         sn(form.sort_order),
       };
 
+      let savedAccount;
       if (editAcc) {
-        const updated = await accountsApi.update(editAcc.id, clean);
-        setAccounts(p => p.map(a => a.id === editAcc.id ? updated : a));
+        // For cash type, map back to bank
+        const updateData = formType === "cash"
+          ? { ...clean, type: "bank", subtype: "cash" }
+          : clean;
+        savedAccount = await accountsApi.update(editAcc.id, updateData);
+        setAccounts(p => p.map(a => a.id === editAcc.id ? savedAccount : a));
         showToast("Account updated");
       } else {
-        // For receivable, build a targeted payload with only valid columns
-        const insertData = formType === "receivable"
-          ? {
-              name:                   form.name?.trim(),
-              type:                   "receivable",
-              subtype:                "reimburse",
-              entity:                 form.entity || "Hamasa",
-              notes:                  form.notes  || null,
-              include_networth:       true,
-              receivable_outstanding: 0,
-              sort_order:             accounts.length,
-            }
-          : { ...clean, type: formType, is_active: true, sort_order: accounts.length };
-
-        const created = await accountsApi.create(user.id, insertData);
-        setAccounts(p => [...p, created]);
+        let insertData;
+        if (formType === "cash") {
+          insertData = {
+            name:            form.name?.trim(),
+            type:            "bank",
+            subtype:         "cash",
+            currency:        form.currency || "IDR",
+            initial_balance: sn(form.initial_balance),
+            current_balance: sn(form.initial_balance),
+            entity:          form.entity || "Personal",
+            notes:           form.notes || null,
+            include_networth: true,
+            is_active:       true,
+            sort_order:      accounts.length,
+          };
+        } else if (formType === "receivable") {
+          insertData = {
+            name:                   form.name?.trim(),
+            type:                   "receivable",
+            subtype:                "reimburse",
+            entity:                 form.entity || "Hamasa",
+            notes:                  form.notes  || null,
+            include_networth:       true,
+            receivable_outstanding: 0,
+            sort_order:             accounts.length,
+          };
+        } else {
+          insertData = { ...clean, type: formType, is_active: true, sort_order: accounts.length };
+        }
+        savedAccount = await accountsApi.create(user.id, insertData);
+        setAccounts(p => [...p, savedAccount]);
         showToast("Account created");
       }
+
+      // Handle multicurrency fx balances
+      if (formType === "bank" && form.is_multicurrency && savedAccount?.id && form.fxBalances?.length) {
+        const upserts = form.fxBalances
+          .filter(r => r.currency && r.balance !== "" && r.balance !== null)
+          .map(r => accountCurrenciesApi.upsert(savedAccount.id, r.currency, Number(r.balance || 0)));
+        await Promise.all(upserts);
+        const newRows = await accountCurrenciesApi.getForAccount(savedAccount.id);
+        setAccountCurrencies(prev => [
+          ...prev.filter(r => r.account_id !== savedAccount.id),
+          ...newRows,
+        ]);
+      }
+
       setModal(null);
     } catch (e) { showToast(e.message, "error"); }
     setSaving(false);
@@ -240,6 +285,8 @@ export default function Accounts({
               account={a}
               ledger={ledger}
               accounts={accounts}
+              accountCurrencies={accountCurrencies}
+              fxRates={fxRates}
               onEdit={() => openEdit(a)}
               onDelete={() => setDeleteAcc(a)}
               onHistory={() => { setHistAcc(a); setModal("history"); }}
@@ -254,10 +301,10 @@ export default function Accounts({
         onClose={() => setModal(null)}
         title={
           modal === "edit"
-            ? `Edit — ${ACC_TYPE_LABEL[formType]}`
+            ? `Edit — ${formType === "cash" ? "Cash Account" : ACC_TYPE_LABEL[formType]}`
             : step === 1
               ? "Add Account"
-              : `New ${ACC_TYPE_LABEL[formType]}`
+              : `New ${formType === "cash" ? "Cash Account" : ACC_TYPE_LABEL[formType]}`
         }
         footer={
           step === 2 && (
@@ -283,6 +330,7 @@ export default function Accounts({
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               {[
                 { id: "bank",        icon: "🏦", label: "Bank Account",  bg: "#e8f4fd", color: "#3b5bdb" },
+                { id: "cash",        icon: "💵", label: "Cash",          bg: "#f0fdf4", color: "#059669" },
                 { id: "credit_card", icon: "💳", label: "Credit Card",   bg: "#fde8e8", color: "#dc2626" },
                 { id: "asset",       icon: "📈", label: "Asset",         bg: "#e8fdf0", color: "#059669" },
                 { id: "liability",   icon: "📉", label: "Liability",     bg: "#fff0f0", color: "#dc2626" },
@@ -320,6 +368,7 @@ export default function Accounts({
             CURRENCIES={CURRENCIES}
           />
         )}
+
       </Modal>
 
       {/* ── HISTORY MODAL ── */}
@@ -353,10 +402,11 @@ export default function Accounts({
 }
 
 // ─── ACCOUNT CARD ────────────────────────────────────────────
-function AccountCard({ account: a, ledger, accounts, onEdit, onDelete, onHistory }) {
-  const bg    = TYPE_BG[a.type]    || "#f9fafb";
-  const color = TYPE_COLOR[a.type] || "#6b7280";
-  const icon  = ACC_TYPE_ICON[a.type] || "🏦";
+function AccountCard({ account: a, ledger, accounts, accountCurrencies = [], fxRates = {}, onEdit, onDelete, onHistory }) {
+  const isCash = a.type === "bank" && a.subtype === "cash";
+  const bg    = isCash ? "#f0fdf4" : (TYPE_BG[a.type]    || "#f9fafb");
+  const color = isCash ? "#059669" : (TYPE_COLOR[a.type] || "#6b7280");
+  const icon  = isCash ? "💵" : (ACC_TYPE_ICON[a.type] || "🏦");
   const txCount = ledger.filter(e => e.from_id === a.id || e.to_id === a.id).length;
 
   // Balance display per type
@@ -458,12 +508,28 @@ function AccountCard({ account: a, ledger, accounts, onEdit, onDelete, onHistory
           <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>
             {bal.label}
           </div>
-          <div style={{
-            fontSize: 16, fontWeight: 800, color: bal.color,
-            fontFamily: "Figtree, sans-serif", lineHeight: 1.2,
-          }}>
-            {fmtIDR(Math.abs(bal.value))}
-          </div>
+          {/* Cash non-IDR: show foreign amount + IDR equiv */}
+          {isCash && a.currency && a.currency !== "IDR" ? (
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: bal.color, fontFamily: "Figtree, sans-serif", lineHeight: 1.2 }}>
+                {fmtCur(Math.abs(bal.value), a.currency)}
+              </div>
+              <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
+                ≈ {fmtIDR(Math.abs(bal.value) * (fxRates[a.currency] || 1), true)}
+              </div>
+            </div>
+          ) : a.is_multicurrency ? (
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#3b5bdb", fontFamily: "Figtree, sans-serif" }}>
+              Multi-currency
+            </div>
+          ) : (
+            <div style={{
+              fontSize: 16, fontWeight: 800, color: bal.color,
+              fontFamily: "Figtree, sans-serif", lineHeight: 1.2,
+            }}>
+              {fmtIDR(Math.abs(bal.value))}
+            </div>
+          )}
           {/* CC utilization % */}
           {a.type === "credit_card" && bal.limit > 0 && (
             <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
@@ -472,6 +538,31 @@ function AccountCard({ account: a, ledger, accounts, onEdit, onDelete, onHistory
           )}
         </div>
       </div>
+
+      {/* Multi-currency balance rows */}
+      {a.is_multicurrency && (() => {
+        const rows = accountCurrencies.filter(r => r.account_id === a.id);
+        if (!rows.length) return null;
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 2 }}>
+            {rows.map(r => (
+              <div key={r.currency} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>{r.currency}</span>
+                <div style={{ textAlign: "right" }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
+                    {fmtCur(r.balance, r.currency)}
+                  </span>
+                  {r.currency !== "IDR" && (
+                    <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginLeft: 4 }}>
+                      ≈ {fmtIDR(Number(r.balance || 0) * (fxRates[r.currency] || 1), true)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* CC progress bar */}
       {a.type === "credit_card" && bal.limit > 0 && (
@@ -497,8 +588,8 @@ function AccountCard({ account: a, ledger, accounts, onEdit, onDelete, onHistory
         </div>
       )}
 
-      {/* Asset gain/loss */}
-      {a.type === "asset" && bal.gain !== null && (
+      {/* Asset gain/loss (non-Deposit) */}
+      {a.type === "asset" && a.subtype !== "Deposit" && bal.gain !== null && (
         <div style={{
           fontSize: 11, fontWeight: 600,
           color:    bal.gain >= 0 ? "#059669" : "#dc2626",
@@ -508,6 +599,64 @@ function AccountCard({ account: a, ledger, accounts, onEdit, onDelete, onHistory
           {bal.pct !== null && ` (${bal.pct >= 0 ? "+" : ""}${bal.pct.toFixed(1)}%)`}
         </div>
       )}
+
+      {/* Deposit card detail */}
+      {a.type === "asset" && a.subtype === "Deposit" && (() => {
+        const rate = Number(a.interest_rate || 0);
+        const principal = Number(a.current_value || 0);
+        const netRate = rate * 0.8;
+        const netMonthly = principal * (netRate / 100) / 12;
+        const daysLeft = a.end_date
+          ? Math.ceil((new Date(a.end_date) - new Date()) / 86400000)
+          : null;
+        const maturityStr = a.end_date
+          ? new Date(a.end_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+          : null;
+        const rolloverLabel = {
+          non_aro: "Non ARO", aro: "ARO", aro_plus: "ARO+",
+        }[a.deposit_rollover_type] || a.deposit_rollover_type;
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {rate > 0 && (
+              <div style={{ fontSize: 11, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
+                {rate}% p.a. → Net {netRate.toFixed(2)}% after tax
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {rolloverLabel && (
+                <span style={{ fontSize: 10, fontWeight: 700, background: "#dbeafe", color: "#3b5bdb", padding: "2px 7px", borderRadius: 5, fontFamily: "Figtree, sans-serif" }}>
+                  {rolloverLabel}
+                </span>
+              )}
+              {a.deposit_status && (
+                <span style={{ fontSize: 10, fontWeight: 700, background: "#d1fae5", color: "#059669", padding: "2px 7px", borderRadius: 5, fontFamily: "Figtree, sans-serif" }}>
+                  {a.deposit_status}
+                </span>
+              )}
+              {a.monthly_interest_payout && (
+                <span style={{ fontSize: 10, fontWeight: 700, background: "#fef3c7", color: "#d97706", padding: "2px 7px", borderRadius: 5, fontFamily: "Figtree, sans-serif" }}>
+                  Monthly payout
+                </span>
+              )}
+            </div>
+            {maturityStr && (
+              <div style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
+                Maturity: {maturityStr}
+                {daysLeft !== null && (
+                  <span style={{ marginLeft: 6, color: daysLeft <= 30 ? "#dc2626" : daysLeft <= 90 ? "#d97706" : "#9ca3af" }}>
+                    {daysLeft > 0 ? `⏰ ${daysLeft} days` : "⚠️ Matured"}
+                  </span>
+                )}
+              </div>
+            )}
+            {netMonthly > 0 && (
+              <div style={{ fontSize: 11, fontWeight: 600, color: "#059669", fontFamily: "Figtree, sans-serif" }}>
+                Est. net/month: {fmtIDR(netMonthly, true)}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Action buttons */}
       <div style={{ display: "flex", gap: 6 }}>
@@ -593,6 +742,26 @@ function AccountHistory({ account, ledger, accounts }) {
 function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = [] }) {
   const FF = 16; // gap between fields
 
+  // FX balance row helpers
+  const addFxRow = () => set("fxBalances", [...(form.fxBalances || []), { currency: "USD", balance: "" }]);
+  const removeFxRow = (i) => set("fxBalances", (form.fxBalances || []).filter((_, idx) => idx !== i));
+  const updateFxRow = (i, key, val) => set("fxBalances", (form.fxBalances || []).map((r, idx) => idx === i ? { ...r, [key]: val } : r));
+
+  // Deposit maturity auto-calc
+  const calcMaturity = (startDate, tenorMonths) => {
+    if (!startDate || !tenorMonths) return "";
+    const d = new Date(startDate);
+    d.setMonth(d.getMonth() + Number(tenorMonths));
+    return d.toISOString().slice(0, 10);
+  };
+
+  const isDeposit = type === "asset" && form.subtype === "Deposit";
+  const depositRate = Number(form.interest_rate || 0);
+  const depositPrincipal = Number(form.current_value || 0);
+  const depositGrossMonthly = depositPrincipal * (depositRate / 100) / 12;
+  const depositNetMonthly   = depositGrossMonthly * 0.8;
+  const depositNetYield     = depositRate * 0.8;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: FF }}>
 
@@ -603,6 +772,7 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
         onChange={e => set("name", e.target.value)}
         placeholder={
           type === "bank"        ? "e.g. BCA Main Account" :
+          type === "cash"        ? "e.g. IDR Cash, USD Cash" :
           type === "credit_card" ? "e.g. BCA Platinum" :
           type === "asset"       ? "e.g. Apartemen Sudirman" :
           type === "liability"   ? "e.g. KPR BCA" :
@@ -610,6 +780,19 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
           "Account name"
         }
       />
+
+      {/* CASH */}
+      {type === "cash" && <>
+        <FormRow>
+          <Select label="Currency" value={form.currency || "IDR"} onChange={e => set("currency", e.target.value)}
+            options={C.map(c => ({ value: c.code, label: `${c.flag} ${c.code}` }))}
+            style={{ flex: 1 }} />
+          <Select label="Entity" value={form.entity || "Personal"} onChange={e => set("entity", e.target.value)}
+            options={ENTITIES} style={{ flex: 1 }} />
+        </FormRow>
+        <AmountInput label="Initial Balance" value={form.initial_balance || ""}
+          onChange={v => { set("initial_balance", v); set("current_balance", v); }} />
+      </>}
 
       {/* BANK */}
       {type === "bank" && <>
@@ -628,6 +811,51 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
         </FormRow>
         <AmountInput label="Initial Balance" value={form.initial_balance || ""}
           onChange={v => { set("initial_balance", v); set("current_balance", v); }} />
+
+        {/* Multi-currency toggle — only for supported banks */}
+        {MULTICURRENCY_BANKS.includes(form.bank_name) && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input type="checkbox" id="is_multi_cur" checked={form.is_multicurrency || false}
+              onChange={e => set("is_multicurrency", e.target.checked)}
+              style={{ accentColor: "#3b5bdb", width: 16, height: 16 }} />
+            <label htmlFor="is_multi_cur" style={{ fontSize: 13, color: "#374151", cursor: "pointer", fontFamily: "Figtree, sans-serif" }}>
+              Multi-currency account
+            </label>
+          </div>
+        )}
+
+        {/* FX balance rows */}
+        {form.is_multicurrency && (
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#374151", fontFamily: "Figtree, sans-serif", marginBottom: 8 }}>
+              Foreign Currency Balances
+            </div>
+            {(form.fxBalances || []).map((row, i) => (
+              <div key={i} style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "flex-end" }}>
+                <Select
+                  label={i === 0 ? "Currency" : ""}
+                  value={row.currency}
+                  onChange={e => updateFxRow(i, "currency", e.target.value)}
+                  options={C.filter(c => c.code !== "IDR").map(c => ({ value: c.code, label: `${c.flag} ${c.code}` }))}
+                  style={{ width: 110 }}
+                />
+                <AmountInput
+                  label={i === 0 ? "Balance" : ""}
+                  value={row.balance}
+                  onChange={v => updateFxRow(i, "balance", v)}
+                  style={{ flex: 1 }}
+                />
+                <button onClick={() => removeFxRow(i)} style={{
+                  border: "none", background: "#fee2e2", color: "#dc2626",
+                  borderRadius: 7, padding: "6px 10px", cursor: "pointer", fontSize: 13,
+                  marginBottom: 0,
+                }}>✕</button>
+              </div>
+            ))}
+            <Button variant="secondary" size="sm" onClick={addFxRow}>+ Add Currency</Button>
+          </div>
+        )}
+
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <input type="checkbox" id="incl_nw" checked={form.include_networth !== false}
             onChange={e => set("include_networth", e.target.checked)}
@@ -664,8 +892,7 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
         </FormRow>
       </>}
 
-
-      {/* ASSET */}
+      {/* ASSET — common fields */}
       {type === "asset" && <>
         <FormRow>
           <Select label="Category" value={form.subtype || "Property"} onChange={e => set("subtype", e.target.value)}
@@ -673,12 +900,98 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
           <Select label="Entity" value={form.entity || "Personal"} onChange={e => set("entity", e.target.value)}
             options={ENTITIES} style={{ flex: 1 }} />
         </FormRow>
-        <AmountInput label="Current Value" value={form.current_value || ""}
-          onChange={v => set("current_value", v)} />
-        <AmountInput label="Purchase Price (optional)" value={form.purchase_price || ""}
-          onChange={v => set("purchase_price", v)} />
-        <Input label="Purchase Date (optional)" type="date" value={form.purchase_date || ""}
-          onChange={e => set("purchase_date", e.target.value)} />
+
+        {/* Deposit-specific fields */}
+        {isDeposit ? (<>
+          <Input label="Bank Name" value={form.bank_name || ""} onChange={e => set("bank_name", e.target.value)}
+            placeholder="e.g. BCA" />
+          <AmountInput label="Principal (Rp)" value={form.current_value || ""}
+            onChange={v => set("current_value", v)} />
+          <FormRow>
+            <Input label="Interest Rate (% p.a.)" type="number" value={form.interest_rate || ""}
+              onChange={e => set("interest_rate", e.target.value)} placeholder="5.5" style={{ flex: 1 }} />
+            <Select label="Tenor (months)" value={form.deposit_tenor || "6"}
+              onChange={e => {
+                set("deposit_tenor", e.target.value);
+                const mat = calcMaturity(form.start_date, e.target.value);
+                if (mat) set("end_date", mat);
+              }}
+              options={["1","3","6","9","12","24"].map(v => ({ value: v, label: `${v} months` }))}
+              style={{ flex: 1 }} />
+          </FormRow>
+          <FormRow>
+            <Input label="Start Date" type="date" value={form.start_date || ""}
+              onChange={e => {
+                set("start_date", e.target.value);
+                const mat = calcMaturity(e.target.value, form.deposit_tenor || 6);
+                if (mat) set("end_date", mat);
+              }}
+              style={{ flex: 1 }} />
+            <Input label="Maturity Date" type="date" value={form.end_date || ""}
+              onChange={e => set("end_date", e.target.value)} style={{ flex: 1 }} />
+          </FormRow>
+
+          {/* Rollover type */}
+          <Field label="Rollover Type">
+            <div style={{ display: "flex", gap: 12 }}>
+              {[
+                { id: "non_aro", label: "Non ARO" },
+                { id: "aro",     label: "ARO" },
+                { id: "aro_plus",label: "ARO+" },
+              ].map(opt => (
+                <label key={opt.id} style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer",
+                  fontSize: 13, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
+                  <input type="radio" name="deposit_rollover"
+                    checked={(form.deposit_rollover_type || "non_aro") === opt.id}
+                    onChange={() => set("deposit_rollover_type", opt.id)}
+                    style={{ accentColor: "#3b5bdb" }} />
+                  {opt.label}
+                </label>
+              ))}
+            </div>
+          </Field>
+
+          {/* Monthly payout toggle */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input type="checkbox" id="monthly_payout" checked={form.monthly_interest_payout || false}
+              onChange={e => set("monthly_interest_payout", e.target.checked)}
+              style={{ accentColor: "#3b5bdb", width: 16, height: 16 }} />
+            <label htmlFor="monthly_payout" style={{ fontSize: 13, color: "#374151", cursor: "pointer", fontFamily: "Figtree, sans-serif" }}>
+              Monthly interest payout
+            </label>
+          </div>
+
+          {/* Auto-calc info box */}
+          {depositPrincipal > 0 && depositRate > 0 && (
+            <div style={{
+              background: "#f0fdf4", borderRadius: 10, padding: "12px 14px",
+              border: "1px solid #bbf7d0", fontFamily: "Figtree, sans-serif",
+            }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#059669", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.4px" }}>
+                Interest Projection
+              </div>
+              {[
+                ["Monthly gross", fmtIDR(depositGrossMonthly, true)],
+                ["PPh 20%", "−" + fmtIDR(depositGrossMonthly * 0.2, true)],
+                ["Net monthly", fmtIDR(depositNetMonthly, true)],
+                ["Effective yield", depositNetYield.toFixed(2) + "% p.a."],
+              ].map(([label, val]) => (
+                <div key={label} style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
+                  <span style={{ fontSize: 12, color: "#374151" }}>{label}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#059669" }}>{val}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>) : (<>
+          {/* Non-deposit asset fields */}
+          <AmountInput label="Current Value" value={form.current_value || ""}
+            onChange={v => set("current_value", v)} />
+          <AmountInput label="Purchase Price (optional)" value={form.purchase_price || ""}
+            onChange={v => set("purchase_price", v)} />
+          <Input label="Purchase Date (optional)" type="date" value={form.purchase_date || ""}
+            onChange={e => set("purchase_date", e.target.value)} />
+        </>)}
       </>}
 
       {/* LIABILITY */}
@@ -722,7 +1035,7 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
       )}
 
       {/* Color picker — bank + CC */}
-      {(type === "bank" || type === "credit_card") && (
+      {(type === "bank" || type === "credit_card" || type === "cash") && (
         <Field label="Card Color">
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {["#3b5bdb","#059669","#d97706","#7c3aed","#0891b2","#c2255c","#dc2626","#111827"].map(c => (
@@ -754,9 +1067,10 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
 function emptyForm(type) {
   const base = { name: "", entity: "Personal", color: "#3b5bdb", notes: "", is_active: true };
   switch (type) {
-    case "bank":        return { ...base, bank_name: "BCA", account_no: "", currency: "IDR", initial_balance: "", current_balance: 0, include_networth: true };
+    case "bank":        return { ...base, bank_name: "BCA", account_no: "", currency: "IDR", initial_balance: "", current_balance: 0, include_networth: true, is_multicurrency: false, fxBalances: [] };
+    case "cash":        return { ...base, currency: "IDR", initial_balance: "", current_balance: 0 };
     case "credit_card": return { ...base, bank_name: "BCA", last4: "", network: "Visa", card_limit: "", monthly_target: "", statement_day: 25, due_day: 17, current_balance: 0 };
-    case "asset":       return { ...base, subtype: "Property", current_value: "", purchase_price: "", purchase_date: "" };
+    case "asset":       return { ...base, subtype: "Property", current_value: "", purchase_price: "", purchase_date: "", deposit_rollover_type: "non_aro", monthly_interest_payout: false, deposit_status: "active", deposit_tenor: "6" };
     case "liability":   return { ...base, subtype: "Mortgage", creditor: "", outstanding_amount: "", total_amount: "", monthly_payment: "", liability_interest_rate: "", start_date: "", end_date: "" };
     case "receivable":  return { ...base, entity: "Hamasa" };
     default:            return base;
