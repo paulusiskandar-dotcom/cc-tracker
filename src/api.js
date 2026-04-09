@@ -447,12 +447,22 @@ export const merchantApi = {
   },
 
   upsert: async (userId, merchantName, categoryId, categoryLabel) => {
+    // Use raw SQL increment for confidence so it accumulates across calls
+    const { data: existing } = await supabase
+      .from("merchant_mappings")
+      .select("confidence")
+      .eq("user_id", userId)
+      .eq("merchant_name", merchantName.toLowerCase())
+      .maybeSingle();
+    const newConfidence = (existing?.confidence || 0) + 1;
     const { error } = await supabase.from("merchant_mappings").upsert(
       {
-        user_id:        userId,
-        merchant_name:  merchantName.toLowerCase(),
-        category_id:    categoryId,
-        category_name:  categoryLabel,
+        user_id:       userId,
+        merchant_name: merchantName.toLowerCase(),
+        category_id:   categoryId,
+        category_name: categoryLabel,
+        confidence:    newConfidence,
+        last_seen:     new Date().toISOString(),
       },
       { onConflict: "user_id,merchant_name" }
     );
@@ -660,6 +670,7 @@ Return a JSON object with a "transactions" array. Each item must have:
 - currency: "IDR" (or detected currency code)
 - amount_idr: number in IDR (use 1:1 if IDR)
 - type: one of expense|income|transfer|pay_cc|reimburse_in|reimburse_out|bank_interest|cashback|bank_charges|materai|tax
+  IMPORTANT: "transfer" = ONLY between user's own accounts listed above. If destination is unknown/external, use "expense" not "transfer".
 - from_account_id: matched account id or null
 - to_account_id: matched account id or null
 - category: expense category slug (food|transport|health|shopping|home|education|entertainment|business|finance|family|social|cash_advance_fee|other)

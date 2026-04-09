@@ -77,7 +77,7 @@ const ACT_BTN = (extra = {}) => ({
 });
 
 // ─────────────────────────────────────────────────────────────────
-export default function AIImport({ user, accounts, ledger, onRefresh, setLedger, dark }) {
+export default function AIImport({ user, accounts, ledger, onRefresh, setLedger, dark, merchantMaps = [] }) {
   const T = dark ? DARK : LIGHT;
   const fileRef = useRef();
   const [isDesktop, setIsDesktop] = useState(() => window.innerWidth > 768);
@@ -104,6 +104,48 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
   const bankAccounts  = accounts.filter(a => a.type === "bank");
   const ccAccounts    = accounts.filter(a => a.type === "credit_card");
   const spendAccounts = [...bankAccounts, ...ccAccounts];
+
+  // ── Transfer detection ────────────────────────────────────────
+  const isOwnAccount = (accountNo) => {
+    if (!accountNo) return false;
+    const no = String(accountNo).replace(/\s/g, "");
+    return accounts.some(a => {
+      const aNo = String(a.account_no || "").replace(/\s/g, "");
+      return (aNo && (aNo.includes(no) || no.includes(aNo))) ||
+             (a.last4 && no.slice(-4) === a.last4);
+    });
+  };
+
+  const fixTransferType = (tx) => {
+    if (tx.tx_type !== "transfer") return tx;
+    const toOwn   = tx.to_account_id
+      ? accounts.some(a => a.id === tx.to_account_id)
+      : isOwnAccount(tx.to_account_no);
+    const fromOwn = tx.from_account_id
+      ? accounts.some(a => a.id === tx.from_account_id)
+      : isOwnAccount(tx.from_account_no);
+    if (toOwn && fromOwn) return tx;                           // both own → keep transfer
+    if (toOwn && !fromOwn) return { ...tx, tx_type: "income" }; // money in from outside
+    return { ...tx, tx_type: "expense", to_id: null, to_account_id: null }; // outgoing to external
+  };
+
+  // ── Merchant learning ─────────────────────────────────────────
+  const lookupLearned = (desc) => {
+    if (!desc || !merchantMaps.length) return null;
+    const lower = desc.toLowerCase();
+    return merchantMaps.find(m => {
+      const mn = (m.merchant_name || "").toLowerCase();
+      return mn && (lower.includes(mn) || mn.includes(lower));
+    }) || null;
+  };
+
+  const saveMerchantMapping = (r) => {
+    const name = (r.description || r.merchant_name || "").trim();
+    if (!name || !r.category_id || NO_CAT.has(r.tx_type)) return;
+    const cat = EXPENSE_CATEGORIES.find(c => c.id === r.category_id)
+             || INCOME_CATEGORIES_LIST.find(c => c.id === r.category_id);
+    merchantApi.upsert(user.id, name, r.category_id, cat?.label || r.category_id).catch(() => {});
+  };
 
   const updateRow = (id, patch) =>
     setResults(prev => prev.map(r => r._id === id ? { ...r, ...patch } : r));
@@ -152,10 +194,24 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
         }
         if (txType === "reimburse_in") flagged = true;
 
-        const catId  = r.category || r.suggested_category || "other";
+        let aiCatId  = r.category || r.suggested_category || "other";
         const txDate = r.date || r.tx_date || todayStr();
         const amount = r.amount_idr || r.amount || 0;
-        const desc   = r.description || "";
+        const desc   = r.description || r.merchant_name || "";
+
+        // Apply transfer detection
+        const fixed = fixTransferType({ tx_type: txType, from_account_id: fromId, to_account_id: toId, to_account_no: r.to_account_no, from_account_no: r.from_account_no });
+        txType = fixed.tx_type;
+        if (fixed.to_account_id === null) toId = "";
+
+        // Apply merchant learning
+        const learned = lookupLearned(desc);
+        let catId = NO_CAT.has(txType) ? null : aiCatId;
+        let learnedCat = null;
+        if (learned && !NO_CAT.has(txType)) {
+          learnedCat = learned;
+          if (learned.confidence >= 2) catId = learned.category_id; // confident → override
+        }
 
         return {
           _id:         i,
@@ -168,8 +224,9 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
           from_id:     fromId,
           to_id:       toId,
           entity:      REIMBURSE_ENTITIES.includes(r.entity) ? r.entity : "Hamasa",
-          category_id: NO_CAT.has(txType) ? null : catId,
-          ai_category: catId,
+          category_id: catId,
+          ai_category: aiCatId,
+          learned_cat: learnedCat,   // { category_id, category_name, confidence }
           notes:       r.notes || "",
           flagged,
           status:      checkDuplicate(txDate, amount, desc) ? "possible_duplicate" : "new",
@@ -217,8 +274,7 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
         if (created) {
           setLedger(prev => [created, ...prev]);
           ok++;
-          if (r.description && r.category_id)
-            merchantApi.upsert(user.id, r.description, r.category_id, r.category_id).catch(() => {});
+          saveMerchantMapping(r);
         }
       } catch { /* continue */ }
     }
@@ -236,8 +292,7 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
       const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
       if (created) {
         setLedger(prev => [created, ...prev]);
-        if (r.description && r.category_id)
-          merchantApi.upsert(user.id, r.description, r.category_id, r.category_id).catch(() => {});
+        saveMerchantMapping(r);
         setResults(prev => prev.filter(x => x._id !== r._id));
         setSelected(s => { const ns = { ...s }; delete ns[r._id]; return ns; });
         showToast(`Imported: ${r.description}`);
@@ -609,14 +664,29 @@ function DesktopTable({
                             <option key={c.id} value={c.id}>{c.label}</option>
                           ))}
                         </select>
-                        {r.ai_category && r.ai_category === r.category_id && (
+                        {/* Badge: Learned (confidence ≥ 2) > AI suggestion */}
+                        {r.learned_cat && r.learned_cat.confidence >= 2 && r.learned_cat.category_id === r.category_id ? (
+                          <span style={{
+                            position: "absolute", top: -7, right: 1,
+                            fontSize: 8, fontWeight: 800, background: "#dcfce7", color: "#059669",
+                            padding: "1px 3px", borderRadius: 3, fontFamily: "Figtree, sans-serif",
+                            pointerEvents: "none", lineHeight: 1.4,
+                          }}>✓ Learned</span>
+                        ) : r.learned_cat && r.learned_cat.confidence === 1 ? (
+                          <span style={{
+                            position: "absolute", top: -7, right: 1,
+                            fontSize: 8, fontWeight: 800, background: "#fef9c3", color: "#a16207",
+                            padding: "1px 3px", borderRadius: 3, fontFamily: "Figtree, sans-serif",
+                            pointerEvents: "none", lineHeight: 1.4,
+                          }}>Suggest</span>
+                        ) : r.ai_category && r.ai_category === r.category_id ? (
                           <span style={{
                             position: "absolute", top: -7, right: 1,
                             fontSize: 8, fontWeight: 800, background: "#dbeafe", color: "#3b5bdb",
                             padding: "1px 3px", borderRadius: 3, fontFamily: "Figtree, sans-serif",
                             pointerEvents: "none", lineHeight: 1.4,
                           }}>AI</span>
-                        )}
+                        ) : null}
                       </div>
                     ) : (
                       <span style={{ fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif" }}>—</span>
