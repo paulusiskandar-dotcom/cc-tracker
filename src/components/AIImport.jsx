@@ -422,6 +422,26 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
         const txAmtIDR   = txIsFX
           ? Math.round(txAmount * txRate)
           : Number(tx.amount_idr || tx.amount || 0);
+
+        // Apply transfer detection — same logic as scan flow
+        let resolvedType = tx_type;
+        let resolvedToId = tx.to_account_id || null;
+        if (resolvedType === "transfer") {
+          const fixed = fixTransferType({
+            tx_type:         resolvedType,
+            from_account_id: tx.from_account_id || null,
+            to_account_id:   resolvedToId,
+            to_account_no:   tx.to_account_no   || null,
+            from_account_no: tx.from_account_no || null,
+          });
+          resolvedType = fixed.tx_type;
+          if (fixed.tx_type !== "transfer") resolvedToId = null;
+        }
+        // Category: null for no-cat types, else use AI suggestion or "other" as fallback
+        const resolvedCatId = NO_CAT.has(resolvedType)
+          ? null
+          : (overrideCat || tx.category_id || "other");
+
         out.push({
           _id:             `${es.id}__${i}`,
           _email_sync_id:  es.id,
@@ -433,11 +453,11 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
           amount_idr:      txAmtIDR,
           currency:        txCurrency,
           fx_rate:         String(txRate),
-          tx_type,
-          category_id:     overrideCat || tx.category_id || null,
+          tx_type:         resolvedType,
+          category_id:     resolvedCatId,
           category_name:   tx.suggested_category || null,
           from_id:         tx.from_account_id || null,
-          to_id:           tx.to_account_id   || null,
+          to_id:           resolvedToId,
           status:          "new",
           notes:           es.subject || "",
           conf:            Number(tx.confidence || 0) >= 0.85 ? 1 : 0,
