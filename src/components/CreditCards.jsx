@@ -64,12 +64,50 @@ export default function CreditCards({
     propBankAccounts || accounts.filter(a => a.type === "bank"),
   [propBankAccounts, accounts]);
 
-  // ── Card stats ──
+  // ── Shared-limit groups ──
+  const { groupMap, groupedCardIds } = useMemo(() => {
+    const gm = {};
+    const gids = new Set();
+    creditCards.forEach(cc => {
+      if (!cc.shared_limit_group_id) return;
+      gids.add(cc.id);
+      if (!gm[cc.shared_limit_group_id]) {
+        gm[cc.shared_limit_group_id] = { id: cc.shared_limit_group_id, master: null, members: [], totalDebt: 0, sharedLimit: 0, name: "" };
+      }
+      const g = gm[cc.shared_limit_group_id];
+      g.members.push(cc);
+      g.totalDebt += Number(cc.current_balance || 0);
+      if (cc.is_limit_group_master) {
+        g.master = cc;
+        g.sharedLimit = Number(cc.shared_limit || 0);
+        g.name = cc.notes || cc.name || "Shared Limit Group";
+      }
+    });
+    // fallback master
+    Object.values(gm).forEach(g => {
+      if (!g.master && g.members.length > 0) {
+        g.master = g.members[0];
+        g.sharedLimit = Number(g.master.shared_limit || 0);
+        g.name = g.master.notes || g.master.name || "Shared Limit Group";
+      }
+    });
+    return { groupMap: gm, groupedCardIds: gids };
+  }, [creditCards]);
+
+  // ── Card stats (group-aware) ──
   const cardStats = useMemo(() => creditCards.map(cc => {
     const debt   = Number(cc.current_balance || 0);
-    const limit  = Number(cc.card_limit || 0);
-    const avail  = Math.max(0, limit - debt);
-    const util   = limit > 0 ? (debt / limit) * 100 : 0;
+    let limit, avail, util;
+    if (cc.shared_limit_group_id && groupMap[cc.shared_limit_group_id]) {
+      const g = groupMap[cc.shared_limit_group_id];
+      limit = g.sharedLimit;
+      avail = Math.max(0, g.sharedLimit - g.totalDebt);
+      util  = g.sharedLimit > 0 ? (g.totalDebt / g.sharedLimit) * 100 : 0;
+    } else {
+      limit = Number(cc.card_limit || 0);
+      avail = Math.max(0, limit - debt);
+      util  = limit > 0 ? (debt / limit) * 100 : 0;
+    }
     const target = Number(cc.monthly_target || 0);
     const monthSpent = ledger
       .filter(e => ym(e.tx_date) === filterMonth && e.from_id === cc.id && e.tx_type === "expense")
@@ -77,7 +115,7 @@ export default function CreditCards({
     const dueIn  = cc.due_day       ? daysUntil(cc.due_day)       : null;
     const stmtIn = cc.statement_day ? daysUntil(cc.statement_day) : null;
     return { ...cc, debt, limit, avail, util, target, monthSpent, dueIn, stmtIn };
-  }), [creditCards, ledger, filterMonth]);
+  }), [creditCards, groupMap, ledger, filterMonth]);
 
   const ccLedger = useMemo(() =>
     ledger.filter(e => {
@@ -267,7 +305,27 @@ export default function CreditCards({
         creditCards.length === 0
           ? <EmptyState icon="💳" title="No credit cards" message="Add a credit card from Accounts." />
           : <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              {cardStats.map(cc => <CCCard key={cc.id} cc={cc} onPay={() => { setPayForm(f => ({ ...f, cardId: cc.id, amount: cc.debt })); setModal("pay"); }} onTransactions={() => { setSelectedCard(cc.id); setSubTab("transactions"); }} />)}
+              {/* Shared-limit groups */}
+              {Object.values(groupMap).map(g => (
+                <SharedLimitGroupCard
+                  key={g.id}
+                  group={g}
+                  cardStats={cardStats}
+                  onPay={(cardId) => {
+                    const s = cardStats.find(c => c.id === cardId);
+                    setPayForm(f => ({ ...f, cardId, amount: s?.debt || "" }));
+                    setModal("pay");
+                  }}
+                  onTransactions={(cardId) => { setSelectedCard(cardId); setSubTab("transactions"); }}
+                />
+              ))}
+              {/* Standalone (non-grouped) cards */}
+              {cardStats.filter(cc => !groupedCardIds.has(cc.id)).map(cc => (
+                <CCCard key={cc.id} cc={cc}
+                  onPay={() => { setPayForm(f => ({ ...f, cardId: cc.id, amount: cc.debt })); setModal("pay"); }}
+                  onTransactions={() => { setSelectedCard(cc.id); setSubTab("transactions"); }}
+                />
+              ))}
             </div>
       )}
 
@@ -581,6 +639,110 @@ export default function CreditCards({
         message="Remove this installment plan? Transaction history is preserved."
         danger
       />
+    </div>
+  );
+}
+
+// ─── SHARED LIMIT GROUP CARD ─────────────────────────────────
+function SharedLimitGroupCard({ group, cardStats, onPay, onTransactions }) {
+  const { name, sharedLimit, totalDebt, members } = group;
+  const available  = Math.max(0, sharedLimit - totalDebt);
+  const util       = sharedLimit > 0 ? (totalDebt / sharedLimit) * 100 : 0;
+  const utilColor  = util > 80 ? "#dc2626" : util > 60 ? "#d97706" : "#059669";
+
+  return (
+    <div style={{ background: "#ffffff", borderRadius: 16, border: "1.5px solid #e5e7eb", overflow: "hidden" }}>
+
+      {/* ── Group header ── */}
+      <div style={{ padding: "16px 18px", borderBottom: "1px solid #f3f4f6" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+          <span style={{ fontSize: 20 }}>🏦</span>
+          <span style={{ fontSize: 15, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif", flex: 1 }}>
+            {name}
+          </span>
+          <span style={{
+            fontSize: 10, fontWeight: 700, background: "#eff6ff", color: "#3b5bdb",
+            padding: "2px 8px", borderRadius: 4, fontFamily: "Figtree, sans-serif",
+          }}>
+            Shared Limit
+          </span>
+        </div>
+
+        {/* Usage row */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <span style={{ fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
+            {fmtIDR(totalDebt, true)} / {fmtIDR(sharedLimit, true)} used
+          </span>
+          <span style={{ fontSize: 12, fontWeight: 800, color: utilColor, fontFamily: "Figtree, sans-serif" }}>
+            {util.toFixed(0)}%
+          </span>
+        </div>
+        <BarSimple value={totalDebt} max={sharedLimit || 1} color={utilColor} height={7} />
+        <div style={{ fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif", marginTop: 6 }}>
+          Available: <strong style={{ color: "#059669" }}>{fmtIDR(available, true)}</strong>
+        </div>
+      </div>
+
+      {/* ── Member cards ── */}
+      <div style={{ padding: "4px 0 8px" }}>
+        {members.map((cc, i) => {
+          const stats  = cardStats.find(s => s.id === cc.id);
+          const debt   = stats?.debt ?? Number(cc.current_balance || 0);
+          const dueIn  = stats?.dueIn ?? null;
+          const isLast = i === members.length - 1;
+          return (
+            <div key={cc.id} style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "8px 18px",
+              borderBottom: isLast ? "none" : "1px solid #f9fafb",
+            }}>
+              {/* Tree line */}
+              <span style={{ fontSize: 12, color: "#d1d5db", flexShrink: 0, fontFamily: "monospace" }}>
+                {isLast ? "└" : "├"}
+              </span>
+              {/* Color dot */}
+              <div style={{
+                width: 8, height: 8, borderRadius: "50%",
+                background: cc.color || "#3b5bdb", flexShrink: 0,
+              }} />
+              {/* Card info */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
+                  {cc.name}
+                  {cc.is_limit_group_master && (
+                    <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, background: "#fef3c7", color: "#d97706", padding: "1px 4px", borderRadius: 3, verticalAlign: "middle" }}>
+                      MASTER
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+                  {cc.bank_name}{cc.network ? ` · ${cc.network}` : ""}{cc.last4 ? ` ····${cc.last4}` : ""}
+                  {dueIn !== null && (
+                    <span style={{ marginLeft: 6, color: dueIn <= 3 ? "#dc2626" : dueIn <= 7 ? "#d97706" : "#9ca3af" }}>
+                      · Due {dueIn}d
+                    </span>
+                  )}
+                </div>
+              </div>
+              {/* Debt */}
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#dc2626", fontFamily: "Figtree, sans-serif", flexShrink: 0 }}>
+                {fmtIDR(debt, true)}
+              </div>
+              {/* Pay button */}
+              <button
+                onClick={() => onPay(cc.id)}
+                style={{
+                  padding: "4px 10px", borderRadius: 7, border: "none",
+                  background: "#fde8e8", color: "#dc2626",
+                  fontSize: 11, fontWeight: 700, cursor: "pointer",
+                  fontFamily: "Figtree, sans-serif", flexShrink: 0,
+                }}>
+                Pay
+              </button>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

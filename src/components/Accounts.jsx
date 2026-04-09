@@ -100,7 +100,15 @@ export default function Accounts({
     const fxBalances = accountCurrencies
       .filter(r => r.account_id === a.id)
       .map(r => ({ currency: r.currency, balance: r.balance }));
-    setForm({ ...a, fxBalances });
+    // CC: populate synthetic shared-limit fields from DB columns
+    const ccExtra = ft === "credit_card" && a.shared_limit_group_id ? {
+      hasSharedLimit:    true,
+      sharedLimitMode:   a.is_limit_group_master ? "new" : "join",
+      groupName:         a.is_limit_group_master ? (a.notes || "") : "",
+      sharedLimitAmount: String(a.shared_limit || ""),
+      joinGroupId:       a.is_limit_group_master ? "" : (a.shared_limit_group_id || ""),
+    } : {};
+    setForm({ ...a, fxBalances, ...ccExtra });
     setStep(2); // go straight to form when editing
     setModal("edit");
   };
@@ -117,10 +125,17 @@ export default function Accounts({
     if (!form.name?.trim()) { showToast("Name is required", "error"); return; }
     setSaving(true);
     try {
+      // Strip synthetic form-only fields so they never reach the DB
+      const {
+        fxBalances: _fb,
+        hasSharedLimit: _hs, sharedLimitMode: _slm, groupName: _gn,
+        sharedLimitAmount: _sla, joinGroupId: _jgi,
+        deductFromBank: _dfb, bankDeductId: _bdi,
+        ...formWithoutSynthetic
+      } = form;
       // Sanitize all numeric fields before insert/update
-      const { fxBalances: _fb, ...formWithoutFx } = form;
       const clean = {
-        ...formWithoutFx,
+        ...formWithoutSynthetic,
         current_balance:    sn(form.current_balance),
         initial_balance:    sn(form.initial_balance),
         current_value:      sn(form.current_value),
@@ -137,6 +152,7 @@ export default function Accounts({
         interest_rate:      sn(form.interest_rate),
         monthly_installment:sn(form.monthly_installment),
         receivable_total:  sn(form.receivable_total),
+        shared_limit:       sn(form.shared_limit),
         sort_order:         sn(form.sort_order),
       };
 
@@ -147,6 +163,26 @@ export default function Accounts({
           ? { ...clean, type: "bank", subtype: "cash" }
           : { ...clean };
         if (formType !== "receivable") updateData.entity = null;
+        // CC shared limit
+        if (formType === "credit_card") {
+          if (form.hasSharedLimit) {
+            if (form.sharedLimitMode === "new") {
+              updateData.is_limit_group_master = true;
+              updateData.shared_limit = sn(form.sharedLimitAmount);
+              if (form.groupName) updateData.notes = form.groupName;
+              // Keep existing group id; if none (converting standalone → master), generate one
+              if (!updateData.shared_limit_group_id) updateData.shared_limit_group_id = crypto.randomUUID();
+            } else {
+              updateData.shared_limit_group_id = form.joinGroupId || null;
+              updateData.is_limit_group_master = false;
+              updateData.shared_limit = null;
+            }
+          } else {
+            updateData.shared_limit_group_id = null;
+            updateData.is_limit_group_master = false;
+            updateData.shared_limit = null;
+          }
+        }
         savedAccount = await accountsApi.update(editAcc.id, updateData);
         setAccounts(p => p.map(a => a.id === editAcc.id ? savedAccount : a));
         showToast("Account updated");
@@ -179,6 +215,19 @@ export default function Accounts({
           };
         } else {
           insertData = { ...clean, type: formType, entity: null, is_active: true, sort_order: accounts.length };
+          // CC shared limit
+          if (formType === "credit_card" && form.hasSharedLimit) {
+            if (form.sharedLimitMode === "new") {
+              insertData.shared_limit_group_id = crypto.randomUUID();
+              insertData.is_limit_group_master = true;
+              insertData.shared_limit = sn(form.sharedLimitAmount);
+              if (form.groupName) insertData.notes = form.groupName;
+            } else {
+              insertData.shared_limit_group_id = form.joinGroupId || null;
+              insertData.is_limit_group_master = false;
+              insertData.shared_limit = null;
+            }
+          }
         }
         savedAccount = await accountsApi.create(user.id, insertData);
         setAccounts(p => [...p, savedAccount]);
@@ -986,8 +1035,8 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
         </FormRow>
         <Input label="Last 4 Digits" value={form.last4 || ""} onChange={e => set("last4", e.target.value)}
           placeholder="1234" />
-        <AmountInput label="Credit Limit" value={form.card_limit || ""}
-          onChange={v => set("card_limit", v)} />
+        <AmountInput label={form.hasSharedLimit ? "Individual Card Limit (optional)" : "Credit Limit"}
+          value={form.card_limit || ""} onChange={v => set("card_limit", v)} />
         <AmountInput label="Monthly Spend Target (optional)" value={form.monthly_target || ""}
           onChange={v => set("monthly_target", v)} />
         <FormRow>
@@ -996,6 +1045,73 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
           <Input label="Due Day" type="number" value={form.due_day || ""}
             onChange={e => set("due_day", e.target.value)} placeholder="17" style={{ flex: 1 }} />
         </FormRow>
+
+        {/* ── Shared Limit ── */}
+        <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: form.hasSharedLimit ? 12 : 0 }}>
+            <input type="checkbox" id="hasSharedLimit" checked={!!form.hasSharedLimit}
+              onChange={e => set("hasSharedLimit", e.target.checked)}
+              style={{ accentColor: "#3b5bdb", width: 16, height: 16 }} />
+            <label htmlFor="hasSharedLimit"
+              style={{ fontSize: 13, color: "#374151", cursor: "pointer", fontFamily: "Figtree, sans-serif" }}>
+              Shared limit with other cards?
+            </label>
+          </div>
+
+          {form.hasSharedLimit && (
+            <div style={{ paddingLeft: 24, display: "flex", flexDirection: "column", gap: 12 }}>
+              {/* Mode toggle */}
+              <div style={{ display: "flex", gap: 6 }}>
+                {[
+                  { id: "new",  label: "New Group"      },
+                  { id: "join", label: "Join Existing"  },
+                ].map(m => {
+                  const active = (form.sharedLimitMode || "new") === m.id;
+                  return (
+                    <button key={m.id} type="button"
+                      onClick={() => set("sharedLimitMode", m.id)}
+                      style={{
+                        padding: "5px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600,
+                        border: `1.5px solid ${active ? "#3b5bdb" : "#e5e7eb"}`,
+                        background: active ? "#eff6ff" : "#fff",
+                        color: active ? "#3b5bdb" : "#6b7280",
+                        cursor: "pointer", fontFamily: "Figtree, sans-serif",
+                      }}>
+                      {m.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {(form.sharedLimitMode || "new") === "new" ? (
+                <>
+                  <Input label="Group Name"
+                    value={form.groupName || ""}
+                    onChange={e => set("groupName", e.target.value)}
+                    placeholder="e.g. Maybank Shared Limit" />
+                  <AmountInput label="Total Shared Limit (Rp)"
+                    value={form.sharedLimitAmount || ""}
+                    onChange={v => set("sharedLimitAmount", v)} />
+                </>
+              ) : (
+                <Select
+                  label="Join Group"
+                  value={form.joinGroupId || ""}
+                  onChange={e => set("joinGroupId", e.target.value)}
+                  options={[
+                    { value: "", label: "— Select group —" },
+                    ...(accounts || [])
+                      .filter(a => a.type === "credit_card" && a.is_limit_group_master && a.shared_limit_group_id)
+                      .map(a => ({
+                        value: a.shared_limit_group_id,
+                        label: `${a.notes || a.name} (${fmtIDR(Number(a.shared_limit || 0), true)})`,
+                      })),
+                  ]}
+                />
+              )}
+            </div>
+          )}
+        </div>
       </>}
 
       {/* ASSET — common fields */}
@@ -1197,7 +1313,7 @@ function emptyForm(type) {
   switch (type) {
     case "bank":        return { ...base, bank_name: "BCA", account_no: "", currency: "IDR", initial_balance: "", current_balance: 0, include_networth: true, is_multicurrency: false, fxBalances: [] };
     case "cash":        return { ...base, currency: "IDR", initial_balance: "", current_balance: 0 };
-    case "credit_card": return { ...base, bank_name: "BCA", last4: "", network: "Visa", card_limit: "", monthly_target: "", statement_day: 25, due_day: 17, current_balance: 0 };
+    case "credit_card": return { ...base, bank_name: "BCA", last4: "", network: "Visa", card_limit: "", monthly_target: "", statement_day: 25, due_day: 17, current_balance: 0, hasSharedLimit: false, sharedLimitMode: "new", groupName: "", sharedLimitAmount: "", joinGroupId: "" };
     case "asset":       return { ...base, subtype: "Property", current_value: "", purchase_price: "", purchase_date: "", deposit_rollover_type: "non_aro", monthly_interest_payout: false, deposit_status: "active", tenor_months: "6" };
     case "liability":   return { ...base, subtype: "Mortgage", creditor: "", outstanding_amount: "", total_amount: "", monthly_payment: "", liability_interest_rate: "", start_date: "", end_date: "" };
     case "receivable":  return { ...base, entity: "Hamasa" };
