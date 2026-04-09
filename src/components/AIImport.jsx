@@ -5,7 +5,7 @@ import { LIGHT, DARK } from "../theme";
 import { Button, EmptyState, Spinner, showToast } from "./shared/index";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
 
-// ── TX types ────────────────────────────────────────────────────
+// ── TX types (dropdown) — only real tx types, not categories ─────
 const IMPORT_TX_TYPES = [
   { value: "expense",       label: "Expense" },
   { value: "income",        label: "Income" },
@@ -13,19 +13,30 @@ const IMPORT_TX_TYPES = [
   { value: "pay_cc",        label: "Pay CC" },
   { value: "reimburse_out", label: "Reimburse Out" },
   { value: "reimburse_in",  label: "Reimburse In" },
-  { value: "bank_charges",  label: "Bank Charges" },
-  { value: "materai",       label: "Materai" },
-  { value: "tax",           label: "Tax" },
-  { value: "bank_interest", label: "Bank Interest" },
-  { value: "cashback",      label: "Cashback" },
   { value: "give_loan",     label: "Give Loan" },
   { value: "collect_loan",  label: "Collect Loan" },
+  { value: "fx_exchange",   label: "FX Exchange" },
 ];
 
+// ── Normalise AI pseudo-types to real tx_type + category ─────────
+// bank_charges/materai/tax → expense; bank_interest/cashback → income
+const PSEUDO_TYPE_MAP = {
+  bank_charges:  { tx_type: "expense", category_id: "finance",    category_name: "Bank Charges"  },
+  materai:       { tx_type: "expense", category_id: "finance",    category_name: "Materai"       },
+  tax:           { tx_type: "expense", category_id: "finance",    category_name: "Tax"           },
+  bank_interest: { tx_type: "income",  category_id: "other_income", category_name: "Bank Interest" },
+  cashback:      { tx_type: "income",  category_id: "other_income", category_name: "Cashback"    },
+};
+const normaliseTxType = (raw, catId) => {
+  const mapped = PSEUDO_TYPE_MAP[raw];
+  if (mapped) return { tx_type: mapped.tx_type, category_id: mapped.category_id };
+  return { tx_type: raw || "expense", category_id: catId };
+};
+
 // ── Category visibility ─────────────────────────────────────────
-const SHOW_EXPENSE_CAT  = new Set(["expense","bank_charges","materai","tax"]);
-const SHOW_INCOME_CAT   = new Set(["income","bank_interest","cashback"]);
-const NO_CAT            = new Set(["transfer","pay_cc","reimburse_out","reimburse_in","give_loan","collect_loan"]);
+const SHOW_EXPENSE_CAT  = new Set(["expense"]);
+const SHOW_INCOME_CAT   = new Set(["income"]);
+const NO_CAT            = new Set(["transfer","pay_cc","reimburse_out","reimburse_in","give_loan","collect_loan","fx_exchange"]);
 const REIMBURSE_TYPES   = new Set(["reimburse_out","reimburse_in"]);
 const REIMBURSE_ENTITIES = ["Hamasa", "SDC", "Travelio"];
 
@@ -34,7 +45,7 @@ const getCatOptions = (txType) =>
 
 // ── Helpers ─────────────────────────────────────────────────────
 const amtColor = (type) => {
-  if (["income","cashback","bank_interest","collect_loan","reimburse_in"].includes(type)) return "#059669";
+  if (["income","collect_loan","reimburse_in","fx_exchange"].includes(type)) return "#059669";
   if (["transfer","pay_cc","give_loan"].includes(type)) return "#3b5bdb";
   return "#dc2626";
 };
@@ -198,6 +209,11 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
         const txDate = r.date || r.tx_date || todayStr();
         const amount = r.amount_idr || r.amount || 0;
         const desc   = r.description || r.merchant_name || "";
+
+        // Normalise pseudo-types (bank_charges, materai, tax, bank_interest, cashback)
+        const norm = normaliseTxType(txType, aiCatId);
+        txType = norm.tx_type;
+        aiCatId = norm.category_id;
 
         // Apply transfer detection
         const fixed = fixTransferType({ tx_type: txType, from_account_id: fromId, to_account_id: toId, to_account_no: r.to_account_no, from_account_no: r.from_account_no });
