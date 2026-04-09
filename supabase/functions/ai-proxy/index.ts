@@ -6,7 +6,7 @@ const corsHeaders = {
 };
 
 const DEFAULT_MODEL  = "claude-sonnet-4-20250514";
-const DEFAULT_TOKENS = 8000;
+const DEFAULT_TOKENS = 16000;
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {

@@ -562,12 +562,12 @@ export const settingsApi = {
 
 // ─── AI RESPONSE JSON EXTRACTOR ───────────────────────────────
 function extractJSON(text) {
-  // Step 1: strip ```json / ``` fences from start and end
-  let clean = text.trim();
-  clean = clean.replace(/^```json\s*/i, "");
-  clean = clean.replace(/^```\s*/i, "");
-  clean = clean.replace(/\s*```\s*$/, "");
-  clean = clean.trim();
+  // Step 1: strip ```json / ``` fences
+  let clean = text.trim()
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```\s*$/, "")
+    .trim();
 
   // Step 2: direct parse
   try {
@@ -578,7 +578,7 @@ function extractJSON(text) {
     return [parsed];
   } catch {}
 
-  // Step 3: find JSON array in cleaned text
+  // Step 3: find JSON array
   const arrayMatch = clean.match(/\[[\s\S]*\]/s);
   if (arrayMatch) {
     try {
@@ -587,18 +587,17 @@ function extractJSON(text) {
     } catch {}
   }
 
-  // Step 4: find "transactions": [...] — fix truncation by balancing brackets
+  // Step 4: find "transactions": [...] — repair truncation by closing brackets
   const txMatch = clean.match(/"transactions"\s*:\s*(\[[\s\S]*)/s);
   if (txMatch) {
     let txText = txMatch[1];
-    // Balance open/close brackets to repair truncated JSON
     let open  = (txText.match(/\[/g) || []).length;
     let close = (txText.match(/\]/g) || []).length;
     while (close < open) { txText += "]"; close++; }
     try { return JSON.parse(txText); } catch {}
   }
 
-  // Step 5: find any JSON object, unwrap .transactions
+  // Step 5: find any JSON object
   const objMatch = clean.match(/\{[\s\S]*\}/s);
   if (objMatch) {
     try {
@@ -606,6 +605,22 @@ function extractJSON(text) {
       if (parsed.transactions) return parsed.transactions;
       return [parsed];
     } catch {}
+  }
+
+  // Step 6: salvage — extract individual complete transaction objects
+  // Handles mid-array truncation where the outer [] is cut off
+  const salvaged = [];
+  const objRegex = /\{[^{}]*"date"[^{}]*\}/gs;
+  let m;
+  while ((m = objRegex.exec(clean)) !== null) {
+    try {
+      const tx = JSON.parse(m[0]);
+      if (tx.date && (tx.amount !== undefined)) salvaged.push(tx);
+    } catch {}
+  }
+  if (salvaged.length > 0) {
+    console.warn(`Salvaged ${salvaged.length} transactions from truncated JSON`);
+    return salvaged;
   }
 
   console.error("Could not parse AI response:", text.slice(0, 400));
@@ -651,7 +666,7 @@ Return a JSON object with a "transactions" array. Each item must have:
 - entity: "Personal"
 - notes: any extra detail
 
-Return ONLY valid JSON, no markdown.`;
+Be concise. Use short field values. Prioritize completing the full JSON array over adding detail. Return ONLY valid JSON, no markdown, no explanation.`;
 
           const contentParts = [];
           // PDFs must use document type; images use image type
@@ -679,7 +694,7 @@ Return ONLY valid JSON, no markdown.`;
             },
             body: JSON.stringify({
               model:      "claude-sonnet-4-20250514",
-              max_tokens: 8000,
+              max_tokens: 16000,
               messages: [{ role: "user", content: contentParts }],
             }),
           });
