@@ -575,7 +575,7 @@ function AmountCell({ r, color, T, updateRow }) {
     <div style={{ padding: "4px 6px" }}>
       <input
         type={focused ? "number" : "text"}
-        style={inInp(T, { textAlign: "right", color, fontWeight: 700, fontSize: 12 })}
+        style={inInp(T, { textAlign: "right", color, fontWeight: 700, fontSize: 12, whiteSpace: "nowrap" })}
         value={focused ? raw : fmtAmt(raw)}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
@@ -595,26 +595,23 @@ function DesktopTable({
 }) {
   const hasReimburse = results.some(r => REIMBURSE_TYPES.has(r.tx_type) || r.flagged);
 
-  // Build columns dynamically based on optional Entity + FX columns
-  // Base: ☑=3% Date=7% Desc=22% Type=10% Cat=12% Acc=16% Amt=12% Actions=6%
-  // When entity present: borrow 4% from Desc
-  // When FX present: add Rate=7% IDR=9% cols (replace Amount col)
-  const descPct = hasReimburse && hasFX ? "12%" : hasReimburse || hasFX ? "17%" : "22%";
-  let cols = `3% 7% ${descPct} 10% 12% 16%`;
+  // Build columns dynamically — minmax lets content breathe, overflowX handles the rest
+  // ☑=40 Date=75 Desc=flex Type=110 Cat=130 Acc=155 [Entity=80] [Rate=70 IDR=100] Amt=120 Actions=80
+  let cols = "40px 75px minmax(180px, 1fr) 110px 130px 155px";
   let hdr  = ["Date", "Description", "Type", "Category", "Account"];
-  if (hasReimburse) { cols += " 7%"; hdr.push("Entity"); }
-  if (hasFX)        { cols += " 7% 9%"; hdr.push("Rate", "≈ IDR"); }
-  else              { cols += " 12%"; hdr.push("Amount"); }
-  cols += " 9%"; hdr.push("");
+  if (hasReimburse) { cols += " 80px"; hdr.push("Entity"); }
+  if (hasFX)        { cols += " 70px 100px"; hdr.push("Rate", "≈ IDR"); }
+  else              { cols += " 120px"; hdr.push("Amount"); }
+  cols += " 80px"; hdr.push("");
   const COLS = cols;
   const HDR  = hdr;
 
   return (
     <div style={{
-      border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden",
-      width: "100%",
+      border: `1px solid ${T.border}`, borderRadius: 12,
+      width: "100%", overflowX: "auto",
     }}>
-      <div style={{ overflowX: "auto", width: "100%" }}>
+      <div style={{ minWidth: 800 }}>
 
         {/* ── Header ── */}
         <div style={{
