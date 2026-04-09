@@ -745,8 +745,6 @@ function CashAccountCard({ account: a, fxRates = {}, CURRENCIES: C = [], ledger,
 
 // ─── BANK PAGE CONTENT ───────────────────────────────────────
 function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, CURRENCIES: C = [], onEdit, onDelete, onHistory }) {
-  const [showZero, setShowZero] = useState(false);
-
   // Sort highest balance first, preserve original index for palette color
   const sorted = useMemo(() =>
     accounts
@@ -754,10 +752,9 @@ function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, CURRENC
       .sort((x, y) => Number(y.a.current_balance || 0) - Number(x.a.current_balance || 0)),
   [accounts]);
 
-  const nonZero = sorted.filter(({ a }) => Number(a.current_balance || 0) > 0);
-  const zero    = sorted.filter(({ a }) => Number(a.current_balance || 0) <= 0);
-  const visible = showZero ? sorted : nonZero;
+  const visible = sorted;
 
+  const nonZero      = sorted.filter(({ a }) => Number(a.current_balance || 0) > 0);
   const idrAccts     = accounts.filter(a => !a.currency || a.currency === "IDR");
   const foreignAccts = accounts.filter(a => a.currency && a.currency !== "IDR");
   const totalIDR     = idrAccts.reduce((s, a) => s + Number(a.current_balance || 0), 0);
@@ -802,15 +799,6 @@ function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, CURRENC
         ))}
       </div>
 
-      {/* Zero-balance toggle */}
-      {zero.length > 0 && (
-        <button
-          onClick={() => setShowZero(v => !v)}
-          style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif", padding: "4px 0", textAlign: "left" }}
-        >
-          {showZero ? `▲ Hide ${zero.length} zero-balance account${zero.length > 1 ? "s" : ""}` : `▼ Show ${zero.length} zero-balance account${zero.length > 1 ? "s" : ""}`}
-        </button>
-      )}
     </div>
   );
 }
