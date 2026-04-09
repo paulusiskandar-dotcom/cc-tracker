@@ -15,6 +15,7 @@ import {
 const SUBTABS = [
   { id: "profile",    label: "Profile"    },
   { id: "accounts",   label: "Accounts"   },
+  { id: "backup",     label: "Backup"     },
   { id: "email",      label: "Email Sync" },
   { id: "fx",         label: "FX Rates"   },
   { id: "recurring",  label: "Recurring"  },
@@ -39,6 +40,7 @@ export default function Settings({
   merchantMaps, setMerchantMaps,
   onRefresh,
   accounts = [], setAccounts, bankAccounts = [], creditCards = [],
+  ledger = [],
 }) {
   const T = dark ? DARK : LIGHT;
 
@@ -380,6 +382,13 @@ export default function Settings({
           accounts={accounts} setAccounts={setAccounts}
           onRefresh={onRefresh}
         />
+      )}
+
+      {/* ══════════════════════════════════════════════════ */}
+      {/* ── BACKUP ───────────────────────────────────── */}
+      {/* ══════════════════════════════════════════════════ */}
+      {subTab === "backup" && (
+        <BackupSection user={user} T={T} card={card} ledger={ledger} />
       )}
 
       {/* ══════════════════════════════════════════════════ */}
@@ -1025,6 +1034,185 @@ function AccountsSection({ user, T, card, accounts, setAccounts, onRefresh }) {
         onConfirm={deleteLiab}
         onCancel={() => setDelLiab(null)}
       />
+    </div>
+  );
+}
+
+// ─── BACKUP SECTION ───────────────────────────────────────────
+const BACKUP_FN_URL = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/auto-backup`;
+
+function BackupSection({ user, T, card, ledger }) {
+  const [files,        setFiles]        = useState([]);
+  const [loadingFiles, setLoadingFiles] = useState(false);
+  const [lastBackup,   setLastBackup]   = useState(null);
+  const [backingUp,    setBackingUp]    = useState(false);
+  const [downloading,  setDownloading]  = useState(null);
+
+  // Load backup list + last_backup on mount
+  const loadBackups = async () => {
+    setLoadingFiles(true);
+    try {
+      const [filesRes, settingRes] = await Promise.all([
+        supabase.storage.from("backups").list(user.id, {
+          sortBy: { column: "created_at", order: "desc" },
+        }),
+        supabase.from("app_settings")
+          .select("value")
+          .eq("user_id", user.id)
+          .eq("key", "last_backup")
+          .maybeSingle(),
+      ]);
+      setFiles(filesRes.data || []);
+      if (settingRes.data?.value) setLastBackup(settingRes.data.value);
+    } catch { /* ignore */ }
+    setLoadingFiles(false);
+  };
+
+  useState(() => { loadBackups(); }, []);
+
+  // Trigger backup via edge function (uses user's JWT)
+  const runBackup = async () => {
+    setBackingUp(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(BACKUP_FN_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type":  "application/json",
+          "Authorization": `Bearer ${session?.access_token}`,
+          "apikey":         process.env.REACT_APP_SUPABASE_ANON_KEY || "",
+        },
+        body: JSON.stringify({ user_id: user.id }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      showToast("Backup complete ✅");
+      await loadBackups();
+    } catch (e) { showToast(e.message || "Backup failed", "error"); }
+    setBackingUp(false);
+  };
+
+  // Download a specific backup file
+  const downloadBackup = async (filename) => {
+    setDownloading(filename);
+    try {
+      const { data, error } = await supabase.storage
+        .from("backups")
+        .download(`${user.id}/${filename}`);
+      if (error) throw error;
+      const url = URL.createObjectURL(data);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { showToast(e.message || "Download failed", "error"); }
+    setDownloading(null);
+  };
+
+  // Export ledger as CSV with UTF-8 BOM (Excel-compatible)
+  const exportCSV = () => {
+    const BOM = "\uFEFF";
+    const headers = ["Date","Description","Amount","Currency","Amount IDR","Type","Category","Entity","Notes"];
+    const rows = ledger.map(e => [
+      e.tx_date, e.description, e.amount, e.currency || "IDR",
+      e.amount_idr || e.amount, e.tx_type, e.category_name || e.category_id || "",
+      e.entity || "", e.notes || "",
+    ].map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","));
+    const csv = BOM + [headers.join(","), ...rows].join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `paulus-finance-${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const fmtTs = (iso) => {
+    try {
+      return new Date(iso).toLocaleString("en-GB", {
+        day: "2-digit", month: "short", year: "numeric",
+        hour: "2-digit", minute: "2-digit",
+      });
+    } catch { return iso; }
+  };
+
+  const rowStyle = {
+    display: "flex", alignItems: "center", justifyContent: "space-between",
+    padding: "8px 0", borderBottom: `1px solid ${T.border}`,
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+      {/* ── Status card ── */}
+      <div style={card}>
+        <SectionHeader title="Backup & Export" />
+        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>
+                Auto backup
+              </div>
+              <div style={{ fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif" }}>
+                Daily at 08:00 WIB (01:00 UTC) ✅
+              </div>
+            </div>
+          </div>
+          {lastBackup && (
+            <div style={{ fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif" }}>
+              Last backup: {fmtTs(lastBackup)}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <Button variant="primary" size="sm" busy={backingUp} onClick={runBackup}>
+              🔄 Backup Now
+            </Button>
+            <Button variant="secondary" size="sm" onClick={exportCSV}>
+              📊 Export CSV
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── File list ── */}
+      <div style={card}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+          <SectionHeader title={`Saved Backups (${files.length}/30)`} />
+          <Button size="sm" variant="secondary" onClick={loadBackups}>↺ Refresh</Button>
+        </div>
+        {loadingFiles ? (
+          <div style={{ textAlign: "center", padding: 20, fontSize: 12, color: T.text3 }}>Loading…</div>
+        ) : files.length === 0 ? (
+          <EmptyState icon="☁️" message="No backups yet. Click 'Backup Now' to create one." />
+        ) : (
+          files.map((f, i) => (
+            <div key={f.name} style={{
+              ...rowStyle,
+              borderBottom: i === files.length - 1 ? "none" : `1px solid ${T.border}`,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 14 }}>📁</span>
+                <div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: T.text, fontFamily: "Figtree, sans-serif" }}>
+                    {f.name}
+                  </div>
+                  <div style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, sans-serif" }}>
+                    {f.metadata?.size ? `${(f.metadata.size / 1024).toFixed(0)} KB` : ""}
+                  </div>
+                </div>
+              </div>
+              <Button
+                size="sm" variant="secondary"
+                busy={downloading === f.name}
+                onClick={() => downloadBackup(f.name)}
+              >
+                ⬇ Download
+              </Button>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }
