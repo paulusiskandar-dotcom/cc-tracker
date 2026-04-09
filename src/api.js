@@ -562,23 +562,24 @@ export const settingsApi = {
 
 // ─── AI RESPONSE JSON EXTRACTOR ───────────────────────────────
 function extractJSON(text) {
-  // Strip markdown code fences first
-  const clean = text
-    .replace(/```json\n?/g, "")
-    .replace(/```\n?/g, "")
-    .trim();
+  // Step 1: strip ```json / ``` fences from start and end
+  let clean = text.trim();
+  clean = clean.replace(/^```json\s*/i, "");
+  clean = clean.replace(/^```\s*/i, "");
+  clean = clean.replace(/\s*```\s*$/, "");
+  clean = clean.trim();
 
-  // Try 1: direct parse of cleaned text
+  // Step 2: direct parse
   try {
     const parsed = JSON.parse(clean);
-    if (Array.isArray(parsed))       return parsed;
-    if (parsed.transactions)         return parsed.transactions;
-    if (parsed.data)                 return parsed.data;
+    if (Array.isArray(parsed))  return parsed;
+    if (parsed.transactions)    return parsed.transactions;
+    if (parsed.data)            return parsed.data;
     return [parsed];
   } catch {}
 
-  // Try 2: find JSON array anywhere in original text
-  const arrayMatch = text.match(/\[[\s\S]*\]/);
+  // Step 3: find JSON array in cleaned text
+  const arrayMatch = clean.match(/\[[\s\S]*\]/s);
   if (arrayMatch) {
     try {
       const parsed = JSON.parse(arrayMatch[0]);
@@ -586,14 +587,19 @@ function extractJSON(text) {
     } catch {}
   }
 
-  // Try 3: extract "transactions": [...] specifically
-  const txMatch = text.match(/"transactions"\s*:\s*(\[[\s\S]*?\])/s);
+  // Step 4: find "transactions": [...] — fix truncation by balancing brackets
+  const txMatch = clean.match(/"transactions"\s*:\s*(\[[\s\S]*)/s);
   if (txMatch) {
-    try { return JSON.parse(txMatch[1]); } catch {}
+    let txText = txMatch[1];
+    // Balance open/close brackets to repair truncated JSON
+    let open  = (txText.match(/\[/g) || []).length;
+    let close = (txText.match(/\]/g) || []).length;
+    while (close < open) { txText += "]"; close++; }
+    try { return JSON.parse(txText); } catch {}
   }
 
-  // Try 4: find any JSON object
-  const objMatch = text.match(/\{[\s\S]*\}/s);
+  // Step 5: find any JSON object, unwrap .transactions
+  const objMatch = clean.match(/\{[\s\S]*\}/s);
   if (objMatch) {
     try {
       const parsed = JSON.parse(objMatch[0]);
@@ -602,8 +608,8 @@ function extractJSON(text) {
     } catch {}
   }
 
-  console.error("Could not parse AI response:", text.slice(0, 300));
-  throw new Error("Could not extract transactions from AI response");
+  console.error("Could not parse AI response:", text.slice(0, 400));
+  throw new Error("Could not extract transactions. Try uploading a smaller file.");
 }
 
 // ─── SCAN BATCHES ─────────────────────────────────────────────
@@ -668,7 +674,7 @@ Return ONLY valid JSON, no markdown.`;
             },
             body: JSON.stringify({
               model:      "claude-sonnet-4-20250514",
-              max_tokens: 4000,
+              max_tokens: 8000,
               messages: [{ role: "user", content: contentParts }],
             }),
           });
