@@ -667,8 +667,8 @@ Return a JSON object with a "transactions" array. Each item must have:
 - date: "YYYY-MM-DD"
 - description: merchant or narration
 - amount: number (positive)
-- currency: "IDR" (or detected currency code)
-- amount_idr: number in IDR (use 1:1 if IDR)
+- currency: "IDR" (or foreign currency code e.g. USD, SGD, JPY)
+- amount_idr: converted IDR amount. If only IDR shown, same as amount. If both shown (e.g. USD 100 = Rp 1.640.000), amount=100, currency=USD, amount_idr=1640000
 - type: one of expense|income|transfer|pay_cc|reimburse_in|reimburse_out|give_loan|collect_loan|fx_exchange
   IMPORTANT: "transfer" = ONLY between user's own accounts listed above. If destination is unknown/external, use "expense".
   For bank admin fees, materai, stamp duty → use type "expense". For bank interest, cashback → use type "income".

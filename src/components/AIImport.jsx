@@ -88,7 +88,7 @@ const ACT_BTN = (extra = {}) => ({
 });
 
 // ─────────────────────────────────────────────────────────────────
-export default function AIImport({ user, accounts, ledger, onRefresh, setLedger, dark, merchantMaps = [] }) {
+export default function AIImport({ user, accounts, ledger, onRefresh, setLedger, dark, merchantMaps = [], fxRates = {}, CURRENCIES = [] }) {
   const T = dark ? DARK : LIGHT;
   const fileRef = useRef();
   const [isDesktop, setIsDesktop] = useState(() => window.innerWidth > 768);
@@ -115,6 +115,14 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
   const bankAccounts  = accounts.filter(a => a.type === "bank");
   const ccAccounts    = accounts.filter(a => a.type === "credit_card");
   const spendAccounts = [...bankAccounts, ...ccAccounts];
+
+  // ── FX rate lookup ────────────────────────────────────────────
+  const getDefaultRate = (currency) => {
+    if (!currency || currency === "IDR") return 1;
+    if (fxRates[currency]) return fxRates[currency];
+    const c = CURRENCIES.find(c => c.code === currency);
+    return c ? c.rate : 1;
+  };
 
   // ── Transfer detection ────────────────────────────────────────
   const isOwnAccount = (accountNo) => {
@@ -229,23 +237,34 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
           if (learned.confidence >= 2) catId = learned.category_id; // confident → override
         }
 
+        const currency = (r.currency || "IDR").toUpperCase();
+        const isFX     = currency !== "IDR";
+        const fxRate   = isFX
+          ? String(r.fx_rate_used || r.rate || getDefaultRate(currency))
+          : "1";
+        // If AI gave amount_idr use it, else calculate from rate
+        const amtIDR   = isFX
+          ? String(r.amount_idr || Math.round(Number(amount) * Number(fxRate)) || amount)
+          : String(amount);
+
         return {
           _id:         i,
           tx_date:     txDate,
           description: desc,
-          amount:      String(amount),
-          currency:    r.currency || "IDR",
-          amount_idr:  String(amount),
+          amount:      String(amount),        // original foreign amount (or IDR)
+          currency,
+          fx_rate:     fxRate,               // editable rate
+          amount_idr:  amtIDR,               // IDR equivalent, auto-recalculated
           tx_type:     txType,
           from_id:     fromId,
           to_id:       toId,
           entity:      REIMBURSE_ENTITIES.includes(r.entity) ? r.entity : "Hamasa",
           category_id: catId,
           ai_category: aiCatId,
-          learned_cat: learnedCat,   // { category_id, category_name, confidence }
+          learned_cat: learnedCat,
           notes:       r.notes || "",
           flagged,
-          status:      checkDuplicate(txDate, amount, desc) ? "possible_duplicate" : "new",
+          status:      checkDuplicate(txDate, amtIDR, desc) ? "possible_duplicate" : "new",
         };
       });
       setResults(items);
@@ -261,12 +280,19 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
   // ── Build ledger entry ────────────────────────────────────────
   const buildEntry = (r) => {
     const { from_type, to_type } = getTxFromToTypes(r.tx_type);
+    const isFX     = r.currency && r.currency !== "IDR";
+    const fxRate   = isFX ? (Number(r.fx_rate) || 1) : 1;
+    const amtOrig  = Number(r.amount) || 0;
+    const amtIDR   = isFX
+      ? (Number(r.amount_idr) || Math.round(amtOrig * fxRate))
+      : amtOrig;
     return {
       tx_date:       r.tx_date,
       description:   r.description,
-      amount:        Number(r.amount_idr || r.amount) || 0,
+      amount:        amtOrig,
       currency:      r.currency || "IDR",
-      amount_idr:    Number(r.amount_idr || r.amount) || 0,
+      fx_rate_used:  isFX ? fxRate : null,
+      amount_idr:    amtIDR,
       tx_type:       r.tx_type,
       from_type, to_type,
       from_id:       r.from_id || null,
@@ -469,6 +495,7 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
                   bankAccounts={bankAccounts} ccAccounts={ccAccounts} spendAccounts={spendAccounts}
                   updateRow={updateRow} setSelected={setSelected} setSkipped={setSkipped}
                   toggleNotes={toggleNotes} importOne={importOne} toggleSelectAll={toggleSelectAll}
+                  hasFX={results.some(r => r.currency && r.currency !== "IDR")}
                 />
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -558,21 +585,25 @@ function AmountCell({ r, color, T, updateRow }) {
 }
 
 // ══ DESKTOP TABLE ════════════════════════════════════════════════
-// Grid: ☑ | Date | Description | Type | Category | Account | [Entity] | Amount | Actions
+// Grid: ☑ | Date | Description | Type | Category | Account | [Entity] | [Rate] | Amount | [IDR] | Actions
 function DesktopTable({
   results, selected, skipped, notesOpen, importingId, allSelected, T,
   bankAccounts, ccAccounts, spendAccounts,
   updateRow, setSelected, setSkipped, toggleNotes, importOne, toggleSelectAll,
+  hasFX = false,
 }) {
   const hasReimburse = results.some(r => REIMBURSE_TYPES.has(r.tx_type) || r.flagged);
 
-  // ☑=44 Date=72 Desc=flex Type=130 Cat=140 Acc=180 [Entity=90] Amt=110 Actions=90
-  const COLS = hasReimburse
-    ? "44px 72px 1fr 130px 140px 180px 90px 110px 90px"
-    : "44px 72px 1fr 130px 140px 180px 110px 90px";
-  const HDR = hasReimburse
-    ? ["Date", "Description", "Type", "Category", "Account", "Entity", "Amount", ""]
-    : ["Date", "Description", "Type", "Category", "Account", "Amount", ""];
+  // Build columns dynamically based on optional Entity + FX columns
+  // Base: ☑=44 Date=72 Desc=flex Type=130 Cat=140 Acc=180 Amt=110 Actions=90
+  let cols = "44px 72px 1fr 130px 140px 180px";
+  let hdr  = ["Date", "Description", "Type", "Category", "Account"];
+  if (hasReimburse) { cols += " 90px"; hdr.push("Entity"); }
+  if (hasFX)        { cols += " 80px 100px"; hdr.push("Rate", "≈ IDR"); }
+  else              { cols += " 110px"; hdr.push("Amount"); }
+  cols += " 90px"; hdr.push("");
+  const COLS = cols;
+  const HDR  = hdr;
 
   return (
     <div style={{
@@ -741,8 +772,50 @@ function DesktopTable({
                     </div>
                   )}
 
-                  {/* Amount — shows formatted Rp X.XXX.XXX; raw number on focus */}
-                  <AmountCell r={r} color={color} T={T} updateRow={updateRow} />
+                  {/* Amount / Rate / IDR columns */}
+                  {hasFX ? (
+                    <>
+                      {/* FX row: foreign amount in Amount col; IDR row: show Rp amount */}
+                      {r.currency !== "IDR" ? (
+                        <div style={{ padding: "4px 6px" }}>
+                          <div style={{ fontSize: 12, fontWeight: 700, color: "#3b5bdb", fontFamily: "Figtree, sans-serif", textAlign: "right" }}>
+                            {r.currency} {Number(r.amount || 0).toLocaleString("id-ID")}
+                          </div>
+                        </div>
+                      ) : (
+                        <AmountCell r={r} color={color} T={T} updateRow={updateRow} />
+                      )}
+                      {/* Rate — editable for FX rows, dash for IDR */}
+                      <div style={{ padding: "4px 6px" }}>
+                        {r.currency !== "IDR" ? (
+                          <input
+                            type="number"
+                            style={inInp(T, { fontSize: 11, textAlign: "right" })}
+                            value={r.fx_rate || ""}
+                            onChange={e => {
+                              const rate = e.target.value;
+                              const idr  = Math.round(Number(r.amount || 0) * Number(rate || 0));
+                              updateRow(r._id, { fx_rate: rate, amount_idr: String(idr) });
+                            }}
+                          />
+                        ) : (
+                          <span style={{ fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif" }}>—</span>
+                        )}
+                      </div>
+                      {/* ≈ IDR — auto-calculated, read-only */}
+                      <div style={{ padding: "4px 6px" }}>
+                        {r.currency !== "IDR" ? (
+                          <div style={{ fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif", textAlign: "right" }}>
+                            ≈ {fmtAmt(r.amount_idr || 0)}
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif" }}>—</span>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <AmountCell r={r} color={color} T={T} updateRow={updateRow} />
+                  )}
 
                   {/* Actions — ✓ import + ✕ skip only */}
                   <div style={{ padding: "4px 8px", display: "flex", gap: 4, justifyContent: "flex-end" }}>
