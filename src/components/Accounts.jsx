@@ -169,13 +169,16 @@ export default function Accounts({
             if (form.sharedLimitMode === "new") {
               updateData.is_limit_group_master = true;
               updateData.shared_limit = sn(form.sharedLimitAmount);
+              updateData.card_limit   = sn(form.sharedLimitAmount);
               if (form.groupName) updateData.notes = form.groupName;
-              // Keep existing group id; if none (converting standalone → master), generate one
               if (!updateData.shared_limit_group_id) updateData.shared_limit_group_id = crypto.randomUUID();
             } else {
+              // Join existing: card_limit = master's shared_limit
+              const masterAcc = (accounts || []).find(a => a.shared_limit_group_id === form.joinGroupId && a.is_limit_group_master);
               updateData.shared_limit_group_id = form.joinGroupId || null;
               updateData.is_limit_group_master = false;
               updateData.shared_limit = null;
+              if (masterAcc) updateData.card_limit = Number(masterAcc.shared_limit || 0);
             }
           } else {
             updateData.shared_limit_group_id = null;
@@ -221,11 +224,15 @@ export default function Accounts({
               insertData.shared_limit_group_id = crypto.randomUUID();
               insertData.is_limit_group_master = true;
               insertData.shared_limit = sn(form.sharedLimitAmount);
+              insertData.card_limit   = sn(form.sharedLimitAmount);
               if (form.groupName) insertData.notes = form.groupName;
             } else {
+              // Join existing: card_limit = master's shared_limit
+              const masterAcc = (accounts || []).find(a => a.shared_limit_group_id === form.joinGroupId && a.is_limit_group_master);
               insertData.shared_limit_group_id = form.joinGroupId || null;
               insertData.is_limit_group_master = false;
               insertData.shared_limit = null;
+              if (masterAcc) insertData.card_limit = Number(masterAcc.shared_limit || 0);
             }
           }
         }
@@ -1035,8 +1042,12 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
         </FormRow>
         <Input label="Last 4 Digits" value={form.last4 || ""} onChange={e => set("last4", e.target.value)}
           placeholder="1234" />
-        <AmountInput label={form.hasSharedLimit ? "Individual Card Limit (optional)" : "Credit Limit"}
-          value={form.card_limit || ""} onChange={v => set("card_limit", v)} />
+        {/* Credit Limit — hidden when Shared is selected */}
+        {!form.hasSharedLimit && (
+          <AmountInput label="Credit Limit"
+            value={form.card_limit || ""} onChange={v => set("card_limit", v)} />
+        )}
+
         <AmountInput label="Monthly Spend Target (optional)" value={form.monthly_target || ""}
           onChange={v => set("monthly_target", v)} />
         <FormRow>
@@ -1048,67 +1059,93 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
 
         {/* ── Shared Limit ── */}
         <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: 14 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: form.hasSharedLimit ? 12 : 0 }}>
-            <input type="checkbox" id="hasSharedLimit" checked={!!form.hasSharedLimit}
-              onChange={e => set("hasSharedLimit", e.target.checked)}
-              style={{ accentColor: "#3b5bdb", width: 16, height: 16 }} />
-            <label htmlFor="hasSharedLimit"
-              style={{ fontSize: 13, color: "#374151", cursor: "pointer", fontFamily: "Figtree, sans-serif" }}>
-              Shared limit with other cards?
-            </label>
+          {/* Individual / Shared toggle */}
+          <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em", fontFamily: "Figtree, sans-serif", marginBottom: 8 }}>
+            Credit Limit Type
+          </div>
+          <div style={{ display: "flex", gap: 0, borderRadius: 8, border: "1.5px solid #e5e7eb", overflow: "hidden", marginBottom: form.hasSharedLimit ? 14 : 0 }}>
+            {[
+              { id: false, label: "Individual" },
+              { id: true,  label: "Shared"     },
+            ].map(opt => {
+              const active = !!form.hasSharedLimit === opt.id;
+              return (
+                <button key={String(opt.id)} type="button"
+                  onClick={() => set("hasSharedLimit", opt.id)}
+                  style={{
+                    flex: 1, padding: "8px 0", fontSize: 13, fontWeight: active ? 700 : 500,
+                    border: "none", cursor: "pointer", fontFamily: "Figtree, sans-serif",
+                    background: active ? "#3b5bdb" : "#fff",
+                    color:      active ? "#fff" : "#6b7280",
+                    transition: "background .15s, color .15s",
+                  }}>
+                  {opt.label}
+                </button>
+              );
+            })}
           </div>
 
           {form.hasSharedLimit && (
-            <div style={{ paddingLeft: 24, display: "flex", flexDirection: "column", gap: 12 }}>
-              {/* Mode toggle */}
-              <div style={{ display: "flex", gap: 6 }}>
-                {[
-                  { id: "new",  label: "New Group"      },
-                  { id: "join", label: "Join Existing"  },
-                ].map(m => {
-                  const active = (form.sharedLimitMode || "new") === m.id;
-                  return (
-                    <button key={m.id} type="button"
-                      onClick={() => set("sharedLimitMode", m.id)}
-                      style={{
-                        padding: "5px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600,
-                        border: `1.5px solid ${active ? "#3b5bdb" : "#e5e7eb"}`,
-                        background: active ? "#eff6ff" : "#fff",
-                        color: active ? "#3b5bdb" : "#6b7280",
-                        cursor: "pointer", fontFamily: "Figtree, sans-serif",
-                      }}>
-                      {m.label}
-                    </button>
-                  );
-                })}
-              </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {/* Radio: Create new / Join existing */}
+              {[
+                { id: "new",  label: "Create new shared limit group" },
+                { id: "join", label: "Join existing group"           },
+              ].map(opt => {
+                const active = (form.sharedLimitMode || "new") === opt.id;
+                const existingGroups = (accounts || [])
+                  .filter(a => a.type === "credit_card" && a.is_limit_group_master && a.shared_limit_group_id);
+                return (
+                  <div key={opt.id}>
+                    {/* Radio row */}
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", marginBottom: active ? 10 : 0 }}>
+                      <input type="radio" name="sharedLimitMode" value={opt.id}
+                        checked={active}
+                        onChange={() => set("sharedLimitMode", opt.id)}
+                        style={{ accentColor: "#3b5bdb", width: 15, height: 15 }} />
+                      <span style={{ fontSize: 13, fontWeight: active ? 600 : 400, color: active ? "#111827" : "#6b7280", fontFamily: "Figtree, sans-serif" }}>
+                        {opt.label}
+                      </span>
+                    </label>
 
-              {(form.sharedLimitMode || "new") === "new" ? (
-                <>
-                  <Input label="Group Name"
-                    value={form.groupName || ""}
-                    onChange={e => set("groupName", e.target.value)}
-                    placeholder="e.g. Maybank Shared Limit" />
-                  <AmountInput label="Total Shared Limit (Rp)"
-                    value={form.sharedLimitAmount || ""}
-                    onChange={v => set("sharedLimitAmount", v)} />
-                </>
-              ) : (
-                <Select
-                  label="Join Group"
-                  value={form.joinGroupId || ""}
-                  onChange={e => set("joinGroupId", e.target.value)}
-                  options={[
-                    { value: "", label: "— Select group —" },
-                    ...(accounts || [])
-                      .filter(a => a.type === "credit_card" && a.is_limit_group_master && a.shared_limit_group_id)
-                      .map(a => ({
-                        value: a.shared_limit_group_id,
-                        label: `${a.notes || a.name} (${fmtIDR(Number(a.shared_limit || 0), true)})`,
-                      })),
-                  ]}
-                />
-              )}
+                    {/* Expanded fields when active */}
+                    {active && opt.id === "new" && (
+                      <div style={{ paddingLeft: 23, display: "flex", flexDirection: "column", gap: 10 }}>
+                        <Input label="Group Name"
+                          value={form.groupName || ""}
+                          onChange={e => set("groupName", e.target.value)}
+                          placeholder="e.g. Maybank Shared Limit" />
+                        <AmountInput label="Total Shared Limit (Rp)"
+                          value={form.sharedLimitAmount || ""}
+                          onChange={v => set("sharedLimitAmount", v)} />
+                      </div>
+                    )}
+
+                    {active && opt.id === "join" && (
+                      <div style={{ paddingLeft: 23 }}>
+                        {existingGroups.length === 0 ? (
+                          <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+                            No shared groups found. Create one first.
+                          </div>
+                        ) : (
+                          <Select
+                            label="Select Group"
+                            value={form.joinGroupId || ""}
+                            onChange={e => set("joinGroupId", e.target.value)}
+                            options={[
+                              { value: "", label: "— Select group —" },
+                              ...existingGroups.map(a => ({
+                                value: a.shared_limit_group_id,
+                                label: `${a.notes || a.name} — ${fmtIDR(Number(a.shared_limit || 0), true)}`,
+                              })),
+                            ]}
+                          />
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
