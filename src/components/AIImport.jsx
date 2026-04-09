@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import { ledgerApi, gmailApi, scanApi, merchantApi, getTxFromToTypes } from "../api";
 import { fmtIDR, todayStr } from "../utils";
 import { LIGHT, DARK } from "../theme";
-import { Button, EmptyState, Spinner, showToast } from "./shared/index";
+import { Button, EmptyState, Spinner, showToast, NativeAccountSelect } from "./shared/index";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
 
 // ── TX types (dropdown) — only real tx types, not categories ─────
@@ -545,7 +545,7 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
               <TxCardList
                 results={results} selected={selected} skipped={skipped} notesOpen={notesOpen}
                 importingId={importingId} T={T}
-                bankAccounts={bankAccounts} ccAccounts={ccAccounts}
+                accounts={accounts}
                 updateRow={updateRow} setSelected={setSelected} setSkipped={setSkipped}
                 toggleNotes={toggleNotes} importOne={importOne}
               />
@@ -644,42 +644,25 @@ function AmountCell({ r, color, T, updateRow }) {
 }
 
 
-// ── Grouped account dropdown ──────────────────────────────────────
-function AccSelect({ style, value, onChange, bankAccounts, ccAccounts, placeholder, showCC = false }) {
-  return (
-    <select style={style} value={value || ""} onChange={onChange}>
-      <option value="">{placeholder || "— Account —"}</option>
-      <optgroup label="BANK & CASH">
-        {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-      </optgroup>
-      {showCC && ccAccounts.length > 0 && (
-        <optgroup label="CREDIT CARDS">
-          {ccAccounts.map(a => (
-            <option key={a.id} value={a.id}>
-              {a.name}{(a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
-            </option>
-          ))}
-        </optgroup>
-      )}
-    </select>
-  );
-}
-
-// ── Card account cell — adapts to tx type ────────────────────────
-function CardAccountCell({ r, updateRow, T, bankAccounts, ccAccounts }) {
-  const t   = r.tx_type;
-  const sel = inSel(T, { fontSize: 11, width: "100%" });
+// ── Card account cell — adapts to tx type, uses NativeAccountSelect ─
+function CardAccountCell({ r, updateRow, T, accounts }) {
+  const t      = r.tx_type;
+  const sel    = inSel(T, { fontSize: 11, width: "100%" });
+  const byName = (a, b) => (a.name || "").localeCompare(b.name || "");
+  const bankAccs = accounts.filter(a => a.type === "bank");
+  const ccAccs   = accounts.filter(a => a.type === "credit_card").sort(byName);
 
   if (t === "pay_cc") return (
     <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-      <AccSelect style={{ ...sel, flex: 1 }} value={r.from_id}
-        onChange={e => updateRow(r._id, { from_id: e.target.value })}
-        bankAccounts={bankAccounts} ccAccounts={[]} placeholder="From Bank…" />
+      <NativeAccountSelect
+        accounts={bankAccs} style={{ ...sel, flex: 1 }}
+        value={r.from_id} placeholder="From Bank…"
+        onChange={e => updateRow(r._id, { from_id: e.target.value })} />
       <span style={{ fontSize: 10, color: T.text3, flexShrink: 0 }}>→</span>
       <select style={{ ...sel, flex: 1 }} value={r.to_id || ""}
         onChange={e => updateRow(r._id, { to_id: e.target.value })}>
         <option value="">To CC…</option>
-        {ccAccounts.map(a => (
+        {ccAccs.map(a => (
           <option key={a.id} value={a.id}>
             {a.name}{(a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
           </option>
@@ -690,27 +673,31 @@ function CardAccountCell({ r, updateRow, T, bankAccounts, ccAccounts }) {
 
   if (t === "transfer") return (
     <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-      <AccSelect style={{ ...sel, flex: 1 }} value={r.from_id}
-        onChange={e => updateRow(r._id, { from_id: e.target.value })}
-        bankAccounts={bankAccounts} ccAccounts={[]} placeholder="From…" />
+      <NativeAccountSelect
+        accounts={bankAccs} style={{ ...sel, flex: 1 }}
+        value={r.from_id} placeholder="From…"
+        onChange={e => updateRow(r._id, { from_id: e.target.value })} />
       <span style={{ fontSize: 10, color: T.text3, flexShrink: 0 }}>→</span>
-      <AccSelect style={{ ...sel, flex: 1 }} value={r.to_id}
-        onChange={e => updateRow(r._id, { to_id: e.target.value })}
-        bankAccounts={bankAccounts} ccAccounts={[]} placeholder="To…" />
+      <NativeAccountSelect
+        accounts={bankAccs} style={{ ...sel, flex: 1 }}
+        value={r.to_id} placeholder="To…"
+        onChange={e => updateRow(r._id, { to_id: e.target.value })} />
     </div>
   );
 
   if (["income", "collect_loan", "reimburse_in"].includes(t)) return (
-    <AccSelect style={sel} value={r.to_id}
-      onChange={e => updateRow(r._id, { to_id: e.target.value })}
-      bankAccounts={bankAccounts} ccAccounts={[]} placeholder="To Account…" />
+    <NativeAccountSelect
+      accounts={bankAccs} style={sel}
+      value={r.to_id} placeholder="To Account…"
+      onChange={e => updateRow(r._id, { to_id: e.target.value })} />
   );
 
-  // expense / reimburse_out / give_loan / fx_exchange / etc — show Bank + CC
+  // expense / reimburse_out / give_loan / fx_exchange — bank + CC
   return (
-    <AccSelect style={sel} value={r.from_id}
-      onChange={e => updateRow(r._id, { from_id: e.target.value })}
-      bankAccounts={bankAccounts} ccAccounts={ccAccounts} showCC placeholder="From Account…" />
+    <NativeAccountSelect
+      accounts={accounts} showCC style={sel}
+      value={r.from_id} placeholder="From Account…"
+      onChange={e => updateRow(r._id, { from_id: e.target.value })} />
   );
 }
 
@@ -719,7 +706,7 @@ function CardAccountCell({ r, updateRow, T, bankAccounts, ccAccounts }) {
 //             ROW2 = type [badge] [category] account [entity] [fx]
 function TxCard({
   r, selected, skipped, notesOpen, importingId, T,
-  bankAccounts, ccAccounts,
+  accounts,
   updateRow, setSelected, setSkipped, toggleNotes, importOne,
 }) {
   const isSkipped  = skipped.has(r._id);
@@ -867,7 +854,7 @@ function TxCard({
         {/* Account */}
         <div style={{ flex: 1, minWidth: 160 }}>
           <CardAccountCell r={r} updateRow={updateRow} T={T}
-            bankAccounts={bankAccounts} ccAccounts={ccAccounts} />
+            accounts={accounts} />
         </div>
 
         {/* Entity toggle (reimburse only) */}
@@ -948,7 +935,7 @@ function TxCard({
 // ══ TRANSACTION CARD LIST ════════════════════════════════════════
 function TxCardList({
   results, selected, skipped, notesOpen, importingId, T,
-  bankAccounts, ccAccounts,
+  accounts,
   updateRow, setSelected, setSkipped, toggleNotes, importOne,
 }) {
   return (
@@ -958,7 +945,7 @@ function TxCardList({
           key={r._id} r={r}
           selected={selected} skipped={skipped} notesOpen={notesOpen}
           importingId={importingId} T={T}
-          bankAccounts={bankAccounts} ccAccounts={ccAccounts}
+          accounts={accounts}
           updateRow={updateRow} setSelected={setSelected} setSkipped={setSkipped}
           toggleNotes={toggleNotes} importOne={importOne}
         />

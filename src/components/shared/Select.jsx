@@ -192,6 +192,43 @@ export function TxTypeGrid({ value, onChange, types = [] }) {
   );
 }
 
+// ─── NATIVE ACCOUNT SELECT ───────────────────────────────────────
+// Native <select> with 3 optgroups: BANK / CASH / CREDIT CARDS
+// Each group sorted A-Z. Pass showCC=true to include credit card group.
+export function NativeAccountSelect({
+  accounts = [], value, onChange, placeholder = "— Account —",
+  style = {}, showCC = false,
+}) {
+  const byName = (a, b) => (a.name || "").localeCompare(b.name || "");
+  const banks  = accounts.filter(a => a.type === "bank" && a.subtype !== "cash").sort(byName);
+  const cash   = accounts.filter(a => a.type === "bank" && a.subtype === "cash").sort(byName);
+  const cards  = showCC ? accounts.filter(a => a.type === "credit_card").sort(byName) : [];
+  return (
+    <select value={value || ""} onChange={onChange} style={style}>
+      <option value="">{placeholder}</option>
+      {banks.length > 0 && (
+        <optgroup label="BANK">
+          {banks.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </optgroup>
+      )}
+      {cash.length > 0 && (
+        <optgroup label="CASH">
+          {cash.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </optgroup>
+      )}
+      {cards.length > 0 && (
+        <optgroup label="CREDIT CARDS">
+          {cards.map(a => (
+            <option key={a.id} value={a.id}>
+              {a.name}{(a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
+            </option>
+          ))}
+        </optgroup>
+      )}
+    </select>
+  );
+}
+
 // ─── ACCOUNT SELECT ───────────────────────────────────────────
 // Styled select that shows account name + balance
 export function AccountSelect({ label, value, onChange, accounts = [], placeholder, error, style = {} }) {

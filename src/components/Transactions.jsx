@@ -661,10 +661,12 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
 
   const fromOpts = fromList
     .filter(a => a.id && a.id.length === 36)
+    .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
     .map(a => ({ value: a.id, label: accLabel(a) }));
 
   const toOpts = toOptions
     .filter(a => a.id && a.id.length === 36)
+    .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
     .map(a => ({
       value: a.id,
       label: a.type === "credit_card"
@@ -791,8 +793,11 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
       {hasTwoStep && (() => {
         // Types that allow both Bank AND CC as source
         const showBothGroups = ["expense", "reimburse_out", "buy_asset"].includes(type);
-        const bankOnly = bankAccs.filter(a => a.id && a.id.length === 36);
-        const ccOnly   = ccAccs.filter(a => a.id && a.id.length === 36);
+        const byName  = (a, b) => (a.name || "").localeCompare(b.name || "");
+        const allBank = bankAccs.filter(a => a.id && a.id.length === 36);
+        const bankGrp = allBank.filter(a => a.subtype !== "cash").sort(byName);
+        const cashGrp = allBank.filter(a => a.subtype === "cash").sort(byName);
+        const ccGrp   = ccAccs.filter(a => a.id && a.id.length === 36).sort(byName);
         return (
           <Field label={type === "give_loan" ? "From Bank Account" : "From Account"}>
             <select
@@ -801,23 +806,24 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
               style={SEL_STYLE}
             >
               <option value="">Select account…</option>
-              {showBothGroups ? (
-                <>
-                  <optgroup label="BANK & CASH">
-                    {bankOnly.map(a => <option key={a.id} value={a.id}>{accLabel(a)}</option>)}
-                  </optgroup>
-                  {ccOnly.length > 0 && (
-                    <optgroup label="CREDIT CARDS">
-                      {ccOnly.map(a => (
-                        <option key={a.id} value={a.id}>
-                          {a.name}{(a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                </>
-              ) : (
-                bankOnly.map(a => <option key={a.id} value={a.id}>{accLabel(a)}</option>)
+              {bankGrp.length > 0 && (
+                <optgroup label="BANK">
+                  {bankGrp.map(a => <option key={a.id} value={a.id}>{accLabel(a)}</option>)}
+                </optgroup>
+              )}
+              {cashGrp.length > 0 && (
+                <optgroup label="CASH">
+                  {cashGrp.map(a => <option key={a.id} value={a.id}>{accLabel(a)}</option>)}
+                </optgroup>
+              )}
+              {showBothGroups && ccGrp.length > 0 && (
+                <optgroup label="CREDIT CARDS">
+                  {ccGrp.map(a => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}{(a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
+                    </option>
+                  ))}
+                </optgroup>
               )}
             </select>
           </Field>

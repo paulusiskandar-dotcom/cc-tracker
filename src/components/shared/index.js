@@ -8,7 +8,7 @@ export { default as Input }           from "./Input";
 export { Textarea, AmountInput, Toggle, FormRow, Field } from "./Input";
 
 export { default as Select }          from "./Select";
-export { SegmentedControl, PillSelector, TxTypeGrid, AccountSelect } from "./Select";
+export { SegmentedControl, PillSelector, TxTypeGrid, AccountSelect, NativeAccountSelect } from "./Select";
 
 export { default as Card }            from "./Card";
 export { BentoCard, HeroCard, StatRow, Badge, SectionHeader, EmptyState, Spinner, ToastContainer, showToast } from "./Card";
