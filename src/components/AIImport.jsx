@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { ledgerApi, gmailApi, scanApi, merchantApi, getTxFromToTypes } from "../api";
 import { fmtIDR, todayStr } from "../utils";
 import { LIGHT, DARK } from "../theme";
@@ -91,13 +91,6 @@ const ACT_BTN = (extra = {}) => ({
 export default function AIImport({ user, accounts, ledger, onRefresh, setLedger, dark, merchantMaps = [], fxRates = {}, CURRENCIES = [] }) {
   const T = dark ? DARK : LIGHT;
   const fileRef = useRef();
-  const [isDesktop, setIsDesktop] = useState(() => window.innerWidth > 768);
-
-  useEffect(() => {
-    const onResize = () => setIsDesktop(window.innerWidth > 768);
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
 
   const [mode,        setMode]        = useState("scan");
   const [scanning,    setScanning]    = useState(false);
@@ -488,29 +481,14 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
                 </div>
               </div>
 
-              {/* Desktop table / Mobile cards */}
-              {isDesktop ? (
-                <DesktopTable
-                  results={results} selected={selected} skipped={skipped} notesOpen={notesOpen}
-                  importingId={importingId} allSelected={allSelected} T={T}
-                  bankAccounts={bankAccounts} ccAccounts={ccAccounts} spendAccounts={spendAccounts}
-                  updateRow={updateRow} setSelected={setSelected} setSkipped={setSkipped}
-                  toggleNotes={toggleNotes} importOne={importOne} toggleSelectAll={toggleSelectAll}
-                  hasFX={results.some(r => r.currency && r.currency !== "IDR")}
-                />
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {results.map(r => (
-                    <MobileCard
-                      key={r._id} r={r} selected={selected} skipped={skipped}
-                      importingId={importingId} T={T}
-                      bankAccounts={bankAccounts} ccAccounts={ccAccounts} spendAccounts={spendAccounts}
-                      updateRow={updateRow} setSelected={setSelected} setSkipped={setSkipped}
-                      importOne={importOne}
-                    />
-                  ))}
-                </div>
-              )}
+              {/* Transaction cards — unified desktop + mobile */}
+              <TxCardList
+                results={results} selected={selected} skipped={skipped} notesOpen={notesOpen}
+                importingId={importingId} T={T}
+                bankAccounts={bankAccounts} ccAccounts={ccAccounts}
+                updateRow={updateRow} setSelected={setSelected} setSkipped={setSkipped}
+                toggleNotes={toggleNotes} importOne={importOne}
+              />
             </div>
           )}
         </div>
@@ -567,6 +545,13 @@ const fmtAmt = (v) => {
   return "Rp " + n.toLocaleString("id-ID");
 };
 
+// ── Amount sign helper ────────────────────────────────────────────
+const amtSign = (type) => {
+  if (["income","collect_loan","reimburse_in","fx_exchange"].includes(type)) return "+";
+  if (["expense","give_loan","reimburse_out"].includes(type)) return "-";
+  return "";
+};
+
 // ── Amount cell — formatted display, raw on focus ─────────────────
 function AmountCell({ r, color, T, updateRow }) {
   const [focused, setFocused] = useState(false);
@@ -585,293 +570,6 @@ function AmountCell({ r, color, T, updateRow }) {
   );
 }
 
-// ══ DESKTOP TABLE ════════════════════════════════════════════════
-// Grid: ☑ | Date | Description | Type | Category | Account | [Entity] | [Rate] | Amount | [IDR] | Actions
-function DesktopTable({
-  results, selected, skipped, notesOpen, importingId, allSelected, T,
-  bankAccounts, ccAccounts, spendAccounts,
-  updateRow, setSelected, setSkipped, toggleNotes, importOne, toggleSelectAll,
-  hasFX = false,
-}) {
-  const hasReimburse = results.some(r => REIMBURSE_TYPES.has(r.tx_type) || r.flagged);
-
-  // Build columns dynamically — minmax lets content breathe, overflowX handles the rest
-  // ☑=40 Date=75 Desc=flex Type=110 Cat=130 Acc=155 [Entity=80] [Rate=70 IDR=100] Amt=120 Actions=80
-  let cols = "40px 75px minmax(180px, 1fr) 110px 130px 155px";
-  let hdr  = ["Date", "Description", "Type", "Category", "Account"];
-  if (hasReimburse) { cols += " 80px"; hdr.push("Entity"); }
-  if (hasFX)        { cols += " 70px 100px"; hdr.push("Rate", "≈ IDR"); }
-  else              { cols += " 120px"; hdr.push("Amount"); }
-  cols += " 80px"; hdr.push("");
-  const COLS = cols;
-  const HDR  = hdr;
-
-  return (
-    <div style={{
-      border: `1px solid ${T.border}`, borderRadius: 12,
-      width: "100%", overflowX: "auto",
-    }}>
-      <div style={{ minWidth: 800 }}>
-
-        {/* ── Header ── */}
-        <div style={{
-          display: "grid", gridTemplateColumns: COLS,
-          background: T.sur2, borderBottom: `1.5px solid ${T.border}`,
-          width: "100%", position: "sticky", top: 0, zIndex: 2,
-        }}>
-          <div style={{ padding: "9px 8px", display: "flex", alignItems: "center" }}>
-            <input type="checkbox" checked={allSelected} onChange={toggleSelectAll}
-              style={{ accentColor: "#3b5bdb", width: 14, height: 14 }} />
-          </div>
-          {HDR.map((h, i) => (
-            <div key={i} style={{
-              padding: "9px 6px",
-              fontSize: 10, fontWeight: 700, color: T.text3,
-              textTransform: "uppercase", letterSpacing: "0.05em",
-              fontFamily: "Figtree, sans-serif",
-              textAlign: h === "Amount" ? "right" : "left",
-            }}>
-              {h}
-            </div>
-          ))}
-        </div>
-
-        {/* ── Rows ── */}
-        <div style={{ width: "100%" }}>
-          {results.map(r => {
-            const isSkipped  = skipped.has(r._id);
-            const isSelected = !!selected[r._id];
-            const isNotes    = notesOpen.has(r._id);
-            const color      = amtColor(r.tx_type);
-            const bg         = rowBg(r, isSkipped, T);
-            const showCat    = !NO_CAT.has(r.tx_type);
-            const showEntity = REIMBURSE_TYPES.has(r.tx_type) || r.flagged;
-            const cats       = getCatOptions(r.tx_type);
-            const leftBorder = r.flagged                           ? "3px solid #f97316"
-                             : r.status === "possible_duplicate"   ? "3px solid #d97706"
-                             : "3px solid transparent";
-            const displayDesc = r.description || r.merchant_name || r.notes || "";
-
-            return (
-              <div key={r._id}>
-                {/* Main row */}
-                <div style={{
-                  display: "grid", gridTemplateColumns: COLS,
-                  alignItems: "center", minHeight: 48,
-                  background: bg, borderBottom: `1px solid ${T.border}`,
-                  borderLeft: leftBorder,
-                  opacity: isSkipped ? 0.5 : 1,
-                }}>
-                  {/* ☑ */}
-                  <div style={{ padding: "4px 8px" }}>
-                    <input type="checkbox" checked={isSelected && !isSkipped}
-                      onChange={e => setSelected(s => ({ ...s, [r._id]: e.target.checked }))}
-                      disabled={isSkipped}
-                      style={{ accentColor: "#3b5bdb", width: 14, height: 14 }} />
-                  </div>
-
-                  {/* Date */}
-                  <div style={{
-                    padding: "4px 6px", fontSize: 11, color: T.text3,
-                    fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap",
-                  }}>
-                    {fmtDateShort(r.tx_date)}
-                  </div>
-
-                  {/* Description */}
-                  <div style={{ padding: "4px 6px", minWidth: 0 }}>
-                    <input
-                      style={inInp(T, { fontSize: 12, fontWeight: 500 })}
-                      value={displayDesc}
-                      onChange={e => updateRow(r._id, { description: e.target.value })}
-                    />
-                  </div>
-
-                  {/* Type */}
-                  <div style={{ padding: "4px 6px" }}>
-                    <select style={inSel(T)}
-                      value={r.tx_type}
-                      onChange={e => {
-                        const t = e.target.value;
-                        updateRow(r._id, { tx_type: t, category_id: NO_CAT.has(t) ? null : r.category_id });
-                      }}>
-                      {IMPORT_TX_TYPES.map(t => (
-                        <option key={t.value} value={t.value}>{t.label}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Category */}
-                  <div style={{ padding: "4px 6px" }}>
-                    {showCat ? (
-                      <div style={{ position: "relative" }}>
-                        <select style={inSel(T)}
-                          value={r.category_id || ""}
-                          onChange={e => updateRow(r._id, { category_id: e.target.value })}>
-                          {cats.map(c => (
-                            <option key={c.id} value={c.id}>{c.label}</option>
-                          ))}
-                        </select>
-                        {/* Badge: Learned (confidence ≥ 2) > AI suggestion */}
-                        {r.learned_cat && r.learned_cat.confidence >= 2 && r.learned_cat.category_id === r.category_id ? (
-                          <span style={{
-                            position: "absolute", top: -7, right: 1,
-                            fontSize: 8, fontWeight: 800, background: "#dcfce7", color: "#059669",
-                            padding: "1px 3px", borderRadius: 3, fontFamily: "Figtree, sans-serif",
-                            pointerEvents: "none", lineHeight: 1.4,
-                          }}>✓ Learned</span>
-                        ) : r.learned_cat && r.learned_cat.confidence === 1 ? (
-                          <span style={{
-                            position: "absolute", top: -7, right: 1,
-                            fontSize: 8, fontWeight: 800, background: "#fef9c3", color: "#a16207",
-                            padding: "1px 3px", borderRadius: 3, fontFamily: "Figtree, sans-serif",
-                            pointerEvents: "none", lineHeight: 1.4,
-                          }}>Suggest</span>
-                        ) : r.ai_category && r.ai_category === r.category_id ? (
-                          <span style={{
-                            position: "absolute", top: -7, right: 1,
-                            fontSize: 8, fontWeight: 800, background: "#dbeafe", color: "#3b5bdb",
-                            padding: "1px 3px", borderRadius: 3, fontFamily: "Figtree, sans-serif",
-                            pointerEvents: "none", lineHeight: 1.4,
-                          }}>AI</span>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <span style={{ fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif" }}>—</span>
-                    )}
-                  </div>
-
-                  {/* Account */}
-                  <div style={{ padding: "4px 6px" }}>
-                    <RowAccountCell r={r} updateRow={updateRow} T={T}
-                      bankAccounts={bankAccounts} ccAccounts={ccAccounts} spendAccounts={spendAccounts} />
-                  </div>
-
-                  {/* Entity — only rendered if any row is reimburse */}
-                  {hasReimburse && (
-                    <div style={{ padding: "4px 6px" }}>
-                      {showEntity ? (
-                        <div style={{ display: "flex", gap: 2 }}>
-                          {REIMBURSE_ENTITIES.map(en => (
-                            <button key={en} onClick={() => updateRow(r._id, { entity: en })}
-                              title={en}
-                              style={{
-                                width: 22, height: 22, borderRadius: 4, padding: 0,
-                                border: `1.5px solid ${r.entity === en ? "#3b5bdb" : T.border}`,
-                                background: r.entity === en ? "#dbeafe" : T.surface,
-                                color: r.entity === en ? "#1d4ed8" : T.text3,
-                                fontSize: 9, fontWeight: 800, cursor: "pointer",
-                                fontFamily: "Figtree, sans-serif",
-                              }}>
-                              {en[0]}
-                            </button>
-                          ))}
-                        </div>
-                      ) : (
-                        <span style={{ fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif" }}>—</span>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Amount / Rate / IDR columns */}
-                  {hasFX ? (
-                    <>
-                      {/* FX row: foreign amount in Amount col; IDR row: show Rp amount */}
-                      {r.currency !== "IDR" ? (
-                        <div style={{ padding: "4px 6px" }}>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: "#3b5bdb", fontFamily: "Figtree, sans-serif", textAlign: "right" }}>
-                            {r.currency} {Number(r.amount || 0).toLocaleString("id-ID")}
-                          </div>
-                        </div>
-                      ) : (
-                        <AmountCell r={r} color={color} T={T} updateRow={updateRow} />
-                      )}
-                      {/* Rate — editable for FX rows, dash for IDR */}
-                      <div style={{ padding: "4px 6px" }}>
-                        {r.currency !== "IDR" ? (
-                          <input
-                            type="number"
-                            style={inInp(T, { fontSize: 11, textAlign: "right" })}
-                            value={r.fx_rate || ""}
-                            onChange={e => {
-                              const rate = e.target.value;
-                              const idr  = Math.round(Number(r.amount || 0) * Number(rate || 0));
-                              updateRow(r._id, { fx_rate: rate, amount_idr: String(idr) });
-                            }}
-                          />
-                        ) : (
-                          <span style={{ fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif" }}>—</span>
-                        )}
-                      </div>
-                      {/* ≈ IDR — auto-calculated, read-only */}
-                      <div style={{ padding: "4px 6px" }}>
-                        {r.currency !== "IDR" ? (
-                          <div style={{ fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif", textAlign: "right" }}>
-                            ≈ {fmtAmt(r.amount_idr || 0)}
-                          </div>
-                        ) : (
-                          <span style={{ fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif" }}>—</span>
-                        )}
-                      </div>
-                    </>
-                  ) : (
-                    <AmountCell r={r} color={color} T={T} updateRow={updateRow} />
-                  )}
-
-                  {/* Actions — ✏️ notes + ✓ import + ✕ skip */}
-                  <div style={{ padding: "4px 4px", display: "flex", gap: 3, justifyContent: "flex-end" }}>
-                    <button
-                      onClick={() => toggleNotes(r._id)}
-                      style={ACT_BTN({ background: isNotes ? "#dbeafe" : "#f9fafb", color: isNotes ? "#3b5bdb" : "#6b7280", width: 28, height: 28 })}
-                      title="Notes">
-                      ✏️
-                    </button>
-                    <button
-                      onClick={() => importOne(r)}
-                      disabled={isSkipped || importingId === r._id}
-                      style={ACT_BTN({ background: "#dcfce7", color: "#059669", border: "1px solid #bbf7d0", width: 28, height: 28 })}
-                      title="Import">
-                      {importingId === r._id ? "…" : "✓"}
-                    </button>
-                    <button
-                      onClick={() => {
-                        setSkipped(s => { const ns = new Set(s); ns.has(r._id) ? ns.delete(r._id) : ns.add(r._id); return ns; });
-                        setSelected(s => ({ ...s, [r._id]: false }));
-                      }}
-                      style={ACT_BTN({ color: isSkipped ? "#059669" : "#9ca3af", width: 28, height: 28 })}
-                      title={isSkipped ? "Restore" : "Skip"}>
-                      {isSkipped ? "↩" : "✕"}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Notes row */}
-                {isNotes && (
-                  <div style={{
-                    background: T.sur2, borderBottom: `1px solid ${T.border}`,
-                    padding: "6px 44px 6px 56px",
-                    display: "flex", gap: 8, alignItems: "center",
-                  }}>
-                    <span style={{
-                      fontSize: 10, fontWeight: 700, color: T.text3, textTransform: "uppercase",
-                      letterSpacing: "0.04em", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap",
-                    }}>Notes</span>
-                    <input
-                      style={inInp(T, { fontSize: 11, flex: 1 })}
-                      value={r.notes || ""}
-                      onChange={e => updateRow(r._id, { notes: e.target.value })}
-                      placeholder="Optional notes…"
-                    />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ── Grouped account dropdown ──────────────────────────────────────
 function AccSelect({ style, value, onChange, bankAccounts, ccAccounts, placeholder, showCC = false }) {
@@ -894,197 +592,17 @@ function AccSelect({ style, value, onChange, bankAccounts, ccAccounts, placehold
   );
 }
 
-// ── Account cell (desktop table) ─────────────────────────────────
-function RowAccountCell({ r, updateRow, T, bankAccounts, ccAccounts, spendAccounts }) {
+// ── Card account cell — adapts to tx type ────────────────────────
+function CardAccountCell({ r, updateRow, T, bankAccounts, ccAccounts }) {
   const t   = r.tx_type;
-  const sel = inSel(T, { fontSize: 10 });
+  const sel = inSel(T, { fontSize: 11, width: "100%" });
 
   if (t === "pay_cc") return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <AccSelect style={sel} value={r.from_id}
-        onChange={e => updateRow(r._id, { from_id: e.target.value })}
-        bankAccounts={bankAccounts} ccAccounts={[]} placeholder="— Bank —" />
-      <select style={sel} value={r.to_id || ""}
-        onChange={e => updateRow(r._id, { to_id: e.target.value })}>
-        <option value="">— CC —</option>
-        {ccAccounts.map(a => (
-          <option key={a.id} value={a.id}>
-            {a.name}{(a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-
-  if (t === "transfer") return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <AccSelect style={sel} value={r.from_id}
-        onChange={e => updateRow(r._id, { from_id: e.target.value })}
-        bankAccounts={bankAccounts} ccAccounts={[]} placeholder="— From —" />
-      <AccSelect style={sel} value={r.to_id}
-        onChange={e => updateRow(r._id, { to_id: e.target.value })}
-        bankAccounts={bankAccounts} ccAccounts={[]} placeholder="— To —" />
-    </div>
-  );
-
-  if (["income","bank_interest","cashback","collect_loan","reimburse_in"].includes(t)) return (
-    <AccSelect style={sel} value={r.to_id}
-      onChange={e => updateRow(r._id, { to_id: e.target.value })}
-      bankAccounts={bankAccounts} ccAccounts={[]} placeholder="— To —" />
-  );
-
-  // expense / reimburse_out / give_loan / etc — show Bank + CC
-  return (
-    <AccSelect style={sel} value={r.from_id}
-      onChange={e => updateRow(r._id, { from_id: e.target.value })}
-      bankAccounts={bankAccounts} ccAccounts={ccAccounts} showCC placeholder="— From —" />
-  );
-}
-
-// ══ MOBILE CARD ══════════════════════════════════════════════════
-function MobileCard({
-  r, selected, skipped, importingId, T, bankAccounts, ccAccounts, spendAccounts,
-  updateRow, setSelected, setSkipped, importOne,
-}) {
-  const isSkipped  = skipped.has(r._id);
-  const isSelected = !!selected[r._id];
-  const color      = amtColor(r.tx_type);
-  const bg         = rowBg(r, isSkipped, T);
-  const showCat    = !NO_CAT.has(r.tx_type);
-  const showEntity = REIMBURSE_TYPES.has(r.tx_type) || r.flagged;
-  const cats       = getCatOptions(r.tx_type);
-  const displayDesc = r.description || r.merchant_name || r.notes || "";
-
-  return (
-    <div style={{
-      background: bg,
-      border: `1.5px solid ${isSkipped ? T.border : r.flagged ? "#f97316" : r.status === "possible_duplicate" ? "#d97706" : T.border}`,
-      borderRadius: 12, padding: "12px 14px",
-      opacity: isSkipped ? 0.5 : 1,
-      display: "flex", flexDirection: "column", gap: 8,
-    }}>
-      {/* Top: ☑ + description input + amount */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <input type="checkbox" checked={isSelected && !isSkipped}
-          onChange={e => setSelected(s => ({ ...s, [r._id]: e.target.checked }))}
-          disabled={isSkipped}
-          style={{ accentColor: "#3b5bdb", width: 15, height: 15, flexShrink: 0 }} />
-        <input
-          style={{
-            flex: 1, border: "none", background: "transparent", padding: 0, outline: "none",
-            fontSize: 13, fontWeight: 600, color: T.text, fontFamily: "Figtree, sans-serif",
-            minWidth: 0,
-          }}
-          value={displayDesc}
-          onChange={e => updateRow(r._id, { description: e.target.value })}
-        />
-        <div style={{
-          fontSize: 14, fontWeight: 800, color, fontFamily: "Figtree, sans-serif", flexShrink: 0,
-        }}>
-          {fmtIDR(Number(r.amount_idr || r.amount || 0), true)}
-        </div>
-      </div>
-
-      {/* Middle: Date · Type · Category */}
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-        <span style={{ fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif", flexShrink: 0 }}>
-          {fmtDateShort(r.tx_date)}
-        </span>
-        <span style={{ fontSize: 11, color: T.text3 }}>·</span>
-        <select style={{ ...inSel(T), fontSize: 11, width: "auto", flex: "0 1 auto" }}
-          value={r.tx_type}
-          onChange={e => {
-            const t = e.target.value;
-            updateRow(r._id, { tx_type: t, category_id: NO_CAT.has(t) ? null : r.category_id });
-          }}>
-          {IMPORT_TX_TYPES.map(t => (
-            <option key={t.value} value={t.value}>{t.label}</option>
-          ))}
-        </select>
-        {showCat && (
-          <>
-            <span style={{ fontSize: 11, color: T.text3 }}>·</span>
-            <select style={{ ...inSel(T), fontSize: 11, width: "auto", flex: "0 1 auto" }}
-              value={r.category_id || ""}
-              onChange={e => updateRow(r._id, { category_id: e.target.value })}>
-              {cats.map(c => (
-                <option key={c.id} value={c.id}>{c.label}</option>
-              ))}
-            </select>
-            {r.ai_category && r.ai_category === r.category_id && (
-              <span style={{
-                fontSize: 9, fontWeight: 800, background: "#dbeafe", color: "#3b5bdb",
-                padding: "1px 4px", borderRadius: 3, fontFamily: "Figtree, sans-serif",
-              }}>AI</span>
-            )}
-          </>
-        )}
-      </div>
-
-      {/* Account — full width */}
-      <MobileAccountCell r={r} updateRow={updateRow} T={T}
-        bankAccounts={bankAccounts} ccAccounts={ccAccounts} />
-
-      {/* Entity (reimburse only) */}
-      {showEntity && (
-        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-          <span style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, sans-serif" }}>Entity:</span>
-          {REIMBURSE_ENTITIES.map(en => (
-            <button key={en} onClick={() => updateRow(r._id, { entity: en })}
-              style={{
-                padding: "2px 10px", borderRadius: 5,
-                border: `1.5px solid ${r.entity === en ? "#3b5bdb" : T.border}`,
-                background: r.entity === en ? "#dbeafe" : T.surface,
-                color: r.entity === en ? "#1d4ed8" : T.text3,
-                fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "Figtree, sans-serif",
-              }}>
-              {en}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* Actions */}
-      <div style={{ display: "flex", gap: 8 }}>
-        <button
-          onClick={() => importOne(r)}
-          disabled={isSkipped || importingId === r._id}
-          style={{
-            flex: 1, padding: "7px 0", borderRadius: 8,
-            border: "none", background: "#dcfce7", color: "#059669",
-            fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "Figtree, sans-serif",
-          }}>
-          {importingId === r._id ? "Importing…" : "✓ Import"}
-        </button>
-        <button
-          onClick={() => {
-            setSkipped(s => { const ns = new Set(s); ns.has(r._id) ? ns.delete(r._id) : ns.add(r._id); return ns; });
-            setSelected(s => ({ ...s, [r._id]: false }));
-          }}
-          style={{
-            padding: "7px 16px", borderRadius: 8,
-            border: `1px solid ${T.border}`, background: T.surface,
-            color: isSkipped ? "#059669" : T.text3,
-            fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "Figtree, sans-serif",
-          }}>
-          {isSkipped ? "↩ Restore" : "✕ Skip"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ── Account cell (mobile card) ────────────────────────────────────
-function MobileAccountCell({ r, updateRow, T, bankAccounts, ccAccounts }) {
-  const t   = r.tx_type;
-  const sel = inSel(T, { fontSize: 12 });
-
-  if (t === "pay_cc") return (
-    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
       <AccSelect style={{ ...sel, flex: 1 }} value={r.from_id}
         onChange={e => updateRow(r._id, { from_id: e.target.value })}
-        bankAccounts={bankAccounts} ccAccounts={[]} placeholder="From…" />
-      <span style={{ fontSize: 11, color: T.text3 }}>→</span>
+        bankAccounts={bankAccounts} ccAccounts={[]} placeholder="From Bank…" />
+      <span style={{ fontSize: 10, color: T.text3, flexShrink: 0 }}>→</span>
       <select style={{ ...sel, flex: 1 }} value={r.to_id || ""}
         onChange={e => updateRow(r._id, { to_id: e.target.value })}>
         <option value="">To CC…</option>
@@ -1098,26 +616,279 @@ function MobileAccountCell({ r, updateRow, T, bankAccounts, ccAccounts }) {
   );
 
   if (t === "transfer") return (
-    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
       <AccSelect style={{ ...sel, flex: 1 }} value={r.from_id}
         onChange={e => updateRow(r._id, { from_id: e.target.value })}
         bankAccounts={bankAccounts} ccAccounts={[]} placeholder="From…" />
-      <span style={{ fontSize: 11, color: T.text3 }}>→</span>
+      <span style={{ fontSize: 10, color: T.text3, flexShrink: 0 }}>→</span>
       <AccSelect style={{ ...sel, flex: 1 }} value={r.to_id}
         onChange={e => updateRow(r._id, { to_id: e.target.value })}
         bankAccounts={bankAccounts} ccAccounts={[]} placeholder="To…" />
     </div>
   );
 
-  if (["income","bank_interest","cashback","collect_loan","reimburse_in"].includes(t)) return (
-    <AccSelect style={{ ...sel, width: "100%" }} value={r.to_id}
+  if (["income", "collect_loan", "reimburse_in"].includes(t)) return (
+    <AccSelect style={sel} value={r.to_id}
       onChange={e => updateRow(r._id, { to_id: e.target.value })}
       bankAccounts={bankAccounts} ccAccounts={[]} placeholder="To Account…" />
   );
 
+  // expense / reimburse_out / give_loan / fx_exchange / etc — show Bank + CC
   return (
-    <AccSelect style={{ ...sel, width: "100%" }} value={r.from_id}
+    <AccSelect style={sel} value={r.from_id}
       onChange={e => updateRow(r._id, { from_id: e.target.value })}
       bankAccounts={bankAccounts} ccAccounts={ccAccounts} showCC placeholder="From Account…" />
+  );
+}
+
+// ══ TRANSACTION CARD ═════════════════════════════════════════════
+// 2-row card: ROW1 = ☑ date desc amount ✓ ✕
+//             ROW2 = type [badge] [category] account [entity] [fx]
+function TxCard({
+  r, selected, skipped, notesOpen, importingId, T,
+  bankAccounts, ccAccounts,
+  updateRow, setSelected, setSkipped, toggleNotes, importOne,
+}) {
+  const isSkipped  = skipped.has(r._id);
+  const isSelected = !!selected[r._id];
+  const isNotes    = notesOpen.has(r._id);
+  const color      = amtColor(r.tx_type);
+  const showCat    = !NO_CAT.has(r.tx_type);
+  const showEntity = REIMBURSE_TYPES.has(r.tx_type) || r.flagged;
+  const cats       = getCatOptions(r.tx_type);
+  const isFX       = r.currency && r.currency !== "IDR";
+  const displayDesc = r.description || r.merchant_name || r.notes || "";
+
+  // Card appearance
+  const isDup     = r.status === "possible_duplicate";
+  const cardBg    = isSkipped ? T.sur2 : isDup ? "#fffbeb" : T.surface;
+  const cardBorder = r.flagged ? "1.5px solid #f97316"
+                   : isDup     ? "1.5px solid #d97706"
+                   : `1px solid ${T.border}`;
+
+  // Amount string
+  const sign = amtSign(r.tx_type);
+  const amtStr = isFX
+    ? `${sign}${r.currency} ${Number(r.amount || 0).toLocaleString("id-ID")} ≈ ${fmtAmt(r.amount_idr || 0)}`
+    : `${sign}${fmtAmt(r.amount_idr || r.amount || 0)}`;
+
+  // Badge
+  const badge = showCat
+    ? (r.learned_cat && r.learned_cat.confidence >= 2 && r.learned_cat.category_id === r.category_id)
+        ? { label: "✓ Learned", bg: "#dcfce7", color: "#059669" }
+      : (r.learned_cat && r.learned_cat.confidence === 1)
+        ? { label: "Suggest",   bg: "#fef9c3", color: "#a16207" }
+      : (r.ai_category && r.ai_category === r.category_id)
+        ? { label: "AI",        bg: "#dbeafe", color: "#3b5bdb" }
+      : null
+    : null;
+
+  const sel11 = inSel(T, { fontSize: 11 });
+
+  return (
+    <div style={{
+      background: cardBg, border: cardBorder, borderRadius: 10,
+      opacity: isSkipped ? 0.55 : 1,
+      overflow: "hidden",
+    }}>
+      {/* ── ROW 1: ☑ date desc amount ✓ ✕ ── */}
+      <div style={{
+        display: "flex", alignItems: "center", gap: 8,
+        padding: "10px 12px 5px",
+      }}>
+        {/* Checkbox */}
+        <input type="checkbox" checked={isSelected && !isSkipped}
+          onChange={e => setSelected(s => ({ ...s, [r._id]: e.target.checked }))}
+          disabled={isSkipped}
+          style={{ accentColor: "#3b5bdb", width: 15, height: 15, flexShrink: 0, cursor: "pointer" }} />
+
+        {/* Date */}
+        <span style={{
+          width: 52, fontSize: 11, color: T.text3,
+          fontFamily: "Figtree, sans-serif", flexShrink: 0, whiteSpace: "nowrap",
+        }}>
+          {fmtDateShort(r.tx_date)}
+        </span>
+
+        {/* Description */}
+        <input
+          style={{
+            flex: 1, minWidth: 0, border: "none", background: "transparent",
+            outline: "none", fontSize: 13, fontWeight: 600,
+            color: isSkipped ? T.text3 : T.text,
+            fontFamily: "Figtree, sans-serif",
+            textDecoration: isSkipped ? "line-through" : "none",
+          }}
+          value={displayDesc}
+          onChange={e => updateRow(r._id, { description: e.target.value })}
+          placeholder="Description…"
+        />
+
+        {/* Amount */}
+        <span style={{
+          fontSize: 13, fontWeight: 800, color,
+          fontFamily: "Figtree, sans-serif", flexShrink: 0, whiteSpace: "nowrap",
+          marginLeft: 4,
+        }}>
+          {amtStr}
+        </span>
+
+        {/* ✓ import */}
+        <button onClick={() => importOne(r)}
+          disabled={isSkipped || importingId === r._id}
+          style={ACT_BTN({ background: "#dcfce7", color: "#059669", border: "1px solid #bbf7d0" })}
+          title="Import">
+          {importingId === r._id ? "…" : "✓"}
+        </button>
+
+        {/* ✕ / ↩ skip */}
+        <button
+          onClick={() => {
+            setSkipped(s => { const ns = new Set(s); ns.has(r._id) ? ns.delete(r._id) : ns.add(r._id); return ns; });
+            setSelected(s => ({ ...s, [r._id]: false }));
+          }}
+          style={ACT_BTN({ color: isSkipped ? "#059669" : "#9ca3af" })}
+          title={isSkipped ? "Restore" : "Skip"}>
+          {isSkipped ? "↩" : "✕"}
+        </button>
+      </div>
+
+      {/* ── ROW 2: type [badge] [category] account [entity] [fx] [✏️] ── */}
+      <div style={{
+        display: "flex", alignItems: "center", flexWrap: "wrap", gap: 5,
+        padding: "2px 12px 9px 35px",
+      }}>
+        {/* Type */}
+        <select style={{ ...sel11, width: 100 }}
+          value={r.tx_type}
+          onChange={e => {
+            const t = e.target.value;
+            updateRow(r._id, { tx_type: t, category_id: NO_CAT.has(t) ? null : r.category_id });
+          }}>
+          {IMPORT_TX_TYPES.map(t => (
+            <option key={t.value} value={t.value}>{t.label}</option>
+          ))}
+        </select>
+
+        {/* Badge */}
+        {badge && (
+          <span style={{
+            fontSize: 9, fontWeight: 800, background: badge.bg, color: badge.color,
+            padding: "2px 5px", borderRadius: 4, fontFamily: "Figtree, sans-serif",
+            whiteSpace: "nowrap", flexShrink: 0,
+          }}>
+            {badge.label}
+          </span>
+        )}
+
+        {/* Category */}
+        {showCat && (
+          <select style={{ ...sel11, width: 130 }}
+            value={r.category_id || ""}
+            onChange={e => updateRow(r._id, { category_id: e.target.value })}>
+            {cats.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+          </select>
+        )}
+
+        {/* Account */}
+        <div style={{ flex: 1, minWidth: 160 }}>
+          <CardAccountCell r={r} updateRow={updateRow} T={T}
+            bankAccounts={bankAccounts} ccAccounts={ccAccounts} />
+        </div>
+
+        {/* Entity toggle (reimburse only) */}
+        {showEntity && (
+          <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
+            {REIMBURSE_ENTITIES.map(en => (
+              <button key={en} onClick={() => updateRow(r._id, { entity: en })}
+                title={en}
+                style={{
+                  padding: "2px 8px", borderRadius: 4,
+                  border: `1.5px solid ${r.entity === en ? "#3b5bdb" : T.border}`,
+                  background: r.entity === en ? "#dbeafe" : T.surface,
+                  color: r.entity === en ? "#1d4ed8" : T.text3,
+                  fontSize: 10, fontWeight: 700, cursor: "pointer",
+                  fontFamily: "Figtree, sans-serif",
+                }}>
+                {en}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* FX rate input */}
+        {isFX && (
+          <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+            <span style={{
+              fontSize: 10, color: T.text3, fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap",
+            }}>Rate:</span>
+            <input
+              type="number"
+              style={inInp(T, { width: 64, fontSize: 11, textAlign: "right" })}
+              value={r.fx_rate || ""}
+              onChange={e => {
+                const rate = e.target.value;
+                const idr  = Math.round(Number(r.amount || 0) * Number(rate || 0));
+                updateRow(r._id, { fx_rate: rate, amount_idr: String(idr) });
+              }}
+            />
+          </div>
+        )}
+
+        {/* ✏️ notes toggle */}
+        <button
+          onClick={() => toggleNotes(r._id)}
+          style={ACT_BTN({
+            background: isNotes ? "#dbeafe" : T.sur2,
+            color: isNotes ? "#3b5bdb" : T.text3,
+            width: 24, height: 24, fontSize: 11,
+          })}
+          title="Notes">
+          ✏️
+        </button>
+      </div>
+
+      {/* ── Notes row ── */}
+      {isNotes && (
+        <div style={{
+          borderTop: `1px solid ${T.border}`, background: T.sur2,
+          padding: "6px 12px 8px 35px",
+          display: "flex", gap: 6, alignItems: "center",
+        }}>
+          <span style={{
+            fontSize: 10, fontWeight: 700, color: T.text3, textTransform: "uppercase",
+            letterSpacing: "0.04em", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap",
+          }}>Notes</span>
+          <input
+            style={inInp(T, { fontSize: 11, flex: 1 })}
+            value={r.notes || ""}
+            onChange={e => updateRow(r._id, { notes: e.target.value })}
+            placeholder="Optional notes…"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══ TRANSACTION CARD LIST ════════════════════════════════════════
+function TxCardList({
+  results, selected, skipped, notesOpen, importingId, T,
+  bankAccounts, ccAccounts,
+  updateRow, setSelected, setSkipped, toggleNotes, importOne,
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {results.map(r => (
+        <TxCard
+          key={r._id} r={r}
+          selected={selected} skipped={skipped} notesOpen={notesOpen}
+          importingId={importingId} T={T}
+          bankAccounts={bankAccounts} ccAccounts={ccAccounts}
+          updateRow={updateRow} setSelected={setSelected} setSkipped={setSkipped}
+          toggleNotes={toggleNotes} importOne={importOne}
+        />
+      ))}
+    </div>
   );
 }
