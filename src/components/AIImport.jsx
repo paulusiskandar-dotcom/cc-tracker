@@ -1,11 +1,11 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { ledgerApi, gmailApi, scanApi, merchantApi, getTxFromToTypes } from "../api";
 import { fmtIDR, todayStr } from "../utils";
 import { LIGHT, DARK } from "../theme";
 import { Button, EmptyState, Spinner, showToast } from "./shared/index";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
 
-// ── TX types available in dropdown ────────────────────────────
+// ── TX types ────────────────────────────────────────────────────
 const IMPORT_TX_TYPES = [
   { value: "expense",       label: "Expense" },
   { value: "income",        label: "Income" },
@@ -22,54 +22,80 @@ const IMPORT_TX_TYPES = [
   { value: "collect_loan",  label: "Collect Loan" },
 ];
 
-// ── Category visibility rules ─────────────────────────────────
+// ── Category visibility ─────────────────────────────────────────
 const SHOW_EXPENSE_CAT  = new Set(["expense","bank_charges","materai","tax"]);
 const SHOW_INCOME_CAT   = new Set(["income","bank_interest","cashback"]);
 const NO_CAT            = new Set(["transfer","pay_cc","reimburse_out","reimburse_in","give_loan","collect_loan"]);
 const REIMBURSE_TYPES   = new Set(["reimburse_out","reimburse_in"]);
-
-// ── Amount color ──────────────────────────────────────────────
-const amtColor = (type) => {
-  if (["income","cashback","bank_interest","collect_loan","reimburse_in"].includes(type)) return "#059669";
-  if (["transfer","pay_cc","give_loan"].includes(type))                                    return "#3b5bdb";
-  return "#dc2626";
-};
-
-// ── Format date for display ───────────────────────────────────
-const fmtDate = (d) => {
-  try {
-    const dt = new Date(d + "T00:00:00");
-    return dt.toLocaleDateString("en-GB", { day:"2-digit", month:"short", year:"numeric" });
-  } catch { return d; }
-};
-
-// ── Inline select / input styles ──────────────────────────────
-const inSel = (T) => ({
-  fontSize: 12, padding: "4px 6px", border: `1px solid ${T.border}`,
-  borderRadius: 6, background: T.surface, color: T.text,
-  fontFamily: "Figtree, sans-serif", width: "100%",
-});
-const inInp = (T) => ({
-  fontSize: 12, padding: "4px 6px", border: `1px solid ${T.border}`,
-  borderRadius: 6, background: T.surface, color: T.text,
-  fontFamily: "Figtree, sans-serif", width: "100%",
-});
-
-// ── Entity toggle ─────────────────────────────────────────────
 const REIMBURSE_ENTITIES = ["Hamasa", "SDC", "Travelio"];
 
+const getCatOptions = (txType) =>
+  SHOW_INCOME_CAT.has(txType) ? INCOME_CATEGORIES_LIST : EXPENSE_CATEGORIES;
+
+// ── Helpers ─────────────────────────────────────────────────────
+const amtColor = (type) => {
+  if (["income","cashback","bank_interest","collect_loan","reimburse_in"].includes(type)) return "#059669";
+  if (["transfer","pay_cc","give_loan"].includes(type)) return "#3b5bdb";
+  return "#dc2626";
+};
+const fmtDateShort = (d) => {
+  try { return new Date(d + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short" }); }
+  catch { return d || ""; }
+};
+const fmtDate = (d) => {
+  try { return new Date(d + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }); }
+  catch { return d || ""; }
+};
+
+// ── Inline control styles ────────────────────────────────────────
+const inSel = (T, extra = {}) => ({
+  fontSize: 11, padding: "3px 4px", border: `1px solid ${T.border}`,
+  borderRadius: 5, background: T.surface, color: T.text,
+  fontFamily: "Figtree, sans-serif", width: "100%", cursor: "pointer",
+  boxSizing: "border-box", ...extra,
+});
+const inInp = (T, extra = {}) => ({
+  fontSize: 11, padding: "3px 5px", border: `1px solid ${T.border}`,
+  borderRadius: 5, background: T.surface, color: T.text,
+  fontFamily: "Figtree, sans-serif", width: "100%", boxSizing: "border-box", ...extra,
+});
+
+// ── Row bg based on status ────────────────────────────────────
+const rowBg = (r, isSkipped, T) => {
+  if (isSkipped) return T.sur2;
+  if (r.flagged) return "#fff7ed";
+  if (r.status === "possible_duplicate") return "#fefce8";
+  return T.surface;
+};
+
+// ── Shared action button style ────────────────────────────────
+const ACT_BTN = (extra = {}) => ({
+  width: 26, height: 26, borderRadius: 6, border: "1px solid #e5e7eb",
+  background: "#f9fafb", cursor: "pointer", fontSize: 12, fontWeight: 700,
+  display: "flex", alignItems: "center", justifyContent: "center",
+  fontFamily: "Figtree, sans-serif", padding: 0, flexShrink: 0, ...extra,
+});
+
+// ─────────────────────────────────────────────────────────────────
 export default function AIImport({ user, accounts, ledger, onRefresh, setLedger, dark }) {
   const T = dark ? DARK : LIGHT;
   const fileRef = useRef();
+  const [isDesktop, setIsDesktop] = useState(() => window.innerWidth > 768);
 
-  const [mode,         setMode]         = useState("scan");
-  const [scanning,     setScanning]     = useState(false);
-  const [results,      setResults]      = useState([]);
-  const [selected,     setSelected]     = useState({});   // _id → bool
-  const [skipped,      setSkipped]      = useState(new Set());
-  const [expanded,     setExpanded]     = useState(new Set());
-  const [importing,    setImporting]    = useState(false);
-  const [importingId,  setImportingId]  = useState(null); // single-row import
+  useEffect(() => {
+    const onResize = () => setIsDesktop(window.innerWidth > 768);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const [mode,        setMode]        = useState("scan");
+  const [scanning,    setScanning]    = useState(false);
+  const [results,     setResults]     = useState([]);
+  const [selected,    setSelected]    = useState({});
+  const [skipped,     setSkipped]     = useState(new Set());
+  const [notesOpen,   setNotesOpen]   = useState(new Set());
+  const [importing,   setImporting]   = useState(false);
+  const [importingId, setImportingId] = useState(null);
 
   const [gmailPending, setGmailPending] = useState([]);
   const [gmailLoading, setGmailLoading] = useState(false);
@@ -79,72 +105,74 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
   const ccAccounts    = accounts.filter(a => a.type === "credit_card");
   const spendAccounts = [...bankAccounts, ...ccAccounts];
 
-  // ── Update a single field on a result row ─────────────────
   const updateRow = (id, patch) =>
     setResults(prev => prev.map(r => r._id === id ? { ...r, ...patch } : r));
 
-  // ── Detect if an account is a reimburse account ──────────────
   const isReimburseAccount = (acc) =>
     String(acc.account_no || "").includes("0830267743") ||
     acc.name?.toLowerCase().includes("reimburse") ||
     acc.subtype === "reimburse";
 
-  const reimburseAccounts = accounts.filter(isReimburseAccount);
+  const checkDuplicate = (date, amount, description) => {
+    const amt = Number(amount);
+    return ledger.some(l =>
+      l.tx_date === date &&
+      Math.abs(Number(l.amount_idr || l.amount) - amt) < 5 &&
+      (l.description || "").trim().toLowerCase() === (description || "").trim().toLowerCase()
+    );
+  };
 
-  // ── File scan ──────────────────────────────────────────────
+  // ── File scan ────────────────────────────────────────────────
   const handleFile = async (file) => {
     if (!file) return;
     setScanning(true);
     setResults([]);
     setSelected({});
     setSkipped(new Set());
-    setExpanded(new Set());
+    setNotesOpen(new Set());
     try {
       const parsed = await scanApi.scan(user.id, file, { accounts });
       const items = (parsed || []).map((r, i) => {
         let txType = r.type || r.tx_type || "expense";
-        // Default from/to based on type
         const defaultFrom = SHOW_EXPENSE_CAT.has(txType) || txType === "pay_cc" || txType === "reimburse_out"
           ? (spendAccounts[0]?.id || "") : "";
         const defaultTo = SHOW_INCOME_CAT.has(txType) || txType === "transfer" || txType === "reimburse_in"
           ? (bankAccounts[0]?.id || "") : "";
-        let fromId = r.from_account_id || defaultFrom;
-        let toId   = r.to_account_id   || defaultTo;
+        let fromId  = r.from_account_id || defaultFrom;
+        let toId    = r.to_account_id   || defaultTo;
         let flagged = false;
 
-        // Auto-detect reimburse_in: if to_account matches a reimburse account
         if (txType !== "reimburse_in" && toId) {
           const toAcc = accounts.find(a => a.id === toId);
-          if (toAcc && isReimburseAccount(toAcc)) {
-            txType = "reimburse_in";
-            flagged = true;
-          }
+          if (toAcc && isReimburseAccount(toAcc)) { txType = "reimburse_in"; flagged = true; }
         }
-        // Also detect by from_account for reimburse_in (credit to bank from receivable)
         if (txType === "reimburse_in" && fromId) {
           const fromAcc = accounts.find(a => a.id === fromId);
           if (fromAcc && isReimburseAccount(fromAcc)) flagged = true;
         }
-        // If AI returned reimburse_in, mark as flagged
         if (txType === "reimburse_in") flagged = true;
 
-        // Category: use AI suggestion directly (ids match slugs)
-        const catId = r.category || r.suggested_category || "other";
+        const catId  = r.category || r.suggested_category || "other";
+        const txDate = r.date || r.tx_date || todayStr();
+        const amount = r.amount_idr || r.amount || 0;
+        const desc   = r.description || "";
+
         return {
           _id:         i,
-          tx_date:     r.date || r.tx_date || todayStr(),
-          description: r.description || "",
-          amount:      String(r.amount || r.amount_idr || ""),
+          tx_date:     txDate,
+          description: desc,
+          amount:      String(amount),
           currency:    r.currency || "IDR",
-          amount_idr:  String(r.amount_idr || r.amount || ""),
+          amount_idr:  String(amount),
           tx_type:     txType,
           from_id:     fromId,
           to_id:       toId,
           entity:      REIMBURSE_ENTITIES.includes(r.entity) ? r.entity : "Hamasa",
           category_id: NO_CAT.has(txType) ? null : catId,
-          ai_category: catId, // remember AI suggestion for badge
+          ai_category: catId,
           notes:       r.notes || "",
           flagged,
+          status:      checkDuplicate(txDate, amount, desc) ? "possible_duplicate" : "new",
         };
       });
       setResults(items);
@@ -157,7 +185,7 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
     setScanning(false);
   };
 
-  // ── Build ledger entry from row ────────────────────────────
+  // ── Build ledger entry ────────────────────────────────────────
   const buildEntry = (r) => {
     const { from_type, to_type } = getTxFromToTypes(r.tx_type);
     return {
@@ -167,8 +195,7 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
       currency:      r.currency || "IDR",
       amount_idr:    Number(r.amount_idr || r.amount) || 0,
       tx_type:       r.tx_type,
-      from_type,
-      to_type,
+      from_type, to_type,
       from_id:       r.from_id || null,
       to_id:         r.to_id   || null,
       entity:        REIMBURSE_TYPES.has(r.tx_type) ? (r.entity || "Hamasa") : "Personal",
@@ -178,7 +205,7 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
     };
   };
 
-  // ── Import selected rows ───────────────────────────────────
+  // ── Import selected ───────────────────────────────────────────
   const importSelected = async () => {
     const toImport = results.filter(r => selected[r._id] && !skipped.has(r._id));
     if (!toImport.length) return showToast("Select at least one entry", "warning");
@@ -202,7 +229,7 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
     setImporting(false);
   };
 
-  // ── Import single row ──────────────────────────────────────
+  // ── Import single row ─────────────────────────────────────────
   const importOne = async (r) => {
     setImportingId(r._id);
     try {
@@ -219,7 +246,7 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
     setImportingId(null);
   };
 
-  // ── Gmail ──────────────────────────────────────────────────
+  // ── Gmail ─────────────────────────────────────────────────────
   const loadGmailPending = async () => {
     if (gmailLoaded) return;
     setGmailLoading(true);
@@ -254,18 +281,23 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
     setGmailPending(prev => prev.filter(p => p.id !== item.id));
   };
 
-  // ── Summary counts ─────────────────────────────────────────
-  const countNew      = results.filter(r => selected[r._id] && !skipped.has(r._id)).length;
-  const countSkipped  = skipped.size;
+  // ── Summary ────────────────────────────────────────────────────
+  const countSelected = results.filter(r => selected[r._id] && !skipped.has(r._id)).length;
+  const countDup      = results.filter(r => r.status === "possible_duplicate").length;
   const allSelected   = results.length > 0 && results.every(r => selected[r._id] && !skipped.has(r._id));
 
   const toggleSelectAll = () => {
+    const cur = results.every(r => selected[r._id] && !skipped.has(r._id));
     const ns = {};
-    results.forEach(r => { ns[r._id] = !allSelected; });
+    results.forEach(r => { ns[r._id] = !cur; });
     setSelected(ns);
   };
 
-  // ─────────────────────────────────────────────────────────
+  const toggleNotes = (id) => setNotesOpen(s => {
+    const ns = new Set(s); ns.has(id) ? ns.delete(id) : ns.add(id); return ns;
+  });
+
+  // ─────────────────────────────────────────────────────────────
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
@@ -283,13 +315,13 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
               background: mode === t.id ? T.text : T.sur2,
               color:      mode === t.id ? T.darkText : T.text2,
               transition: "background .15s, color .15s",
-            }}
-          >{t.label}</button>
+            }}>
+            {t.label}
+          </button>
         ))}
       </div>
 
-      {/* ══════════════════════════════════════════════════ */}
-      {/* ── SCAN TAB ── */}
+      {/* ══════════════════════════════ SCAN TAB ═════════════════ */}
       {mode === "scan" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
@@ -301,8 +333,7 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
             style={{
               border: `2px dashed ${T.border}`, borderRadius: 16, padding: "28px 24px",
               textAlign: "center", cursor: "pointer", background: T.sur2,
-            }}
-          >
+            }}>
             <div style={{ fontSize: 28, marginBottom: 6 }}>📄</div>
             <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 4 }}>
               Drop receipt, invoice, or bank statement
@@ -322,222 +353,71 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
 
           {/* ── RESULTS ── */}
           {results.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
 
-              {/* Header summary */}
+              {/* Summary header */}
               <div style={{
                 display: "flex", alignItems: "center", justifyContent: "space-between",
                 flexWrap: "wrap", gap: 8,
               }}>
-                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "#059669" }}>
-                    ✅ {countNew} new
-                  </span>
-                  {countSkipped > 0 && (
-                    <span style={{ fontSize: 13, fontWeight: 700, color: "#9ca3af" }}>
-                      🔄 {countSkipped} skipped
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>
+                    {results.length} transactions found
+                  </div>
+                  <div style={{ display: "flex", gap: 12, marginTop: 3 }}>
+                    <span style={{ fontSize: 12, color: "#059669", fontFamily: "Figtree, sans-serif" }}>
+                      ✅ {countSelected} new
                     </span>
-                  )}
+                    {countDup > 0 && (
+                      <span style={{ fontSize: 12, color: "#d97706", fontFamily: "Figtree, sans-serif" }}>
+                        ⚠️ {countDup} possible duplicate{countDup > 1 ? "s" : ""}
+                      </span>
+                    )}
+                    {skipped.size > 0 && (
+                      <span style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+                        ✕ {skipped.size} skipped
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <Button variant="secondary" size="sm" onClick={toggleSelectAll}>
-                    {allSelected ? "Deselect All" : "☑ Select All"}
+                    {allSelected ? "Deselect All" : "Select All"}
                   </Button>
                   <Button variant="primary" size="sm" busy={importing} onClick={importSelected}>
-                    ✓ Import {countNew} Selected
+                    Import {countSelected} Selected ▶
                   </Button>
                 </div>
               </div>
 
-              {/* Row list */}
-              {results.map((r) => {
-                const isSkipped  = skipped.has(r._id);
-                const isSelected = !!selected[r._id];
-                const isExpanded = expanded.has(r._id);
-                const color      = amtColor(r.tx_type);
-
-                return (
-                  <div key={r._id} style={{
-                    border: `1.5px solid ${isSkipped ? T.border : r.flagged ? "#f97316" : isSelected ? "#3b5bdb44" : T.border}`,
-                    borderRadius: 12, background: r.flagged ? "#fff7ed" : T.surface,
-                    opacity: isSkipped ? 0.45 : 1,
-                    transition: "opacity .15s",
-                  }}>
-                    {/* ── COLLAPSED ROW ── */}
-                    <div style={{
-                      display: "grid",
-                      gridTemplateColumns: "24px 80px 1fr 90px auto 80px auto",
-                      gap: 8, alignItems: "center", padding: "10px 12px",
-                    }}>
-                      {/* ☑ */}
-                      <input type="checkbox" checked={isSelected && !isSkipped}
-                        onChange={e => setSelected(s => ({ ...s, [r._id]: e.target.checked }))}
-                        disabled={isSkipped}
-                        style={{ accentColor: "#3b5bdb", width: 15, height: 15 }} />
-
-                      {/* Date */}
-                      <div style={{ fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
-                        {fmtDate(r.tx_date)}
-                      </div>
-
-                      {/* Description */}
-                      <div style={{ fontSize: 13, fontWeight: 600, color: T.text, fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {r.description || "—"}
-                        {r.ai_category && !NO_CAT.has(r.tx_type) && (
-                          <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, background: "#dbeafe", color: "#3b5bdb", padding: "1px 4px", borderRadius: 4, verticalAlign: "middle", fontFamily: "Figtree, sans-serif" }}>
-                            AI
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Type badge */}
-                      <div style={{ fontSize: 10, fontWeight: 700, color, fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
-                        {r.tx_type.replace("_", " ")}
-                      </div>
-
-                      {/* Category (collapsed preview) */}
-                      <div style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
-                        {!NO_CAT.has(r.tx_type) && r.category_id ? (() => {
-                          const cats = SHOW_INCOME_CAT.has(r.tx_type) ? INCOME_CATEGORIES_LIST : EXPENSE_CATEGORIES;
-                          const cat = cats.find(c => c.id === r.category_id);
-                          return cat ? `${cat.icon || ""} ${cat.label}` : r.category_id;
-                        })() : ""}
-                      </div>
-
-                      {/* Amount */}
-                      <div style={{ fontSize: 13, fontWeight: 700, color, fontFamily: "Figtree, sans-serif", textAlign: "right", whiteSpace: "nowrap" }}>
-                        {fmtIDR(Number(r.amount_idr || r.amount || 0), true)}
-                      </div>
-
-                      {/* Actions */}
-                      <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
-                        <button
-                          onClick={() => setExpanded(s => { const ns = new Set(s); ns.has(r._id) ? ns.delete(r._id) : ns.add(r._id); return ns; })}
-                          style={ACT_BTN} title="Edit">✏️</button>
-                        <button
-                          onClick={() => importOne(r)}
-                          disabled={isSkipped || importingId === r._id}
-                          style={{ ...ACT_BTN, background: "#dcfce7", color: "#059669" }} title="Import">
-                          {importingId === r._id ? "…" : "✓"}
-                        </button>
-                        <button
-                          onClick={() => {
-                            setSkipped(s => { const ns = new Set(s); ns.has(r._id) ? ns.delete(r._id) : ns.add(r._id); return ns; });
-                            setSelected(s => ({ ...s, [r._id]: false }));
-                          }}
-                          style={{ ...ACT_BTN, color: isSkipped ? "#059669" : "#9ca3af" }} title={isSkipped ? "Restore" : "Skip"}>
-                          {isSkipped ? "↩" : "✕"}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* ── EXPANDED INLINE EDIT ── */}
-                    {isExpanded && (
-                      <div style={{
-                        borderTop: `1px solid ${T.border}`, padding: "12px 14px",
-                        display: "flex", flexDirection: "column", gap: 10,
-                        background: T.sur2, borderRadius: "0 0 10px 10px",
-                      }}>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-
-                          {/* Description */}
-                          <div style={{ flex: "2 1 180px" }}>
-                            <label style={LBL}>Description</label>
-                            <input style={inInp(T)} value={r.description}
-                              onChange={e => updateRow(r._id, { description: e.target.value })} />
-                          </div>
-
-                          {/* Type */}
-                          <div style={{ flex: "1 1 120px" }}>
-                            <label style={LBL}>Type</label>
-                            <select style={inSel(T)} value={r.tx_type}
-                              onChange={e => {
-                                const t = e.target.value;
-                                updateRow(r._id, {
-                                  tx_type:     t,
-                                  category_id: NO_CAT.has(t) ? null : r.category_id,
-                                });
-                              }}>
-                              {IMPORT_TX_TYPES.map(t => (
-                                <option key={t.value} value={t.value}>{t.label}</option>
-                              ))}
-                            </select>
-                          </div>
-
-                          {/* Amount */}
-                          <div style={{ flex: "1 1 110px" }}>
-                            <label style={LBL}>Amount (IDR)</label>
-                            <input style={{ ...inInp(T), color }} type="number"
-                              value={r.amount_idr || r.amount || ""}
-                              onChange={e => updateRow(r._id, { amount_idr: e.target.value, amount: e.target.value })} />
-                          </div>
-                        </div>
-
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-                          {/* Category */}
-                          {!NO_CAT.has(r.tx_type) && (
-                            <div style={{ flex: "1 1 160px" }}>
-                              <label style={LBL}>
-                                Category
-                                {r.ai_category && r.ai_category === r.category_id && (
-                                  <span style={{ marginLeft: 4, fontSize: 9, fontWeight: 700, background: "#dbeafe", color: "#3b5bdb", padding: "1px 4px", borderRadius: 4 }}>AI</span>
-                                )}
-                              </label>
-                              <select style={inSel(T)} value={r.category_id || ""}
-                                onChange={e => updateRow(r._id, { category_id: e.target.value })}>
-                                {(SHOW_INCOME_CAT.has(r.tx_type) ? INCOME_CATEGORIES_LIST : EXPENSE_CATEGORIES).map(c => (
-                                  <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ` : ""}{c.label}</option>
-                                ))}
-                              </select>
-                            </div>
-                          )}
-
-                          {/* Account selectors — vary by type */}
-                          <AccountSelectors r={r} updateRow={updateRow} T={T}
-                            bankAccounts={bankAccounts} ccAccounts={ccAccounts} spendAccounts={spendAccounts} />
-
-                          {/* Entity — reimburse types or flagged rows */}
-                          {(REIMBURSE_TYPES.has(r.tx_type) || r.flagged) && (
-                            <div style={{ flex: "1 1 160px" }}>
-                              <label style={LBL}>Entity</label>
-                              <div style={{ display: "flex", gap: 4 }}>
-                                {REIMBURSE_ENTITIES.map(en => (
-                                  <button key={en}
-                                    onClick={() => updateRow(r._id, { entity: en })}
-                                    style={{
-                                      padding: "4px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600,
-                                      border: `1.5px solid ${r.entity === en ? "#3b5bdb" : T.border}`,
-                                      background: r.entity === en ? "#eff6ff" : T.surface,
-                                      color: r.entity === en ? "#3b5bdb" : T.text2,
-                                      cursor: "pointer", fontFamily: "Figtree, sans-serif",
-                                    }}>
-                                    {en}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Notes */}
-                        <div>
-                          <label style={LBL}>Notes (optional)</label>
-                          <input style={inInp(T)} value={r.notes || ""}
-                            onChange={e => updateRow(r._id, { notes: e.target.value })}
-                            placeholder="Any extra details" />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+              {/* Desktop table / Mobile cards */}
+              {isDesktop ? (
+                <DesktopTable
+                  results={results} selected={selected} skipped={skipped} notesOpen={notesOpen}
+                  importingId={importingId} allSelected={allSelected} T={T}
+                  bankAccounts={bankAccounts} ccAccounts={ccAccounts} spendAccounts={spendAccounts}
+                  updateRow={updateRow} setSelected={setSelected} setSkipped={setSkipped}
+                  toggleNotes={toggleNotes} importOne={importOne} toggleSelectAll={toggleSelectAll}
+                />
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {results.map(r => (
+                    <MobileCard
+                      key={r._id} r={r} selected={selected} skipped={skipped}
+                      importingId={importingId} T={T}
+                      bankAccounts={bankAccounts} ccAccounts={ccAccounts} spendAccounts={spendAccounts}
+                      updateRow={updateRow} setSelected={setSelected} setSkipped={setSkipped}
+                      importOne={importOne}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════ */}
-      {/* ── GMAIL TAB ── */}
+      {/* ══════════════════════════════ GMAIL TAB ════════════════ */}
       {mode === "gmail" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {gmailLoading ? (
@@ -554,7 +434,9 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
             }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>{item.description}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>
+                    {item.description}
+                  </div>
                   <div style={{ fontSize: 11, color: T.text3, marginTop: 2, fontFamily: "Figtree, sans-serif" }}>
                     {item.date} · {item.merchant || "—"}
                   </div>
@@ -580,87 +462,451 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
   );
 }
 
-// ── Account selectors component ────────────────────────────────
-function AccountSelectors({ r, updateRow, T, bankAccounts, ccAccounts, spendAccounts }) {
-  const t = r.tx_type;
-  const sel = inSel(T);
+// ══ DESKTOP TABLE ════════════════════════════════════════════════
+// Grid: ☑ | Date | Description | Type | Category | Account | Entity | Amount | Actions
+const COLS = "32px 76px 1fr 120px 138px 158px 72px 108px 88px";
+const HDR  = ["Date", "Description", "Type", "Category", "Account", "Entity", "Amount", ""];
+
+function DesktopTable({
+  results, selected, skipped, notesOpen, importingId, allSelected, T,
+  bankAccounts, ccAccounts, spendAccounts,
+  updateRow, setSelected, setSkipped, toggleNotes, importOne, toggleSelectAll,
+}) {
+  return (
+    <div style={{
+      border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden",
+    }}>
+      <div style={{ overflowX: "auto" }}>
+
+        {/* ── Header ── */}
+        <div style={{
+          display: "grid", gridTemplateColumns: COLS,
+          background: T.sur2, borderBottom: `1.5px solid ${T.border}`,
+          minWidth: 780, position: "sticky", top: 0, zIndex: 2,
+        }}>
+          <div style={{ padding: "9px 8px", display: "flex", alignItems: "center" }}>
+            <input type="checkbox" checked={allSelected} onChange={toggleSelectAll}
+              style={{ accentColor: "#3b5bdb", width: 14, height: 14 }} />
+          </div>
+          {HDR.map((h, i) => (
+            <div key={i} style={{
+              padding: "9px 6px",
+              fontSize: 10, fontWeight: 700, color: T.text3,
+              textTransform: "uppercase", letterSpacing: "0.05em",
+              fontFamily: "Figtree, sans-serif",
+              textAlign: i === 6 ? "right" : "left",
+            }}>
+              {h}
+            </div>
+          ))}
+        </div>
+
+        {/* ── Rows ── */}
+        <div style={{ minWidth: 780 }}>
+          {results.map(r => {
+            const isSkipped  = skipped.has(r._id);
+            const isSelected = !!selected[r._id];
+            const isNotes    = notesOpen.has(r._id);
+            const color      = amtColor(r.tx_type);
+            const bg         = rowBg(r, isSkipped, T);
+            const showCat    = !NO_CAT.has(r.tx_type);
+            const showEntity = REIMBURSE_TYPES.has(r.tx_type) || r.flagged;
+            const cats       = getCatOptions(r.tx_type);
+            const leftBorder = r.flagged             ? "3px solid #f97316"
+                             : r.status === "possible_duplicate" ? "3px solid #d97706"
+                             : "3px solid transparent";
+
+            return (
+              <div key={r._id}>
+                {/* Main row */}
+                <div style={{
+                  display: "grid", gridTemplateColumns: COLS,
+                  alignItems: "center", minHeight: 48,
+                  background: bg, borderBottom: `1px solid ${T.border}`,
+                  borderLeft: leftBorder,
+                  opacity: isSkipped ? 0.5 : 1,
+                }}>
+                  {/* ☑ */}
+                  <div style={{ padding: "4px 8px" }}>
+                    <input type="checkbox" checked={isSelected && !isSkipped}
+                      onChange={e => setSelected(s => ({ ...s, [r._id]: e.target.checked }))}
+                      disabled={isSkipped}
+                      style={{ accentColor: "#3b5bdb", width: 14, height: 14 }} />
+                  </div>
+
+                  {/* Date */}
+                  <div style={{
+                    padding: "4px 6px", fontSize: 11, color: T.text3,
+                    fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap",
+                  }}>
+                    {fmtDateShort(r.tx_date)}
+                  </div>
+
+                  {/* Description */}
+                  <div style={{ padding: "4px 6px", minWidth: 0 }}>
+                    <input
+                      style={inInp(T, { fontSize: 12, fontWeight: 500 })}
+                      value={r.description}
+                      onChange={e => updateRow(r._id, { description: e.target.value })}
+                    />
+                  </div>
+
+                  {/* Type */}
+                  <div style={{ padding: "4px 6px" }}>
+                    <select style={inSel(T)}
+                      value={r.tx_type}
+                      onChange={e => {
+                        const t = e.target.value;
+                        updateRow(r._id, { tx_type: t, category_id: NO_CAT.has(t) ? null : r.category_id });
+                      }}>
+                      {IMPORT_TX_TYPES.map(t => (
+                        <option key={t.value} value={t.value}>{t.label}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Category */}
+                  <div style={{ padding: "4px 6px" }}>
+                    {showCat ? (
+                      <div style={{ position: "relative" }}>
+                        <select style={inSel(T)}
+                          value={r.category_id || ""}
+                          onChange={e => updateRow(r._id, { category_id: e.target.value })}>
+                          {cats.map(c => (
+                            <option key={c.id} value={c.id}>{c.label}</option>
+                          ))}
+                        </select>
+                        {r.ai_category && r.ai_category === r.category_id && (
+                          <span style={{
+                            position: "absolute", top: -7, right: 1,
+                            fontSize: 8, fontWeight: 800, background: "#dbeafe", color: "#3b5bdb",
+                            padding: "1px 3px", borderRadius: 3, fontFamily: "Figtree, sans-serif",
+                            pointerEvents: "none", lineHeight: 1.4,
+                          }}>AI</span>
+                        )}
+                      </div>
+                    ) : (
+                      <span style={{ fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif" }}>—</span>
+                    )}
+                  </div>
+
+                  {/* Account */}
+                  <div style={{ padding: "4px 6px" }}>
+                    <RowAccountCell r={r} updateRow={updateRow} T={T}
+                      bankAccounts={bankAccounts} ccAccounts={ccAccounts} spendAccounts={spendAccounts} />
+                  </div>
+
+                  {/* Entity */}
+                  <div style={{ padding: "4px 6px" }}>
+                    {showEntity && (
+                      <div style={{ display: "flex", gap: 2 }}>
+                        {REIMBURSE_ENTITIES.map((en, i) => (
+                          <button key={en} onClick={() => updateRow(r._id, { entity: en })}
+                            title={en}
+                            style={{
+                              width: 22, height: 22, borderRadius: 4, padding: 0,
+                              border: `1.5px solid ${r.entity === en ? "#3b5bdb" : T.border}`,
+                              background: r.entity === en ? "#dbeafe" : T.surface,
+                              color: r.entity === en ? "#1d4ed8" : T.text3,
+                              fontSize: 9, fontWeight: 800, cursor: "pointer",
+                              fontFamily: "Figtree, sans-serif",
+                            }}>
+                            {en[0]}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Amount */}
+                  <div style={{ padding: "4px 6px" }}>
+                    <input
+                      type="number"
+                      style={inInp(T, { textAlign: "right", color, fontWeight: 700, fontSize: 12 })}
+                      value={r.amount_idr || r.amount || ""}
+                      onChange={e => updateRow(r._id, { amount_idr: e.target.value, amount: e.target.value })}
+                    />
+                  </div>
+
+                  {/* Actions */}
+                  <div style={{ padding: "4px 8px", display: "flex", gap: 3, justifyContent: "flex-end" }}>
+                    <button
+                      onClick={() => toggleNotes(r._id)}
+                      style={ACT_BTN({
+                        color: isNotes ? "#3b5bdb" : "#9ca3af",
+                        border: `1px solid ${isNotes ? "#bfdbfe" : "#e5e7eb"}`,
+                        background: isNotes ? "#eff6ff" : "#f9fafb",
+                      })}
+                      title="Notes">✏️</button>
+                    <button
+                      onClick={() => importOne(r)}
+                      disabled={isSkipped || importingId === r._id}
+                      style={ACT_BTN({ background: "#dcfce7", color: "#059669", border: "1px solid #bbf7d0" })}
+                      title="Import">
+                      {importingId === r._id ? "…" : "✓"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setSkipped(s => { const ns = new Set(s); ns.has(r._id) ? ns.delete(r._id) : ns.add(r._id); return ns; });
+                        setSelected(s => ({ ...s, [r._id]: false }));
+                      }}
+                      style={ACT_BTN({ color: isSkipped ? "#059669" : "#9ca3af" })}
+                      title={isSkipped ? "Restore" : "Skip"}>
+                      {isSkipped ? "↩" : "✕"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Notes row */}
+                {isNotes && (
+                  <div style={{
+                    background: T.sur2, borderBottom: `1px solid ${T.border}`,
+                    padding: "6px 44px 6px 56px",
+                    display: "flex", gap: 8, alignItems: "center",
+                  }}>
+                    <span style={{
+                      fontSize: 10, fontWeight: 700, color: T.text3, textTransform: "uppercase",
+                      letterSpacing: "0.04em", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap",
+                    }}>Notes</span>
+                    <input
+                      style={inInp(T, { fontSize: 11, flex: 1 })}
+                      value={r.notes || ""}
+                      onChange={e => updateRow(r._id, { notes: e.target.value })}
+                      placeholder="Optional notes…"
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Account cell (desktop table) ─────────────────────────────────
+function RowAccountCell({ r, updateRow, T, bankAccounts, ccAccounts, spendAccounts }) {
+  const t   = r.tx_type;
+  const sel = inSel(T, { fontSize: 10 });
 
   if (t === "pay_cc") return (
-    <>
-      <div style={{ flex: "1 1 140px" }}>
-        <label style={LBL}>From Bank</label>
-        <select style={sel} value={r.from_id || ""}
-          onChange={e => updateRow(r._id, { from_id: e.target.value })}>
-          <option value="">— Select —</option>
-          {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-        </select>
-      </div>
-      <div style={{ flex: "1 1 140px" }}>
-        <label style={LBL}>To CC</label>
-        <select style={sel} value={r.to_id || ""}
-          onChange={e => updateRow(r._id, { to_id: e.target.value })}>
-          <option value="">— Select —</option>
-          {ccAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-        </select>
-      </div>
-    </>
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <select style={sel} value={r.from_id || ""}
+        onChange={e => updateRow(r._id, { from_id: e.target.value })}>
+        <option value="">— Bank —</option>
+        {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+      </select>
+      <select style={sel} value={r.to_id || ""}
+        onChange={e => updateRow(r._id, { to_id: e.target.value })}>
+        <option value="">— CC —</option>
+        {ccAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+      </select>
+    </div>
   );
 
   if (t === "transfer") return (
-    <>
-      <div style={{ flex: "1 1 140px" }}>
-        <label style={LBL}>From</label>
-        <select style={sel} value={r.from_id || ""}
-          onChange={e => updateRow(r._id, { from_id: e.target.value })}>
-          <option value="">— Select —</option>
-          {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-        </select>
-      </div>
-      <div style={{ flex: "1 1 140px" }}>
-        <label style={LBL}>To</label>
-        <select style={sel} value={r.to_id || ""}
-          onChange={e => updateRow(r._id, { to_id: e.target.value })}>
-          <option value="">— Select —</option>
-          {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-        </select>
-      </div>
-    </>
-  );
-
-  if (["income","bank_interest","cashback","collect_loan","reimburse_in"].includes(t)) return (
-    <div style={{ flex: "1 1 160px" }}>
-      <label style={LBL}>To Account</label>
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      <select style={sel} value={r.from_id || ""}
+        onChange={e => updateRow(r._id, { from_id: e.target.value })}>
+        <option value="">— From —</option>
+        {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+      </select>
       <select style={sel} value={r.to_id || ""}
         onChange={e => updateRow(r._id, { to_id: e.target.value })}>
-        <option value="">— Select —</option>
+        <option value="">— To —</option>
         {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
       </select>
     </div>
   );
 
-  // expense, bank_charges, materai, tax, reimburse_out, give_loan
+  if (["income","bank_interest","cashback","collect_loan","reimburse_in"].includes(t)) return (
+    <select style={sel} value={r.to_id || ""}
+      onChange={e => updateRow(r._id, { to_id: e.target.value })}>
+      <option value="">— To —</option>
+      {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+    </select>
+  );
+
   return (
-    <div style={{ flex: "1 1 160px" }}>
-      <label style={LBL}>From Account</label>
-      <select style={sel} value={r.from_id || ""}
-        onChange={e => updateRow(r._id, { from_id: e.target.value })}>
-        <option value="">— Select —</option>
-        {spendAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-      </select>
+    <select style={sel} value={r.from_id || ""}
+      onChange={e => updateRow(r._id, { from_id: e.target.value })}>
+      <option value="">— From —</option>
+      {spendAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+    </select>
+  );
+}
+
+// ══ MOBILE CARD ══════════════════════════════════════════════════
+function MobileCard({
+  r, selected, skipped, importingId, T, bankAccounts, ccAccounts, spendAccounts,
+  updateRow, setSelected, setSkipped, importOne,
+}) {
+  const isSkipped  = skipped.has(r._id);
+  const isSelected = !!selected[r._id];
+  const color      = amtColor(r.tx_type);
+  const bg         = rowBg(r, isSkipped, T);
+  const showCat    = !NO_CAT.has(r.tx_type);
+  const showEntity = REIMBURSE_TYPES.has(r.tx_type) || r.flagged;
+  const cats       = getCatOptions(r.tx_type);
+
+  return (
+    <div style={{
+      background: bg,
+      border: `1.5px solid ${isSkipped ? T.border : r.flagged ? "#f97316" : r.status === "possible_duplicate" ? "#d97706" : T.border}`,
+      borderRadius: 12, padding: "12px 14px",
+      opacity: isSkipped ? 0.5 : 1,
+      display: "flex", flexDirection: "column", gap: 8,
+    }}>
+      {/* Top: ☑ + description input + amount */}
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <input type="checkbox" checked={isSelected && !isSkipped}
+          onChange={e => setSelected(s => ({ ...s, [r._id]: e.target.checked }))}
+          disabled={isSkipped}
+          style={{ accentColor: "#3b5bdb", width: 15, height: 15, flexShrink: 0 }} />
+        <input
+          style={{
+            flex: 1, border: "none", background: "transparent", padding: 0, outline: "none",
+            fontSize: 13, fontWeight: 600, color: T.text, fontFamily: "Figtree, sans-serif",
+            minWidth: 0,
+          }}
+          value={r.description}
+          onChange={e => updateRow(r._id, { description: e.target.value })}
+        />
+        <div style={{
+          fontSize: 14, fontWeight: 800, color, fontFamily: "Figtree, sans-serif", flexShrink: 0,
+        }}>
+          {fmtIDR(Number(r.amount_idr || r.amount || 0), true)}
+        </div>
+      </div>
+
+      {/* Middle: Date · Type · Category */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+        <span style={{ fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif", flexShrink: 0 }}>
+          {fmtDateShort(r.tx_date)}
+        </span>
+        <span style={{ fontSize: 11, color: T.text3 }}>·</span>
+        <select style={{ ...inSel(T), fontSize: 11, width: "auto", flex: "0 1 auto" }}
+          value={r.tx_type}
+          onChange={e => {
+            const t = e.target.value;
+            updateRow(r._id, { tx_type: t, category_id: NO_CAT.has(t) ? null : r.category_id });
+          }}>
+          {IMPORT_TX_TYPES.map(t => (
+            <option key={t.value} value={t.value}>{t.label}</option>
+          ))}
+        </select>
+        {showCat && (
+          <>
+            <span style={{ fontSize: 11, color: T.text3 }}>·</span>
+            <select style={{ ...inSel(T), fontSize: 11, width: "auto", flex: "0 1 auto" }}
+              value={r.category_id || ""}
+              onChange={e => updateRow(r._id, { category_id: e.target.value })}>
+              {cats.map(c => (
+                <option key={c.id} value={c.id}>{c.label}</option>
+              ))}
+            </select>
+            {r.ai_category && r.ai_category === r.category_id && (
+              <span style={{
+                fontSize: 9, fontWeight: 800, background: "#dbeafe", color: "#3b5bdb",
+                padding: "1px 4px", borderRadius: 3, fontFamily: "Figtree, sans-serif",
+              }}>AI</span>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Account — full width */}
+      <MobileAccountCell r={r} updateRow={updateRow} T={T}
+        bankAccounts={bankAccounts} ccAccounts={ccAccounts} spendAccounts={spendAccounts} />
+
+      {/* Entity (reimburse only) */}
+      {showEntity && (
+        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <span style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, sans-serif" }}>Entity:</span>
+          {REIMBURSE_ENTITIES.map(en => (
+            <button key={en} onClick={() => updateRow(r._id, { entity: en })}
+              style={{
+                padding: "2px 10px", borderRadius: 5,
+                border: `1.5px solid ${r.entity === en ? "#3b5bdb" : T.border}`,
+                background: r.entity === en ? "#dbeafe" : T.surface,
+                color: r.entity === en ? "#1d4ed8" : T.text3,
+                fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "Figtree, sans-serif",
+              }}>
+              {en}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Actions */}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          onClick={() => importOne(r)}
+          disabled={isSkipped || importingId === r._id}
+          style={{
+            flex: 1, padding: "7px 0", borderRadius: 8,
+            border: "none", background: "#dcfce7", color: "#059669",
+            fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "Figtree, sans-serif",
+          }}>
+          {importingId === r._id ? "Importing…" : "✓ Import"}
+        </button>
+        <button
+          onClick={() => {
+            setSkipped(s => { const ns = new Set(s); ns.has(r._id) ? ns.delete(r._id) : ns.add(r._id); return ns; });
+            setSelected(s => ({ ...s, [r._id]: false }));
+          }}
+          style={{
+            padding: "7px 16px", borderRadius: 8,
+            border: `1px solid ${T.border}`, background: T.surface,
+            color: isSkipped ? "#059669" : T.text3,
+            fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "Figtree, sans-serif",
+          }}>
+          {isSkipped ? "↩ Restore" : "✕ Skip"}
+        </button>
+      </div>
     </div>
   );
 }
 
-// ── Styles ─────────────────────────────────────────────────────
-const ACT_BTN = {
-  width: 26, height: 26, borderRadius: 7, border: "1px solid #e5e7eb",
-  background: "#f9fafb", cursor: "pointer", fontSize: 11, fontWeight: 700,
-  display: "flex", alignItems: "center", justifyContent: "center",
-  fontFamily: "Figtree, sans-serif",
-};
+// ── Account cell (mobile card) ────────────────────────────────────
+function MobileAccountCell({ r, updateRow, T, bankAccounts, ccAccounts, spendAccounts }) {
+  const t   = r.tx_type;
+  const sel = inSel(T, { fontSize: 12 });
 
-const LBL = {
-  display: "block", fontSize: 10, fontWeight: 700, color: "#9ca3af",
-  marginBottom: 3, textTransform: "uppercase", letterSpacing: "0.04em",
-  fontFamily: "Figtree, sans-serif",
-};
+  if (t === "pay_cc" || t === "transfer") {
+    const fromList = bankAccounts;
+    const toList   = t === "pay_cc" ? ccAccounts : bankAccounts;
+    return (
+      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+        <select style={{ ...sel, flex: 1 }} value={r.from_id || ""}
+          onChange={e => updateRow(r._id, { from_id: e.target.value })}>
+          <option value="">From…</option>
+          {fromList.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+        <span style={{ fontSize: 11, color: T.text3 }}>→</span>
+        <select style={{ ...sel, flex: 1 }} value={r.to_id || ""}
+          onChange={e => updateRow(r._id, { to_id: e.target.value })}>
+          <option value="">To…</option>
+          {toList.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+      </div>
+    );
+  }
+
+  if (["income","bank_interest","cashback","collect_loan","reimburse_in"].includes(t)) return (
+    <select style={{ ...sel, width: "100%" }} value={r.to_id || ""}
+      onChange={e => updateRow(r._id, { to_id: e.target.value })}>
+      <option value="">To Account…</option>
+      {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+    </select>
+  );
+
+  return (
+    <select style={{ ...sel, width: "100%" }} value={r.from_id || ""}
+      onChange={e => updateRow(r._id, { from_id: e.target.value })}>
+      <option value="">From Account…</option>
+      {spendAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+    </select>
+  );
+}
