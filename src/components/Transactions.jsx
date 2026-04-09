@@ -665,7 +665,12 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
 
   const toOpts = toOptions
     .filter(a => a.id && a.id.length === 36)
-    .map(a => ({ value: a.id, label: accLabel(a) }));
+    .map(a => ({
+      value: a.id,
+      label: a.type === "credit_card"
+        ? `${a.name}${(a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}`
+        : accLabel(a),
+    }));
 
   const incOpts = (incomeSrcs || [])
     .filter(s => s.id && s.id.length === 36)
@@ -782,25 +787,42 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
         />
       )}
 
-      {/* FROM ACCOUNT — two-step (Bank / CC toggle + dropdown) */}
-      {hasTwoStep && (
-        <Field label={type === "give_loan" ? "From Bank Account" : "From Account"}>
-          {type !== "give_loan" && (
-            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-              <button type="button" onClick={() => switchFromSource("bank")}        style={pillStyle(fromSource === "bank")}>🏦 Bank Account</button>
-              <button type="button" onClick={() => switchFromSource("credit_card")} style={pillStyle(fromSource === "credit_card")}>💳 Credit Card</button>
-            </div>
-          )}
-          <select
-            value={form.from_id || ""}
-            onChange={e => set("from_id", e.target.value.length === 36 ? e.target.value : null)}
-            style={SEL_STYLE}
-          >
-            <option value="">Select bank account…</option>
-            {(type === "give_loan" ? bankAccs.filter(a => a.id && a.id.length === 36).map(a => ({ value: a.id, label: accLabel(a) })) : fromOpts).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        </Field>
-      )}
+      {/* FROM ACCOUNT — grouped dropdown */}
+      {hasTwoStep && (() => {
+        // Types that allow both Bank AND CC as source
+        const showBothGroups = ["expense", "reimburse_out", "buy_asset"].includes(type);
+        const bankOnly = bankAccs.filter(a => a.id && a.id.length === 36);
+        const ccOnly   = ccAccs.filter(a => a.id && a.id.length === 36);
+        return (
+          <Field label={type === "give_loan" ? "From Bank Account" : "From Account"}>
+            <select
+              value={form.from_id || ""}
+              onChange={e => set("from_id", e.target.value.length === 36 ? e.target.value : null)}
+              style={SEL_STYLE}
+            >
+              <option value="">Select account…</option>
+              {showBothGroups ? (
+                <>
+                  <optgroup label="BANK & CASH">
+                    {bankOnly.map(a => <option key={a.id} value={a.id}>{accLabel(a)}</option>)}
+                  </optgroup>
+                  {ccOnly.length > 0 && (
+                    <optgroup label="CREDIT CARDS">
+                      {ccOnly.map(a => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}{(a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                </>
+              ) : (
+                bankOnly.map(a => <option key={a.id} value={a.id}>{accLabel(a)}</option>)
+              )}
+            </select>
+          </Field>
+        );
+      })()}
 
       {/* Give Loan — installment + start date + auto-calc */}
       {type === "give_loan" && (() => {

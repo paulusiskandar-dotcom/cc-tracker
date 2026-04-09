@@ -463,15 +463,23 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
 }
 
 // ══ DESKTOP TABLE ════════════════════════════════════════════════
-// Grid: ☑ | Date | Description | Type | Category | Account | Entity | Amount | Actions
-const COLS = "32px 76px 1fr 120px 138px 158px 72px 108px 88px";
-const HDR  = ["Date", "Description", "Type", "Category", "Account", "Entity", "Amount", ""];
-
+// Grid: ☑ | Date | Description | Type | Category | Account | [Entity] | Amount | Actions
 function DesktopTable({
   results, selected, skipped, notesOpen, importingId, allSelected, T,
   bankAccounts, ccAccounts, spendAccounts,
   updateRow, setSelected, setSkipped, toggleNotes, importOne, toggleSelectAll,
 }) {
+  const hasReimburse = results.some(r => REIMBURSE_TYPES.has(r.tx_type) || r.flagged);
+
+  // Build column template dynamically
+  const COLS = hasReimburse
+    ? "40px 75px 1fr 120px 130px 150px 90px 95px 85px"
+    : "40px 75px 1fr 120px 130px 150px 95px 85px";
+  const HDR = hasReimburse
+    ? ["Date", "Description", "Type", "Category", "Account", "Entity", "Amount", ""]
+    : ["Date", "Description", "Type", "Category", "Account", "Amount", ""];
+  const MIN_W = hasReimburse ? 920 : 830;
+
   return (
     <div style={{
       border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden",
@@ -482,7 +490,7 @@ function DesktopTable({
         <div style={{
           display: "grid", gridTemplateColumns: COLS,
           background: T.sur2, borderBottom: `1.5px solid ${T.border}`,
-          minWidth: 780, position: "sticky", top: 0, zIndex: 2,
+          minWidth: MIN_W, position: "sticky", top: 0, zIndex: 2,
         }}>
           <div style={{ padding: "9px 8px", display: "flex", alignItems: "center" }}>
             <input type="checkbox" checked={allSelected} onChange={toggleSelectAll}
@@ -494,7 +502,7 @@ function DesktopTable({
               fontSize: 10, fontWeight: 700, color: T.text3,
               textTransform: "uppercase", letterSpacing: "0.05em",
               fontFamily: "Figtree, sans-serif",
-              textAlign: i === 6 ? "right" : "left",
+              textAlign: h === "Amount" ? "right" : "left",
             }}>
               {h}
             </div>
@@ -502,7 +510,7 @@ function DesktopTable({
         </div>
 
         {/* ── Rows ── */}
-        <div style={{ minWidth: 780 }}>
+        <div style={{ minWidth: MIN_W }}>
           {results.map(r => {
             const isSkipped  = skipped.has(r._id);
             const isSelected = !!selected[r._id];
@@ -512,9 +520,10 @@ function DesktopTable({
             const showCat    = !NO_CAT.has(r.tx_type);
             const showEntity = REIMBURSE_TYPES.has(r.tx_type) || r.flagged;
             const cats       = getCatOptions(r.tx_type);
-            const leftBorder = r.flagged             ? "3px solid #f97316"
-                             : r.status === "possible_duplicate" ? "3px solid #d97706"
+            const leftBorder = r.flagged                           ? "3px solid #f97316"
+                             : r.status === "possible_duplicate"   ? "3px solid #d97706"
                              : "3px solid transparent";
+            const displayDesc = r.description || r.merchant_name || r.notes || "";
 
             return (
               <div key={r._id}>
@@ -546,7 +555,7 @@ function DesktopTable({
                   <div style={{ padding: "4px 6px", minWidth: 0 }}>
                     <input
                       style={inInp(T, { fontSize: 12, fontWeight: 500 })}
-                      value={r.description}
+                      value={displayDesc}
                       onChange={e => updateRow(r._id, { description: e.target.value })}
                     />
                   </div>
@@ -596,27 +605,31 @@ function DesktopTable({
                       bankAccounts={bankAccounts} ccAccounts={ccAccounts} spendAccounts={spendAccounts} />
                   </div>
 
-                  {/* Entity */}
-                  <div style={{ padding: "4px 6px" }}>
-                    {showEntity && (
-                      <div style={{ display: "flex", gap: 2 }}>
-                        {REIMBURSE_ENTITIES.map((en, i) => (
-                          <button key={en} onClick={() => updateRow(r._id, { entity: en })}
-                            title={en}
-                            style={{
-                              width: 22, height: 22, borderRadius: 4, padding: 0,
-                              border: `1.5px solid ${r.entity === en ? "#3b5bdb" : T.border}`,
-                              background: r.entity === en ? "#dbeafe" : T.surface,
-                              color: r.entity === en ? "#1d4ed8" : T.text3,
-                              fontSize: 9, fontWeight: 800, cursor: "pointer",
-                              fontFamily: "Figtree, sans-serif",
-                            }}>
-                            {en[0]}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                  {/* Entity — only rendered if any row is reimburse */}
+                  {hasReimburse && (
+                    <div style={{ padding: "4px 6px" }}>
+                      {showEntity ? (
+                        <div style={{ display: "flex", gap: 2 }}>
+                          {REIMBURSE_ENTITIES.map(en => (
+                            <button key={en} onClick={() => updateRow(r._id, { entity: en })}
+                              title={en}
+                              style={{
+                                width: 22, height: 22, borderRadius: 4, padding: 0,
+                                border: `1.5px solid ${r.entity === en ? "#3b5bdb" : T.border}`,
+                                background: r.entity === en ? "#dbeafe" : T.surface,
+                                color: r.entity === en ? "#1d4ed8" : T.text3,
+                                fontSize: 9, fontWeight: 800, cursor: "pointer",
+                                fontFamily: "Figtree, sans-serif",
+                              }}>
+                              {en[0]}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif" }}>—</span>
+                      )}
+                    </div>
+                  )}
 
                   {/* Amount */}
                   <div style={{ padding: "4px 6px" }}>
@@ -685,6 +698,27 @@ function DesktopTable({
   );
 }
 
+// ── Grouped account dropdown ──────────────────────────────────────
+function AccSelect({ style, value, onChange, bankAccounts, ccAccounts, placeholder, showCC = false }) {
+  return (
+    <select style={style} value={value || ""} onChange={onChange}>
+      <option value="">{placeholder || "— Account —"}</option>
+      <optgroup label="BANK & CASH">
+        {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+      </optgroup>
+      {showCC && ccAccounts.length > 0 && (
+        <optgroup label="CREDIT CARDS">
+          {ccAccounts.map(a => (
+            <option key={a.id} value={a.id}>
+              {a.name}{(a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
+            </option>
+          ))}
+        </optgroup>
+      )}
+    </select>
+  );
+}
+
 // ── Account cell (desktop table) ─────────────────────────────────
 function RowAccountCell({ r, updateRow, T, bankAccounts, ccAccounts, spendAccounts }) {
   const t   = r.tx_type;
@@ -692,48 +726,43 @@ function RowAccountCell({ r, updateRow, T, bankAccounts, ccAccounts, spendAccoun
 
   if (t === "pay_cc") return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <select style={sel} value={r.from_id || ""}
-        onChange={e => updateRow(r._id, { from_id: e.target.value })}>
-        <option value="">— Bank —</option>
-        {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-      </select>
+      <AccSelect style={sel} value={r.from_id}
+        onChange={e => updateRow(r._id, { from_id: e.target.value })}
+        bankAccounts={bankAccounts} ccAccounts={[]} placeholder="— Bank —" />
       <select style={sel} value={r.to_id || ""}
         onChange={e => updateRow(r._id, { to_id: e.target.value })}>
         <option value="">— CC —</option>
-        {ccAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        {ccAccounts.map(a => (
+          <option key={a.id} value={a.id}>
+            {a.name}{(a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
+          </option>
+        ))}
       </select>
     </div>
   );
 
   if (t === "transfer") return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <select style={sel} value={r.from_id || ""}
-        onChange={e => updateRow(r._id, { from_id: e.target.value })}>
-        <option value="">— From —</option>
-        {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-      </select>
-      <select style={sel} value={r.to_id || ""}
-        onChange={e => updateRow(r._id, { to_id: e.target.value })}>
-        <option value="">— To —</option>
-        {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-      </select>
+      <AccSelect style={sel} value={r.from_id}
+        onChange={e => updateRow(r._id, { from_id: e.target.value })}
+        bankAccounts={bankAccounts} ccAccounts={[]} placeholder="— From —" />
+      <AccSelect style={sel} value={r.to_id}
+        onChange={e => updateRow(r._id, { to_id: e.target.value })}
+        bankAccounts={bankAccounts} ccAccounts={[]} placeholder="— To —" />
     </div>
   );
 
   if (["income","bank_interest","cashback","collect_loan","reimburse_in"].includes(t)) return (
-    <select style={sel} value={r.to_id || ""}
-      onChange={e => updateRow(r._id, { to_id: e.target.value })}>
-      <option value="">— To —</option>
-      {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-    </select>
+    <AccSelect style={sel} value={r.to_id}
+      onChange={e => updateRow(r._id, { to_id: e.target.value })}
+      bankAccounts={bankAccounts} ccAccounts={[]} placeholder="— To —" />
   );
 
+  // expense / reimburse_out / give_loan / etc — show Bank + CC
   return (
-    <select style={sel} value={r.from_id || ""}
-      onChange={e => updateRow(r._id, { from_id: e.target.value })}>
-      <option value="">— From —</option>
-      {spendAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-    </select>
+    <AccSelect style={sel} value={r.from_id}
+      onChange={e => updateRow(r._id, { from_id: e.target.value })}
+      bankAccounts={bankAccounts} ccAccounts={ccAccounts} showCC placeholder="— From —" />
   );
 }
 
@@ -749,6 +778,7 @@ function MobileCard({
   const showCat    = !NO_CAT.has(r.tx_type);
   const showEntity = REIMBURSE_TYPES.has(r.tx_type) || r.flagged;
   const cats       = getCatOptions(r.tx_type);
+  const displayDesc = r.description || r.merchant_name || r.notes || "";
 
   return (
     <div style={{
@@ -770,7 +800,7 @@ function MobileCard({
             fontSize: 13, fontWeight: 600, color: T.text, fontFamily: "Figtree, sans-serif",
             minWidth: 0,
           }}
-          value={r.description}
+          value={displayDesc}
           onChange={e => updateRow(r._id, { description: e.target.value })}
         />
         <div style={{
@@ -818,7 +848,7 @@ function MobileCard({
 
       {/* Account — full width */}
       <MobileAccountCell r={r} updateRow={updateRow} T={T}
-        bankAccounts={bankAccounts} ccAccounts={ccAccounts} spendAccounts={spendAccounts} />
+        bankAccounts={bankAccounts} ccAccounts={ccAccounts} />
 
       {/* Entity (reimburse only) */}
       {showEntity && (
@@ -870,43 +900,49 @@ function MobileCard({
 }
 
 // ── Account cell (mobile card) ────────────────────────────────────
-function MobileAccountCell({ r, updateRow, T, bankAccounts, ccAccounts, spendAccounts }) {
+function MobileAccountCell({ r, updateRow, T, bankAccounts, ccAccounts }) {
   const t   = r.tx_type;
   const sel = inSel(T, { fontSize: 12 });
 
-  if (t === "pay_cc" || t === "transfer") {
-    const fromList = bankAccounts;
-    const toList   = t === "pay_cc" ? ccAccounts : bankAccounts;
-    return (
-      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-        <select style={{ ...sel, flex: 1 }} value={r.from_id || ""}
-          onChange={e => updateRow(r._id, { from_id: e.target.value })}>
-          <option value="">From…</option>
-          {fromList.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-        </select>
-        <span style={{ fontSize: 11, color: T.text3 }}>→</span>
-        <select style={{ ...sel, flex: 1 }} value={r.to_id || ""}
-          onChange={e => updateRow(r._id, { to_id: e.target.value })}>
-          <option value="">To…</option>
-          {toList.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-        </select>
-      </div>
-    );
-  }
+  if (t === "pay_cc") return (
+    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+      <AccSelect style={{ ...sel, flex: 1 }} value={r.from_id}
+        onChange={e => updateRow(r._id, { from_id: e.target.value })}
+        bankAccounts={bankAccounts} ccAccounts={[]} placeholder="From…" />
+      <span style={{ fontSize: 11, color: T.text3 }}>→</span>
+      <select style={{ ...sel, flex: 1 }} value={r.to_id || ""}
+        onChange={e => updateRow(r._id, { to_id: e.target.value })}>
+        <option value="">To CC…</option>
+        {ccAccounts.map(a => (
+          <option key={a.id} value={a.id}>
+            {a.name}{(a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+
+  if (t === "transfer") return (
+    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+      <AccSelect style={{ ...sel, flex: 1 }} value={r.from_id}
+        onChange={e => updateRow(r._id, { from_id: e.target.value })}
+        bankAccounts={bankAccounts} ccAccounts={[]} placeholder="From…" />
+      <span style={{ fontSize: 11, color: T.text3 }}>→</span>
+      <AccSelect style={{ ...sel, flex: 1 }} value={r.to_id}
+        onChange={e => updateRow(r._id, { to_id: e.target.value })}
+        bankAccounts={bankAccounts} ccAccounts={[]} placeholder="To…" />
+    </div>
+  );
 
   if (["income","bank_interest","cashback","collect_loan","reimburse_in"].includes(t)) return (
-    <select style={{ ...sel, width: "100%" }} value={r.to_id || ""}
-      onChange={e => updateRow(r._id, { to_id: e.target.value })}>
-      <option value="">To Account…</option>
-      {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-    </select>
+    <AccSelect style={{ ...sel, width: "100%" }} value={r.to_id}
+      onChange={e => updateRow(r._id, { to_id: e.target.value })}
+      bankAccounts={bankAccounts} ccAccounts={[]} placeholder="To Account…" />
   );
 
   return (
-    <select style={{ ...sel, width: "100%" }} value={r.from_id || ""}
-      onChange={e => updateRow(r._id, { from_id: e.target.value })}>
-      <option value="">From Account…</option>
-      {spendAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-    </select>
+    <AccSelect style={{ ...sel, width: "100%" }} value={r.from_id}
+      onChange={e => updateRow(r._id, { from_id: e.target.value })}
+      bankAccounts={bankAccounts} ccAccounts={ccAccounts} showCC placeholder="From Account…" />
   );
 }
