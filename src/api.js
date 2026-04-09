@@ -562,27 +562,43 @@ export const settingsApi = {
 
 // ─── AI RESPONSE JSON EXTRACTOR ───────────────────────────────
 function extractJSON(text) {
-  // Try 1: direct parse
-  try { return JSON.parse(text); } catch {}
+  // Strip markdown code fences first
+  const clean = text
+    .replace(/```json\n?/g, "")
+    .replace(/```\n?/g, "")
+    .trim();
 
-  // Try 2: code block (```json ... ```)
-  const codeBlock = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (codeBlock) {
-    try { return JSON.parse(codeBlock[1].trim()); } catch {}
-  }
+  // Try 1: direct parse of cleaned text
+  try {
+    const parsed = JSON.parse(clean);
+    if (Array.isArray(parsed))       return parsed;
+    if (parsed.transactions)         return parsed.transactions;
+    if (parsed.data)                 return parsed.data;
+    return [parsed];
+  } catch {}
 
-  // Try 3: JSON array anywhere in text
+  // Try 2: find JSON array anywhere in original text
   const arrayMatch = text.match(/\[[\s\S]*\]/);
   if (arrayMatch) {
-    try { return JSON.parse(arrayMatch[0]); } catch {}
+    try {
+      const parsed = JSON.parse(arrayMatch[0]);
+      return Array.isArray(parsed) ? parsed : [parsed];
+    } catch {}
   }
 
-  // Try 4: JSON object → wrap in array or unwrap .transactions
-  const objMatch = text.match(/\{[\s\S]*\}/);
+  // Try 3: extract "transactions": [...] specifically
+  const txMatch = text.match(/"transactions"\s*:\s*(\[[\s\S]*?\])/s);
+  if (txMatch) {
+    try { return JSON.parse(txMatch[1]); } catch {}
+  }
+
+  // Try 4: find any JSON object
+  const objMatch = text.match(/\{[\s\S]*\}/s);
   if (objMatch) {
     try {
-      const obj = JSON.parse(objMatch[0]);
-      return obj.transactions || [obj];
+      const parsed = JSON.parse(objMatch[0]);
+      if (parsed.transactions) return parsed.transactions;
+      return [parsed];
     } catch {}
   }
 
