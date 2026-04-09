@@ -48,6 +48,8 @@ export default function Accounts({
   setAccounts, setAccountCurrencies, accountCurrencies = [], CURRENCIES = [], fxRates = {},
   initialSubTab = "all",
 }) {
+  // When initialSubTab != "all" the page is "locked" to that type — hide subtab bar
+  const locked = initialSubTab !== "all";
   const [subTab,   setSubTab]   = useState(initialSubTab);
   const [modal,    setModal]    = useState(null); // null | "add" | "edit" | "history" | "delete" | "updateNilai"
   const [step,     setStep]     = useState(1);
@@ -323,57 +325,91 @@ export default function Accounts({
         <Button onClick={openAdd} size="sm">+ Add Account</Button>
       </div>
 
-      {/* ── SUMMARY BAR ── */}
-      <div style={{
-        display:             "grid",
-        gridTemplateColumns: "repeat(3, 1fr)",
-        gap:                 8,
-      }}>
-        {[
-          { label: "Bank",        value: totals.bank,        color: "#3b5bdb", bg: "#e8f4fd" },
-          { label: "CC Debt",     value: totals.cc,          color: "#dc2626", bg: "#fde8e8" },
-          { label: "Assets",      value: totals.assets,      color: "#059669", bg: "#e8fdf0" },
-          { label: "Receivables", value: totals.receivables, color: "#d97706", bg: "#fdf6e8" },
-          { label: "Liabilities", value: totals.liabilities, color: "#dc2626", bg: "#fff0f0" },
-        ].filter(s => s.value > 0).slice(0, 3).map(s => (
-          <div key={s.label} style={{
-            background:   s.bg,
-            borderRadius: 12,
-            padding:      "12px 14px",
-          }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: s.color, textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 4, opacity: 0.75 }}>
-              {s.label}
+      {/* ── SUMMARY BAR (only on "All" view) ── */}
+      {!locked && (
+        <div style={{
+          display:             "grid",
+          gridTemplateColumns: "repeat(3, 1fr)",
+          gap:                 8,
+        }}>
+          {[
+            { label: "Bank",        value: totals.bank,        color: "#3b5bdb", bg: "#e8f4fd" },
+            { label: "CC Debt",     value: totals.cc,          color: "#dc2626", bg: "#fde8e8" },
+            { label: "Assets",      value: totals.assets,      color: "#059669", bg: "#e8fdf0" },
+            { label: "Receivables", value: totals.receivables, color: "#d97706", bg: "#fdf6e8" },
+            { label: "Liabilities", value: totals.liabilities, color: "#dc2626", bg: "#fff0f0" },
+          ].filter(s => s.value > 0).slice(0, 3).map(s => (
+            <div key={s.label} style={{
+              background:   s.bg,
+              borderRadius: 12,
+              padding:      "12px 14px",
+            }}>
+              <div style={{ fontSize: 9, fontWeight: 700, color: s.color, textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 4, opacity: 0.75 }}>
+                {s.label}
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
+                {fmtIDR(s.value, true)}
+              </div>
             </div>
-            <div style={{ fontSize: 14, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
-              {fmtIDR(s.value, true)}
+          ))}
+        </div>
+      )}
+
+      {/* ── Locked page summary ── */}
+      {locked && filtered.length > 0 && (() => {
+        const total = filtered.reduce((s, a) => s + Number(a.current_balance || a.current_value || 0), 0);
+        const label = subTab === "bank" ? "Bank Balance" : subTab === "cash" ? "Cash Balance"
+          : subTab === "credit_card" ? "CC Debt" : subTab === "asset" ? "Total Value"
+          : subTab === "receivable" ? "Total Receivable" : "Total";
+        const color = subTab === "credit_card" ? "#dc2626" : subTab === "receivable" ? "#d97706" : "#3b5bdb";
+        const bg    = subTab === "credit_card" ? "#fde8e8" : subTab === "receivable" ? "#fdf6e8" : "#e8f4fd";
+        return (
+          <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ background: bg, borderRadius: 12, padding: "12px 14px", flex: 1 }}>
+              <div style={{ fontSize: 9, fontWeight: 700, color, textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 4, opacity: 0.75 }}>
+                {label}
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
+                {fmtIDR(total, true)}
+              </div>
+            </div>
+            <div style={{ background: "#f3f4f6", borderRadius: 12, padding: "12px 14px" }}>
+              <div style={{ fontSize: 9, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 4 }}>
+                Accounts
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
+                {filtered.length}
+              </div>
             </div>
           </div>
-        ))}
-      </div>
+        );
+      })()}
 
-      {/* ── SUBTABS ── */}
-      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-        {SUBTABS.map(t => {
-          const active = subTab === t.id;
-          return (
-            <button key={t.id} onClick={() => setSubTab(t.id)} style={{
-              height:       30,
-              padding:      "0 12px",
-              borderRadius: 20,
-              border:       `1.5px solid ${active ? "#111827" : "#e5e7eb"}`,
-              background:   active ? "#111827" : "#fff",
-              color:        active ? "#fff" : "#6b7280",
-              fontSize:     12,
-              fontWeight:   active ? 700 : 500,
-              cursor:       "pointer",
-              fontFamily:   "Figtree, sans-serif",
-              transition:   "all 0.15s",
-            }}>
-              {t.label}
-            </button>
-          );
+      {/* ── SUBTABS (only on "All" view) ── */}
+      {!locked && (
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+          {SUBTABS.map(t => {
+            const active = subTab === t.id;
+            return (
+              <button key={t.id} onClick={() => setSubTab(t.id)} style={{
+                height:       30,
+                padding:      "0 12px",
+                borderRadius: 20,
+                border:       `1.5px solid ${active ? "#111827" : "#e5e7eb"}`,
+                background:   active ? "#111827" : "#fff",
+                color:        active ? "#fff" : "#6b7280",
+                fontSize:     12,
+                fontWeight:   active ? 700 : 500,
+                cursor:       "pointer",
+                fontFamily:   "Figtree, sans-serif",
+                transition:   "all 0.15s",
+              }}>
+                {t.label}
+              </button>
+            );
         })}
       </div>
+      )}
 
       {/* ── ACCOUNT LIST ── */}
       {filtered.length === 0 ? (

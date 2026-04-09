@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Home, ArrowUpDown, Landmark, Wallet, CreditCard,
-  TrendingUp, ClipboardList, ArrowDownLeft, BarChart2,
+  TrendingUp, ClipboardList, ArrowDown, BarChart2,
   Calendar as CalendarIcon, Settings as SettingsIcon, LayoutGrid,
 } from "lucide-react";
 import PILogo from "./components/PILogo";
@@ -514,7 +514,7 @@ function NAV_ICON({ id }) {
     case "cards":        return <CreditCard    {...LUCIDE_PROPS} />;
     case "assets":       return <TrendingUp    {...LUCIDE_PROPS} />;
     case "receivables":  return <ClipboardList {...LUCIDE_PROPS} />;
-    case "income":       return <ArrowDownLeft {...LUCIDE_PROPS} />;
+    case "income":       return <ArrowDown      {...LUCIDE_PROPS} />;
     case "reports":      return <BarChart2     {...LUCIDE_PROPS} />;
     case "calendar":     return <CalendarIcon  {...LUCIDE_PROPS} />;
     case "settings":     return <SettingsIcon  {...LUCIDE_PROPS} />;
