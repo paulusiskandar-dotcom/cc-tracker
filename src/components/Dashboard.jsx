@@ -3,6 +3,7 @@ import { ledgerApi, recurringApi } from "../api";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
 import { fmtIDR, ym, mlShort, getGreeting, todayStr, groupByDate } from "../utils";
 import { showToast, EmptyState, Modal, Button, AmountInput, Field, Input, FormRow } from "./shared/index";
+import Select from "./shared/Select";
 import { GroupedTransactionList } from "./shared/TransactionRow";
 
 export default function Dashboard({
@@ -19,6 +20,11 @@ export default function Dashboard({
   const [confirmForm,   setConfirmForm]   = useState({ date: todayStr(), amount: "", notes: "" });
   const [confirmSaving, setConfirmSaving] = useState(false);
   const [dismissed,     setDismissed]     = useState(new Set()); // dismissed upcoming item ids
+  const [settleModal,   setSettleModal]   = useState(false);
+  const [settleRec,     setSettleRec]     = useState(null);    // receivable account raw
+  const [settleBankId,  setSettleBankId]  = useState("");
+  const [settleAmount,  setSettleAmount]  = useState("");
+  const [settleSaving,  setSettleSaving]  = useState(false);
 
   // ─── DERIVED STATS ───────────────────────────────────────────
   const nw = netWorth || { total: 0, bank: 0, assets: 0, receivables: 0, ccDebt: 0, liabilities: 0 };
@@ -278,6 +284,40 @@ export default function Dashboard({
     setDismissed(prev => new Set([...prev, itemId]));
   };
 
+  const openSettleModal = (rec) => {
+    setSettleRec(rec);
+    setSettleAmount(String(rec.receivable_outstanding || ""));
+    setSettleBankId(bankAccounts[0]?.id || "");
+    setSettleModal(true);
+  };
+
+  const doSettle = async () => {
+    if (!settleRec || !settleBankId) return showToast("Select a bank account", "error");
+    setSettleSaving(true);
+    try {
+      const amount = Number(settleAmount) || Number(settleRec.receivable_outstanding) || 0;
+      await ledgerApi.create(user.id, {
+        tx_date:     todayStr(),
+        description: `${settleRec.entity || settleRec.name} reimburse received`,
+        amount,
+        currency:    "IDR",
+        amount_idr:  amount,
+        tx_type:     "reimburse_in",
+        from_type:   "receivable",
+        to_type:     "account",
+        from_id:     settleRec.id,
+        to_id:       settleBankId,
+        entity:      settleRec.entity || "Personal",
+        category_id: null,
+        notes:       "",
+      }, accounts);
+      showToast("Reimburse recorded");
+      setSettleModal(false);
+      await onRefresh();
+    } catch (e) { showToast(e.message, "error"); }
+    setSettleSaving(false);
+  };
+
   // ─── RENDER ──────────────────────────────────────────────────
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -498,12 +538,14 @@ export default function Dashboard({
                         item={item}
                         onEdit={
                           item.type === "reminder"   ? () => openConfirmModal(item.raw, true) :
-                          item.type === "loan" || item.type === "receivable" ? () => setTab?.("receivables") :
+                          item.type === "receivable" ? () => openSettleModal(item.raw) :
+                          item.type === "loan"       ? () => setTab?.("receivables") :
                           null
                         }
                         onConfirm={
                           item.type === "reminder"   ? () => openConfirmModal(item.raw) :
-                          item.type === "loan" || item.type === "receivable" ? () => setTab?.("receivables") :
+                          item.type === "receivable" ? () => openSettleModal(item.raw) :
+                          item.type === "loan"       ? () => setTab?.("receivables") :
                           null
                         }
                         onSkip={
@@ -543,6 +585,39 @@ export default function Dashboard({
           />
         )}
       </div>
+
+      {/* ── QUICK SETTLE MODAL (receivable) ── */}
+      <Modal
+        isOpen={settleModal && !!settleRec}
+        onClose={() => setSettleModal(false)}
+        title={`Settle — ${settleRec?.entity || settleRec?.name || "Reimburse"}`}
+        footer={
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <Button variant="secondary" size="md" onClick={() => setSettleModal(false)}>Cancel</Button>
+            <Button variant="primary"   size="md" busy={settleSaving} onClick={doSettle}>✓ Record</Button>
+          </div>
+        }
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ background: "#f9fafb", borderRadius: 10, padding: "10px 14px", fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
+            Outstanding: <strong style={{ color: "#111827" }}>{fmtIDR(Number(settleRec?.receivable_outstanding || 0))}</strong>
+          </div>
+          <AmountInput
+            label="Amount Received"
+            value={settleAmount}
+            onChange={v => setSettleAmount(v)}
+            currency="IDR"
+          />
+          <Field label="To Bank Account">
+            <Select
+              value={settleBankId}
+              onChange={e => setSettleBankId(e.target.value)}
+              options={bankAccounts.map(a => ({ value: a.id, label: a.name }))}
+              placeholder="Select bank…"
+            />
+          </Field>
+        </div>
+      </Modal>
 
       {/* ── CONFIRM / EDIT REMINDER MODAL ── */}
       <Modal
@@ -686,13 +761,13 @@ function UpcomingRow({ item, onConfirm, onEdit, onSkip }) {
       {!isInfo && (
         <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
           {onEdit && (
-            <button onClick={onEdit} style={RUPT_GHOST} title="Edit">✏️</button>
+            <button onClick={e => { e.stopPropagation(); onEdit(e); }} style={RUPT_GHOST} title="Edit">✏️</button>
           )}
           {onConfirm && (
-            <button onClick={onConfirm} style={RUPT_PRIMARY} title="Confirm">✓</button>
+            <button onClick={e => { e.stopPropagation(); onConfirm(e); }} style={RUPT_PRIMARY} title="Confirm">✓</button>
           )}
           {onSkip && (
-            <button onClick={onSkip} style={RUPT_GHOST} title="Skip">✕</button>
+            <button onClick={e => { e.stopPropagation(); onSkip(e); }} style={RUPT_GHOST} title="Skip">✕</button>
           )}
         </div>
       )}
