@@ -462,6 +462,30 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
   );
 }
 
+// ── Amount formatter (Rp 5.000.000) ─────────────────────────────
+const fmtAmt = (v) => {
+  const n = Number(v) || 0;
+  return "Rp " + n.toLocaleString("id-ID");
+};
+
+// ── Amount cell — formatted display, raw on focus ─────────────────
+function AmountCell({ r, color, T, updateRow }) {
+  const [focused, setFocused] = useState(false);
+  const raw = r.amount_idr || r.amount || "";
+  return (
+    <div style={{ padding: "4px 6px" }}>
+      <input
+        type={focused ? "number" : "text"}
+        style={inInp(T, { textAlign: "right", color, fontWeight: 700, fontSize: 12 })}
+        value={focused ? raw : fmtAmt(raw)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        onChange={e => updateRow(r._id, { amount_idr: e.target.value, amount: e.target.value })}
+      />
+    </div>
+  );
+}
+
 // ══ DESKTOP TABLE ════════════════════════════════════════════════
 // Grid: ☑ | Date | Description | Type | Category | Account | [Entity] | Amount | Actions
 function DesktopTable({
@@ -471,26 +495,26 @@ function DesktopTable({
 }) {
   const hasReimburse = results.some(r => REIMBURSE_TYPES.has(r.tx_type) || r.flagged);
 
-  // Build column template dynamically
+  // ☑=44 Date=72 Desc=flex Type=130 Cat=140 Acc=180 [Entity=90] Amt=110 Actions=90
   const COLS = hasReimburse
-    ? "40px 75px 1fr 120px 130px 150px 90px 95px 85px"
-    : "40px 75px 1fr 120px 130px 150px 95px 85px";
+    ? "44px 72px 1fr 130px 140px 180px 90px 110px 90px"
+    : "44px 72px 1fr 130px 140px 180px 110px 90px";
   const HDR = hasReimburse
     ? ["Date", "Description", "Type", "Category", "Account", "Entity", "Amount", ""]
     : ["Date", "Description", "Type", "Category", "Account", "Amount", ""];
-  const MIN_W = hasReimburse ? 920 : 830;
 
   return (
     <div style={{
       border: `1px solid ${T.border}`, borderRadius: 12, overflow: "hidden",
+      width: "100%",
     }}>
-      <div style={{ overflowX: "auto" }}>
+      <div style={{ overflowX: "auto", width: "100%" }}>
 
         {/* ── Header ── */}
         <div style={{
           display: "grid", gridTemplateColumns: COLS,
           background: T.sur2, borderBottom: `1.5px solid ${T.border}`,
-          minWidth: MIN_W, position: "sticky", top: 0, zIndex: 2,
+          width: "100%", position: "sticky", top: 0, zIndex: 2,
         }}>
           <div style={{ padding: "9px 8px", display: "flex", alignItems: "center" }}>
             <input type="checkbox" checked={allSelected} onChange={toggleSelectAll}
@@ -510,7 +534,7 @@ function DesktopTable({
         </div>
 
         {/* ── Rows ── */}
-        <div style={{ minWidth: MIN_W }}>
+        <div style={{ width: "100%" }}>
           {results.map(r => {
             const isSkipped  = skipped.has(r._id);
             const isSelected = !!selected[r._id];
@@ -631,30 +655,15 @@ function DesktopTable({
                     </div>
                   )}
 
-                  {/* Amount */}
-                  <div style={{ padding: "4px 6px" }}>
-                    <input
-                      type="number"
-                      style={inInp(T, { textAlign: "right", color, fontWeight: 700, fontSize: 12 })}
-                      value={r.amount_idr || r.amount || ""}
-                      onChange={e => updateRow(r._id, { amount_idr: e.target.value, amount: e.target.value })}
-                    />
-                  </div>
+                  {/* Amount — shows formatted Rp X.XXX.XXX; raw number on focus */}
+                  <AmountCell r={r} color={color} T={T} updateRow={updateRow} />
 
-                  {/* Actions */}
-                  <div style={{ padding: "4px 8px", display: "flex", gap: 3, justifyContent: "flex-end" }}>
-                    <button
-                      onClick={() => toggleNotes(r._id)}
-                      style={ACT_BTN({
-                        color: isNotes ? "#3b5bdb" : "#9ca3af",
-                        border: `1px solid ${isNotes ? "#bfdbfe" : "#e5e7eb"}`,
-                        background: isNotes ? "#eff6ff" : "#f9fafb",
-                      })}
-                      title="Notes">✏️</button>
+                  {/* Actions — ✓ import + ✕ skip only */}
+                  <div style={{ padding: "4px 8px", display: "flex", gap: 4, justifyContent: "flex-end" }}>
                     <button
                       onClick={() => importOne(r)}
                       disabled={isSkipped || importingId === r._id}
-                      style={ACT_BTN({ background: "#dcfce7", color: "#059669", border: "1px solid #bbf7d0" })}
+                      style={ACT_BTN({ background: "#dcfce7", color: "#059669", border: "1px solid #bbf7d0", width: 32, height: 32 })}
                       title="Import">
                       {importingId === r._id ? "…" : "✓"}
                     </button>
@@ -663,7 +672,7 @@ function DesktopTable({
                         setSkipped(s => { const ns = new Set(s); ns.has(r._id) ? ns.delete(r._id) : ns.add(r._id); return ns; });
                         setSelected(s => ({ ...s, [r._id]: false }));
                       }}
-                      style={ACT_BTN({ color: isSkipped ? "#059669" : "#9ca3af" })}
+                      style={ACT_BTN({ color: isSkipped ? "#059669" : "#9ca3af", width: 32, height: 32 })}
                       title={isSkipped ? "Restore" : "Skip"}>
                       {isSkipped ? "↩" : "✕"}
                     </button>
