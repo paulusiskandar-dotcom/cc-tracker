@@ -119,6 +119,9 @@ export const EXPENSE_CATEGORIES = [
   { id: "social",        label: "Social & Gifts",   icon: "🎁",  color: "#c2255c",
     keywords: ["gift","donation","wedding","birthday","charity","flowers","social"] },
   { id: "cash_advance_fee", label: "Cash Advance Fee", icon: "💸", color: "#dc2626", keywords: ["cash advance", "advance fee", "ca fee"] },
+  { id: "bank_charges",  label: "Bank Charges",     icon: "🏦",  color: "#6b7280", keywords: ["bank charge", "biaya admin", "admin fee", "service charge"] },
+  { id: "materai",       label: "Materai",          icon: "📋",  color: "#6b7280", keywords: ["materai", "stamp duty"] },
+  { id: "tax",           label: "Tax",              icon: "🧾",  color: "#6b7280", keywords: ["pajak", "pph", "ppn", "tax"] },
   { id: "other",         label: "Other",            icon: "❓",  color: "#9ca3af", keywords: [] },
 ];
 
@@ -134,6 +137,8 @@ export const INCOME_CATEGORIES_LIST = [
   { id: "dividend",        label: "Dividend",        icon: "📈", color: "#7c3aed" },
   { id: "freelance",       label: "Freelance",       icon: "💻", color: "#d97706" },
   { id: "loan_collection", label: "Loan Collection", icon: "🔄", color: "#3b5bdb" },
+  { id: "bank_interest",   label: "Bank Interest",   icon: "🏦", color: "#059669" },
+  { id: "cashback",        label: "Cashback",        icon: "💰", color: "#059669" },
   { id: "other_income",    label: "Other Income",    icon: "💰", color: "#6b7280" },
 ];
 

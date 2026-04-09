@@ -20,11 +20,11 @@ const IMPORT_TX_TYPES = [
 
 // ── Normalise AI pseudo-types to real tx_type + category ─────────
 const PSEUDO_TYPE_MAP = {
-  bank_charges:  { tx_type: "expense", category_id: "finance",      category_name: "Bank Charges"  },
-  materai:       { tx_type: "expense", category_id: "finance",      category_name: "Materai"       },
-  tax:           { tx_type: "expense", category_id: "finance",      category_name: "Tax"           },
-  bank_interest: { tx_type: "income",  category_id: "other_income", category_name: "Bank Interest" },
-  cashback:      { tx_type: "income",  category_id: "other_income", category_name: "Cashback"      },
+  bank_charges:  { tx_type: "expense", category_id: "bank_charges", category_name: "Bank Charges"  },
+  materai:       { tx_type: "expense", category_id: "materai",      category_name: "Materai"       },
+  tax:           { tx_type: "expense", category_id: "tax",          category_name: "Tax"           },
+  bank_interest: { tx_type: "income",  category_id: "bank_interest",category_name: "Bank Interest" },
+  cashback:      { tx_type: "income",  category_id: "cashback",     category_name: "Cashback"      },
 };
 const normaliseTxType = (raw, catId) => {
   const mapped = PSEUDO_TYPE_MAP[raw];
@@ -37,36 +37,36 @@ const normaliseTxType = (raw, catId) => {
 const KEYWORD_RULES = [
   {
     match: /biaya\s*adm|admin\s*fee|bi-?fast\s*fee|transfer\s*fee|provisi|biaya\s*transfer|administration\s*fee|service\s*charge/i,
-    tx_type: "expense", category_id: "finance", category_name: "Bank Charges",
+    tx_type: "expense", category_id: "bank_charges", category_name: "Bank Charges",
   },
   {
     // BI-Fast / bifast ≤ Rp 5.000 → bank charges
     match: /bi-?fast|bifast/i,
     maxAmount: 5000,
-    tx_type: "expense", category_id: "finance", category_name: "Bank Charges",
+    tx_type: "expense", category_id: "bank_charges", category_name: "Bank Charges",
   },
   {
     match: /materai|stamp\s*duty|bea\s*materai/i,
-    tx_type: "expense", category_id: "finance", category_name: "Materai",
+    tx_type: "expense", category_id: "materai", category_name: "Materai",
   },
   {
     match: /\bpph\b|pajak|withholding\s*tax|interest\s*tax|pph\s*bunga/i,
-    tx_type: "expense", category_id: "finance", category_name: "Tax",
+    tx_type: "expense", category_id: "tax", category_name: "Tax",
   },
   {
     // "tax" alone only when NOT "cashback" or "interest" context
     match: /\btax\b/i,
     notMatch: /cashback|interest|bunga/i,
-    tx_type: "expense", category_id: "finance", category_name: "Tax",
+    tx_type: "expense", category_id: "tax", category_name: "Tax",
   },
   {
     match: /bunga\s*tabungan|bunga\s*deposito|jasa\s*giro|bank\s*interest|bunga\b/i,
     notMatch: /pph|pajak|tax/i,
-    tx_type: "income", category_id: "other_income", category_name: "Bank Interest",
+    tx_type: "income", category_id: "bank_interest", category_name: "Bank Interest",
   },
   {
     match: /cashback|cash\s*back|reward\s*points|poin\s*reward/i,
-    tx_type: "income", category_id: "other_income", category_name: "Cashback",
+    tx_type: "income", category_id: "cashback", category_name: "Cashback",
   },
 ];
 
