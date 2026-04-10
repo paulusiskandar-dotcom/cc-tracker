@@ -227,8 +227,8 @@ export default function CreditCards({
   // ── Mark installment month paid ──
   const markInstPaid = async (inst) => {
     try {
-      const total    = inst.total_months || inst.months || 0;
-      const newPaid  = Math.min(inst.paid_months + 1, total);
+      const total    = Math.max(1, Number(inst.total_months ?? inst.months ?? 0) || 1);
+      const newPaid  = Math.min(Number(inst.paid_months ?? 0) + 1, total);
       // Advance next_payment_date by 1 month
       let nextDate = inst.next_payment_date || null;
       if (nextDate) {
@@ -552,11 +552,13 @@ export default function CreditCards({
           {ccInstallments.length === 0
             ? <EmptyState icon="📅" title="No installments" message="Track 0% installment plans here." />
             : ccInstallments.map(inst => {
-                const cc         = creditCards.find(c => c.id === inst.account_id);
-                const total      = inst.total_months || inst.months || 0;
-                const remaining  = total - inst.paid_months;
-                const pct        = total > 0 ? (inst.paid_months / total) * 100 : 0;
-                const isDone     = inst.paid_months >= total;
+                const cc      = creditCards.find(c => c.id === inst.account_id);
+                const total   = Math.max(1, Number(inst.total_months ?? inst.months ?? 0) || 1);
+                const paid    = Number(inst.paid_months ?? 0);
+                const monthly = Number(inst.monthly_amount ?? 0);
+                const remaining = Math.max(0, total - paid);
+                const pct       = Math.min(100, (paid / total) * 100);
+                const isDone    = paid >= total;
                 // Due day from next_payment_date or start_date
                 const dueDateSrc = inst.next_payment_date || inst.start_date;
                 const dueDay     = dueDateSrc ? new Date(dueDateSrc + "T00:00:00").getDate() : null;
@@ -576,7 +578,7 @@ export default function CreditCards({
                         <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 3, display: "flex", gap: 8, flexWrap: "wrap" }}>
                           <span>{cc?.name || "CC"}</span>
                           <span>{total} months</span>
-                          <span style={{ fontWeight: 700, color: "#374151" }}>{fmtIDR(inst.monthly_amount)}/mo</span>
+                          <span style={{ fontWeight: 700, color: "#374151" }}>{fmtIDR(monthly)}/mo</span>
                           {dueDay && !isDone && (
                             <span style={{ color: "#3b5bdb" }}>Due {ordinal(dueDay)} each month</span>
                           )}
@@ -589,7 +591,7 @@ export default function CreditCards({
                       </div>
                       <div style={{ textAlign: "right" }}>
                         <div style={{ fontSize: 15, fontWeight: 800, color: isDone ? "#059669" : "#3b5bdb", fontFamily: "Figtree, sans-serif" }}>
-                          {isDone ? "✓ Done" : fmtIDR(Number(inst.monthly_amount || 0) * remaining, true)}
+                          {isDone ? "✓ Done" : fmtIDR(monthly * remaining, true)}
                         </div>
                         <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
                           {isDone ? "Fully paid" : "remaining"}
@@ -603,8 +605,8 @@ export default function CreditCards({
                         <div key={i} style={{
                           width: Math.min(16, Math.max(8, Math.floor(240 / total))),
                           height: 14, borderRadius: 3,
-                          background: i < inst.paid_months ? "#059669" : "#f3f4f6",
-                          border: `1px solid ${i < inst.paid_months ? "#059669" : "#e5e7eb"}`,
+                          background: i < paid ? "#059669" : "#f3f4f6",
+                          border: `1px solid ${i < paid ? "#059669" : "#e5e7eb"}`,
                           title: `Month ${i + 1}`,
                           cursor: "default",
                           flexShrink: 0,
@@ -614,10 +616,10 @@ export default function CreditCards({
 
                     {/* Progress bar + label */}
                     <BarWithLabel
-                      value={inst.paid_months}
+                      value={paid}
                       max={total}
                       color={isDone ? "#059669" : "#3b5bdb"}
-                      label={`${inst.paid_months}/${total} months paid`}
+                      label={`${paid}/${total} months paid`}
                       labelRight={`${pct.toFixed(0)}%`}
                     />
 
@@ -625,7 +627,7 @@ export default function CreditCards({
                     <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
                       {!isDone && (
                         <Button size="sm" onClick={() => markInstPaid(inst)}>
-                          ✓ Mark Month {inst.paid_months + 1} Paid
+                          ✓ Mark Month {paid + 1} Paid
                         </Button>
                       )}
                       <Button size="sm" variant="danger" onClick={() => setDeleteInstId(inst.id)}>

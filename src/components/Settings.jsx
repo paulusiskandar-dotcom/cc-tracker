@@ -1569,18 +1569,28 @@ function EStatementTab({
       const fromId = isDebit ? (defaultCC?.id || defaultBank?.id || "") : "";
       const toId   = !isDebit ? (defaultBank?.id || "") : "";
 
-      // duplicate check
+      // duplicate check — three levels
       const amt = Number(t.amount || 0);
-      const isDup = ledger.some(e => {
-        if (Math.abs(Number(e.amount_idr || e.amount || 0) - amt) > 1) return false;
-        if (!e.tx_date || !t.date) return false;
-        return Math.abs(new Date(e.tx_date) - new Date(t.date)) / 86400000 <= 1;
-      });
-      const dupEntry = isDup ? ledger.find(e => {
-        if (Math.abs(Number(e.amount_idr || e.amount || 0) - amt) > 1) return false;
-        if (!e.tx_date || !t.date) return false;
-        return Math.abs(new Date(e.tx_date) - new Date(t.date)) / 86400000 <= 1;
-      }) : null;
+      const descSim = (a, b) => {
+        const wordsA = new Set((a || "").toLowerCase().split(/\s+/).filter(w => w.length > 2));
+        const wordsB = new Set((b || "").toLowerCase().split(/\s+/).filter(w => w.length > 2));
+        if (!wordsA.size || !wordsB.size) return 0;
+        let common = 0;
+        wordsA.forEach(w => { if (wordsB.has(w)) common++; });
+        return common / Math.max(wordsA.size, wordsB.size);
+      };
+
+      let dupStatus = "new";
+      let dupEntry  = null;
+      for (const e of ledger) {
+        if (Math.abs(Number(e.amount_idr || e.amount || 0) - amt) > 1) continue;
+        if (!e.tx_date || !t.date) continue;
+        const dayDiff = Math.abs(new Date(e.tx_date) - new Date(t.date)) / 86400000;
+        const sim = descSim(e.description || e.merchant_name, t.merchant || t.description);
+        if (dayDiff === 0 && sim >= 0.7) { dupStatus = "duplicate"; dupEntry = e; break; }
+        if (dayDiff <= 1 && sim >= 0.7) { dupStatus = "possible_duplicate"; dupEntry = e; break; }
+        if (dayDiff <= 1 && dupStatus === "new") { dupStatus = "review"; dupEntry = e; }
+      }
 
       // installment cross-check
       const isInstallment = cat === "installment";
@@ -1607,7 +1617,7 @@ function EStatementTab({
         to_id:           toId,
         category_id:     catId,
         notes:           "",
-        status:          isDup ? "possible_duplicate" : "new",
+        status:          dupStatus,
         _dupEntry:       dupEntry,
         _isInstallment:  isInstallment,
         _instMatch:      instMatch,
@@ -1660,7 +1670,7 @@ function EStatementTab({
 
       const rows = buildRows(result.transactions || []);
       const sel = {};
-      rows.forEach(r => { sel[r._id] = r.status !== "possible_duplicate"; });
+      rows.forEach(r => { sel[r._id] = r.status !== "duplicate" && r.status !== "possible_duplicate"; });
       setQueue(prev => prev.map(i => i.id === itemId
         ? { ...i, status: "reviewed", rows, selected: sel, skipped: new Set(), notesOpen: new Set(), file: null, file_path: null } : i
       ));
@@ -1947,8 +1957,8 @@ function EStmtQueueItem({
 
   const rows         = item.rows || [];
   const countSel     = rows.filter(r => item.selected[r._id] && !item.skipped.has(r._id)).length;
-  const countNew     = rows.filter(r => r.status !== "possible_duplicate").length;
-  const countDup     = rows.filter(r => r.status === "possible_duplicate").length;
+  const countNew     = rows.filter(r => r.status === "new" || r.status === "review").length;
+  const countDup     = rows.filter(r => r.status === "duplicate" || r.status === "possible_duplicate").length;
   const allSel       = rows.length > 0 && rows.every(r => item.selected[r._id] && !item.skipped.has(r._id));
 
   return (
@@ -2073,9 +2083,9 @@ function EStmtTxCard({
   r, T, isSelected, isSkipped, isNotesOpen,
   accounts, onToggleSel, onToggleSkip, onToggleNotes, onUpdate, onCreateInstallment,
 }) {
-  const isDup      = r.status === "possible_duplicate";
-  const cardBg     = isSkipped ? T.sur2 : isDup ? "#fffbeb" : T.surface;
-  const cardBorder = isDup ? "1.5px solid #d97706" : `1px solid ${T.border}`;
+  const dupLevel   = r.status === "duplicate" ? 3 : r.status === "possible_duplicate" ? 2 : r.status === "review" ? 1 : 0;
+  const cardBg     = isSkipped ? T.sur2 : dupLevel === 3 ? "#fff1f2" : dupLevel === 2 ? "#fff7ed" : dupLevel === 1 ? "#fefce8" : T.surface;
+  const cardBorder = dupLevel === 3 ? "1.5px solid #dc2626" : dupLevel === 2 ? "1.5px solid #ea580c" : dupLevel === 1 ? "1.5px solid #ca8a04" : `1px solid ${T.border}`;
   const color      = ESTMT_AMT_COLOR[r.tx_type] || "#A32D2D";
   const showCat    = !ESTMT_NO_CAT.has(r.tx_type);
   const cats       = ESTMT_CAT_FOR_TYPE(r.tx_type);
@@ -2150,9 +2160,19 @@ function EStmtTxCard({
         </select>
 
         {/* DUPLICATE badge */}
-        {isDup && (
-          <span style={{ fontSize: 9, fontWeight: 800, background: "#fef9c3", color: "#92400e", padding: "2px 5px", borderRadius: 4, whiteSpace: "nowrap" }}>
-            ⚠️ DUPLICATE
+        {dupLevel === 3 && (
+          <span style={{ fontSize: 9, fontWeight: 800, background: "#fee2e2", color: "#dc2626", padding: "2px 5px", borderRadius: 4, whiteSpace: "nowrap" }}>
+            DUPLICATE
+          </span>
+        )}
+        {dupLevel === 2 && (
+          <span style={{ fontSize: 9, fontWeight: 800, background: "#ffedd5", color: "#ea580c", padding: "2px 5px", borderRadius: 4, whiteSpace: "nowrap" }}>
+            POSSIBLE DUPLICATE
+          </span>
+        )}
+        {dupLevel === 1 && (
+          <span style={{ fontSize: 9, fontWeight: 800, background: "#fef9c3", color: "#ca8a04", padding: "2px 5px", borderRadius: 4, whiteSpace: "nowrap" }}>
+            REVIEW
           </span>
         )}
 
