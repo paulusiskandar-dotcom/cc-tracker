@@ -1748,17 +1748,27 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
   const [manualPwd, setManualPwd] = useState("");
   const [error, setError]         = useState("");
 
-  // Assign tx_category + extract installment metadata (AI field with fallback patterns)
+  // Normalise AI output → internal shape used by preview + saveAll
+  // Handles both new prompt fields (is_installment, is_fee, installment_current)
+  // and old prompt fields (tx_category, installment_no) for backward compat
   const categorize = (t) => {
-    let cat = t.tx_category;
+    // ── derive tx_category ──────────────────────────────────────
+    let cat = t.tx_category; // old prompt field
     if (!cat) {
       const d = (t.description || "").toLowerCase();
-      if (/payment|pembayaran|bayar\s+tagihan|pelunasan|pay\s+bill|tagihan\s+kartu/i.test(d)) cat = "payment";
+      if (t.is_installment) cat = "installment";
+      else if (t.is_fee)    cat = "fee";
+      else if (t.is_transfer) cat = "transfer";
+      else if (/payment|pembayaran|bayar\s+tagihan|pelunasan|pay\s+bill|tagihan\s+kartu/i.test(d)) cat = "payment";
       else if (/cicilan|angsuran|installment|cicil/i.test(d)) cat = "installment";
       else if (/biaya\s+admin|admin[\s-]fee|late[\s-]charge|bunga|interest|annual[\s-]fee|denda|iuran|service[\s-]charge|provisi/i.test(d)) cat = "fee";
       else cat = "regular";
     }
-    let inst_no    = t.installment_no    ?? null;
+
+    // ── installment metadata ────────────────────────────────────
+    // new prompt: installment_current / installment_total
+    // old prompt: installment_no / installment_total
+    let inst_no    = t.installment_current ?? t.installment_no    ?? null;
     let inst_total = t.installment_total ?? null;
     if (cat === "installment" && !inst_no) {
       const m = (t.description || "").match(
@@ -1766,7 +1776,19 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
       );
       if (m) { inst_no = parseInt(m[1]); inst_total = m[2] ? parseInt(m[2]) : null; }
     }
-    return { ...t, tx_category: cat, installment_no: inst_no, installment_total: inst_total };
+
+    // ── transaction direction ───────────────────────────────────
+    // new prompt: direction "out"/"in" | old prompt: type "debit"/"credit"
+    const isDebit = t.direction ? t.direction === "out"
+                                : (t.type || "debit").toLowerCase() !== "credit";
+
+    return {
+      ...t,
+      tx_category:     cat,
+      installment_no:  inst_no,
+      installment_total: inst_total,
+      _isDebit:        isDebit,
+    };
   };
 
   // Duplicate = amount exact + date ±1 day
@@ -1834,7 +1856,12 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
       }
 
       const categorized = (result.transactions || []).map((t, i) => categorize({ ...t, _id: i }));
-      setMissing(categorized.filter(tx => tx.tx_category !== "payment" && !isDuplicate(tx)));
+      // Filter out payments and transfers-in; keep expenses, fees, installments
+      setMissing(categorized.filter(tx =>
+        tx.tx_category !== "payment" &&
+        !(tx.tx_category === "transfer" && !tx._isDebit) &&
+        !isDuplicate(tx)
+      ));
       setSkipped({});
       setPhase("preview");
     } catch (e) {
@@ -1850,15 +1877,20 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
     let count = 0;
     for (const tx of toSave) {
       const acct = accounts.find(a => a.type === "bank" && (a.bank_name === statement.bank_name || accounts.length === 1));
-      const isDebit = (tx.type || "debit").toLowerCase() === "debit";
+      const isDebit = tx._isDebit !== false;
+      const fxCurrency = tx.currency_original || null;
+      const fxAmount   = tx.amount_original   || null;
+      const notes = tx.tx_category === "installment" && tx.installment_no
+        ? `Cicilan ${tx.installment_no}${tx.installment_total ? `/${tx.installment_total}` : ""}`
+        : (tx.fee_type ? tx.fee_type : null);
       try {
         await supabase.from("ledger").insert({
           user_id:        user.id,
           tx_date:        tx.date,
-          description:    tx.description || "E-Statement import",
-          amount:         Number(tx.amount || 0),
+          description:    tx.merchant || tx.description || "E-Statement import",
+          amount:         fxCurrency ? (fxAmount || Number(tx.amount || 0)) : Number(tx.amount || 0),
           amount_idr:     Number(tx.amount || 0),
-          currency:       tx.currency || "IDR",
+          currency:       fxCurrency || "IDR",
           tx_type:        isDebit ? "expense" : "income",
           from_type:      isDebit ? "account" : null,
           to_type:        isDebit ? null : "account",
@@ -1870,9 +1902,7 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
           is_reimburse:   false,
           ai_categorized: false,
           ai_confidence:  null,
-          notes: tx.tx_category === "installment" && tx.installment_no
-            ? `Cicilan ${tx.installment_no}${tx.installment_total ? `/${tx.installment_total}` : ""}`
-            : null,
+          notes,
         });
         count++;
       } catch { /* skip on error */ }
@@ -1989,7 +2019,7 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
                     {group.items.map(tx => {
                       const skip = !!skipped[tx._id];
                       const isNewInstallment = tx.tx_category === "installment" && !hasInstallmentParent(tx);
-                      const isDebit = (tx.type || "debit").toLowerCase() === "debit";
+                      const isDebit = tx._isDebit !== false;
                       return (
                         <div key={tx._id} style={{
                           padding: "9px 11px", borderRadius: 9,

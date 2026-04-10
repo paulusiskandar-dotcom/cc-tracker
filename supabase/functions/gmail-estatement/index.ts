@@ -328,30 +328,72 @@ async function processStatement(
   // Send PDF to Claude as base64 document
   console.log(`[gmail-estatement] process: sending to Claude AI, pdf size=${pdfForAI.length}`);
 
-  const prompt = `Extract ALL transactions from this bank e-statement PDF.
+  const prompt = `You are an expert at extracting transactions from Indonesian bank and credit card statements.
 
-Return a JSON array of transactions with this exact structure:
-[{
+EXTRACT only actual financial transactions. Return a JSON array.
+
+INCLUDE these transaction types:
+- Regular purchases/expenses (merchant name + amount)
+- Installment payments (CICILAN/INSTALLMENT - note the X/Y pattern and total)
+- Bank fees: biaya admin, biaya layanan notifikasi, bea materai, iuran tahunan, bunga, denda, provisi
+- Foreign currency transactions (extract both IDR amount and original currency/amount if shown)
+- Transfers OUT (DEBIT column / direction "out")
+
+SKIP these completely:
+- BALANCE OF LAST MONTH / Saldo awal bulan lalu / SALDO BULAN LALU
+- Payment received / Pembayaran diterima / (-) Pembayaran
+- Summary sections: RINGKASAN TAGIHAN, RINGKASAN TREATS, BUNGA DAN TOTAL TRANSAKSI
+- TOTAL rows and END OF STATEMENT
+- Promotional text, advertisements, discount offers
+- Credit limit info, minimum payment info
+- Header/footer info (name, address, card number)
+- Barcode, QR code references
+- TAX Deducted with amount < 1000 (withholding tax noise)
+- Credit Interest Capitalised (bank interest earned, skip)
+
+DEBIT/KREDIT column format (Danamon consolidated statement style):
+- DEBIT column = money OUT → direction "out"
+- KREDIT column = money IN (transfers received, reversals) → direction "in" — SKIP these
+- SALDO column = running balance, ignore entirely
+- Section headers like "DANAMON LEBIH PRO (IDR) - IDR - 903691853372"
+  → extract account number (last segment) and set account_hint for all rows in that section
+- Section headers like "KARTU KREDIT JCB - 3567XXXXXX459551"
+  → extract card last 4 digits ("9551") and set card_last4 for all rows in that section
+
+FOR EACH TRANSACTION return:
+{
   "date": "YYYY-MM-DD",
-  "description": "transaction description",
+  "description": "full description as written",
+  "merchant": "cleaned merchant name",
   "amount": 150000,
-  "currency": "IDR",
-  "type": "debit|credit",
-  "balance": 5000000,
-  "tx_category": "payment|installment|fee|transfer|regular",
-  "installment_no": null,
-  "installment_total": null
-}]
+  "direction": "out",
+  "currency_original": "USD",
+  "amount_original": 6.66,
+  "rate_used": 17182.95,
+  "is_installment": false,
+  "installment_current": null,
+  "installment_total": null,
+  "is_fee": false,
+  "fee_type": null,
+  "is_transfer": false,
+  "card_last4": null,
+  "account_hint": null
+}
 
-Rules for tx_category:
-- "payment": Bill/CC payments (description contains: payment, pembayaran, bayar tagihan, pelunasan, pay bill, tagihan kartu)
-- "installment": Installment charges (description contains: cicilan, angsuran, installment, cicil)
-- "fee": Bank charges (description contains: biaya admin, admin fee, late charge, bunga, interest, annual fee, denda, iuran, service charge, provisi)
-- "transfer": Inter-account transfers (description contains: transfer, pemindahan, top up, tarik tunai ke rekening lain)
-- "regular": All other purchases, expenses, and income
+Field notes:
+- amount: always positive number in IDR
+- direction: "out" for expenses/debits, "in" for credits (income/transfers in)
+- currency_original / amount_original / rate_used: fill if foreign currency shown, else null
+- is_installment: true if CICILAN/INSTALLMENT row
+- installment_current / installment_total: e.g. 10 and 12 from "10/12", else null
+- is_fee: true if bank fee/charge (admin, materai, annual fee, bunga, denda, notifikasi)
+- fee_type: "materai" | "admin" | "annual_fee" | "interest" | "notification" | "penalty" | null
+- is_transfer: true if description contains "Transfer ke" or "Transfer dari"
+- card_last4: last 4 digits of card if shown next to the transaction, else null
+- account_hint: account number from section header if applicable, else null
 
-For installment rows extract installment_no and installment_total if shown (e.g. "Cicilan 3/12" → no=3, total=12). Leave null if not shown.
-Return ONLY the JSON array, no other text.`;
+Return ONLY valid JSON array. No markdown, no explanation.
+If no transactions found, return [].`;
 
   const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
