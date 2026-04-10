@@ -278,12 +278,13 @@ async function processStatement(
   let transactions: any[] = [];
   let usedPassword = "";
   let lastError = "";
+  let isEncrypted = false; // true only if no-password attempt returns password_required
 
   for (const pwd of passwords) {
     try {
       const promptPrefix = pwd.value
         ? `This is a password-protected bank e-statement PDF. The password is: "${pwd.value}". Extract ALL transactions from this document.`
-        : `Extract ALL transactions from this bank e-statement PDF.`;
+        : `Extract ALL transactions from this bank e-statement PDF. This PDF has no password.`;
 
       const fullPrompt = `${promptPrefix}
 
@@ -355,6 +356,8 @@ Return ONLY the JSON array (or error object), no other text.`;
 
       const parsed = JSON.parse(jsonMatch[0]);
       if (parsed?.error === "password_required" || parsed?.error === "wrong_password") {
+        // Track that we confirmed the PDF is encrypted (only relevant on no-password attempt)
+        if (pwd.value === "") isEncrypted = true;
         lastError = parsed.error;
         continue;
       }
@@ -372,9 +375,17 @@ Return ONLY the JSON array (or error object), no other text.`;
   }
 
   if (transactions.length === 0) {
-    await serviceSupabase.from("estatement_pdfs")
-      .update({ status: "password_needed" }).eq("id", statementId);
-    return { success: false, error: lastError, needs_password: true };
+    if (isEncrypted) {
+      // PDF is definitely password-protected — user needs to provide password
+      await serviceSupabase.from("estatement_pdfs")
+        .update({ status: "password_needed" }).eq("id", statementId);
+      return { success: false, error: lastError, needs_password: true, encrypted: true };
+    } else {
+      // PDF was readable but no transactions could be extracted (format issue, image PDF, etc.)
+      await serviceSupabase.from("estatement_pdfs")
+        .update({ status: "pending" }).eq("id", statementId);
+      return { success: false, error: lastError || "No transactions extracted", needs_password: false, encrypted: false };
+    }
   }
 
   // Update record

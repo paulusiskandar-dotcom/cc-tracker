@@ -1724,30 +1724,43 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
     );
   };
 
-  const callProcess = async (extraPasswords = []) => {
+  // onlyPasswords: when set, send only these passwords (skip saved list) — used for manual Try
+  const callProcess = async ({ extraPasswords = [], onlyPasswords = null } = {}) => {
     setPhase("processing"); setError("");
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
+
+      let pwdPayload = null;
+      if (onlyPasswords) {
+        // Manual Try: send only the specified password(s)
+        pwdPayload = onlyPasswords.map(v => ({ label: "Manual", pattern: v }));
+      } else if (extraPasswords.length > 0) {
+        pwdPayload = [...passwordList, ...extraPasswords.map(v => ({ label: "Manual", pattern: v }))];
+      }
+
       const res = await fetch(`${SUPABASE_URL}/functions/v1/gmail-estatement`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({
-          action: "process",
-          statement_id: statement.id,
-          passwords: extraPasswords.length > 0
-            ? [...passwordList, ...extraPasswords.map(v => ({ label: "Manual", pattern: v }))]
-            : null,
-        }),
+        body: JSON.stringify({ action: "process", statement_id: statement.id, passwords: pwdPayload }),
       });
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || "Processing failed");
-      if (!result.success || result.needs_password) {
-        setPhase("idle"); setError("Could not unlock PDF. Enter password manually below.");
+
+      if (!result.success) {
+        if (result.needs_password && result.encrypted) {
+          setPhase("idle");
+          setError(onlyPasswords
+            ? "Wrong password — try a different one."
+            : "PDF is password-protected. Enter the password below.");
+        } else {
+          setPhase("idle");
+          setError("Could not extract transactions from this PDF. It may be a scanned image or unsupported format.");
+        }
         return;
       }
+
       const categorized = (result.transactions || []).map((t, i) => categorize({ ...t, _id: i }));
-      // Silently drop payment-type and already-recorded transactions
       setMissing(categorized.filter(tx => tx.tx_category !== "payment" && !isDuplicate(tx)));
       setSkipped({});
       setPhase("preview");
@@ -1839,22 +1852,28 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
             <>
               <div style={{ fontSize: 13, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
                 This will download the PDF from Gmail and extract transactions using AI.
-                {passwordList.length > 0 && ` Will try ${passwordList.length} saved password(s).`}
+                {passwordList.length > 0 && ` Will try no password first, then ${passwordList.length} saved password(s).`}
               </div>
               {error && (
                 <div style={{ padding: "10px 12px", background: "#fff5f5", border: "1px solid #fecaca", borderRadius: 9, fontSize: 12, color: "#dc2626" }}>
                   {error}
-                  <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
-                    <input
-                      value={manualPwd}
-                      onChange={e => setManualPwd(e.target.value)}
-                      placeholder="Enter PDF password…"
-                      style={{ flex: 1, height: 34, padding: "0 10px", border: "1.5px solid #e5e7eb", borderRadius: 8, fontFamily: "Figtree, sans-serif", fontSize: 13 }}
-                    />
-                    <Button variant="primary" size="sm" onClick={() => callProcess(manualPwd ? [manualPwd] : [])}>
-                      Try
-                    </Button>
-                  </div>
+                  {error.includes("password") && (
+                    <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
+                      <input
+                        value={manualPwd}
+                        onChange={e => setManualPwd(e.target.value)}
+                        onKeyDown={e => e.key === "Enter" && manualPwd.trim() && callProcess({ onlyPasswords: [manualPwd] })}
+                        placeholder="Enter PDF password…"
+                        style={{ flex: 1, height: 34, padding: "0 10px", border: "1.5px solid #e5e7eb", borderRadius: 8, fontFamily: "Figtree, sans-serif", fontSize: 13 }}
+                      />
+                      <Button
+                        variant="primary" size="sm"
+                        onClick={() => manualPwd.trim() && callProcess({ onlyPasswords: [manualPwd] })}
+                      >
+                        Try
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )}
               <Button variant="primary" onClick={() => callProcess()}>
