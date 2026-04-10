@@ -659,18 +659,16 @@ export default function Transactions({
         isOpen={modal === "add" || modal === "edit"}
         onClose={() => setModal(null)}
         title={
-          modal === "edit"
-            ? "Edit Transaction"
-            : step === 1 ? "Add Transaction" : TYPE_CHOICES.find(t => t.id === form.tx_type)?.label || "Add"
+          step === 1
+            ? (modal === "edit" ? "Change Type" : "Add Transaction")
+            : (modal === "edit" ? "Edit Transaction" : TYPE_CHOICES.find(t => t.id === form.tx_type)?.label || "Add")
         }
         footer={
           step === 2 && (
             <div style={{ display: "flex", gap: 8 }}>
-              {modal === "add" && (
-                <Button variant="secondary" onClick={() => setStep(1)} style={{ flexShrink: 0 }}>
-                  ← Back
-                </Button>
-              )}
+              <Button variant="secondary" onClick={() => setStep(1)} style={{ flexShrink: 0 }}>
+                ← Back
+              </Button>
               <Button fullWidth onClick={save} busy={saving}>
                 {modal === "edit" ? "Save Changes" : "Add Transaction"}
               </Button>
@@ -691,6 +689,7 @@ export default function Transactions({
             incomeSrcs={incomeSrcs} allCurrencies={allCurrencies}
             amtIDR={amtIDR} receivables={receivables}
             assets={assets} accountCurrencies={accountCurrencies}
+            onChangeType={() => setStep(1)}
           />
         )}
       </Modal>
@@ -1244,7 +1243,7 @@ function FxExchangeForm({ form, set, accounts, accountCurrencies = [], allCurren
 }
 
 // ─── TRANSACTION FORM ────────────────────────────────────────
-function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incomeSrcs = [], allCurrencies = [], amtIDR, receivables = [], assets = [], accountCurrencies = [] }) {
+function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incomeSrcs = [], allCurrencies = [], amtIDR, receivables = [], assets = [], accountCurrencies = [], onChangeType }) {
   const type = form.tx_type;
   const [fromSource, setFromSource] = useState("bank");
 
@@ -1329,18 +1328,29 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
-      {/* Type badge */}
-      <div style={{
-        display: "inline-flex", alignItems: "center", gap: 6,
-        padding: "4px 10px", borderRadius: 20,
-        background: (TYPE_CHOICES.find(t => t.id === type)?.color || "#9ca3af") + "18",
-        width: "fit-content",
-      }}>
+      {/* Type badge — clickable to change type */}
+      <button
+        type="button"
+        onClick={onChangeType}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: 6,
+          padding: "4px 10px", borderRadius: 20,
+          background: (TYPE_CHOICES.find(t => t.id === type)?.color || "#9ca3af") + "18",
+          border: `1.5px solid ${(TYPE_CHOICES.find(t => t.id === type)?.color || "#9ca3af")}33`,
+          cursor: onChangeType ? "pointer" : "default",
+          width: "fit-content",
+        }}
+      >
         <span style={{ fontSize: 14 }}>{TYPE_CHOICES.find(t => t.id === type)?.icon}</span>
         <span style={{ fontSize: 11, fontWeight: 700, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
           {TYPE_CHOICES.find(t => t.id === type)?.label}
         </span>
-      </div>
+        {onChangeType && (
+          <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginLeft: 2 }}>
+            ✎
+          </span>
+        )}
+      </button>
 
       {/* Date — hidden for fx_exchange (handled inside FxExchangeForm) */}
       {type !== "fx_exchange" && (
