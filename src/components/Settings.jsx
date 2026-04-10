@@ -1726,64 +1726,39 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
   };
 
   // Auto-start as soon as modal opens
-  useEffect(() => { callPrepare(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { callProcess(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Step 2: call extract with the working password returned from prepare
-  const callExtract = async (workingPassword) => {
-    setStatusMsg("Extracting transactions with AI...");
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/gmail-estatement`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({ action: "extract", statement_id: statement.id, working_password: workingPassword }),
-      });
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error || "Extract failed");
-
-      if (!result.success) {
-        setPhase("needs_password");
-        setError(result.error || "Could not extract transactions from this PDF. It may be a scanned image or unsupported format.");
-        return;
-      }
-
-      const categorized = (result.transactions || []).map((t, i) => categorize({ ...t, _id: i }));
-      setMissing(categorized.filter(tx => tx.tx_category !== "payment" && !isDuplicate(tx)));
-      setSkipped({});
-      setPhase("preview");
-    } catch (e) {
-      setPhase("needs_password");
-      setError(e.message);
-    }
-  };
-
-  // Step 1: download PDF + test passwords with pdf-lib (no AI)
-  // onlyPassword: if set, only test this single password (manual Try)
-  const callPrepare = async ({ onlyPassword = null } = {}) => {
+  // onlyPassword: if set, only test this single password (manual Try — skips saved list)
+  const callProcess = async ({ onlyPassword = null } = {}) => {
     setPhase("loading");
+    setStatusMsg("Processing e-statement...");
     setError("");
-    setStatusMsg(onlyPassword ? "Testing password..." : "Downloading PDF...");
+
+    console.log("[estatement] callProcess for statement:", statement?.id);
+    console.log("[estatement] SUPABASE_URL:", SUPABASE_URL || "(empty — check REACT_APP_SUPABASE_URL)");
+
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
+      console.log("[estatement] auth token:", token ? "present" : "MISSING");
 
-      const reqBody = { action: "prepare", statement_id: statement.id };
+      const url = `${SUPABASE_URL}/functions/v1/gmail-estatement`;
+      const reqBody = { action: "process", statement_id: statement.id };
       if (onlyPassword !== null) reqBody.only_password = onlyPassword;
 
-      if (!onlyPassword) {
-        // Show "Testing passwords..." after a brief delay so the first msg is visible
-        setTimeout(() => setStatusMsg("Testing passwords..."), 800);
-      }
+      console.log("[estatement] fetching:", url, "body:", JSON.stringify(reqBody));
 
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/gmail-estatement`, {
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
         body: JSON.stringify(reqBody),
       });
+
+      console.log("[estatement] response status:", res.status);
       const result = await res.json();
-      if (!res.ok) throw new Error(result.error || "Prepare failed");
+      console.log("[estatement] response body:", result);
+
+      if (!res.ok) throw new Error(result.error || `HTTP ${res.status}`);
 
       if (!result.success) {
         if (result.needs_password && result.encrypted) {
@@ -1793,15 +1768,17 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
             : "PDF is password-protected. Enter the password below.");
         } else {
           setPhase("needs_password");
-          setError("Could not open this PDF. It may be a scanned image or an unsupported format.");
+          setError(result.error || "Could not extract transactions. PDF may be a scanned image or unsupported format.");
         }
         return;
       }
 
-      // Prepare succeeded → proceed to AI extraction
-      setStatusMsg("Unlocked! Extracting transactions with AI...");
-      await callExtract(result.working_password);
+      const categorized = (result.transactions || []).map((t, i) => categorize({ ...t, _id: i }));
+      setMissing(categorized.filter(tx => tx.tx_category !== "payment" && !isDuplicate(tx)));
+      setSkipped({});
+      setPhase("preview");
     } catch (e) {
+      console.error("[estatement] callProcess error:", e);
       setPhase("needs_password");
       setError(e.message);
     }
@@ -1904,13 +1881,13 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
                       type="password"
                       value={manualPwd}
                       onChange={e => setManualPwd(e.target.value)}
-                      onKeyDown={e => e.key === "Enter" && manualPwd.trim() && callPrepare({ onlyPassword: manualPwd })}
+                      onKeyDown={e => e.key === "Enter" && manualPwd.trim() && callProcess({ onlyPassword: manualPwd })}
                       placeholder="PDF password…"
                       style={{ flex: 1, height: 38, padding: "0 12px", border: "1.5px solid #3b5bdb", borderRadius: 8, fontFamily: "Figtree, sans-serif", fontSize: 13, outline: "none" }}
                     />
                     <Button
                       variant="primary" size="sm"
-                      onClick={() => manualPwd.trim() && callPrepare({ onlyPassword: manualPwd })}
+                      onClick={() => manualPwd.trim() && callProcess({ onlyPassword: manualPwd })}
                     >
                       Try
                     </Button>
