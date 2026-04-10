@@ -36,6 +36,24 @@ const BANK_DOMAINS = [
   "bankmega.com", "permatabank.com",
   "btn.co.id", "superbank.id",
   "neobank.id", "sea.com",
+  // additional domains
+  "smbci.com",
+  "btpn.com",
+  "mybca.com",
+  "bcadigital.co.id",
+  "mandirisyariah.co.id",
+  "livin.id",
+  "brimo.bri.co.id",
+  "ocbcnisp.com",
+  "ocbcnisp.co.id",
+  "danamonline.com",
+  "cimb.com",
+  "uobgroup.com",
+  "hsbc.com",
+  "megasyariah.co.id",
+  "permatabank.co.id",
+  "noreply.jenius.com",
+  "info.jenius.com",
 ];
 
 // Keywords that indicate non-transactional emails to skip
