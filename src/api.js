@@ -561,6 +561,32 @@ export const accountCurrenciesApi = {
   },
 };
 
+// ─── ASSETS ───────────────────────────────────────────────────
+export const assetsApi = {
+  getAll: async (userId) => {
+    const { data, error } = await supabase
+      .from("assets")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return data || [];
+  },
+  create: async (userId, d) => {
+    const { data, error } = await supabase
+      .from("assets")
+      .insert([{ ...d, user_id: userId }])
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return data;
+  },
+  update: async (id, d) => {
+    const { error } = await supabase.from("assets").update(d).eq("id", id);
+    if (error) throw new Error(error.message);
+  },
+};
+
 // ─── FX RATES ─────────────────────────────────────────────────
 export const fxApi = {
   getAll: async (userId) => {

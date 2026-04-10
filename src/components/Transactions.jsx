@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { ledgerApi, merchantApi, gmailApi, getTxFromToTypes, employeeLoanApi, accountCurrenciesApi } from "../api";
+import { ledgerApi, merchantApi, gmailApi, getTxFromToTypes, employeeLoanApi, accountCurrenciesApi, assetsApi } from "../api";
 import { EXPENSE_CATEGORIES, ENTITIES, TX_TYPES } from "../constants";
 import { fmtIDR, todayStr, ym, toIDR, groupByDate, fmtDateLabel } from "../utils";
 import Modal, { ConfirmModal } from "./shared/Modal";
@@ -40,6 +40,8 @@ const EMPTY = {
   notes: "", is_reimburse: false,
   // give_loan extras
   employee_name: "", monthly_installment: "", loan_start_date: todayStr(),
+  // buy_asset extras
+  asset_name: "", asset_type: "Investment",
 };
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────
@@ -179,12 +181,16 @@ export default function Transactions({
       showToast("Description is required", "error");
       return;
     }
-    // Both accounts required
-    if (["transfer", "pay_cc", "fx_exchange", "buy_asset", "sell_asset", "pay_liability"].includes(type)) {
+    // Both accounts required (buy_asset only needs from_id + asset_name)
+    if (["transfer", "pay_cc", "fx_exchange", "sell_asset", "pay_liability"].includes(type)) {
       if (!form.from_id || !form.to_id) {
         showToast("Both From and To accounts are required", "error");
         return;
       }
+    }
+    if (type === "buy_asset") {
+      if (!form.from_id) { showToast("Select source account", "error"); return; }
+      if (!form.asset_name?.trim()) { showToast("Asset name is required", "error"); return; }
     }
     // FX exchange extra validation
     if (type === "fx_exchange") {
@@ -247,6 +253,69 @@ export default function Transactions({
         const created = await ledgerApi.create(user.id, loanEntry, accounts);
         setLedger(p => [created, ...p]);
         showToast(`Loan of ${fmtIDR(sn(form.amount), true)} created for ${loan.employee_name}`);
+        await onRefresh();
+        setModal(null);
+        setSaving(false);
+        return;
+      }
+
+      // ── Buy Asset ──────────────────────────────────────────────
+      if (type === "buy_asset" && !editEntry) {
+        const price = sn(form.amount);
+        const txEntry = {
+          tx_date:       form.tx_date || todayStr(),
+          description:   form.asset_name?.trim() || "Asset Purchase",
+          amount:        price, currency: "IDR", amount_idr: price,
+          tx_type:       "buy_asset", from_type: "account", to_type: "account",
+          from_id:       uuid(form.from_id), to_id: null,
+          category_id:   null, category_name: null,
+          entity:        "Personal", is_reimburse: false,
+          merchant_name: null, notes: form.notes || null,
+          attachment_url: null, ai_categorized: false, ai_confidence: null,
+          installment_id: null, scan_batch_id: null,
+        };
+        const created = await ledgerApi.create(user.id, txEntry, accounts);
+        setLedger(p => [created, ...p]);
+        // Try to record in assets table
+        try {
+          await assetsApi.create(user.id, {
+            name:           form.asset_name.trim(),
+            type:           form.asset_type || "Investment",
+            current_value:  price,
+            purchase_price: price,
+            purchase_date:  form.tx_date || todayStr(),
+            notes:          form.notes || null,
+          });
+        } catch (ae) { console.warn("[buy_asset] assets table insert failed:", ae.message); }
+        showToast("Asset purchased");
+        await onRefresh();
+        setModal(null);
+        setSaving(false);
+        return;
+      }
+
+      // ── Sell Asset ─────────────────────────────────────────────
+      if (type === "sell_asset" && !editEntry) {
+        const sellPrice = sn(form.amount);
+        const txEntry = {
+          tx_date:       form.tx_date || todayStr(),
+          description:   "Asset Sale",
+          amount:        sellPrice, currency: "IDR", amount_idr: sellPrice,
+          tx_type:       "sell_asset", from_type: "account", to_type: "account",
+          from_id:       uuid(form.from_id), to_id: uuid(form.to_id),
+          category_id:   null, category_name: null,
+          entity:        "Personal", is_reimburse: false,
+          merchant_name: null, notes: form.notes || null,
+          attachment_url: null, ai_categorized: false, ai_confidence: null,
+          installment_id: null, scan_batch_id: null,
+        };
+        const created = await ledgerApi.create(user.id, txEntry, accounts);
+        setLedger(p => [created, ...p]);
+        // Try to mark asset as sold
+        try {
+          if (form.from_id) await assetsApi.update(form.from_id, { current_value: 0 });
+        } catch (ae) { console.warn("[sell_asset] assets table update failed:", ae.message); }
+        showToast("Asset sold");
         await onRefresh();
         setModal(null);
         setSaving(false);
@@ -544,6 +613,7 @@ export default function Transactions({
             accounts={accounts} categories={categories}
             incomeSrcs={incomeSrcs} allCurrencies={allCurrencies}
             amtIDR={amtIDR} receivables={receivables}
+            assets={assets}
           />
         )}
       </Modal>
@@ -679,8 +749,112 @@ function TypePickerGrid({ types, onSelect }) {
   );
 }
 
+// ─── BUY ASSET FORM ──────────────────────────────────────────
+const ASSET_TYPES = ["Property", "Vehicle", "Investment", "Crypto", "Collectible", "Other"];
+
+function BuyAssetForm({ form, set, accounts }) {
+  const INP = {
+    width: "100%", height: 44, padding: "0 14px",
+    border: "1.5px solid #e5e7eb", borderRadius: 10,
+    fontFamily: "Figtree, sans-serif", fontSize: 14, fontWeight: 500,
+    color: "#111827", background: "#fff", outline: "none",
+    appearance: "none", WebkitAppearance: "none", boxSizing: "border-box",
+  };
+  const bankAccs = accounts.filter(a => a.is_active !== false && (a.type === "bank" || a.type === "credit_card")).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* From account */}
+      <Field label="From Account">
+        <select value={form.from_id || ""} onChange={e => set("from_id", e.target.value || null)} style={INP}>
+          <option value="">Select account…</option>
+          {bankAccs.map(a => <option key={a.id} value={a.id}>{a.name}{a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : ""}</option>)}
+        </select>
+      </Field>
+      {/* Asset name */}
+      <Input label="Asset Name *" value={form.asset_name || ""} onChange={e => set("asset_name", e.target.value)} placeholder="e.g. Apartment Kemang, BCA Stock" />
+      {/* Asset type */}
+      <Field label="Asset Type">
+        <select value={form.asset_type || "Investment"} onChange={e => set("asset_type", e.target.value)} style={INP}>
+          {ASSET_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+      </Field>
+      {/* Purchase price */}
+      <AmountInput label="Purchase Price (IDR)" value={form.amount} onChange={v => set("amount", v)} />
+      {/* Notes */}
+      <Field label="Notes (optional)">
+        <textarea value={form.notes || ""} onChange={e => set("notes", e.target.value)} placeholder="Any details…" rows={2}
+          style={{ width: "100%", padding: "10px 14px", border: "1.5px solid #e5e7eb", borderRadius: 10, fontFamily: "Figtree, sans-serif", fontSize: 14, fontWeight: 500, color: "#111827", background: "#fff", outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+      </Field>
+    </div>
+  );
+}
+
+// ─── SELL ASSET FORM ─────────────────────────────────────────
+function SellAssetForm({ form, set, accounts, assets = [] }) {
+  const INP = {
+    width: "100%", height: 44, padding: "0 14px",
+    border: "1.5px solid #e5e7eb", borderRadius: 10,
+    fontFamily: "Figtree, sans-serif", fontSize: 14, fontWeight: 500,
+    color: "#111827", background: "#fff", outline: "none",
+    appearance: "none", WebkitAppearance: "none", boxSizing: "border-box",
+  };
+  const bankAccs  = accounts.filter(a => a.is_active !== false && a.type === "bank").sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  const assetAccs = assets.filter(a => a.is_active !== false).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  const selectedAsset = assetAccs.find(a => a.id === form.from_id);
+  const purchasePrice = Number(selectedAsset?.purchase_price || selectedAsset?.current_value || 0);
+  const sellPrice     = Number(form.amount || 0);
+  const pl            = purchasePrice > 0 && sellPrice > 0 ? sellPrice - purchasePrice : null;
+  const plColor       = pl === null ? "#9ca3af" : pl >= 0 ? "#059669" : "#dc2626";
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* Asset selector */}
+      <Field label="Asset">
+        <select value={form.from_id || ""} onChange={e => set("from_id", e.target.value || null)} style={INP}>
+          <option value="">Select asset…</option>
+          {assetAccs.map(a => <option key={a.id} value={a.id}>{a.name}{a.subtype ? ` · ${a.subtype}` : ""}</option>)}
+        </select>
+      </Field>
+      {/* To account */}
+      <Field label="To Account (receive funds)">
+        <select value={form.to_id || ""} onChange={e => set("to_id", e.target.value || null)} style={INP}>
+          <option value="">Select account…</option>
+          {bankAccs.map(a => <option key={a.id} value={a.id}>{a.name}{a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : ""}</option>)}
+        </select>
+      </Field>
+      {/* Sell price */}
+      <AmountInput label="Sell Price (IDR)" value={form.amount} onChange={v => set("amount", v)} />
+      {/* P/L display */}
+      {selectedAsset && sellPrice > 0 && (
+        <div style={{ background: pl !== null && pl >= 0 ? "#f0fdf4" : "#fff5f5", border: `1px solid ${plColor}33`, borderRadius: 10, padding: "10px 14px", display: "flex", gap: 20, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 9, color: "#9ca3af", fontWeight: 700, textTransform: "uppercase", fontFamily: "Figtree, sans-serif" }}>Purchase Price</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif" }}>{purchasePrice > 0 ? `Rp ${purchasePrice.toLocaleString("id-ID")}` : "—"}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 9, color: "#9ca3af", fontWeight: 700, textTransform: "uppercase", fontFamily: "Figtree, sans-serif" }}>Sell Price</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif" }}>Rp {sellPrice.toLocaleString("id-ID")}</div>
+          </div>
+          {pl !== null && (
+            <div>
+              <div style={{ fontSize: 9, color: plColor, fontWeight: 700, textTransform: "uppercase", fontFamily: "Figtree, sans-serif" }}>{pl >= 0 ? "Gain" : "Loss"}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: plColor, fontFamily: "Figtree, sans-serif" }}>{pl >= 0 ? "+" : ""}Rp {Math.abs(pl).toLocaleString("id-ID")}</div>
+            </div>
+          )}
+        </div>
+      )}
+      {/* Notes */}
+      <Field label="Notes (optional)">
+        <textarea value={form.notes || ""} onChange={e => set("notes", e.target.value)} placeholder="Any details…" rows={2}
+          style={{ width: "100%", padding: "10px 14px", border: "1.5px solid #e5e7eb", borderRadius: 10, fontFamily: "Figtree, sans-serif", fontSize: 14, fontWeight: 500, color: "#111827", background: "#fff", outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+      </Field>
+    </div>
+  );
+}
+
 // ─── TRANSACTION FORM ────────────────────────────────────────
-function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incomeSrcs = [], allCurrencies = [], amtIDR, receivables = [] }) {
+function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incomeSrcs = [], allCurrencies = [], amtIDR, receivables = [], assets = [] }) {
   const type = form.tx_type;
   const [fromSource, setFromSource] = useState("bank");
 
@@ -781,8 +955,14 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
       {/* Date */}
       <Input label="Date" type="date" value={form.tx_date} onChange={e => set("tx_date", e.target.value)} />
 
-      {/* Description */}
-      {!["transfer","pay_cc","reimburse_in","collect_loan","pay_liability","fx_exchange"].includes(type) && (
+      {/* ── BUY ASSET form ──────────────────────────────────────── */}
+      {type === "buy_asset" && <BuyAssetForm form={form} set={set} accounts={accounts} />}
+
+      {/* ── SELL ASSET form ─────────────────────────────────────── */}
+      {type === "sell_asset" && <SellAssetForm form={form} set={set} accounts={accounts} assets={assets} />}
+
+      {/* Description — skip for buy/sell asset (handled inside their forms) */}
+      {!["transfer","pay_cc","reimburse_in","collect_loan","pay_liability","fx_exchange","buy_asset","sell_asset"].includes(type) && (
         <Input
           label="Description"
           value={form.description}
@@ -799,25 +979,27 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
         />
       )}
 
-      {/* Amount + Currency */}
-      <div style={{ display: "flex", gap: 8 }}>
-        <AmountInput label="Amount" value={form.amount} onChange={v => set("amount", v)} currency={form.currency} style={{ flex: 1 }} />
-        <Field label="Currency" style={{ width: 90, flexShrink: 0 }}>
-          <select value={form.currency} onChange={e => set("currency", e.target.value)} style={{
-            width: "100%", height: 44, border: "1.5px solid #e5e7eb", borderRadius: 10,
-            fontFamily: "Figtree, sans-serif", fontSize: 13, fontWeight: 600,
-            color: "#111827", background: "#fff", outline: "none",
-            appearance: "none", padding: "0 8px", cursor: "pointer",
-          }}>
-            {allCurrencies.map(c => <option key={c.code} value={c.code}>{c.flag} {c.code}</option>)}
-          </select>
-        </Field>
-      </div>
-      {form.currency !== "IDR" && form.amount && (
-        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: -8 }}>
-          ≈ {fmtIDR(amtIDR)} IDR
+      {/* Amount + Currency — hidden for buy/sell asset (their own forms handle it) */}
+      {!["buy_asset","sell_asset"].includes(type) && <>
+        <div style={{ display: "flex", gap: 8 }}>
+          <AmountInput label="Amount" value={form.amount} onChange={v => set("amount", v)} currency={form.currency} style={{ flex: 1 }} />
+          <Field label="Currency" style={{ width: 90, flexShrink: 0 }}>
+            <select value={form.currency} onChange={e => set("currency", e.target.value)} style={{
+              width: "100%", height: 44, border: "1.5px solid #e5e7eb", borderRadius: 10,
+              fontFamily: "Figtree, sans-serif", fontSize: 13, fontWeight: 600,
+              color: "#111827", background: "#fff", outline: "none",
+              appearance: "none", padding: "0 8px", cursor: "pointer",
+            }}>
+              {allCurrencies.map(c => <option key={c.code} value={c.code}>{c.flag} {c.code}</option>)}
+            </select>
+          </Field>
         </div>
-      )}
+        {form.currency !== "IDR" && form.amount && (
+          <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: -8 }}>
+            ≈ {fmtIDR(amtIDR)} IDR
+          </div>
+        )}
+      </>}
 
       {/* Give Loan — employee details (before From Account) */}
       {type === "give_loan" && (
@@ -829,8 +1011,8 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
         />
       )}
 
-      {/* FROM ACCOUNT — grouped dropdown */}
-      {hasTwoStep && (() => {
+      {/* FROM ACCOUNT — grouped dropdown (hidden for buy/sell asset — handled inside their forms) */}
+      {hasTwoStep && !["buy_asset","sell_asset"].includes(type) && (() => {
         // Types that allow both Bank AND CC as source
         const showBothGroups = ["expense", "reimburse_out", "buy_asset"].includes(type);
         const byName  = (a, b) => (a.name || "").localeCompare(b.name || "");
@@ -893,10 +1075,10 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
         );
       })()}
 
-      {/* FROM ACCOUNT — regular select for non-two-step types (sell_asset, collect_loan, etc.) */}
-      {!hasTwoStep && fromOptions.length > 0 && (
+      {/* FROM ACCOUNT — regular select for non-two-step types (sell_asset handled inside its own form) */}
+      {!hasTwoStep && fromOptions.length > 0 && !["buy_asset","sell_asset"].includes(type) && (
         <Select
-          label={type === "sell_asset" ? "Asset" : (type === "collect_loan" || type === "reimburse_in") ? "Receivable" : "From Account"}
+          label={(type === "collect_loan" || type === "reimburse_in") ? "Receivable" : "From Account"}
           value={form.from_id || ""}
           onChange={e => set("from_id", e.target.value.length === 36 ? e.target.value : null)}
           options={fromOpts}
@@ -917,10 +1099,10 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
         </Field>
       )}
 
-      {/* TO ACCOUNT — skip for reimburse_out (entity toggle sets it) */}
-      {needsTo && (
+      {/* TO ACCOUNT — skip for reimburse_out, give_loan, buy/sell asset */}
+      {needsTo && !["buy_asset","sell_asset"].includes(type) && (
         <Select
-          label={type === "buy_asset" ? "Asset" : type === "give_loan" ? "Receivable" : type === "pay_cc" ? "Credit Card" : type === "pay_liability" ? "Liability" : "To Account"}
+          label={type === "give_loan" ? "Receivable" : type === "pay_cc" ? "Credit Card" : type === "pay_liability" ? "Liability" : "To Account"}
           value={form.to_id || ""}
           onChange={e => set("to_id", e.target.value.length === 36 ? e.target.value : null)}
           options={toOpts}
@@ -973,21 +1155,23 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
         <AmountInput label="Transfer Fee (optional)" value={form.transfer_fee || ""} onChange={v => set("transfer_fee", v)} />
       )}
 
-      {/* Notes */}
-      <Field label="Notes (optional)">
-        <textarea
-          value={form.notes}
-          onChange={e => set("notes", e.target.value)}
-          placeholder="Any extra details…"
-          rows={2}
-          style={{
-            width: "100%", padding: "10px 14px", border: "1.5px solid #e5e7eb",
-            borderRadius: 10, fontFamily: "Figtree, sans-serif", fontSize: 14,
-            fontWeight: 500, color: "#111827", background: "#fff", outline: "none",
-            resize: "vertical", boxSizing: "border-box", lineHeight: 1.5,
-          }}
-        />
-      </Field>
+      {/* Notes — hidden for buy/sell asset (handled inside their forms) */}
+      {!["buy_asset","sell_asset"].includes(type) && (
+        <Field label="Notes (optional)">
+          <textarea
+            value={form.notes}
+            onChange={e => set("notes", e.target.value)}
+            placeholder="Any extra details…"
+            rows={2}
+            style={{
+              width: "100%", padding: "10px 14px", border: "1.5px solid #e5e7eb",
+              borderRadius: 10, fontFamily: "Figtree, sans-serif", fontSize: 14,
+              fontWeight: 500, color: "#111827", background: "#fff", outline: "none",
+              resize: "vertical", boxSizing: "border-box", lineHeight: 1.5,
+            }}
+          />
+        </Field>
+      )}
 
     </div>
   );
