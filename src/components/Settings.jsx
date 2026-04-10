@@ -1696,34 +1696,28 @@ function EStatementTab({
     const toSave = item.rows.filter(r => item.selected[r._id] && !item.skipped.has(r._id));
     let count = 0;
     for (const r of toSave) {
-      const txType  = r.tx_type === "cc_installment" ? "expense" : (r.tx_type || "expense");
-      const isDebit = ["expense","transfer","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan","fx_exchange"].includes(txType);
+      const isDebit = ["expense","cc_installment","transfer"].includes(r.tx_type);
       const notes = r._isInstallment && r._instNo
         ? `Cicilan ${r._instNo}${r._instTotal ? `/${r._instTotal}` : ""}${r.notes ? ` — ${r.notes}` : ""}`
         : (r.notes || null);
-      const payload = {
+      const { error: insErr } = await supabase.from("ledger").insert({
         user_id:       user.id,
         tx_date:       r.tx_date,
         description:   r.description || "E-Statement import",
         merchant_name: r.description || null,
         amount:        Number(r.amount || 0),
         amount_idr:    Number(r.amount_idr || r.amount || 0),
-        currency:      r.currency || "IDR",
-        tx_type:       txType,
+        currency:      "IDR",
+        tx_type:       r.tx_type === "cc_installment" ? "expense" : r.tx_type,
         from_id:       isDebit ? (r.from_id || null) : null,
         to_id:         isDebit ? null : (r.to_id || null),
         category_id:   r.category_id || null,
         category_name: r.category_name || null,
-        entity:        r.entity || "Personal",
+        entity:        "Personal",
         is_reimburse:  false,
         notes,
-      };
-      const { error: insErr } = await supabase.from("ledger").insert(payload);
-      if (insErr) {
-        console.error("ledger insert error", insErr, payload);
-        showToast(`Save error: ${insErr.message}`, "error");
-        continue;
-      }
+      });
+      if (insErr) { showToast(`Save error: ${insErr.message}`, "error"); continue; }
       count++;
     }
     const now = new Date().toISOString();
@@ -2073,18 +2067,6 @@ function EStmtQueueItem({
                   />
                 ))}
               </div>
-
-              {/* Bottom summary + import */}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, paddingTop: 6, borderTop: `1px solid ${T.border}` }}>
-                <div style={{ fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif", display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <span style={{ color: "#059669" }}>{countNew} new</span>
-                  {countDup > 0 && <span style={{ color: "#d97706" }}>{countDup} duplicate{countDup !== 1 ? "s" : ""} unchecked</span>}
-                  <span style={{ color: T.text, fontWeight: 600 }}>{countSel} selected for import</span>
-                </div>
-                <Button variant="primary" size="sm" onClick={onSave} disabled={countSel === 0}>
-                  Import {countSel} Selected ▶
-                </Button>
-              </div>
             </div>
           )}
         </div>
@@ -2118,15 +2100,7 @@ function EStmtTxCard({
     <div style={{ background: cardBg, border: cardBorder, borderRadius: 10, opacity: isSkipped ? 0.55 : 1, overflow: "hidden" }}>
 
       {/* ── ROW 1: ☑ date description amount ✓ ✕ ── */}
-      <div
-        style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px 5px", cursor: isSkipped ? "default" : "pointer" }}
-        onClick={e => {
-          if (isSkipped) return;
-          const tag = e.target.tagName;
-          if (tag === "INPUT" || tag === "SELECT" || tag === "BUTTON") return;
-          onToggleSel();
-        }}
-      >
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px 5px" }}>
         <input type="checkbox"
           checked={isSelected && !isSkipped}
           onChange={onToggleSel}
