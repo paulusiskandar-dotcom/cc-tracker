@@ -206,6 +206,7 @@ async function scanGmailForStatements(
   if (messages.length === 0) return { new_pdfs: 0, total_found: 0 };
 
   const msgIds = messages.map((m: any) => m.id);
+  // Any existing row (any status including 'skipped') counts as known — never re-pull
   const { data: existingRows } = await serviceSupabase
     .from("estatement_pdfs")
     .select("gmail_message_id")

@@ -1445,8 +1445,22 @@ function EStatementTab({
   processModal, setProcessModal,
   accounts, ledger,
 }) {
-  const [showList, setShowList] = useState(false);
-  const [revealed, setRevealed] = useState({}); // id → true
+  const [showList,    setShowList]    = useState(false);
+  const [revealed,    setRevealed]    = useState({}); // id → true
+  const [showSkipped, setShowSkipped] = useState(false);
+
+  const skipStatement = async (id) => {
+    await supabase.from("estatement_pdfs").update({ status: "skipped" }).eq("id", id);
+    setStatements(prev => prev.map(s => s.id === id ? { ...s, status: "skipped" } : s));
+  };
+
+  const restoreStatement = async (id) => {
+    await supabase.from("estatement_pdfs").update({ status: "pending" }).eq("id", id);
+    setStatements(prev => prev.map(s => s.id === id ? { ...s, status: "pending" } : s));
+  };
+
+  const activeStatements  = statements.filter(s => s.status !== "skipped");
+  const skippedStatements = statements.filter(s => s.status === "skipped");
 
   const statusBadge = (status) => {
     const map = {
@@ -1610,11 +1624,11 @@ function EStatementTab({
           </Button>
         </div>
 
-        {statements.length === 0 ? (
+        {activeStatements.length === 0 ? (
           <EmptyState icon="📄" message='No statements found. Click "Scan Gmail" to search.' />
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {statements.map(s => (
+            {activeStatements.map(s => (
               <div key={s.id} style={{
                 display: "flex", alignItems: "center", gap: 10,
                 padding: "10px 12px", background: T.sur2, borderRadius: 10,
@@ -1629,7 +1643,7 @@ function EStatementTab({
                   </div>
                 </div>
                 {statusBadge(s.status)}
-                <div style={{ flexShrink: 0 }}>
+                <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 6 }}>
                   {s.status === "done" ? (
                     <span style={{ fontSize: 11, color: "#059669", fontWeight: 600, fontFamily: "Figtree, sans-serif" }}>
                       ✓ {s.transaction_count || 0} txns
@@ -1645,9 +1659,64 @@ function EStatementTab({
                       {s.status === "password_needed" ? "🔑 Enter Password" : "▶ Process"}
                     </Button>
                   )}
+                  {s.status !== "done" && (
+                    <button
+                      onClick={() => skipStatement(s.id)}
+                      title="Skip this statement"
+                      style={{
+                        border: "none", background: "none", cursor: "pointer",
+                        fontSize: 14, color: "#d1d5db", lineHeight: 1, padding: "2px 2px",
+                        flexShrink: 0,
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.color = "#ef4444"}
+                      onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}
+                    >
+                      ×
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* ── Skipped statements ── */}
+        {skippedStatements.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <button
+              onClick={() => setShowSkipped(v => !v)}
+              style={{
+                border: "none", background: "none", cursor: "pointer",
+                fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif",
+                padding: 0, display: "flex", alignItems: "center", gap: 4,
+              }}
+            >
+              <span style={{ display: "inline-block", transform: showSkipped ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 0.15s" }}>›</span>
+              {showSkipped ? "Hide" : "Show"} {skippedStatements.length} skipped
+            </button>
+            {showSkipped && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 6 }}>
+                {skippedStatements.map(s => (
+                  <div key={s.id} style={{
+                    display: "flex", alignItems: "center", gap: 10,
+                    padding: "8px 12px", background: T.sur2, borderRadius: 10, opacity: 0.5,
+                  }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: T.text, fontFamily: "Figtree, sans-serif",
+                        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {s.filename}
+                      </div>
+                      <div style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
+                        {s.bank_name}{s.statement_month ? ` · ${s.statement_month}` : ""}
+                      </div>
+                    </div>
+                    <Button size="sm" variant="secondary" onClick={() => restoreStatement(s.id)}>
+                      Restore
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
