@@ -1207,6 +1207,40 @@ function ProgressBar({ value, max, color = "#059669", height = 5 }) {
 }
 
 // ─── ACCOUNT HISTORY ─────────────────────────────────────────
+function HistoryRow({ label, sub, amountStr, positive }) {
+  return (
+    <div style={{
+      display:        "flex",
+      justifyContent: "space-between",
+      alignItems:     "center",
+      padding:        "10px 12px",
+      background:     "#f9fafb",
+      borderRadius:   10,
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
+          {label}
+        </div>
+        {sub && (
+          <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
+            {sub}
+          </div>
+        )}
+      </div>
+      <div style={{
+        fontSize:   14,
+        fontWeight: 700,
+        color:      positive ? "#059669" : "#dc2626",
+        fontFamily: "Figtree, sans-serif",
+        flexShrink: 0,
+        marginLeft: 12,
+      }}>
+        {positive ? "+" : "−"}{amountStr}
+      </div>
+    </div>
+  );
+}
+
 function AccountHistory({ account, ledger, accounts }) {
   const entries = ledger
     .filter(e => e.from_id === account.id || e.to_id === account.id)
@@ -1216,43 +1250,134 @@ function AccountHistory({ account, ledger, accounts }) {
     <EmptyState icon="📋" message="No transactions for this account yet" />
   );
 
+  const rows = [];
+
+  for (const e of entries) {
+    const isFrom = e.from_id === account.id;
+    const amtIDR = Number(e.amount_idr || e.amount || 0);
+    const fromAcc = accounts.find(a => a.id === e.from_id);
+    const toAcc   = accounts.find(a => a.id === e.to_id);
+
+    if (e.tx_type === "fx_exchange") {
+      // Parse foreign currency from description e.g. "Buy EUR" or "Sell EUR"
+      const desc   = e.description || "";
+      const parts  = desc.split(" ");
+      const fxCur  = parts[1] || "";
+      const rate   = Number(e.fx_rate_used || 0);
+      const foreignAmt = rate > 0 ? Math.round((amtIDR / rate) * 100) / 100 : 0;
+      const isBuy  = desc.startsWith("Buy");
+
+      if (isBuy) {
+        // Row 1: IDR debit — "Buy EUR" · -Rp X
+        rows.push(
+          <HistoryRow
+            key={`${e.id}-idr`}
+            label={desc || "FX Buy"}
+            sub={`${e.tx_date} · ${fromAcc?.name || "?"} → ${toAcc?.name || "?"}`}
+            amountStr={fmtIDR(amtIDR, true)}
+            positive={false}
+          />
+        );
+        // Row 2: Foreign credit — "EUR received" · +€X
+        if (fxCur && foreignAmt > 0) {
+          rows.push(
+            <HistoryRow
+              key={`${e.id}-fx`}
+              label={`${fxCur} received`}
+              sub={e.tx_date}
+              amountStr={fmtCur(foreignAmt, fxCur).replace(/^[+\-]/, "")}
+              positive={true}
+            />
+          );
+        }
+      } else {
+        // Sell: Row 1: Foreign debit — "Sell EUR" · -€X
+        if (fxCur && foreignAmt > 0) {
+          rows.push(
+            <HistoryRow
+              key={`${e.id}-fx`}
+              label={desc || "FX Sell"}
+              sub={`${e.tx_date} · ${fromAcc?.name || "?"} → ${toAcc?.name || "?"}`}
+              amountStr={fmtCur(foreignAmt, fxCur).replace(/^[+\-]/, "")}
+              positive={false}
+            />
+          );
+        }
+        // Row 2: IDR credit — "EUR sold" · +Rp X
+        rows.push(
+          <HistoryRow
+            key={`${e.id}-idr`}
+            label={`${fxCur || "FX"} sold`}
+            sub={e.tx_date}
+            amountStr={fmtIDR(amtIDR, true)}
+            positive={true}
+          />
+        );
+      }
+    } else if (e.tx_type === "buy_asset" && isFrom) {
+      // Row 1: IDR debit from bank — asset name · -Rp X
+      rows.push(
+        <HistoryRow
+          key={`${e.id}-main`}
+          label={e.description || toAcc?.name || "Asset Purchase"}
+          sub={`${e.tx_date}${toAcc ? ` · → ${toAcc.name}` : ""}`}
+          amountStr={fmtIDR(amtIDR, true)}
+          positive={false}
+        />
+      );
+      // Row 2: Asset credit — "AssetName (asset)" · +Rp X
+      if (toAcc) {
+        rows.push(
+          <HistoryRow
+            key={`${e.id}-asset`}
+            label={`${toAcc.name} (asset)`}
+            sub={e.tx_date}
+            amountStr={fmtIDR(amtIDR, true)}
+            positive={true}
+          />
+        );
+      }
+    } else if (e.tx_type === "transfer") {
+      // Row 1: source side
+      rows.push(
+        <HistoryRow
+          key={`${e.id}-main`}
+          label={e.description || "Transfer"}
+          sub={`${e.tx_date}${fromAcc ? ` · ${fromAcc.name}` : ""}${toAcc ? ` → ${toAcc.name}` : ""}`}
+          amountStr={fmtIDR(amtIDR, true)}
+          positive={!isFrom}
+        />
+      );
+      // Row 2: destination side (only if this account is the source)
+      if (isFrom && toAcc) {
+        rows.push(
+          <HistoryRow
+            key={`${e.id}-dest`}
+            label={`→ ${toAcc.name}`}
+            sub={e.tx_date}
+            amountStr={fmtIDR(amtIDR, true)}
+            positive={true}
+          />
+        );
+      }
+    } else {
+      // All other transaction types — single row
+      const other = accounts.find(a => a.id === (isFrom ? e.to_id : e.from_id));
+      rows.push(
+        <HistoryRow
+          key={e.id}
+          label={e.description || "—"}
+          sub={`${e.tx_date}${other ? ` · ${isFrom ? "→" : "←"} ${other.name}` : ""}`}
+          amountStr={fmtIDR(amtIDR, true)}
+          positive={!isFrom}
+        />
+      );
+    }
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      {entries.map(e => {
-        const isFrom = e.from_id === account.id;
-        const amt    = Number(e.amount_idr || e.amount || 0);
-        const other  = accounts.find(a => a.id === (isFrom ? e.to_id : e.from_id));
-        return (
-          <div key={e.id} style={{
-            display:        "flex",
-            justifyContent: "space-between",
-            alignItems:     "center",
-            padding:        "10px 12px",
-            background:     "#f9fafb",
-            borderRadius:   10,
-          }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
-                {e.description || "—"}
-              </div>
-              <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
-                {e.tx_date}
-                {other && ` · ${isFrom ? "→" : "←"} ${other.name}`}
-              </div>
-            </div>
-            <div style={{
-              fontSize:   14,
-              fontWeight: 700,
-              color:      isFrom ? "#dc2626" : "#059669",
-              fontFamily: "Figtree, sans-serif",
-              flexShrink: 0,
-              marginLeft: 12,
-            }}>
-              {isFrom ? "−" : "+"}{fmtIDR(amt, true)}
-            </div>
-          </div>
-        );
-      })}
+      {rows}
     </div>
   );
 }
