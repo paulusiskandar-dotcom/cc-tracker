@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { accountsApi } from "../api";
 import { supabase } from "../lib/supabase";
 import { fmtIDR, todayStr } from "../utils";
@@ -44,17 +44,77 @@ function DonutChart({ data, colors, size = 120, thickness = 24 }) {
 
 // ─── ASSET HISTORY MODAL CONTENT ─────────────────────────────
 function AssetHistory({ asset, ledger, accounts }) {
-  const entries = ledger
-    .filter(e => e.from_id === asset.id || e.to_id === asset.id)
-    .slice(0, 50);
+  const [valueHistory, setValueHistory] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  if (entries.length === 0) return (
-    <EmptyState icon="📋" message="No transactions for this asset yet" />
+  useEffect(() => {
+    if (!asset?.id) return;
+    setLoading(true);
+    supabase
+      .from("asset_value_history")
+      .select("*")
+      .eq("account_id", asset.id)
+      .order("date", { ascending: false })
+      .then(({ data, error }) => {
+        console.log("[AssetHistory] account_id:", asset.id);
+        console.log("[AssetHistory] asset_value_history rows:", data, "error:", error);
+        setValueHistory(data || []);
+        setLoading(false);
+      });
+  }, [asset?.id]);
+
+  const txEntries = ledger.filter(e => e.from_id === asset.id || e.to_id === asset.id);
+  console.log("[AssetHistory] ledger tx entries:", txEntries.length);
+
+  // Merge: value history rows + ledger tx rows, sorted by date desc
+  const allRows = [
+    ...valueHistory.map(h => ({ _type: "value", _date: h.date || h.created_at || "", ...h })),
+    ...txEntries.map(e  => ({ _type: "tx",    _date: e.tx_date || "",                 ...e })),
+  ].sort((a, b) => (b._date > a._date ? 1 : b._date < a._date ? -1 : 0));
+
+  if (loading) return (
+    <div style={{ textAlign: "center", padding: 24, color: "#9ca3af", fontFamily: "Figtree, sans-serif", fontSize: 13 }}>
+      Loading…
+    </div>
+  );
+
+  if (allRows.length === 0) return (
+    <EmptyState icon="📋" message="No history for this asset yet" />
   );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      {entries.map(e => {
+      {allRows.map(row => {
+        if (row._type === "value") {
+          const oldVal = Number(row.old_value || 0);
+          const newVal = Number(row.new_value || 0);
+          const diff   = newVal - oldVal;
+          const up     = diff >= 0;
+          return (
+            <div key={`vh-${row.id}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: "#f9fafb", borderRadius: 10 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
+                    Value Updated
+                  </span>
+                  <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 4, background: "#f3f4f6", color: "#6b7280", textTransform: "uppercase" }}>
+                    UPDATE
+                  </span>
+                </div>
+                <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
+                  {row.date} · {fmtIDR(oldVal, true)} → {fmtIDR(newVal, true)}
+                  {row.notes && row.notes !== "Manual update" ? ` · ${row.notes}` : ""}
+                </div>
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: up ? "#059669" : "#dc2626", fontFamily: "Figtree, sans-serif", flexShrink: 0, marginLeft: 12 }}>
+                {up ? "▲ +" : "▼ −"}{fmtIDR(Math.abs(diff), true)}
+              </div>
+            </div>
+          );
+        }
+
+        // Ledger tx row
+        const e = row;
         const isFrom = e.from_id === asset.id;
         const amt    = Number(e.amount_idr || e.amount || 0);
         const other  = accounts.find(a => a.id === (isFrom ? e.to_id : e.from_id));
@@ -63,7 +123,7 @@ function AssetHistory({ asset, ledger, accounts }) {
         const typeLabel = isBuy ? "Buy" : isSell ? "Sell" : e.tx_type || "";
         const color = isFrom ? "#dc2626" : "#059669";
         return (
-          <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: "#f9fafb", borderRadius: 10 }}>
+          <div key={`tx-${e.id}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: "#f9fafb", borderRadius: 10 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
