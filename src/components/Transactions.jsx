@@ -772,50 +772,62 @@ function TxRow({ entry: e, accounts, onEdit, onDelete }) {
   const iconEmoji = catDef?.icon || (isOut ? "↑" : isIn ? "↓" : "↔");
   const iconBg    = catDef ? catDef.color + "18" : isOut ? "#fee2e2" : isIn ? "#dcfce7" : "#dbeafe";
 
-  const accLabel = isMove
-    ? `${fromAcc?.name || "?"} → ${toAcc?.name || "?"}`
-    : fromAcc?.name || toAcc?.name || "";
-
-  const meta = [
-    accLabel,
-    e.category_name || catDef?.label,
-    e.entity && e.entity !== "Personal" ? e.entity : null,
-  ].filter(Boolean).join(" · ");
-
   const expandedContent = isTwoDir ? getTxExpandedContent(e, fromAcc, toAcc) : null;
-  // indent = chevron (20) + gap (8) + icon (36) + gap (12)
-  const expandedIndent = 76;
+  const tealLabel = expandedContent?.label || null;
+  // indent = icon (36) + gap (12)
+  const expandedIndent = 48;
+
+  const catLabel = e.category_name || catDef?.label || null;
+
+  const renderMeta = () => {
+    if (!isTwoDir || !tealLabel) {
+      const accLabel = isMove
+        ? `${fromAcc?.name || "?"} → ${toAcc?.name || "?"}`
+        : fromAcc?.name || toAcc?.name || "";
+      return [accLabel, catLabel, e.entity && e.entity !== "Personal" ? e.entity : null]
+        .filter(Boolean).join(" · ");
+    }
+
+    const tealStyle = {
+      color: "#0D9488", cursor: "pointer",
+      textDecoration: expanded ? "underline" : "none", fontWeight: 500,
+    };
+    const handleTealClick = (ev) => { ev.stopPropagation(); setExpanded(x => !x); };
+    const tealSpan = <span key="teal" style={tealStyle} onClick={handleTealClick}>{tealLabel}</span>;
+
+    const parts = [];
+    if (e.tx_type === "transfer" || e.tx_type === "pay_cc" || e.tx_type === "fx_exchange") {
+      parts.push(<span key="arrow">{fromAcc?.name || "?"} → </span>, tealSpan);
+    } else {
+      const mainAcc = fromAcc?.name || toAcc?.name || "";
+      if (mainAcc && mainAcc !== tealLabel) {
+        parts.push(<span key="acc">{mainAcc}</span>);
+        parts.push(<span key="sep1"> · </span>);
+      }
+      parts.push(tealSpan);
+    }
+    if (catLabel) {
+      parts.push(<span key="sep2"> · </span>);
+      parts.push(<span key="cat">{catLabel}</span>);
+    }
+    return parts;
+  };
+
+  const meta = renderMeta();
 
   return (
     <div style={{ borderBottom: "1px solid #f9fafb" }}>
       {/* ── Main row ── */}
       <div
-        onClick={() => { if (isTwoDir) setExpanded(x => !x); }}
+        onClick={onEdit}
         style={{
           display:    "flex",
           alignItems: "center",
           gap:        12,
           padding:    "10px 0",
-          cursor:     isTwoDir ? "pointer" : "default",
+          cursor:     "pointer",
         }}
       >
-        {/* Chevron */}
-        <div style={{ width: 20, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          {isTwoDir && (
-            <span style={{
-              fontSize:   14,
-              color:      "#9ca3af",
-              display:    "inline-block",
-              transform:  expanded ? "rotate(90deg)" : "rotate(0deg)",
-              transition: "transform 0.2s ease",
-              lineHeight: 1,
-              userSelect: "none",
-            }}>
-              ›
-            </span>
-          )}
-        </div>
-
         {/* Icon */}
         <div style={{
           width: 36, height: 36, borderRadius: 10,
@@ -877,12 +889,12 @@ function TxRow({ entry: e, accounts, onEdit, onDelete }) {
             display:       "flex",
             alignItems:    "center",
             justifyContent:"space-between",
-            background:    "var(--color-background-secondary, #f9fafb)",
+            background:    "#f9fafb",
             borderRadius:  "0 0 6px 6px",
           }}>
             <span style={{
               fontSize:    12,
-              color:       "var(--color-text-secondary, #9ca3af)",
+              color:       "#9ca3af",
               fontFamily:  "Figtree, sans-serif",
               overflow:    "hidden",
               textOverflow:"ellipsis",
