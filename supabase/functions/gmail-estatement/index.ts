@@ -37,6 +37,7 @@ const BANK_DOMAINS = [
   "hsbc.com", "megasyariah.co.id",
   "permatabank.co.id",
   "noreply.jenius.com", "info.jenius.com",
+  "bdi.co.id", "maybank.co.id", "hsbc.co.id",
 ];
 
 // Derive a bank name from sender email domain
@@ -114,11 +115,27 @@ async function scanGmailForStatements(
   serviceSupabase: any, userId: string, accessToken: string,
   fromDate?: string, toDate?: string
 ) {
-  const domainQuery = BANK_DOMAINS.map(d => `from:${d}`).join(" OR ");
   // Gmail date format: YYYY/MM/DD
   const afterPart  = fromDate ? ` after:${fromDate.replace(/-/g, "/")}` : "";
   const beforePart = toDate   ? ` before:${toDate.replace(/-/g, "/")}` : "";
-  const query = `has:attachment filename:pdf (${domainQuery})${afterPart}${beforePart}`;
+
+  // Subject-keyword query covers statement emails from any domain
+  const subjectQuery = [
+    "subject:statement",
+    'subject:estatement',
+    'subject:"e-statement"',
+    'subject:"e statement"',
+    "subject:rekening",
+    'subject:"laporan rekening"',
+    'subject:"laporan transaksi"',
+    'subject:"pernyataan transaksi"',
+    "subject:tagihan",
+    'subject:"kartu kredit"',
+    'subject:"credit card"',
+    'subject:"consolidated statement"',
+  ].join(" OR ");
+
+  const query = `has:attachment filename:pdf (${subjectQuery})${afterPart}${beforePart}`;
 
   const listRes = await fetch(
     `https://www.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=50`,
