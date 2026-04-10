@@ -638,22 +638,15 @@ function BankAccountCard({ account: a, ledger, accountCurrencies = [], fxRates =
         <div>
           <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 3 }}>Balance</div>
           {a.is_multicurrency ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              {fxRows.map(r => (
-                <div key={r.currency} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>{r.currency}</span>
-                  <div style={{ textAlign: "right" }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif" }}>{fmtCur(r.balance, r.currency)}</span>
-                    {r.currency !== "IDR" && (
-                      <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginLeft: 4 }}>
-                        ≈{fmtIDR(Number(r.balance || 0) * (fxRates[r.currency] || 1), true)}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#3b5bdb", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>Multi-currency</div>
-            </div>
+            <>
+              <div style={{ fontSize: 24, fontWeight: 800, color: "#059669", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
+                {fmtIDR(bal + fxRows.reduce((sum, r) => {
+                  const fxRate = fxRates[r.currency];
+                  return fxRate ? sum + Number(r.balance || 0) * fxRate : sum;
+                }, 0))}
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#3b5bdb", fontFamily: "Figtree, sans-serif", marginTop: 3 }}>Multi-currency</div>
+            </>
           ) : isForeign ? (
             <>
               <div style={{ fontSize: 24, fontWeight: 800, color: "#059669", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
