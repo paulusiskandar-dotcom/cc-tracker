@@ -41,7 +41,7 @@ const EMPTY = {
   // give_loan extras
   employee_name: "", monthly_installment: "", loan_start_date: todayStr(),
   // buy_asset extras
-  asset_name: "", asset_type: "Investment",
+  asset_name: "", asset_type: "Investment", asset_mode: "existing", asset_id: null,
 };
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────
@@ -190,7 +190,11 @@ export default function Transactions({
     }
     if (type === "buy_asset") {
       if (!form.from_id) { showToast("Select source account", "error"); return; }
-      if (!form.asset_name?.trim()) { showToast("Asset name is required", "error"); return; }
+      if (form.asset_mode === "existing") {
+        if (!form.asset_id) { showToast("Select an asset", "error"); return; }
+      } else {
+        if (!form.asset_name?.trim()) { showToast("Asset name is required", "error"); return; }
+      }
     }
     // FX exchange extra validation
     if (type === "fx_exchange") {
@@ -262,9 +266,13 @@ export default function Transactions({
       // ── Buy Asset ──────────────────────────────────────────────
       if (type === "buy_asset" && !editEntry) {
         const price = sn(form.amount);
+        const isExisting = form.asset_mode === "existing";
+        const assetName = isExisting
+          ? (assets.find(a => a.id === form.asset_id)?.name || "Asset Purchase")
+          : (form.asset_name?.trim() || "Asset Purchase");
         const txEntry = {
           tx_date:       form.tx_date || todayStr(),
-          description:   form.asset_name?.trim() || "Asset Purchase",
+          description:   assetName,
           amount:        price, currency: "IDR", amount_idr: price,
           tx_type:       "buy_asset", from_type: "account", to_type: "account",
           from_id:       uuid(form.from_id), to_id: null,
@@ -276,17 +284,24 @@ export default function Transactions({
         };
         const created = await ledgerApi.create(user.id, txEntry, accounts);
         setLedger(p => [created, ...p]);
-        // Try to record in assets table
         try {
-          await assetsApi.create(user.id, {
-            name:           form.asset_name.trim(),
-            type:           form.asset_type || "Investment",
-            current_value:  price,
-            purchase_price: price,
-            purchase_date:  form.tx_date || todayStr(),
-            notes:          form.notes || null,
-          });
-        } catch (ae) { console.warn("[buy_asset] assets table insert failed:", ae.message); }
+          if (isExisting) {
+            // Add to existing asset's current value
+            const existing = assets.find(a => a.id === form.asset_id);
+            const newValue = Number(existing?.current_value || 0) + price;
+            await assetsApi.update(form.asset_id, { current_value: newValue });
+          } else {
+            // Create new asset record
+            await assetsApi.create(user.id, {
+              name:           form.asset_name.trim(),
+              type:           form.asset_type || "Investment",
+              current_value:  price,
+              purchase_price: price,
+              purchase_date:  form.tx_date || todayStr(),
+              notes:          form.notes || null,
+            });
+          }
+        } catch (ae) { console.warn("[buy_asset] assets table update failed:", ae.message); }
         showToast("Asset purchased");
         await onRefresh();
         setModal(null);
@@ -752,7 +767,7 @@ function TypePickerGrid({ types, onSelect }) {
 // ─── BUY ASSET FORM ──────────────────────────────────────────
 const ASSET_TYPES = ["Property", "Vehicle", "Investment", "Crypto", "Collectible", "Other"];
 
-function BuyAssetForm({ form, set, accounts }) {
+function BuyAssetForm({ form, set, accounts, assets = [] }) {
   const INP = {
     width: "100%", height: 44, padding: "0 14px",
     border: "1.5px solid #e5e7eb", borderRadius: 10,
@@ -760,10 +775,37 @@ function BuyAssetForm({ form, set, accounts }) {
     color: "#111827", background: "#fff", outline: "none",
     appearance: "none", WebkitAppearance: "none", boxSizing: "border-box",
   };
-  const bankAccs = accounts.filter(a => a.is_active !== false && (a.type === "bank" || a.type === "credit_card")).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  const bankAccs  = accounts.filter(a => a.is_active !== false && (a.type === "bank" || a.type === "credit_card")).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  const assetAccs = assets.filter(a => a.is_active !== false).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+  const mode = form.asset_mode || (assetAccs.length > 0 ? "existing" : "new");
+
+  const handleAssetSelect = (id) => {
+    set("asset_id", id || null);
+    const a = assetAccs.find(x => x.id === id);
+    if (a) {
+      set("asset_name", a.name);
+      set("asset_type", a.subtype || a.type || "Investment");
+    }
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* Mode toggle */}
+      <div style={{ display: "flex", gap: 8 }}>
+        {["existing", "new"].map(m => (
+          <button key={m} onClick={() => { set("asset_mode", m); set("asset_id", null); set("asset_name", ""); }}
+            style={{
+              flex: 1, height: 36, borderRadius: 8, border: "1.5px solid",
+              borderColor: mode === m ? "#3b5bdb" : "#e5e7eb",
+              background: mode === m ? "#eff3ff" : "#fff",
+              color: mode === m ? "#3b5bdb" : "#6b7280",
+              fontFamily: "Figtree, sans-serif", fontSize: 13, fontWeight: 600, cursor: "pointer",
+            }}>
+            {m === "existing" ? "Existing Asset" : "New Asset"}
+          </button>
+        ))}
+      </div>
+
       {/* From account */}
       <Field label="From Account">
         <select value={form.from_id || ""} onChange={e => set("from_id", e.target.value || null)} style={INP}>
@@ -771,16 +813,37 @@ function BuyAssetForm({ form, set, accounts }) {
           {bankAccs.map(a => <option key={a.id} value={a.id}>{a.name}{a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : ""}</option>)}
         </select>
       </Field>
-      {/* Asset name */}
-      <Input label="Asset Name *" value={form.asset_name || ""} onChange={e => set("asset_name", e.target.value)} placeholder="e.g. Apartment Kemang, BCA Stock" />
-      {/* Asset type */}
-      <Field label="Asset Type">
-        <select value={form.asset_type || "Investment"} onChange={e => set("asset_type", e.target.value)} style={INP}>
-          {ASSET_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-        </select>
-      </Field>
+
+      {mode === "existing" ? (
+        <>
+          <Field label="Asset *">
+            <select value={form.asset_id || ""} onChange={e => handleAssetSelect(e.target.value || null)} style={INP}>
+              <option value="">Select asset…</option>
+              {assetAccs.map(a => <option key={a.id} value={a.id}>{a.name}{a.subtype ? ` · ${a.subtype}` : a.type ? ` · ${a.type}` : ""}</option>)}
+            </select>
+          </Field>
+          {form.asset_id && (() => {
+            const a = assetAccs.find(x => x.id === form.asset_id);
+            return a?.current_value > 0 ? (
+              <div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 10, padding: "10px 14px", fontSize: 12, color: "#6b7280" }}>
+                Current value: <strong style={{ color: "#111827" }}>Rp {Number(a.current_value).toLocaleString("id-ID")}</strong>
+              </div>
+            ) : null;
+          })()}
+        </>
+      ) : (
+        <>
+          <Input label="Asset Name *" value={form.asset_name || ""} onChange={e => set("asset_name", e.target.value)} placeholder="e.g. Apartment Kemang, BCA Stock" />
+          <Field label="Asset Type">
+            <select value={form.asset_type || "Investment"} onChange={e => set("asset_type", e.target.value)} style={INP}>
+              {ASSET_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </Field>
+        </>
+      )}
+
       {/* Purchase price */}
-      <AmountInput label="Purchase Price (IDR)" value={form.amount} onChange={v => set("amount", v)} />
+      <AmountInput label={mode === "existing" ? "Amount to Add (IDR)" : "Purchase Price (IDR)"} value={form.amount} onChange={v => set("amount", v)} />
       {/* Notes */}
       <Field label="Notes (optional)">
         <textarea value={form.notes || ""} onChange={e => set("notes", e.target.value)} placeholder="Any details…" rows={2}
@@ -956,7 +1019,7 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
       <Input label="Date" type="date" value={form.tx_date} onChange={e => set("tx_date", e.target.value)} />
 
       {/* ── BUY ASSET form ──────────────────────────────────────── */}
-      {type === "buy_asset" && <BuyAssetForm form={form} set={set} accounts={accounts} />}
+      {type === "buy_asset" && <BuyAssetForm form={form} set={set} accounts={accounts} assets={assets} />}
 
       {/* ── SELL ASSET form ─────────────────────────────────────── */}
       {type === "sell_asset" && <SellAssetForm form={form} set={set} accounts={accounts} assets={assets} />}
