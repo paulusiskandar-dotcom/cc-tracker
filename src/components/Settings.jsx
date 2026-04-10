@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { supabase } from "../lib/supabase";
 import PILogo from "./PILogo";
 import { fxApi, merchantApi, settingsApi, recurringApi, gmailApi, accountsApi } from "../api";
@@ -13,14 +13,15 @@ import {
 } from "./shared/index";
 
 const SUBTABS = [
-  { id: "profile",    label: "Profile"    },
-  { id: "accounts",   label: "Accounts"   },
-  { id: "backup",     label: "Backup"     },
-  { id: "email",      label: "Email Sync" },
-  { id: "fx",         label: "FX Rates"   },
-  { id: "recurring",  label: "Recurring"  },
-  { id: "merchants",  label: "Merchants"  },
-  { id: "appearance", label: "Appearance" },
+  { id: "profile",     label: "Profile"     },
+  { id: "accounts",    label: "Accounts"    },
+  { id: "backup",      label: "Backup"      },
+  { id: "email",       label: "Email Sync"  },
+  { id: "estatement",  label: "E-Statement" },
+  { id: "fx",          label: "FX Rates"    },
+  { id: "recurring",   label: "Recurring"   },
+  { id: "merchants",   label: "Merchants"   },
+  { id: "appearance",  label: "Appearance"  },
 ];
 
 const SETUP_STEPS = [
@@ -89,6 +90,64 @@ export default function Settings({
   const [editMerchant, setEditMerchant] = useState(null);
   const [merchantCat, setMerchantCat]   = useState("");
   const [merchantModal, setMerchantModal] = useState(false);
+
+  // ── E-Statement ────────────────────────────────────────────
+  const [eStatements,       setEStatements]       = useState([]);
+  const [passwordList,      setPasswordList]       = useState([]);
+  const [eStmtLoaded,       setEStmtLoaded]        = useState(false);
+  const [scanning,          setScanning]           = useState(false);
+  const [processModal,      setProcessModal]       = useState(null); // statement record
+  const [addPwdOpen,        setAddPwdOpen]         = useState(false);
+  const [newPwdLabel,       setNewPwdLabel]        = useState("");
+  const [newPwdPattern,     setNewPwdPattern]      = useState("");
+
+  const loadEStatement = useCallback(async () => {
+    if (eStmtLoaded) return;
+    try {
+      const [{ data: stmts }, { data: pwds }] = await Promise.all([
+        supabase.from("estatement_pdfs").select("*").eq("user_id", user.id).order("created_at", { ascending: false }),
+        supabase.from("estatement_password_list").select("*").eq("user_id", user.id).order("sort_order"),
+      ]);
+      setEStatements(stmts || []);
+      setPasswordList(pwds || []);
+      setEStmtLoaded(true);
+    } catch (e) { showToast(e.message, "error"); }
+  }, [eStmtLoaded, user.id]);
+
+  const scanGmail = async () => {
+    setScanning(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch(
+        `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/gmail-estatement`,
+        { method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+          body: JSON.stringify({ action: "scan" }) }
+      );
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || "Scan failed");
+      showToast(`Found ${result.new_pdfs || 0} new statement(s)`);
+      setEStmtLoaded(false);
+      await loadEStatement();
+    } catch (e) { showToast(e.message, "error"); }
+    setScanning(false);
+  };
+
+  const addPassword = async () => {
+    if (!newPwdLabel.trim() || !newPwdPattern.trim()) return showToast("Label and pattern required", "error");
+    const maxOrder = passwordList.reduce((m, p) => Math.max(m, p.sort_order || 0), 0);
+    const { data, error } = await supabase.from("estatement_password_list").insert({
+      user_id: user.id, label: newPwdLabel.trim(), pattern: newPwdPattern.trim(), sort_order: maxOrder + 1,
+    }).select().single();
+    if (error) return showToast(error.message, "error");
+    setPasswordList(prev => [...prev, data]);
+    setNewPwdLabel(""); setNewPwdPattern(""); setAddPwdOpen(false);
+  };
+
+  const deletePassword = async (id) => {
+    await supabase.from("estatement_password_list").delete().eq("id", id);
+    setPasswordList(prev => prev.filter(p => p.id !== id));
+  };
 
   // ── What's New ─────────────────────────────────────────────
   const [whatsNewOpen, setWhatsNewOpen] = useState(false);
@@ -329,7 +388,7 @@ export default function Settings({
         {SUBTABS.map(t => (
           <button
             key={t.id}
-            onClick={() => { setSubTab(t.id); if (t.id === "email") loadGmailToken(); }}
+            onClick={() => { setSubTab(t.id); if (t.id === "email") loadGmailToken(); if (t.id === "estatement") loadEStatement(); }}
             style={{
               padding: "7px 14px", borderRadius: 99, border: "none",
               cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "Figtree, sans-serif",
@@ -587,6 +646,24 @@ export default function Settings({
             </div>
           )}
         </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════ */}
+      {/* ── E-STATEMENT ──────────────────────────────── */}
+      {/* ══════════════════════════════════════════════════ */}
+      {subTab === "estatement" && (
+        <EStatementTab
+          T={T} card={card} user={user}
+          statements={eStatements} setStatements={setEStatements}
+          passwordList={passwordList} setPasswordList={setPasswordList}
+          scanning={scanning} onScan={scanGmail}
+          addPwdOpen={addPwdOpen} setAddPwdOpen={setAddPwdOpen}
+          newPwdLabel={newPwdLabel} setNewPwdLabel={setNewPwdLabel}
+          newPwdPattern={newPwdPattern} setNewPwdPattern={setNewPwdPattern}
+          onAddPassword={addPassword} onDeletePassword={deletePassword}
+          processModal={processModal} setProcessModal={setProcessModal}
+          accounts={accounts} ledger={ledger}
+        />
       )}
 
       {/* ══════════════════════════════════════════════════ */}
@@ -1337,6 +1414,433 @@ function BackupSection({ user, T, card, ledger }) {
               </Button>
             </div>
           ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── E-STATEMENT TAB ─────────────────────────────────────────
+function EStatementTab({
+  T, card, user, statements, setStatements,
+  passwordList, setPasswordList,
+  scanning, onScan,
+  addPwdOpen, setAddPwdOpen,
+  newPwdLabel, setNewPwdLabel,
+  newPwdPattern, setNewPwdPattern,
+  onAddPassword, onDeletePassword,
+  processModal, setProcessModal,
+  accounts, ledger,
+}) {
+  const statusBadge = (status) => {
+    const map = {
+      pending:         { bg: "#e0f2fe", color: "#0369a1", label: "Pending" },
+      processing:      { bg: "#fef9c3", color: "#92400e", label: "Processing…" },
+      parsed:          { bg: "#e0f7fa", color: "#0891b2", label: "Parsed" },
+      password_needed: { bg: "#fff7ed", color: "#c2410c", label: "Password Needed" },
+      done:            { bg: "#dcfce7", color: "#15803d", label: "Done" },
+    };
+    const s = map[status] || { bg: "#f3f4f6", color: "#6b7280", label: status };
+    return (
+      <span style={{
+        fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 6,
+        background: s.bg, color: s.color, fontFamily: "Figtree, sans-serif",
+      }}>
+        {s.label}
+      </span>
+    );
+  };
+
+  const VARIABLE_LEGEND = [
+    { var: "{DDMMYYYY}", desc: "Your birth date e.g. 01011990" },
+    { var: "{account_no}", desc: "Account number" },
+    { var: "{last4}", desc: "Last 4 digits of card" },
+  ];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+
+      {/* ── Password Priority List ── */}
+      <div style={card}>
+        <SectionHeader title="📋 Password Priority List" />
+        <div style={{ fontSize: 11, color: T.text3, marginBottom: 12, marginTop: 4 }}>
+          Passwords to try when unlocking encrypted e-statements. Listed in order.
+        </div>
+
+        {passwordList.length === 0 && !addPwdOpen ? (
+          <div style={{ fontSize: 12, color: T.text3, fontFamily: "Figtree, sans-serif", padding: "8px 0" }}>
+            No passwords configured. Add your common PDF passwords below.
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+            {passwordList.map((p, idx) => (
+              <div key={p.id} style={{
+                display: "flex", alignItems: "center", gap: 8,
+                padding: "8px 10px", background: T.sur2, borderRadius: 9,
+              }}>
+                <span style={{ fontSize: 12, color: T.text3, fontWeight: 700, minWidth: 20 }}>{idx + 1}.</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: T.text, fontFamily: "Figtree, sans-serif" }}>
+                    {p.label}
+                  </div>
+                  <div style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, mono, monospace", marginTop: 1 }}>
+                    {p.pattern}
+                  </div>
+                </div>
+                <button
+                  onClick={() => onDeletePassword(p.id)}
+                  style={{
+                    border: "none", background: "none", cursor: "pointer",
+                    fontSize: 12, color: "#dc2626", padding: "2px 6px",
+                  }}
+                >✕</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {addPwdOpen ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px", background: T.sur2, borderRadius: 10 }}>
+            <Input
+              label="Label (e.g. Birth Date)"
+              value={newPwdLabel}
+              onChange={e => setNewPwdLabel(e.target.value)}
+              placeholder="Password label"
+            />
+            <Input
+              label="Pattern / Value"
+              value={newPwdPattern}
+              onChange={e => setNewPwdPattern(e.target.value)}
+              placeholder="e.g. {DDMMYYYY} or MyPassword123"
+            />
+            <div style={{ display: "flex", gap: 8 }}>
+              <Button variant="primary" size="sm" onClick={onAddPassword}>Save</Button>
+              <Button variant="secondary" size="sm" onClick={() => { setAddPwdOpen(false); setNewPwdLabel(""); setNewPwdPattern(""); }}>Cancel</Button>
+            </div>
+          </div>
+        ) : (
+          <Button variant="secondary" size="sm" onClick={() => setAddPwdOpen(true)}>+ Add Password</Button>
+        )}
+
+        {/* Variable legend */}
+        <div style={{ marginTop: 14, padding: "10px 12px", background: T.sur2, borderRadius: 10 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: T.text3, textTransform: "uppercase", marginBottom: 6, letterSpacing: "0.4px" }}>
+            Available Variables
+          </div>
+          {VARIABLE_LEGEND.map(v => (
+            <div key={v.var} style={{ display: "flex", gap: 8, marginBottom: 3, alignItems: "center" }}>
+              <code style={{ fontSize: 10, fontWeight: 700, color: "#0891b2", background: "#e0f7fa", padding: "1px 5px", borderRadius: 4 }}>
+                {v.var}
+              </code>
+              <span style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, sans-serif" }}>{v.desc}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Pending Statements ── */}
+      <div style={card}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <SectionHeader title="📄 Pending Statements" />
+          <Button variant="primary" size="sm" busy={scanning} onClick={onScan}>
+            🔍 Scan Gmail
+          </Button>
+        </div>
+
+        {statements.length === 0 ? (
+          <EmptyState icon="📄" message='No statements found. Click "Scan Gmail" to search.' />
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {statements.map(s => (
+              <div key={s.id} style={{
+                display: "flex", alignItems: "center", gap: 10,
+                padding: "10px 12px", background: T.sur2, borderRadius: 10,
+              }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: T.text, fontFamily: "Figtree, sans-serif",
+                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {s.filename}
+                  </div>
+                  <div style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
+                    {s.bank_name}{s.statement_month ? ` · ${s.statement_month}` : ""}
+                  </div>
+                </div>
+                {statusBadge(s.status)}
+                <div style={{ flexShrink: 0 }}>
+                  {s.status === "done" ? (
+                    <span style={{ fontSize: 11, color: "#059669", fontWeight: 600, fontFamily: "Figtree, sans-serif" }}>
+                      ✓ {s.transaction_count || 0} txns
+                    </span>
+                  ) : s.status === "processing" ? (
+                    <span style={{ fontSize: 11, color: "#92400e", fontFamily: "Figtree, sans-serif" }}>…</span>
+                  ) : (
+                    <Button
+                      variant={s.status === "password_needed" ? "secondary" : "primary"}
+                      size="sm"
+                      onClick={() => setProcessModal(s)}
+                    >
+                      {s.status === "password_needed" ? "🔑 Enter Password" : "▶ Process"}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Process Modal ── */}
+      {processModal && (
+        <ProcessStatementModal
+          statement={processModal}
+          passwordList={passwordList}
+          user={user}
+          accounts={accounts}
+          ledger={ledger}
+          T={T}
+          onClose={() => setProcessModal(null)}
+          onDone={(id, txCount) => {
+            setStatements(prev => prev.map(s => s.id === id ? { ...s, status: "done", transaction_count: txCount } : s));
+            setProcessModal(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── PROCESS STATEMENT MODAL ─────────────────────────────────
+function ProcessStatementModal({ statement, passwordList, user, accounts, ledger, T, onClose, onDone }) {
+  const [phase, setPhase]           = useState("idle"); // idle | processing | preview | saving
+  const [transactions, setTransactions] = useState([]);
+  const [skipped, setSkipped]       = useState({});  // id → true
+  const [manualPwd, setManualPwd]   = useState("");
+  const [error, setError]           = useState("");
+
+  const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL || "";
+
+  const callProcess = async (extraPasswords = []) => {
+    setPhase("processing"); setError("");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/gmail-estatement`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify({
+          action: "process",
+          statement_id: statement.id,
+          passwords: extraPasswords.length > 0
+            ? [...passwordList, ...extraPasswords.map(v => ({ label: "Manual", pattern: v }))]
+            : null,
+        }),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || "Processing failed");
+      if (!result.success || result.needs_password) {
+        setPhase("idle"); setError("Could not unlock PDF. Enter password manually below.");
+        return;
+      }
+      const txns = (result.transactions || []).map((t, i) => ({ ...t, _id: i }));
+      setTransactions(txns);
+      setPhase("preview");
+    } catch (e) { setPhase("idle"); setError(e.message); }
+  };
+
+  // Check for duplicates in ledger
+  const isDuplicate = (tx) => {
+    const amt = Number(tx.amount || 0);
+    const txDate = tx.date || "";
+    return ledger.some(e => {
+      const eAmt = Number(e.amount_idr || e.amount || 0);
+      if (Math.abs(eAmt - amt) > 1) return false;
+      if (!e.tx_date || !txDate) return false;
+      const diff = Math.abs(new Date(e.tx_date) - new Date(txDate)) / 86400000;
+      return diff <= 1;
+    });
+  };
+
+  const saveAll = async () => {
+    setPhase("saving");
+    const toSave = transactions.filter(t => !skipped[t._id] && !isDuplicate(t));
+    let count = 0;
+    for (const tx of toSave) {
+      const acct = accounts.find(a => a.type === "bank" && (a.bank_name === statement.bank_name || accounts.length === 1));
+      const isDebit = (tx.type || "debit").toLowerCase() === "debit";
+      try {
+        await supabase.from("ledger").insert({
+          user_id:      user.id,
+          tx_date:      tx.date,
+          description:  tx.description || "E-Statement import",
+          amount:       Number(tx.amount || 0),
+          amount_idr:   Number(tx.amount || 0),
+          currency:     tx.currency || "IDR",
+          tx_type:      isDebit ? "expense" : "income",
+          from_type:    isDebit ? "account" : null,
+          to_type:      isDebit ? null : "account",
+          from_id:      isDebit ? (acct?.id || null) : null,
+          to_id:        isDebit ? null : (acct?.id || null),
+          category_id:  null,
+          category_name:null,
+          entity:       "Personal",
+          is_reimburse: false,
+          ai_categorized: false,
+          ai_confidence:  null,
+        });
+        count++;
+      } catch { /* skip on error */ }
+    }
+
+    // Mark statement done
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    await fetch(`${SUPABASE_URL}/functions/v1/gmail-estatement`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+      body: JSON.stringify({ action: "mark_done", statement_id: statement.id, tx_count: count }),
+    });
+    onDone(statement.id, count);
+  };
+
+  const OVL = {
+    position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
+    display: "flex", alignItems: "center", justifyContent: "center",
+    zIndex: 9999, padding: 16,
+  };
+  const BOX = {
+    background: "#fff", borderRadius: 16, width: "100%", maxWidth: 540,
+    maxHeight: "90vh", display: "flex", flexDirection: "column", overflow: "hidden",
+  };
+
+  return (
+    <div style={OVL} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={BOX}>
+        {/* Header */}
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
+              Process E-Statement
+            </div>
+            <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
+              {statement.bank_name} · {statement.filename}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ border: "none", background: "none", fontSize: 18, cursor: "pointer", color: "#9ca3af" }}>✕</button>
+        </div>
+
+        {/* Body */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+
+          {phase === "idle" && (
+            <>
+              <div style={{ fontSize: 13, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
+                This will download the PDF from Gmail and extract transactions using AI.
+                {passwordList.length > 0 && ` Will try ${passwordList.length} saved password(s).`}
+              </div>
+              {error && (
+                <div style={{ padding: "10px 12px", background: "#fff5f5", border: "1px solid #fecaca", borderRadius: 9, fontSize: 12, color: "#dc2626" }}>
+                  {error}
+                  <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
+                    <input
+                      value={manualPwd}
+                      onChange={e => setManualPwd(e.target.value)}
+                      placeholder="Enter PDF password…"
+                      style={{ flex: 1, height: 34, padding: "0 10px", border: "1.5px solid #e5e7eb", borderRadius: 8, fontFamily: "Figtree, sans-serif", fontSize: 13 }}
+                    />
+                    <Button variant="primary" size="sm" onClick={() => callProcess(manualPwd ? [manualPwd] : [])}>
+                      Try
+                    </Button>
+                  </div>
+                </div>
+              )}
+              <Button variant="primary" onClick={() => callProcess()}>
+                ▶ Start Processing
+              </Button>
+            </>
+          )}
+
+          {phase === "processing" && (
+            <div style={{ textAlign: "center", padding: 32, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+              <div style={{ fontSize: 24, marginBottom: 8 }}>⏳</div>
+              <div style={{ fontSize: 13 }}>Downloading PDF and extracting transactions…</div>
+              <div style={{ fontSize: 11, marginTop: 4 }}>This may take 10–30 seconds</div>
+            </div>
+          )}
+
+          {phase === "preview" && (
+            <>
+              <div style={{ fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
+                Found <strong>{transactions.length}</strong> transactions.
+                {transactions.filter(t => isDuplicate(t)).length > 0 &&
+                  ` ${transactions.filter(t => isDuplicate(t)).length} possible duplicate(s) flagged.`
+                }
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {transactions.map(tx => {
+                  const dup = isDuplicate(tx);
+                  const skip = !!skipped[tx._id];
+                  return (
+                    <div key={tx._id} style={{
+                      padding: "9px 11px", borderRadius: 9,
+                      background: skip ? "#f9fafb" : dup ? "#fffbeb" : "#f9fafb",
+                      border: `1px solid ${skip ? "#e5e7eb" : dup ? "#fde68a" : "#e5e7eb"}`,
+                      opacity: skip ? 0.5 : 1,
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", fontFamily: "Figtree, sans-serif",
+                            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {dup && <span style={{ fontSize: 10, color: "#d97706", marginRight: 4 }}>⚠️ dup</span>}
+                            {tx.description || "—"}
+                          </div>
+                          <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1 }}>
+                            {tx.date} · {(tx.type || "debit").toLowerCase() === "debit" ? "Debit" : "Credit"}
+                          </div>
+                        </div>
+                        <div style={{ textAlign: "right", flexShrink: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700,
+                            color: (tx.type || "debit").toLowerCase() === "debit" ? "#dc2626" : "#059669" }}>
+                            {(tx.type || "debit").toLowerCase() === "debit" ? "−" : "+"}Rp {Number(tx.amount || 0).toLocaleString("id-ID")}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => setSkipped(p => ({ ...p, [tx._id]: !p[tx._id] }))}
+                          style={{
+                            border: "1px solid #e5e7eb", borderRadius: 6, padding: "3px 8px",
+                            fontSize: 10, fontWeight: 600, cursor: "pointer",
+                            background: skip ? "#f3f4f6" : "#fff", color: skip ? "#059669" : "#dc2626",
+                          }}
+                        >
+                          {skip ? "Include" : "Skip"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {phase === "saving" && (
+            <div style={{ textAlign: "center", padding: 32, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+              <div style={{ fontSize: 24, marginBottom: 8 }}>💾</div>
+              <div style={{ fontSize: 13 }}>Saving transactions…</div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        {phase === "preview" && (
+          <div style={{ padding: "12px 20px", borderTop: "1px solid #f3f4f6", display: "flex", gap: 8 }}>
+            <Button variant="secondary" onClick={onClose} style={{ flexShrink: 0 }}>Cancel</Button>
+            <Button
+              fullWidth variant="primary"
+              onClick={saveAll}
+              busy={phase === "saving"}
+            >
+              Save {transactions.filter(t => !skipped[t._id] && !isDuplicate(t)).length} New Transactions
+            </Button>
+          </div>
         )}
       </div>
     </div>
