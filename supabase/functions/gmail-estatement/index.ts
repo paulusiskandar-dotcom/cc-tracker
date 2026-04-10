@@ -628,6 +628,73 @@ Deno.serve(async (req: Request) => {
       if (!statement_id) throw new Error("statement_id required");
       result = await markDone(serviceSupabase, userId, statement_id, tx_count || 0);
 
+    } else if (action === "process_upload") {
+      // Direct PDF upload — no Gmail download needed
+      const { pdf_base64 } = body;
+      if (!pdf_base64) throw new Error("pdf_base64 required");
+
+      const base64Len   = pdf_base64.length;
+      const approxBytes = Math.round(base64Len * 0.75);
+      console.log(`[gmail-estatement] process_upload: base64_len=${base64Len} approx_bytes=${approxBytes}`);
+
+      if (approxBytes > 10 * 1024 * 1024) {
+        result = {
+          success: false, needs_password: false,
+          error: "PDF too large to process automatically (>10MB). Please use AI Import / Scan instead.",
+        };
+      } else {
+        const { pwdList, vars } = await loadPasswordsAndVars(serviceSupabase, userId, body);
+
+        // Step 1: try Claude with raw PDF
+        let claudeResult = await callClaude(pdf_base64, EXTRACTION_PROMPT, ANTHROPIC_KEY);
+
+        if (claudeResult.ok) {
+          result = { success: true, transactions: claudeResult.transactions };
+        } else if (!claudeResult.is_encrypted) {
+          result = { success: false, needs_password: false, error: claudeResult.error };
+        } else {
+          // Step 2: try pdf-lib with passwords
+          const passwords: string[] = body.only_password !== undefined
+            ? (body.only_password ? [body.only_password] : [])
+            : pwdList.map((p: any) => resolvePassword(p.pattern || "", vars)).filter(Boolean);
+
+          console.log(`[gmail-estatement] process_upload: trying ${passwords.length} password(s)`);
+          let lastDecryptError: "wrong_password" | "unsupported" = "wrong_password";
+          let found = false;
+
+          for (let i = 0; i < passwords.length; i++) {
+            const decResult = await tryDecryptPDF(pdf_base64, passwords[i]);
+            if ("base64" in decResult) {
+              claudeResult = await callClaude(decResult.base64, EXTRACTION_PROMPT, ANTHROPIC_KEY);
+              if (claudeResult.ok) {
+                result = { success: true, transactions: claudeResult.transactions };
+              } else {
+                result = { success: false, needs_password: false, error: "PDF decrypted but no transactions could be extracted. It may be a scanned image." };
+              }
+              found = true;
+              break;
+            }
+            lastDecryptError = decResult.error;
+          }
+
+          if (!found) {
+            if (lastDecryptError === "unsupported") {
+              result = {
+                success: false, needs_password: true, encrypted: true, encryption_unsupported: true,
+                error: "This PDF uses advanced encryption (AES-256) that cannot be decrypted automatically. Please download and decrypt it manually, then upload via AI Import / Scan instead.",
+              };
+            } else {
+              result = {
+                success: false, needs_password: true, encrypted: true, encryption_unsupported: false,
+                error: passwords.length > 0
+                  ? "None of the saved passwords worked. Enter the PDF password below."
+                  : "This PDF is password-protected. Enter the password below.",
+              };
+            }
+          }
+        }
+      }
+
     } else {
       throw new Error(`Unknown action: ${action}`);
     }
