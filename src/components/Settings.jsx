@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import PILogo from "./PILogo";
 import { fxApi, merchantApi, settingsApi, recurringApi, gmailApi, accountsApi } from "../api";
@@ -102,8 +102,8 @@ export default function Settings({
   const [addPwdOpen,        setAddPwdOpen]         = useState(false);
   const [newPwdPattern,     setNewPwdPattern]      = useState("");
 
-  const loadEStatement = useCallback(async () => {
-    if (eStmtLoaded) return;
+  // Always fetches — no guard. Used on mount and after scan.
+  const refreshStatements = useCallback(async () => {
     try {
       const [{ data: stmts }, { data: pwds }] = await Promise.all([
         supabase.from("estatement_pdfs").select("*").eq("user_id", user.id).order("created_at", { ascending: false }),
@@ -113,7 +113,13 @@ export default function Settings({
       setPasswordList(pwds || []);
       setEStmtLoaded(true);
     } catch (e) { showToast(e.message, "error"); }
-  }, [eStmtLoaded, user.id]);
+  }, [user.id]);
+
+  // Lazy-load once when tab is opened (guard is fine here)
+  const loadEStatement = useCallback(async () => {
+    if (eStmtLoaded) return;
+    await refreshStatements();
+  }, [eStmtLoaded, refreshStatements]);
 
   const scanGmail = async () => {
     setScanning(true);
@@ -127,9 +133,9 @@ export default function Settings({
       );
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || "Scan failed");
-      showToast(`Found ${result.new_pdfs || 0} new statement(s)`);
-      setEStmtLoaded(false);
-      await loadEStatement();
+      const newCount = result.new_pdfs || 0;
+      showToast(newCount > 0 ? `Found ${newCount} new statement(s)` : "No new statements found");
+      await refreshStatements();
     } catch (e) { showToast(e.message, "error"); }
     setScanning(false);
   };
@@ -149,6 +155,11 @@ export default function Settings({
     await supabase.from("estatement_password_list").delete().eq("id", id);
     setPasswordList(prev => prev.filter(p => p.id !== id));
   };
+
+  // Auto-load e-statement data when this tab is active on mount
+  useEffect(() => {
+    if (subTab === "estatement") loadEStatement();
+  }, [subTab, loadEStatement]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── What's New ─────────────────────────────────────────────
   const [whatsNewOpen, setWhatsNewOpen] = useState(false);
