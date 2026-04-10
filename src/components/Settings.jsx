@@ -98,7 +98,6 @@ export default function Settings({
   const [scanning,          setScanning]           = useState(false);
   const [processModal,      setProcessModal]       = useState(null); // statement record
   const [addPwdOpen,        setAddPwdOpen]         = useState(false);
-  const [newPwdLabel,       setNewPwdLabel]        = useState("");
   const [newPwdPattern,     setNewPwdPattern]      = useState("");
 
   const loadEStatement = useCallback(async () => {
@@ -134,14 +133,14 @@ export default function Settings({
   };
 
   const addPassword = async () => {
-    if (!newPwdLabel.trim() || !newPwdPattern.trim()) return showToast("Label and pattern required", "error");
+    if (!newPwdPattern.trim()) return showToast("Password required", "error");
     const maxOrder = passwordList.reduce((m, p) => Math.max(m, p.sort_order || 0), 0);
     const { data, error } = await supabase.from("estatement_password_list").insert({
-      user_id: user.id, label: newPwdLabel.trim(), pattern: newPwdPattern.trim(), sort_order: maxOrder + 1,
+      user_id: user.id, label: "", pattern: newPwdPattern.trim(), sort_order: maxOrder + 1,
     }).select().single();
     if (error) return showToast(error.message, "error");
     setPasswordList(prev => [...prev, data]);
-    setNewPwdLabel(""); setNewPwdPattern(""); setAddPwdOpen(false);
+    setNewPwdPattern(""); setAddPwdOpen(false);
   };
 
   const deletePassword = async (id) => {
@@ -658,7 +657,6 @@ export default function Settings({
           passwordList={passwordList} setPasswordList={setPasswordList}
           scanning={scanning} onScan={scanGmail}
           addPwdOpen={addPwdOpen} setAddPwdOpen={setAddPwdOpen}
-          newPwdLabel={newPwdLabel} setNewPwdLabel={setNewPwdLabel}
           newPwdPattern={newPwdPattern} setNewPwdPattern={setNewPwdPattern}
           onAddPassword={addPassword} onDeletePassword={deletePassword}
           processModal={processModal} setProcessModal={setProcessModal}
@@ -1426,12 +1424,14 @@ function EStatementTab({
   passwordList, setPasswordList,
   scanning, onScan,
   addPwdOpen, setAddPwdOpen,
-  newPwdLabel, setNewPwdLabel,
   newPwdPattern, setNewPwdPattern,
   onAddPassword, onDeletePassword,
   processModal, setProcessModal,
   accounts, ledger,
 }) {
+  const [showList, setShowList] = useState(false);
+  const [revealed, setRevealed] = useState({}); // id → true
+
   const statusBadge = (status) => {
     const map = {
       pending:         { bg: "#e0f2fe", color: "#0369a1", label: "Pending" },
@@ -1452,7 +1452,7 @@ function EStatementTab({
   };
 
   const VARIABLE_LEGEND = [
-    { var: "{DDMMYYYY}", desc: "Your birth date e.g. 01011990" },
+    { var: "{DDMMYYYY}", desc: "Birth date e.g. 01011990" },
     { var: "{account_no}", desc: "Account number" },
     { var: "{last4}", desc: "Last 4 digits of card" },
   ];
@@ -1462,79 +1462,98 @@ function EStatementTab({
 
       {/* ── Password Priority List ── */}
       <div style={card}>
-        <SectionHeader title="📋 Password Priority List" />
-        <div style={{ fontSize: 11, color: T.text3, marginBottom: 12, marginTop: 4 }}>
-          Passwords to try when unlocking encrypted e-statements. Listed in order.
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <SectionHeader title="PDF Passwords" />
+          {passwordList.length > 0 && (
+            <span style={{ fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif" }}>
+              {passwordList.length} configured
+            </span>
+          )}
         </div>
 
-        {passwordList.length === 0 && !addPwdOpen ? (
-          <div style={{ fontSize: 12, color: T.text3, fontFamily: "Figtree, sans-serif", padding: "8px 0" }}>
-            No passwords configured. Add your common PDF passwords below.
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+        {/* Masked list — only when showList */}
+        {showList && passwordList.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 10 }}>
             {passwordList.map((p, idx) => (
               <div key={p.id} style={{
                 display: "flex", alignItems: "center", gap: 8,
-                padding: "8px 10px", background: T.sur2, borderRadius: 9,
+                padding: "7px 10px", background: T.sur2, borderRadius: 8,
               }}>
-                <span style={{ fontSize: 12, color: T.text3, fontWeight: 700, minWidth: 20 }}>{idx + 1}.</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: T.text, fontFamily: "Figtree, sans-serif" }}>
-                    {p.label}
-                  </div>
-                  <div style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, mono, monospace", marginTop: 1 }}>
-                    {p.pattern}
-                  </div>
-                </div>
+                <span style={{ fontSize: 11, color: T.text3, fontWeight: 700, minWidth: 18, flexShrink: 0 }}>
+                  {idx + 1}.
+                </span>
+                <span style={{
+                  flex: 1, fontSize: 13, letterSpacing: revealed[p.id] ? "normal" : "0.12em",
+                  color: T.text, fontFamily: revealed[p.id] ? "Figtree, monospace" : "monospace",
+                }}>
+                  {revealed[p.id] ? p.pattern : "••••••••"}
+                </span>
+                <button
+                  onClick={() => setRevealed(r => ({ ...r, [p.id]: !r[p.id] }))}
+                  title={revealed[p.id] ? "Hide" : "Reveal"}
+                  style={{ border: "none", background: "none", cursor: "pointer", fontSize: 14, padding: "2px 4px", color: T.text3 }}
+                >
+                  {revealed[p.id] ? "🙈" : "👁"}
+                </button>
                 <button
                   onClick={() => onDeletePassword(p.id)}
-                  style={{
-                    border: "none", background: "none", cursor: "pointer",
-                    fontSize: 12, color: "#dc2626", padding: "2px 6px",
-                  }}
+                  style={{ border: "none", background: "none", cursor: "pointer", fontSize: 13, color: "#dc2626", padding: "2px 4px" }}
                 >✕</button>
               </div>
             ))}
           </div>
         )}
 
-        {addPwdOpen ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "10px", background: T.sur2, borderRadius: 10 }}>
-            <Input
-              label="Label (e.g. Birth Date)"
-              value={newPwdLabel}
-              onChange={e => setNewPwdLabel(e.target.value)}
-              placeholder="Password label"
-            />
-            <Input
-              label="Pattern / Value"
-              value={newPwdPattern}
-              onChange={e => setNewPwdPattern(e.target.value)}
-              placeholder="e.g. {DDMMYYYY} or MyPassword123"
-            />
-            <div style={{ display: "flex", gap: 8 }}>
-              <Button variant="primary" size="sm" onClick={onAddPassword}>Save</Button>
-              <Button variant="secondary" size="sm" onClick={() => { setAddPwdOpen(false); setNewPwdLabel(""); setNewPwdPattern(""); }}>Cancel</Button>
-            </div>
+        {showList && passwordList.length === 0 && !addPwdOpen && (
+          <div style={{ fontSize: 12, color: T.text3, marginBottom: 10, fontFamily: "Figtree, sans-serif" }}>
+            No passwords yet.
           </div>
-        ) : (
-          <Button variant="secondary" size="sm" onClick={() => setAddPwdOpen(true)}>+ Add Password</Button>
         )}
 
-        {/* Variable legend */}
-        <div style={{ marginTop: 14, padding: "10px 12px", background: T.sur2, borderRadius: 10 }}>
-          <div style={{ fontSize: 10, fontWeight: 700, color: T.text3, textTransform: "uppercase", marginBottom: 6, letterSpacing: "0.4px" }}>
-            Available Variables
-          </div>
-          {VARIABLE_LEGEND.map(v => (
-            <div key={v.var} style={{ display: "flex", gap: 8, marginBottom: 3, alignItems: "center" }}>
-              <code style={{ fontSize: 10, fontWeight: 700, color: "#0891b2", background: "#e0f7fa", padding: "1px 5px", borderRadius: 4 }}>
-                {v.var}
-              </code>
-              <span style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, sans-serif" }}>{v.desc}</span>
+        {/* Add password inline form */}
+        {addPwdOpen && (
+          <div style={{ marginBottom: 10, padding: "10px 12px", background: T.sur2, borderRadius: 10 }}>
+            <div style={{ fontSize: 11, color: T.text3, marginBottom: 6, fontFamily: "Figtree, sans-serif" }}>
+              Password or pattern:
             </div>
-          ))}
+            <input
+              type="password"
+              autoFocus
+              value={newPwdPattern}
+              onChange={e => setNewPwdPattern(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") onAddPassword(); if (e.key === "Escape") { setAddPwdOpen(false); setNewPwdPattern(""); } }}
+              placeholder="e.g. {DDMMYYYY} or MyPassword123"
+              style={{
+                width: "100%", boxSizing: "border-box", height: 38,
+                padding: "0 12px", border: "1.5px solid #3b5bdb", borderRadius: 8,
+                fontFamily: "Figtree, sans-serif", fontSize: 13,
+                background: "#fff", color: "#111827", outline: "none", marginBottom: 8,
+              }}
+            />
+            <div style={{ fontSize: 10, color: T.text3, marginBottom: 8, fontFamily: "Figtree, sans-serif" }}>
+              Variables: {VARIABLE_LEGEND.map(v => (
+                <code key={v.var} style={{ fontSize: 10, color: "#0891b2", background: "#e0f7fa", padding: "0 4px", borderRadius: 3, marginRight: 6 }}>
+                  {v.var}
+                </code>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Button variant="primary" size="sm" onClick={onAddPassword}>Save</Button>
+              <Button variant="secondary" size="sm" onClick={() => { setAddPwdOpen(false); setNewPwdPattern(""); }}>Cancel</Button>
+            </div>
+          </div>
+        )}
+
+        {/* Buttons row */}
+        <div style={{ display: "flex", gap: 8 }}>
+          <Button variant="secondary" size="sm" onClick={() => setAddPwdOpen(o => !o)}>
+            {addPwdOpen ? "Cancel" : "+ Add Password"}
+          </Button>
+          {passwordList.length > 0 && (
+            <Button variant="secondary" size="sm" onClick={() => { setShowList(o => !o); setRevealed({}); }}>
+              {showList ? "Hide" : "Show All"}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -1611,13 +1630,55 @@ function EStatementTab({
 
 // ─── PROCESS STATEMENT MODAL ─────────────────────────────────
 function ProcessStatementModal({ statement, passwordList, user, accounts, ledger, T, onClose, onDone }) {
-  const [phase, setPhase]           = useState("idle"); // idle | processing | preview | saving
-  const [transactions, setTransactions] = useState([]);
-  const [skipped, setSkipped]       = useState({});  // id → true
-  const [manualPwd, setManualPwd]   = useState("");
-  const [error, setError]           = useState("");
+  const [phase, setPhase]       = useState("idle"); // idle | processing | preview | saving
+  const [missing, setMissing]   = useState([]);     // filtered + categorized missing txns
+  const [skipped, setSkipped]   = useState({});     // _id → true (user-manually skipped)
+  const [manualPwd, setManualPwd] = useState("");
+  const [error, setError]       = useState("");
 
   const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL || "";
+
+  // Assign tx_category + extract installment metadata (AI field with fallback patterns)
+  const categorize = (t) => {
+    let cat = t.tx_category;
+    if (!cat) {
+      const d = (t.description || "").toLowerCase();
+      if (/payment|pembayaran|bayar\s+tagihan|pelunasan|pay\s+bill|tagihan\s+kartu/i.test(d)) cat = "payment";
+      else if (/cicilan|angsuran|installment|cicil/i.test(d)) cat = "installment";
+      else if (/biaya\s+admin|admin[\s-]fee|late[\s-]charge|bunga|interest|annual[\s-]fee|denda|iuran|service[\s-]charge|provisi/i.test(d)) cat = "fee";
+      else cat = "regular";
+    }
+    let inst_no    = t.installment_no    ?? null;
+    let inst_total = t.installment_total ?? null;
+    if (cat === "installment" && !inst_no) {
+      const m = (t.description || "").match(
+        /(?:cicilan|angsuran|installment)\s+(?:ke[\s-]*)?(\d+)(?:[\/\s](?:dari\s+)?(\d+))?/i
+      );
+      if (m) { inst_no = parseInt(m[1]); inst_total = m[2] ? parseInt(m[2]) : null; }
+    }
+    return { ...t, tx_category: cat, installment_no: inst_no, installment_total: inst_total };
+  };
+
+  // Duplicate = amount exact + date ±1 day
+  const isDuplicate = (tx) => {
+    const amt = Number(tx.amount || 0);
+    return ledger.some(e => {
+      if (Math.abs(Number(e.amount_idr || e.amount || 0) - amt) > 1) return false;
+      if (!e.tx_date || !tx.date) return false;
+      return Math.abs(new Date(e.tx_date) - new Date(tx.date)) / 86400000 <= 1;
+    });
+  };
+
+  // Installment series: check if any ledger entry shares the same base description
+  const hasInstallmentParent = (tx) => {
+    const base = (tx.description || "")
+      .replace(/(?:cicilan|angsuran|installment)\s+(?:ke[\s-]*)?\d+(?:[\/\s]\d+)?/gi, "")
+      .replace(/\s+/g, " ").trim().toLowerCase();
+    if (base.length < 4) return false;
+    return ledger.some(e =>
+      (e.description || "").toLowerCase().includes(base.slice(0, Math.min(base.length, 20)))
+    );
+  };
 
   const callProcess = async (extraPasswords = []) => {
     setPhase("processing"); setError("");
@@ -1641,57 +1702,47 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
         setPhase("idle"); setError("Could not unlock PDF. Enter password manually below.");
         return;
       }
-      const txns = (result.transactions || []).map((t, i) => ({ ...t, _id: i }));
-      setTransactions(txns);
+      const categorized = (result.transactions || []).map((t, i) => categorize({ ...t, _id: i }));
+      // Silently drop payment-type and already-recorded transactions
+      setMissing(categorized.filter(tx => tx.tx_category !== "payment" && !isDuplicate(tx)));
+      setSkipped({});
       setPhase("preview");
     } catch (e) { setPhase("idle"); setError(e.message); }
   };
 
-  // Check for duplicates in ledger
-  const isDuplicate = (tx) => {
-    const amt = Number(tx.amount || 0);
-    const txDate = tx.date || "";
-    return ledger.some(e => {
-      const eAmt = Number(e.amount_idr || e.amount || 0);
-      if (Math.abs(eAmt - amt) > 1) return false;
-      if (!e.tx_date || !txDate) return false;
-      const diff = Math.abs(new Date(e.tx_date) - new Date(txDate)) / 86400000;
-      return diff <= 1;
-    });
-  };
-
   const saveAll = async () => {
     setPhase("saving");
-    const toSave = transactions.filter(t => !skipped[t._id] && !isDuplicate(t));
+    const toSave = missing.filter(t => !skipped[t._id]);
     let count = 0;
     for (const tx of toSave) {
       const acct = accounts.find(a => a.type === "bank" && (a.bank_name === statement.bank_name || accounts.length === 1));
       const isDebit = (tx.type || "debit").toLowerCase() === "debit";
       try {
         await supabase.from("ledger").insert({
-          user_id:      user.id,
-          tx_date:      tx.date,
-          description:  tx.description || "E-Statement import",
-          amount:       Number(tx.amount || 0),
-          amount_idr:   Number(tx.amount || 0),
-          currency:     tx.currency || "IDR",
-          tx_type:      isDebit ? "expense" : "income",
-          from_type:    isDebit ? "account" : null,
-          to_type:      isDebit ? null : "account",
-          from_id:      isDebit ? (acct?.id || null) : null,
-          to_id:        isDebit ? null : (acct?.id || null),
-          category_id:  null,
-          category_name:null,
-          entity:       "Personal",
-          is_reimburse: false,
+          user_id:        user.id,
+          tx_date:        tx.date,
+          description:    tx.description || "E-Statement import",
+          amount:         Number(tx.amount || 0),
+          amount_idr:     Number(tx.amount || 0),
+          currency:       tx.currency || "IDR",
+          tx_type:        isDebit ? "expense" : "income",
+          from_type:      isDebit ? "account" : null,
+          to_type:        isDebit ? null : "account",
+          from_id:        isDebit ? (acct?.id || null) : null,
+          to_id:          isDebit ? null : (acct?.id || null),
+          category_id:    null,
+          category_name:  null,
+          entity:         "Personal",
+          is_reimburse:   false,
           ai_categorized: false,
           ai_confidence:  null,
+          notes: tx.tx_category === "installment" && tx.installment_no
+            ? `Cicilan ${tx.installment_no}${tx.installment_total ? `/${tx.installment_total}` : ""}`
+            : null,
         });
         count++;
       } catch { /* skip on error */ }
     }
-
-    // Mark statement done
     const { data: { session } } = await supabase.auth.getSession();
     const token = session?.access_token;
     await fetch(`${SUPABASE_URL}/functions/v1/gmail-estatement`, {
@@ -1701,6 +1752,15 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
     });
     onDone(statement.id, count);
   };
+
+  // Group missing transactions by category
+  const groups = [
+    { key: "fee",         label: "FEES & CHARGES", items: missing.filter(t => t.tx_category === "fee") },
+    { key: "installment", label: "INSTALLMENTS",   items: missing.filter(t => t.tx_category === "installment") },
+    { key: "regular",     label: "TRANSACTIONS",   items: missing.filter(t => t.tx_category === "regular" || t.tx_category === "transfer") },
+  ].filter(g => g.items.length > 0);
+
+  const importCount = missing.filter(t => !skipped[t._id]).length;
 
   const OVL = {
     position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
@@ -1768,57 +1828,82 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
           )}
 
           {phase === "preview" && (
-            <>
-              <div style={{ fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
-                Found <strong>{transactions.length}</strong> transactions.
-                {transactions.filter(t => isDuplicate(t)).length > 0 &&
-                  ` ${transactions.filter(t => isDuplicate(t)).length} possible duplicate(s) flagged.`
-                }
+            groups.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "40px 20px" }}>
+                <div style={{ fontSize: 32, marginBottom: 12 }}>✅</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
+                  All transactions already recorded
+                </div>
+                <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 4, fontFamily: "Figtree, sans-serif" }}>
+                  Nothing to import.
+                </div>
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {transactions.map(tx => {
-                  const dup = isDuplicate(tx);
-                  const skip = !!skipped[tx._id];
-                  return (
-                    <div key={tx._id} style={{
-                      padding: "9px 11px", borderRadius: 9,
-                      background: skip ? "#f9fafb" : dup ? "#fffbeb" : "#f9fafb",
-                      border: `1px solid ${skip ? "#e5e7eb" : dup ? "#fde68a" : "#e5e7eb"}`,
-                      opacity: skip ? 0.5 : 1,
-                    }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", fontFamily: "Figtree, sans-serif",
-                            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                            {dup && <span style={{ fontSize: 10, color: "#d97706", marginRight: 4 }}>⚠️ dup</span>}
-                            {tx.description || "—"}
-                          </div>
-                          <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1 }}>
-                            {tx.date} · {(tx.type || "debit").toLowerCase() === "debit" ? "Debit" : "Credit"}
+            ) : (
+              groups.map(group => (
+                <div key={group.key}>
+                  <div style={{
+                    fontSize: 10, fontWeight: 700, color: "#9ca3af", letterSpacing: "0.6px",
+                    textTransform: "uppercase", marginBottom: 6, fontFamily: "Figtree, sans-serif",
+                  }}>
+                    {group.label} · {group.items.filter(t => !skipped[t._id]).length} missing
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 14 }}>
+                    {group.items.map(tx => {
+                      const skip = !!skipped[tx._id];
+                      const isNewInstallment = tx.tx_category === "installment" && !hasInstallmentParent(tx);
+                      const isDebit = (tx.type || "debit").toLowerCase() === "debit";
+                      return (
+                        <div key={tx._id} style={{
+                          padding: "9px 11px", borderRadius: 9,
+                          background: skip ? "#f9fafb" : "#f0fdf4",
+                          border: `1px solid ${skip ? "#e5e7eb" : "#bbf7d0"}`,
+                          opacity: skip ? 0.5 : 1,
+                        }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", fontFamily: "Figtree, sans-serif",
+                                whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                {isNewInstallment && (
+                                  <span style={{
+                                    fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 4,
+                                    background: "#fef9c3", color: "#92400e", marginRight: 5,
+                                  }}>NEW</span>
+                                )}
+                                {tx.description || "—"}
+                              </div>
+                              <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1, fontFamily: "Figtree, sans-serif" }}>
+                                {tx.date}
+                                {tx.installment_no
+                                  ? ` · Cicilan ${tx.installment_no}${tx.installment_total ? `/${tx.installment_total}` : ""}`
+                                  : ""}
+                              </div>
+                            </div>
+                            <div style={{ textAlign: "right", flexShrink: 0 }}>
+                              <div style={{ fontSize: 12, fontWeight: 700, fontFamily: "Figtree, sans-serif",
+                                color: isDebit ? "#dc2626" : "#059669" }}>
+                                {isDebit ? "−" : "+"}Rp {Number(tx.amount || 0).toLocaleString("id-ID")}
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => setSkipped(p => ({ ...p, [tx._id]: !p[tx._id] }))}
+                              style={{
+                                border: "1px solid #e5e7eb", borderRadius: 6, padding: "3px 8px",
+                                fontSize: 10, fontWeight: 600, cursor: "pointer", flexShrink: 0,
+                                background: skip ? "#f3f4f6" : "#fff",
+                                color: skip ? "#059669" : "#6b7280",
+                                fontFamily: "Figtree, sans-serif",
+                              }}
+                            >
+                              {skip ? "Include" : "Skip"}
+                            </button>
                           </div>
                         </div>
-                        <div style={{ textAlign: "right", flexShrink: 0 }}>
-                          <div style={{ fontSize: 12, fontWeight: 700,
-                            color: (tx.type || "debit").toLowerCase() === "debit" ? "#dc2626" : "#059669" }}>
-                            {(tx.type || "debit").toLowerCase() === "debit" ? "−" : "+"}Rp {Number(tx.amount || 0).toLocaleString("id-ID")}
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => setSkipped(p => ({ ...p, [tx._id]: !p[tx._id] }))}
-                          style={{
-                            border: "1px solid #e5e7eb", borderRadius: 6, padding: "3px 8px",
-                            fontSize: 10, fontWeight: 600, cursor: "pointer",
-                            background: skip ? "#f3f4f6" : "#fff", color: skip ? "#059669" : "#dc2626",
-                          }}
-                        >
-                          {skip ? "Include" : "Skip"}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))
+            )
           )}
 
           {phase === "saving" && (
@@ -1833,13 +1918,14 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
         {phase === "preview" && (
           <div style={{ padding: "12px 20px", borderTop: "1px solid #f3f4f6", display: "flex", gap: 8 }}>
             <Button variant="secondary" onClick={onClose} style={{ flexShrink: 0 }}>Cancel</Button>
-            <Button
-              fullWidth variant="primary"
-              onClick={saveAll}
-              busy={phase === "saving"}
-            >
-              Save {transactions.filter(t => !skipped[t._id] && !isDuplicate(t)).length} New Transactions
-            </Button>
+            {groups.length > 0 && (
+              <Button fullWidth variant="primary" onClick={saveAll}>
+                Import {importCount} Transaction{importCount !== 1 ? "s" : ""}
+              </Button>
+            )}
+            {groups.length === 0 && (
+              <Button fullWidth variant="secondary" onClick={onClose}>Close</Button>
+            )}
           </div>
         )}
       </div>

@@ -258,9 +258,36 @@ async function processStatement(
 
   for (const pwd of passwords) {
     try {
-      const prompt = pwd.value
+      const promptPrefix = pwd.value
         ? `This is a password-protected bank e-statement PDF. The password is: "${pwd.value}". Extract ALL transactions from this document.`
         : `Extract ALL transactions from this bank e-statement PDF.`;
+
+      const fullPrompt = `${promptPrefix}
+
+Return a JSON array of transactions with this exact structure:
+[{
+  "date": "YYYY-MM-DD",
+  "description": "transaction description",
+  "amount": 150000,
+  "currency": "IDR",
+  "type": "debit|credit",
+  "balance": 5000000,
+  "tx_category": "payment|installment|fee|transfer|regular",
+  "installment_no": null,
+  "installment_total": null
+}]
+
+Rules for tx_category:
+- "payment": Bill/CC payments (description contains: payment, pembayaran, bayar tagihan, pelunasan, pay bill, tagihan kartu)
+- "installment": Installment charges (description contains: cicilan, angsuran, installment, cicil)
+- "fee": Bank charges (description contains: biaya admin, admin fee, late charge, bunga, interest, annual fee, denda, iuran, service charge, provisi)
+- "transfer": Inter-account transfers (description contains: transfer, pemindahan, top up, tarik tunai ke rekening lain)
+- "regular": All other purchases, expenses, and income
+
+For installment rows extract installment_no and installment_total if shown (e.g. "Cicilan 3/12" → no=3, total=12). Leave null if not shown.
+If the PDF is password-protected and you cannot read it, return: {"error": "password_required"}
+If the password is wrong, return: {"error": "wrong_password"}
+Return ONLY the JSON array (or error object), no other text.`;
 
       const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -286,21 +313,7 @@ async function processStatement(
               },
               {
                 type: "text",
-                text: `${prompt}
-
-Return a JSON array of transactions with this structure:
-[{
-  "date": "YYYY-MM-DD",
-  "description": "transaction description",
-  "amount": 150000,
-  "currency": "IDR",
-  "type": "debit or credit",
-  "balance": 5000000
-}]
-
-If the PDF is password-protected and you cannot read it, return: {"error": "password_required"}
-If the password is wrong, return: {"error": "wrong_password"}
-Only return the JSON array (or error object), no other text.`,
+                text: fullPrompt,
               },
             ],
           }],
