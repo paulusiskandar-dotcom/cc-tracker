@@ -754,15 +754,25 @@ function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, CURRENC
   const visible = bankFilter === "all" ? sorted : sorted.filter(({ a }) => a.bank_name === bankFilter);
 
   const nonZero      = sorted.filter(({ a }) => Number(a.current_balance || 0) > 0);
+  const accountIds   = new Set(accounts.map(a => a.id));
   const idrAccts     = accounts.filter(a => !a.currency || a.currency === "IDR");
   const foreignAccts = accounts.filter(a => a.currency && a.currency !== "IDR");
   const totalIDR     = idrAccts.reduce((s, a) => s + Number(a.current_balance || 0), 0);
-  const foreignIDR   = foreignAccts.reduce((sum, a) => {
+  // Foreign-currency accounts (non-IDR base)
+  const foreignAcctIDR = foreignAccts.reduce((sum, a) => {
     const cur  = C.find(c => c.code === a.currency);
     const rate = fxRates[a.currency] || cur?.rate || 1;
     return sum + Math.round(Number(a.current_balance || 0) * rate);
   }, 0);
-  const grandTotal = totalIDR + foreignIDR;
+  // Multi-currency pockets (account_currencies rows) for all bank accounts in this tab
+  const foreignPocketIDR = accountCurrencies
+    .filter(r => accountIds.has(r.account_id) && r.currency && r.currency !== "IDR")
+    .reduce((sum, r) => {
+      const rate = fxRates[r.currency];
+      return rate ? sum + Number(r.balance || 0) * rate : sum;
+    }, 0);
+  const foreignIDR   = foreignAcctIDR + foreignPocketIDR;
+  const grandTotal   = totalIDR + foreignIDR;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
