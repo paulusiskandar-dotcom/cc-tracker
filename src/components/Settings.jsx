@@ -1700,26 +1700,25 @@ function EStatementTab({
       const notes = r._isInstallment && r._instNo
         ? `Cicilan ${r._instNo}${r._instTotal ? `/${r._instTotal}` : ""}${r.notes ? ` — ${r.notes}` : ""}`
         : (r.notes || null);
-      try {
-        await supabase.from("ledger").insert({
-          user_id:       user.id,
-          tx_date:       r.tx_date,
-          description:   r.description || "E-Statement import",
-          merchant_name: r.description || null,
-          amount:        Number(r.amount || 0),
-          amount_idr:    Number(r.amount_idr || r.amount || 0),
-          currency:      "IDR",
-          tx_type:       r.tx_type === "cc_installment" ? "expense" : r.tx_type,
-          from_id:       isDebit ? (r.from_id || null) : null,
-          to_id:         isDebit ? null : (r.to_id || null),
-          category_id:   r.category_id || null,
-          category_name: r.category_name || null,
-          entity:        "Personal",
-          is_reimburse:  false,
-          notes,
-        });
-        count++;
-      } catch { /* skip */ }
+      const { error: insErr } = await supabase.from("ledger").insert({
+        user_id:       user.id,
+        tx_date:       r.tx_date,
+        description:   r.description || "E-Statement import",
+        merchant_name: r.description || null,
+        amount:        Number(r.amount || 0),
+        amount_idr:    Number(r.amount_idr || r.amount || 0),
+        currency:      "IDR",
+        tx_type:       r.tx_type === "cc_installment" ? "expense" : r.tx_type,
+        from_id:       isDebit ? (r.from_id || null) : null,
+        to_id:         isDebit ? null : (r.to_id || null),
+        category_id:   r.category_id || null,
+        category_name: r.category_name || null,
+        entity:        "Personal",
+        is_reimburse:  false,
+        notes,
+      });
+      if (insErr) { showToast(`Save error: ${insErr.message}`, "error"); continue; }
+      count++;
     }
     const now = new Date().toISOString();
     await supabase.from("estatement_pdfs").update({
