@@ -4,13 +4,18 @@ export const APP_BUILD   = "2026-04-09";
 
 // ─── CURRENCIES ───────────────────────────────────────────────
 export const CURRENCIES = [
-  { code: "IDR", symbol: "Rp",  rate: 1,      flag: "🇮🇩" },
-  { code: "USD", symbol: "$",   rate: 16400,  flag: "🇺🇸" },
-  { code: "SGD", symbol: "S$",  rate: 12200,  flag: "🇸🇬" },
-  { code: "MYR", symbol: "RM",  rate: 3700,   flag: "🇲🇾" },
-  { code: "JPY", symbol: "¥",   rate: 110,    flag: "🇯🇵" },
-  { code: "EUR", symbol: "€",   rate: 17800,  flag: "🇪🇺" },
-  { code: "AUD", symbol: "A$",  rate: 10500,  flag: "🇦🇺" },
+  { code: "IDR", symbol: "Rp",  rate: 1,      flag: "🇮🇩", name: "Indonesian Rupiah"  },
+  { code: "USD", symbol: "$",   rate: 16400,  flag: "🇺🇸", name: "US Dollar"          },
+  { code: "SGD", symbol: "S$",  rate: 12200,  flag: "🇸🇬", name: "Singapore Dollar"   },
+  { code: "MYR", symbol: "RM",  rate: 3700,   flag: "🇲🇾", name: "Malaysian Ringgit"  },
+  { code: "JPY", symbol: "¥",   rate: 110,    flag: "🇯🇵", name: "Japanese Yen"       },
+  { code: "EUR", symbol: "€",   rate: 17800,  flag: "🇪🇺", name: "Euro"               },
+  { code: "AUD", symbol: "A$",  rate: 10500,  flag: "🇦🇺", name: "Australian Dollar"  },
+  { code: "GBP", symbol: "£",   rate: 21200,  flag: "🇬🇧", name: "British Pound"      },
+  { code: "CHF", symbol: "Fr",  rate: 18500,  flag: "🇨🇭", name: "Swiss Franc"        },
+  { code: "CNY", symbol: "¥",   rate: 2250,   flag: "🇨🇳", name: "Chinese Yuan"       },
+  { code: "THB", symbol: "฿",   rate: 470,    flag: "🇹🇭", name: "Thai Baht"          },
+  { code: "KRW", symbol: "₩",   rate: 12,     flag: "🇰🇷", name: "Korean Won"         },
 ];
 
 // ─── ENTITIES ─────────────────────────────────────────────────
