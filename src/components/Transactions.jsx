@@ -791,32 +791,45 @@ function TxRow({ entry: e, accounts, onEdit, onDelete }) {
   const catLabel = e.category_name || catDef?.label || null;
 
   // ── Type badge / missing-type warning ────────────────────────
-  const txDef = TX_TYPE_MAP[e.tx_type];
-  const badgeEl = e.tx_type ? (txDef ? (
+  const TX_BADGE = {
+    expense:       { bg: "#FDE8E8", color: "#C0392B", label: "Expense"       },
+    income:        { bg: "#DFF5E8", color: "#1A7A42", label: "Income"        },
+    transfer:      { bg: "#E0EAFF", color: "#2255C4", label: "Transfer"      },
+    pay_cc:        { bg: "#EDE8FF", color: "#5B2DC4", label: "Pay CC"        },
+    buy_asset:     { bg: "#FDE8E8", color: "#C0392B", label: "Buy Asset"     },
+    sell_asset:    { bg: "#DFF5E8", color: "#1A7A42", label: "Sell Asset"    },
+    fx_exchange:   { bg: "#FFF4DC", color: "#A0620A", label: "FX Exchange"   },
+    reimburse_out: { bg: "#FDE8E8", color: "#C0392B", label: "Reimburse Out" },
+    reimburse_in:  { bg: "#DFF5E8", color: "#1A7A42", label: "Reimburse In"  },
+    give_loan:     { bg: "#FDE8E8", color: "#C0392B", label: "Give Loan"     },
+    collect_loan:  { bg: "#DFF5E8", color: "#1A7A42", label: "Collect Loan"  },
+    pay_liability: { bg: "#FFE8DC", color: "#A04A0A", label: "Pay Liability" },
+  };
+  const bdg = e.tx_type ? TX_BADGE[e.tx_type] : null;
+  const badgeEl = e.tx_type ? (bdg ? (
     <span key="badge" style={{
       display:       "inline-block",
-      fontSize:      9,
-      fontWeight:    700,
+      fontSize:      10,
+      fontWeight:    500,
       lineHeight:    "1",
-      padding:       "2px 5px",
+      padding:       "1px 6px",
       borderRadius:  4,
-      background:    txDef.color + "18",
-      color:         txDef.color,
+      background:    bdg.bg,
+      color:         bdg.color,
       marginRight:   4,
       verticalAlign: "middle",
-      letterSpacing: "0.3px",
       whiteSpace:    "nowrap",
-    }}>{txDef.label}</span>
+    }}>{bdg.label}</span>
   ) : null) : (
     <span key="badge" style={{
       display:       "inline-block",
-      fontSize:      9,
-      fontWeight:    800,
+      fontSize:      10,
+      fontWeight:    500,
       lineHeight:    "1",
-      padding:       "2px 5px",
+      padding:       "1px 6px",
       borderRadius:  4,
-      background:    "#fee2e2",
-      color:         "#dc2626",
+      background:    "#FDE8E8",
+      color:         "#C0392B",
       marginRight:   4,
       verticalAlign: "middle",
       whiteSpace:    "nowrap",
