@@ -92,42 +92,6 @@ export default function Settings({
   const [merchantCat, setMerchantCat]   = useState("");
   const [merchantModal, setMerchantModal] = useState(false);
 
-  // ── E-Statement ────────────────────────────────────────────
-  const [passwordList,  setPasswordList]  = useState([]);
-  const [pwdLoaded,     setPwdLoaded]     = useState(false);
-  const [addPwdOpen,    setAddPwdOpen]    = useState(false);
-  const [newPwdPattern, setNewPwdPattern] = useState("");
-
-  const loadPasswords = useCallback(async () => {
-    if (pwdLoaded) return;
-    try {
-      const { data } = await supabase.from("estatement_password_list").select("*").eq("user_id", user.id).order("sort_order");
-      setPasswordList(data || []);
-      setPwdLoaded(true);
-    } catch (e) { showToast(e.message, "error"); }
-  }, [pwdLoaded, user.id]);
-
-  const addPassword = async () => {
-    if (!newPwdPattern.trim()) return showToast("Password required", "error");
-    const maxOrder = passwordList.reduce((m, p) => Math.max(m, p.sort_order || 0), 0);
-    const { data, error } = await supabase.from("estatement_password_list").insert({
-      user_id: user.id, label: "", pattern: newPwdPattern.trim(), sort_order: maxOrder + 1,
-    }).select().single();
-    if (error) return showToast(error.message, "error");
-    setPasswordList(prev => [...prev, data]);
-    setNewPwdPattern(""); setAddPwdOpen(false);
-  };
-
-  const deletePassword = async (id) => {
-    await supabase.from("estatement_password_list").delete().eq("id", id);
-    setPasswordList(prev => prev.filter(p => p.id !== id));
-  };
-
-  // Auto-load passwords when e-statement tab is active
-  useEffect(() => {
-    if (subTab === "estatement") loadPasswords();
-  }, [subTab, loadPasswords]); // eslint-disable-line react-hooks/exhaustive-deps
-
   // ── What's New ─────────────────────────────────────────────
   const [whatsNewOpen, setWhatsNewOpen] = useState(false);
 
@@ -633,10 +597,6 @@ export default function Settings({
       {subTab === "estatement" && (
         <EStatementTab
           T={T} card={card} user={user}
-          passwordList={passwordList}
-          addPwdOpen={addPwdOpen} setAddPwdOpen={setAddPwdOpen}
-          newPwdPattern={newPwdPattern} setNewPwdPattern={setNewPwdPattern}
-          onAddPassword={addPassword} onDeletePassword={deletePassword}
           accounts={accounts} ledger={ledger}
           installments={installments} setInstallments={setInstallments}
         />
@@ -1428,22 +1388,10 @@ const estmtACT = (extra = {}) => ({
 // ─── E-STATEMENT TAB ─────────────────────────────────────────
 function EStatementTab({
   T, card, user,
-  passwordList,
-  addPwdOpen, setAddPwdOpen,
-  newPwdPattern, setNewPwdPattern,
-  onAddPassword, onDeletePassword,
   accounts, ledger, installments = [], setInstallments,
 }) {
-  const [showList, setShowList] = useState(false);
-  const [revealed, setRevealed] = useState({});
   const [queue,    setQueue]    = useState([]);
   const [dragging, setDragging] = useState(false);
-
-  const VARIABLE_LEGEND = [
-    { var: "{DDMMYYYY}", desc: "Birth date e.g. 01011990" },
-    { var: "{account_no}", desc: "Account number" },
-    { var: "{last4}", desc: "Last 4 digits of card" },
-  ];
 
   const readFileAsBase64 = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1592,7 +1540,7 @@ function EStatementTab({
   };
 
   // ── Process a queued file ──────────────────────────────────
-  const processFile = async (itemId, onlyPassword = null) => {
+  const processFile = async (itemId) => {
     const item = queue.find(i => i.id === itemId);
     if (!item) return;
     setQueue(prev => prev.map(i => i.id === itemId
@@ -1601,7 +1549,6 @@ function EStatementTab({
     try {
       const base64 = await readFileAsBase64(item.file);
       const reqBody = { action: "process_upload", user_id: user.id, pdf_base64: base64, filename: item.name };
-      if (onlyPassword !== null) reqBody.only_password = onlyPassword;
       const res = await fetch(
         `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/gmail-estatement`,
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(reqBody) }
@@ -1610,7 +1557,7 @@ function EStatementTab({
       if (!res.ok) throw new Error(result.error || `HTTP ${res.status}`);
       if (!result.success) {
         setQueue(prev => prev.map(i => i.id === itemId
-          ? { ...i, status: result.needs_password ? "needs_password" : "failed", error: result.error } : i
+          ? { ...i, status: "failed", error: result.error } : i
         ));
         return;
       }
@@ -1708,12 +1655,11 @@ function EStatementTab({
 
   const statusBadge = (status) => {
     const map = {
-      queued:         { label: "⏳ Queued",          bg: "#f3f4f6", color: "#6b7280" },
-      processing:     { label: "🔄 Processing",      bg: "#fef9c3", color: "#92400e" },
-      done:           { label: "✅ Processed",        bg: "#dcfce7", color: "#15803d" },
-      saved:          { label: "✅ Saved",            bg: "#dcfce7", color: "#15803d" },
-      failed:         { label: "❌ Failed",           bg: "#fef2f2", color: "#dc2626" },
-      needs_password: { label: "🔑 Password Needed", bg: "#fff7ed", color: "#c2410c" },
+      queued:     { label: "⏳ Queued",     bg: "#f3f4f6", color: "#6b7280" },
+      processing: { label: "🔄 Processing", bg: "#fef9c3", color: "#92400e" },
+      done:       { label: "✅ Processed",  bg: "#dcfce7", color: "#15803d" },
+      saved:      { label: "✅ Saved",      bg: "#dcfce7", color: "#15803d" },
+      failed:     { label: "❌ Failed",     bg: "#fef2f2", color: "#dc2626" },
     };
     const s = map[status] || { label: status, bg: "#f3f4f6", color: "#6b7280" };
     return (
@@ -1729,98 +1675,7 @@ function EStatementTab({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
 
-      {/* ── Section 1: PDF Passwords ── */}
-      <div style={card}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-          <SectionHeader title="PDF Passwords" />
-          {passwordList.length > 0 && (
-            <span style={{ fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif" }}>
-              {passwordList.length} configured
-            </span>
-          )}
-        </div>
-
-        {showList && passwordList.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 10 }}>
-            {passwordList.map((p, idx) => (
-              <div key={p.id} style={{
-                display: "flex", alignItems: "center", gap: 8,
-                padding: "7px 10px", background: T.sur2, borderRadius: 8,
-              }}>
-                <span style={{ fontSize: 11, color: T.text3, fontWeight: 700, minWidth: 18, flexShrink: 0 }}>
-                  {idx + 1}.
-                </span>
-                <span style={{
-                  flex: 1, fontSize: 13,
-                  letterSpacing: revealed[p.id] ? "normal" : "0.12em",
-                  color: T.text, fontFamily: revealed[p.id] ? "Figtree, monospace" : "monospace",
-                }}>
-                  {revealed[p.id] ? p.pattern : "••••••••"}
-                </span>
-                <button onClick={() => setRevealed(r => ({ ...r, [p.id]: !r[p.id] }))}
-                  style={{ border: "none", background: "none", cursor: "pointer", fontSize: 14, padding: "2px 4px", color: T.text3 }}>
-                  {revealed[p.id] ? "🙈" : "👁"}
-                </button>
-                <button onClick={() => onDeletePassword(p.id)}
-                  style={{ border: "none", background: "none", cursor: "pointer", fontSize: 13, color: "#dc2626", padding: "2px 4px" }}>
-                  ✕
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {showList && passwordList.length === 0 && !addPwdOpen && (
-          <div style={{ fontSize: 12, color: T.text3, marginBottom: 10, fontFamily: "Figtree, sans-serif" }}>
-            No passwords yet.
-          </div>
-        )}
-
-        {addPwdOpen && (
-          <div style={{ marginBottom: 10, padding: "10px 12px", background: T.sur2, borderRadius: 10 }}>
-            <div style={{ fontSize: 11, color: T.text3, marginBottom: 6, fontFamily: "Figtree, sans-serif" }}>
-              Password or pattern:
-            </div>
-            <input
-              type="password" autoFocus
-              value={newPwdPattern}
-              onChange={e => setNewPwdPattern(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") onAddPassword(); if (e.key === "Escape") { setAddPwdOpen(false); setNewPwdPattern(""); } }}
-              placeholder="e.g. {DDMMYYYY} or MyPassword123"
-              style={{
-                width: "100%", boxSizing: "border-box", height: 38,
-                padding: "0 12px", border: "1.5px solid #3b5bdb", borderRadius: 8,
-                fontFamily: "Figtree, sans-serif", fontSize: 13,
-                background: "#fff", color: "#111827", outline: "none", marginBottom: 8,
-              }}
-            />
-            <div style={{ fontSize: 10, color: T.text3, marginBottom: 8, fontFamily: "Figtree, sans-serif" }}>
-              Variables: {VARIABLE_LEGEND.map(v => (
-                <code key={v.var} style={{ fontSize: 10, color: "#0891b2", background: "#e0f7fa", padding: "0 4px", borderRadius: 3, marginRight: 6 }}>
-                  {v.var}
-                </code>
-              ))}
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <Button variant="primary" size="sm" onClick={onAddPassword}>Save</Button>
-              <Button variant="secondary" size="sm" onClick={() => { setAddPwdOpen(false); setNewPwdPattern(""); }}>Cancel</Button>
-            </div>
-          </div>
-        )}
-
-        <div style={{ display: "flex", gap: 8 }}>
-          <Button variant="secondary" size="sm" onClick={() => setAddPwdOpen(o => !o)}>
-            {addPwdOpen ? "Cancel" : "+ Add Password"}
-          </Button>
-          {passwordList.length > 0 && (
-            <Button variant="secondary" size="sm" onClick={() => { setShowList(o => !o); setRevealed({}); }}>
-              {showList ? "Hide" : "Show All"}
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {/* ── Section 2: Upload Zone ── */}
+      {/* ── Upload Zone ── */}
       <div style={card}>
         <SectionHeader title="Upload Statements" />
         <div
@@ -1860,7 +1715,6 @@ function EStatementTab({
               T={T} card={card}
               accounts={accounts}
               onProcess={() => processFile(item.id)}
-              onTryPassword={pwd => processFile(item.id, pwd)}
               onUpdateRow={(rowId, patch) => updateRow(item.id, rowId, patch)}
               onToggleSel={(rowId) => setQueue(prev => prev.map(i => i.id === item.id
                 ? { ...i, selected: { ...i.selected, [rowId]: !i.selected[rowId] } } : i))}
@@ -1895,12 +1749,11 @@ function EStatementTab({
 // ─── QUEUE FILE ITEM (card wrapper + preview) ─────────────────
 function EStmtQueueItem({
   item, T, card, accounts,
-  onProcess, onTryPassword,
+  onProcess,
   onUpdateRow, onToggleSel, onToggleSkip, onToggleNotes, onToggleAll,
   onSave, onCreateInstallment, onRemove,
   statusBadge, fmtSize,
 }) {
-  const [manualPwd, setManualPwd] = useState("");
 
   const rows         = item.rows || [];
   const countSel     = rows.filter(r => item.selected[r._id] && !item.skipped.has(r._id)).length;
@@ -1951,21 +1804,12 @@ function EStmtQueueItem({
         </div>
       </div>
 
-      {/* ── Error / password input ── */}
+      {/* ── Error ── */}
       {item.error && (
         <div style={{ padding: "10px 14px", background: "#fff5f5", borderBottom: "1px solid #fecaca" }}>
           <div style={{ fontSize: 11, color: "#dc2626", fontFamily: "Figtree, sans-serif" }}>
             {item.error}
           </div>
-          {item.status === "needs_password" && (
-            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              <input type="password" value={manualPwd} onChange={e => setManualPwd(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && manualPwd.trim() && onTryPassword(manualPwd)}
-                placeholder="Enter PDF password…"
-                style={{ flex: 1, height: 34, padding: "0 10px", border: "1.5px solid #3b5bdb", borderRadius: 7, fontFamily: "Figtree, sans-serif", fontSize: 12, outline: "none" }} />
-              <Button variant="primary" size="sm" onClick={() => manualPwd.trim() && onTryPassword(manualPwd)}>Try</Button>
-            </div>
-          )}
         </div>
       )}
 
