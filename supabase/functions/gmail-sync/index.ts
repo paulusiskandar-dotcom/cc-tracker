@@ -223,7 +223,7 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
     const lastSync = tokenRow.last_sync ? new Date(tokenRow.last_sync) : new Date(Date.now() - 7 * 86400000);
     afterDate = lastSync.toISOString().slice(0, 10).replace(/-/g, "/");
   }
-  const domainQuery = BANK_DOMAINS.map(d => `from:*@${d}`).join(" OR ");
+  const domainQuery = BANK_DOMAINS.map(d => `from:${d}`).join(" OR ");
   let query = `(${domainQuery}) after:${afterDate}`;
   if (beforeDate) query += ` before:${beforeDate}`;
 
