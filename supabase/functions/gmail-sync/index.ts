@@ -71,6 +71,7 @@ For each transaction return a JSON array:
   "card_last4": "1234 or null",
   "from_account_no": "account number or null",
   "to_account_no": "account number or null",
+  "from_account_masked": "raw masked string from email e.g. TAHAPAN - 0831****88 or ****5130 or null",
   "from_bank_name": "BCA or null",
   "to_bank_name": "null",
   "type": "out or in",
@@ -78,8 +79,8 @@ For each transaction return a JSON array:
   "is_debit": false,
   "is_transfer": false,
   "is_cc_payment": false,
-  "from_account_id": "matched account UUID or null",
-  "to_account_id": "matched account UUID or null",
+  "from_account_id": "null - leave null, will be matched by post-processing",
+  "to_account_id": "null - leave null, will be matched by post-processing",
   "suggested_category": "Food & Drinks",
   "category_id": "food",
   "suggested_entity": "Personal",
@@ -89,12 +90,71 @@ For each transaction return a JSON array:
 }]
 
 Rules:
-- Match card_last4 or account_no against provided accounts
+- Extract from_account_masked: look in "Source of Fund", "Card number", "Account" fields. Copy the raw masked string exactly as it appears (e.g. "TAHAPAN - 0831****88", "437896******5130").
+- Leave from_account_id and to_account_id as null — account matching is done by post-processing code.
 - QRIS/QR payment → is_qris=true, suggested_tx_type=qris_debit
 - Transfer to own account → is_transfer=true, suggested_tx_type=transfer
 - CC payment → is_cc_payment=true, suggested_tx_type=pay_cc
 - Return ONLY valid JSON array, no markdown.
 `;
+
+// Extract the visible (unmasked) trailing digits from a masked account/card string.
+// Examples:
+//   "TAHAPAN - 0831****88"  → "88"
+//   "437896******5130"      → "5130"
+//   "****1234"              → "1234"
+//   "1234567890"            → "1234567890"  (no asterisks, return full)
+function extractVisibleSuffix(masked: string): string | null {
+  if (!masked) return null;
+  // Find last run of digits after asterisks
+  const m = masked.match(/\*+(\d+)\s*$/);
+  if (m) return m[1];
+  // No asterisks — strip spaces/dashes and return raw digits
+  const digits = masked.replace(/[\s\-]/g, "").match(/\d+$/);
+  return digits ? digits[0] : null;
+}
+
+// Match a masked account string against the user's accounts list.
+// Returns the best matching account id, or null if no confident match.
+function matchAccount(masked: string | null, bankName: string | null, accounts: any[]): string | null {
+  if (!masked || accounts.length === 0) return null;
+
+  const suffix = extractVisibleSuffix(masked);
+  if (!suffix) return null;
+
+  // Filter by bank if we know it
+  const pool = bankName
+    ? accounts.filter(a => a.bank_name && a.bank_name.toLowerCase().includes(bankName.toLowerCase()))
+    : accounts;
+
+  // Try suffix match against account_no
+  const byAccountNo = pool.filter(a => a.account_no && String(a.account_no).endsWith(suffix));
+  if (byAccountNo.length === 1) return byAccountNo[0].id;
+
+  // Try suffix match against last4
+  const byLast4 = pool.filter(a => a.last4 && String(a.last4) === suffix.slice(-4));
+  if (byLast4.length === 1) return byLast4[0].id;
+
+  // Ambiguous or no match — return null so user can assign manually
+  return null;
+}
+
+// Resolve account IDs for all extracted transactions using deterministic suffix matching.
+function resolveAccountIds(transactions: any[], accounts: any[]): any[] {
+  return transactions.map(tx => {
+    const fromId = matchAccount(
+      tx.from_account_masked || tx.from_account_no || null,
+      tx.from_bank_name || null,
+      accounts,
+    );
+    const toId = matchAccount(
+      tx.to_account_no || null,
+      tx.to_bank_name || null,
+      accounts,
+    );
+    return { ...tx, from_account_id: fromId, to_account_id: toId };
+  });
+}
 
 async function refreshAccessToken(token: any, clientSecret: string): Promise<string | null> {
   if (!token.refresh_token) return null;
@@ -243,9 +303,12 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
         const aiData = await aiRes.json();
         const text = aiData.content?.[0]?.text || "[]";
         try {
-          aiResult = JSON.parse(text.replace(/```json|```/g, "").trim());
-          if (Array.isArray(aiResult)) extractedCount = aiResult.length;
-          else if (aiResult) { aiResult = [aiResult]; extractedCount = 1; }
+          let parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
+          if (!Array.isArray(parsed) && parsed) parsed = [parsed];
+          if (Array.isArray(parsed)) {
+            aiResult = resolveAccountIds(parsed, userAccounts);
+            extractedCount = aiResult.length;
+          }
         } catch {
           aiResult = null;
         }
