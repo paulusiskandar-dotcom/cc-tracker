@@ -53,7 +53,6 @@ function getExpandedContent(entry, accounts) {
 
 // ─── CATEGORY ICON ────────────────────────────────────────────
 function CategoryIcon({ categoryId, txType, size = 36 }) {
-  // Pick icon: category > tx type > fallback
   let icon  = "💸";
   let color = "#9ca3af";
   let bg    = "#f3f4f6";
@@ -117,92 +116,113 @@ export default function TransactionRow({
   const fromAcc = accounts.find(a => a.id === entry.from_id);
   const toAcc   = accounts.find(a => a.id === entry.to_id);
 
-  // Account display: "from → to" for transfers, else whichever exists
-  const accLabel = (() => {
-    if (entry.tx_type === "transfer" || entry.tx_type === "pay_cc" || entry.tx_type === "fx_exchange") {
-      const from = fromAcc?.name || "?";
-      const to   = toAcc?.name   || "?";
-      return `${from} → ${to}`;
-    }
-    return fromAcc?.name || toAcc?.name || "";
-  })();
-
   const color  = amountColor(entry.tx_type);
   const prefix = amountPrefix(entry.tx_type);
   const amount = fmtIDR(entry.amount_idr || entry.amount);
 
-  // Meta line: account · category · entity
-  const meta = [
-    accLabel,
-    entry.category_name || entry.category,
-    entry.entity !== "Personal" ? entry.entity : null,
-  ].filter(Boolean).join(" · ");
-
   const iconSize = compact ? 32 : 36;
-  // indent = chevron width (20) + gap (8) + icon width + gap (12)
-  const expandedIndent = 20 + 8 + iconSize + 12;
+  // indent = icon width + gap (12) — no chevron anymore
+  const expandedIndent = iconSize + 12;
 
-  const handleClick = () => {
-    if (isTwoDir) setExpanded(e => !e);
-    onClick?.();
+  // ── Build meta line with teal clickable for two-dir ──────────
+  const catLabel    = entry.category_name || entry.category || null;
+  const tealLabel   = expandedContent?.label || null;
+
+  const renderMeta = () => {
+    if (!isTwoDir || !tealLabel) {
+      // Single-directional: plain text
+      const accLabel = fromAcc?.name || toAcc?.name || "";
+      const parts = [accLabel, catLabel, entry.entity !== "Personal" ? entry.entity : null].filter(Boolean);
+      return parts.join(" · ");
+    }
+
+    // Two-directional: build JSX with teal label
+    const tealStyle = {
+      color:          "#0D9488",
+      cursor:         "pointer",
+      textDecoration: expanded ? "underline" : "none",
+      fontWeight:     500,
+    };
+
+    const handleTealClick = (e) => {
+      e.stopPropagation();
+      setExpanded(v => !v);
+    };
+
+    const tealSpan = (
+      <span key="teal" style={tealStyle} onClick={handleTealClick}>
+        {tealLabel}
+      </span>
+    );
+
+    const parts = [];
+
+    if (entry.tx_type === "transfer" || entry.tx_type === "pay_cc" || entry.tx_type === "fx_exchange") {
+      // "From → To" where To is teal
+      const fromName = fromAcc?.name || "?";
+      parts.push(
+        <span key="arrow">{fromName} → </span>,
+        tealSpan,
+      );
+    } else {
+      // Show the main account, then teal as the "other side"
+      const mainAcc = fromAcc?.name || toAcc?.name || "";
+      if (mainAcc && mainAcc !== tealLabel) {
+        parts.push(<span key="acc">{mainAcc}</span>);
+        parts.push(<span key="sep1"> · </span>);
+      }
+      parts.push(tealSpan);
+    }
+
+    if (catLabel) {
+      parts.push(<span key="sep2"> · </span>);
+      parts.push(<span key="cat">{catLabel}</span>);
+    }
+
+    return parts;
   };
+
+  const meta = renderMeta();
 
   return (
     <div style={{ borderBottom: "1px solid #f3f4f6" }}>
       {/* ── Main row ── */}
       <div
-        onClick={handleClick}
+        onClick={onClick}
         style={{
           display:    "flex",
           alignItems: "center",
           gap:        12,
           padding:    compact ? "10px 0" : "12px 0",
-          cursor:     isTwoDir ? "pointer" : (onClick ? "pointer" : "default"),
+          cursor:     onClick ? "pointer" : "default",
           position:   "relative",
         }}
       >
-        {/* Chevron */}
-        <div style={{ width: 20, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          {isTwoDir && (
-            <span style={{
-              fontSize:   14,
-              color:      "#9ca3af",
-              display:    "inline-block",
-              transform:  expanded ? "rotate(90deg)" : "rotate(0deg)",
-              transition: "transform 0.2s ease",
-              lineHeight: 1,
-              userSelect: "none",
-            }}>
-              ›
-            </span>
-          )}
-        </div>
-
         <CategoryIcon categoryId={entry.category} txType={entry.tx_type} size={iconSize} />
 
         {/* Center: name + meta */}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
-            fontSize:    compact ? 13 : 14,
-            fontWeight:  600,
-            color:       "#111827",
-            fontFamily:  "Figtree, sans-serif",
-            whiteSpace:  "nowrap",
-            overflow:    "hidden",
-            textOverflow:"ellipsis",
+            fontSize:     compact ? 13 : 14,
+            fontWeight:   600,
+            color:        "#111827",
+            fontFamily:   "Figtree, sans-serif",
+            whiteSpace:   "nowrap",
+            overflow:     "hidden",
+            textOverflow: "ellipsis",
           }}>
             {entry.description || entry.merchant_name || "—"}
           </div>
           {meta && (
             <div style={{
-              fontSize:    11,
-              fontWeight:  500,
-              color:       "#9ca3af",
-              fontFamily:  "Figtree, sans-serif",
-              marginTop:   2,
-              whiteSpace:  "nowrap",
-              overflow:    "hidden",
-              textOverflow:"ellipsis",
+              fontSize:     11,
+              fontWeight:   500,
+              color:        "#9ca3af",
+              fontFamily:   "Figtree, sans-serif",
+              marginTop:    2,
+              whiteSpace:   "nowrap",
+              overflow:     "hidden",
+              textOverflow: "ellipsis",
             }}>
               {meta}
             </div>
@@ -219,7 +239,7 @@ export default function TransactionRow({
           }}>
             {prefix}{amount}
           </div>
-          {!compact && accLabel && (
+          {!compact && (fromAcc?.bank_name || toAcc?.bank_name) && (
             <div style={{
               fontSize:   10,
               color:      "#9ca3af",
@@ -251,12 +271,12 @@ export default function TransactionRow({
             borderRadius:  "0 0 6px 6px",
           }}>
             <span style={{
-              fontSize:   12,
-              color:      "var(--color-text-secondary, #9ca3af)",
-              fontFamily: "Figtree, sans-serif",
-              overflow:   "hidden",
+              fontSize:    12,
+              color:       "var(--color-text-secondary, #9ca3af)",
+              fontFamily:  "Figtree, sans-serif",
+              overflow:    "hidden",
               textOverflow:"ellipsis",
-              whiteSpace: "nowrap",
+              whiteSpace:  "nowrap",
             }}>
               {expandedContent.label}
             </span>
@@ -288,12 +308,12 @@ export function DateGroupHeader({ dateStr, total, style = {} }) {
       ...style,
     }}>
       <div style={{
-        fontSize:   11,
-        fontWeight: 700,
-        color:      "#9ca3af",
+        fontSize:      11,
+        fontWeight:    700,
+        color:         "#9ca3af",
         textTransform: "uppercase",
         letterSpacing: "0.5px",
-        fontFamily: "Figtree, sans-serif",
+        fontFamily:    "Figtree, sans-serif",
       }}>
         {fmtDateLabel(dateStr)}
       </div>
@@ -318,7 +338,6 @@ export function GroupedTransactionList({ groups, accounts, onRowClick, compact =
   return (
     <div>
       {groups.map(([date, entries]) => {
-        // Net for the day (income - expense)
         const dayNet = entries.reduce((sum, e) => {
           const a = Number(e.amount_idr || e.amount || 0);
           if (["income","reimburse_in","collect_loan","sell_asset"].includes(e.tx_type)) return sum + a;
