@@ -138,7 +138,7 @@ async function scanGmailForStatements(
   const query = `has:attachment filename:pdf (${subjectQuery})${afterPart}${beforePart}`;
 
   const listRes = await fetch(
-    `https://www.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=50`,
+    `https://www.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=20`,
     { headers: { Authorization: `Bearer ${accessToken}` } }
   );
   if (!listRes.ok) {
@@ -149,63 +149,63 @@ async function scanGmailForStatements(
   const messages: any[] = listData.messages || [];
   console.log(`[gmail-estatement] found ${messages.length} candidate messages`);
 
+  if (messages.length === 0) return { new_pdfs: 0, total_found: 0 };
+
+  // Batch-check which message IDs are already in DB (one query, not N)
+  const msgIds = messages.map((m: any) => m.id);
+  const { data: existingRows } = await serviceSupabase
+    .from("estatement_pdfs")
+    .select("gmail_message_id")
+    .eq("user_id", userId)
+    .in("gmail_message_id", msgIds);
+  const knownIds = new Set((existingRows || []).map((r: any) => r.gmail_message_id));
+  const newMsgs  = messages.filter((m: any) => !knownIds.has(m.id));
+
+  if (newMsgs.length === 0) return { new_pdfs: 0, total_found: messages.length };
+
+  // Fetch metadata for new messages in parallel
+  const metaResults = await Promise.all(
+    newMsgs.map((msg: any) =>
+      fetch(
+        `https://www.googleapis.com/gmail/v1/users/me/messages/${msg.id}` +
+        `?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      ).then(r => r.ok ? r.json() : null)
+    )
+  );
+
+  const MONTHS: Record<string, string> = {
+    jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
+    jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
+  };
+
   let newCount = 0;
+  for (let i = 0; i < newMsgs.length; i++) {
+    const msgData = metaResults[i];
+    if (!msgData) continue;
 
-  for (const msg of messages) {
-    // Skip already-known
-    const { data: existing } = await serviceSupabase
-      .from("estatement_pdfs")
-      .select("id")
-      .eq("user_id", userId)
-      .eq("gmail_message_id", msg.id)
-      .maybeSingle();
-    if (existing) continue;
-
-    // Fetch message metadata
-    const msgRes = await fetch(
-      `https://www.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject&metadataHeaders=Date`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
-    if (!msgRes.ok) continue;
-    const msgData = await msgRes.json();
-
-    const headers = msgData.payload?.headers || [];
-    const subject  = headers.find((h: any) => h.name === "Subject")?.value || "";
-    const from     = headers.find((h: any) => h.name === "From")?.value    || "";
-    const dateHdr  = headers.find((h: any) => h.name === "Date")?.value    || "";
-
+    const headers     = msgData.payload?.headers || [];
+    const subject     = headers.find((h: any) => h.name === "Subject")?.value || "";
+    const from        = headers.find((h: any) => h.name === "From")?.value    || "";
+    const dateHdr     = headers.find((h: any) => h.name === "Date")?.value    || "";
     const senderMatch = from.match(/<(.+)>/);
     const senderEmail = (senderMatch?.[1] || from).toLowerCase().trim();
     const bankName    = bankNameFromDomain(senderEmail);
 
-    // Find PDF attachment names from parts
-    const parts = msgData.payload?.parts || [];
-    const pdfParts = parts.filter((p: any) =>
-      p.filename?.toLowerCase().endsWith(".pdf") || p.mimeType === "application/pdf"
-    );
-    if (pdfParts.length === 0) continue;
-
-    // Use first PDF attachment name
-    const filename = pdfParts[0].filename || `${bankName}_statement.pdf`;
-
-    // Try to parse statement month from subject or date
+    // Parse statement month from subject or email date
     let statementMonth: string | null = null;
     const monthMatch = (subject + " " + dateHdr).match(
       /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s\-]*(\d{4})\b/i
     );
     if (monthMatch) {
-      const months: Record<string, string> = {
-        jan: "01", feb: "02", mar: "03", apr: "04", may: "05", jun: "06",
-        jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
-      };
-      const mo = months[monthMatch[1].toLowerCase().slice(0, 3)];
-      if (mo) statementMonth = `${monthMatch[2] || "2025"}-${mo}`;
+      const mo = MONTHS[monthMatch[1].toLowerCase().slice(0, 3)];
+      if (mo) statementMonth = `${monthMatch[2]}-${mo}`;
     }
 
     await serviceSupabase.from("estatement_pdfs").insert({
       user_id:          userId,
-      gmail_message_id: msg.id,
-      filename,
+      gmail_message_id: newMsgs[i].id,
+      filename:         subject || `${bankName}_statement`,
       bank_name:        bankName,
       statement_month:  statementMonth,
       status:           "pending",
