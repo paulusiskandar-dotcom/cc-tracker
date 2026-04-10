@@ -1696,28 +1696,34 @@ function EStatementTab({
     const toSave = item.rows.filter(r => item.selected[r._id] && !item.skipped.has(r._id));
     let count = 0;
     for (const r of toSave) {
-      const isDebit = ["expense","cc_installment","transfer"].includes(r.tx_type);
+      const txType  = r.tx_type === "cc_installment" ? "expense" : (r.tx_type || "expense");
+      const isDebit = ["expense","transfer","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan","fx_exchange"].includes(txType);
       const notes = r._isInstallment && r._instNo
         ? `Cicilan ${r._instNo}${r._instTotal ? `/${r._instTotal}` : ""}${r.notes ? ` — ${r.notes}` : ""}`
         : (r.notes || null);
-      const { error: insErr } = await supabase.from("ledger").insert({
+      const payload = {
         user_id:       user.id,
         tx_date:       r.tx_date,
         description:   r.description || "E-Statement import",
         merchant_name: r.description || null,
         amount:        Number(r.amount || 0),
         amount_idr:    Number(r.amount_idr || r.amount || 0),
-        currency:      "IDR",
-        tx_type:       r.tx_type === "cc_installment" ? "expense" : r.tx_type,
+        currency:      r.currency || "IDR",
+        tx_type:       txType,
         from_id:       isDebit ? (r.from_id || null) : null,
         to_id:         isDebit ? null : (r.to_id || null),
         category_id:   r.category_id || null,
         category_name: r.category_name || null,
-        entity:        "Personal",
+        entity:        r.entity || "Personal",
         is_reimburse:  false,
         notes,
-      });
-      if (insErr) { showToast(`Save error: ${insErr.message}`, "error"); continue; }
+      };
+      const { error: insErr } = await supabase.from("ledger").insert(payload);
+      if (insErr) {
+        console.error("ledger insert error", insErr, payload);
+        showToast(`Save error: ${insErr.message}`, "error");
+        continue;
+      }
       count++;
     }
     const now = new Date().toISOString();
