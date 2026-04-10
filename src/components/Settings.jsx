@@ -2073,6 +2073,18 @@ function EStmtQueueItem({
                   />
                 ))}
               </div>
+
+              {/* Bottom summary + import */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, paddingTop: 6, borderTop: `1px solid ${T.border}` }}>
+                <div style={{ fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif", display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ color: "#059669" }}>{countNew} new</span>
+                  {countDup > 0 && <span style={{ color: "#d97706" }}>{countDup} duplicate{countDup !== 1 ? "s" : ""} unchecked</span>}
+                  <span style={{ color: T.text, fontWeight: 600 }}>{countSel} selected for import</span>
+                </div>
+                <Button variant="primary" size="sm" onClick={onSave} disabled={countSel === 0}>
+                  Import {countSel} Selected ▶
+                </Button>
+              </div>
             </div>
           )}
         </div>
@@ -2106,7 +2118,15 @@ function EStmtTxCard({
     <div style={{ background: cardBg, border: cardBorder, borderRadius: 10, opacity: isSkipped ? 0.55 : 1, overflow: "hidden" }}>
 
       {/* ── ROW 1: ☑ date description amount ✓ ✕ ── */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px 5px" }}>
+      <div
+        style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px 5px", cursor: isSkipped ? "default" : "pointer" }}
+        onClick={e => {
+          if (isSkipped) return;
+          const tag = e.target.tagName;
+          if (tag === "INPUT" || tag === "SELECT" || tag === "BUTTON") return;
+          onToggleSel();
+        }}
+      >
         <input type="checkbox"
           checked={isSelected && !isSkipped}
           onChange={onToggleSel}
