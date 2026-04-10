@@ -467,30 +467,33 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
   const SUPABASE_URL  = Deno.env.get("SUPABASE_URL")              || "";
-  const ANON_KEY      = Deno.env.get("SUPABASE_ANON_KEY")         || "";
   const SERVICE_KEY   = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
   const ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_KEY")             || "";
   const GOOGLE_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET")      || "";
 
+  console.log("[gmail-estatement] service key exists:", !!SERVICE_KEY);
+
+  // Extract JWT from Authorization header
   const authHeader = req.headers.get("Authorization") || "";
-  if (!authHeader.startsWith("Bearer ")) {
+  const token = authHeader.replace("Bearer ", "").trim();
+  if (!token) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401, headers: { ...CORS, "Content-Type": "application/json" },
     });
   }
 
-  const userSupabase    = createClient(SUPABASE_URL, ANON_KEY, {
-    global: { headers: { Authorization: authHeader } },
-  });
+  // Use service role client for all DB operations + JWT validation
   const serviceSupabase = createClient(SUPABASE_URL, SERVICE_KEY);
 
-  const { data: { user }, error: authErr } = await userSupabase.auth.getUser();
+  const { data: { user }, error: authErr } = await serviceSupabase.auth.getUser(token);
   if (authErr || !user) {
+    console.error("[gmail-estatement] auth failed:", authErr?.message);
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
       status: 401, headers: { ...CORS, "Content-Type": "application/json" },
     });
   }
   const userId = user.id;
+  console.log("[gmail-estatement] authenticated user:", userId);
 
   let body: any = {};
   try { body = await req.json(); } catch { /* no body */ }
