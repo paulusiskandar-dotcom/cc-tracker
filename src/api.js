@@ -195,12 +195,10 @@ export const ledgerApi = {
   // Create entry + update balances
   create: async (userId, entry, accounts = []) => {
     validateLedgerEntry(entry);
-    // Sanitize ALL _id UUID fields — empty string / name / "undefined" are invalid
-    const safeEntry = sanitizeUUIDs(entry);
 
-    console.log("[ledger.create] from_id:", safeEntry.from_id);
-    console.log("[ledger.create] to_id:  ", safeEntry.to_id);
-    console.log("[ledger.create] cat_id: ", safeEntry.category_id);
+    // Strip client-only fields before DB insert
+    const { fx_direction: fxDirection, ...insertEntry } = entry;
+    const safeEntry = sanitizeUUIDs(insertEntry);
 
     const { data, error } = await supabase
       .from("ledger")
@@ -210,14 +208,25 @@ export const ledgerApi = {
     if (error) throw new Error(error.message);
 
     const amount  = Number(safeEntry.amount_idr || safeEntry.amount || 0);
-    const deltas  = getDeltas(safeEntry.tx_type, amount);
     const fromAcc = accounts.find(a => a.id === safeEntry.from_id);
     const toAcc   = accounts.find(a => a.id === safeEntry.to_id);
 
-    if (fromAcc && deltas.from?.[fromAcc.type] !== undefined)
-      await applyBalanceDelta(fromAcc.id, fromAcc.type, deltas.from[fromAcc.type]);
-    if (toAcc && deltas.to?.[toAcc.type] !== undefined)
-      await applyBalanceDelta(toAcc.id, toAcc.type, deltas.to[toAcc.type]);
+    if (safeEntry.tx_type === "fx_exchange") {
+      // Only update the IDR side — the caller handles account_currencies for the foreign side
+      if ((fxDirection || "buy") === "buy") {
+        // BUY: from-account loses IDR
+        if (fromAcc) await applyBalanceDelta(fromAcc.id, fromAcc.type, -amount);
+      } else {
+        // SELL: to-account gains IDR
+        if (toAcc) await applyBalanceDelta(toAcc.id, toAcc.type, +amount);
+      }
+    } else {
+      const deltas = getDeltas(safeEntry.tx_type, amount);
+      if (fromAcc && deltas.from?.[fromAcc.type] !== undefined)
+        await applyBalanceDelta(fromAcc.id, fromAcc.type, deltas.from[fromAcc.type]);
+      if (toAcc && deltas.to?.[toAcc.type] !== undefined)
+        await applyBalanceDelta(toAcc.id, toAcc.type, deltas.to[toAcc.type]);
+    }
 
     return data;
   },
@@ -510,6 +519,37 @@ export const accountCurrenciesApi = {
         { onConflict: "account_id,currency" }
       );
     if (error) throw new Error(error.message);
+  },
+  // Increment (or decrement if delta < 0) a foreign currency balance.
+  // Creates the row if it doesn't exist.
+  addBalance: async (accountId, currency, delta, userId) => {
+    if (!accountId || !currency || !delta) return;
+    const { data: row } = await supabase
+      .from("account_currencies")
+      .select("balance")
+      .eq("account_id", accountId)
+      .eq("currency", currency)
+      .maybeSingle();
+
+    if (row !== null) {
+      const { error } = await supabase
+        .from("account_currencies")
+        .update({ balance: Number(row.balance || 0) + delta })
+        .eq("account_id", accountId)
+        .eq("currency", currency);
+      if (error) throw new Error(error.message);
+    } else {
+      let uid = userId;
+      if (!uid) {
+        const { data: { user } } = await supabase.auth.getUser();
+        uid = user?.id;
+      }
+      const { error } = await supabase.from("account_currencies").insert({
+        account_id: accountId, currency,
+        balance: delta, initial_balance: delta, user_id: uid,
+      });
+      if (error) throw new Error(error.message);
+    }
   },
   delete: async (accountId, currency) => {
     const { error } = await supabase

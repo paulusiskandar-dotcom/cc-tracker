@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { ledgerApi, merchantApi, gmailApi, getTxFromToTypes, employeeLoanApi } from "../api";
+import { ledgerApi, merchantApi, gmailApi, getTxFromToTypes, employeeLoanApi, accountCurrenciesApi } from "../api";
 import { EXPENSE_CATEGORIES, ENTITIES, TX_TYPES } from "../constants";
 import { fmtIDR, todayStr, ym, toIDR, groupByDate, fmtDateLabel } from "../utils";
 import Modal, { ConfirmModal } from "./shared/Modal";
@@ -186,6 +186,17 @@ export default function Transactions({
         return;
       }
     }
+    // FX exchange extra validation
+    if (type === "fx_exchange") {
+      if (!form.currency || form.currency === "IDR") {
+        showToast("Select a foreign currency", "error");
+        return;
+      }
+      if (!form.fx_rate_used || Number(form.fx_rate_used) <= 0) {
+        showToast("Enter a valid exchange rate", "error");
+        return;
+      }
+    }
 
     setSaving(true);
     try {
@@ -259,13 +270,23 @@ export default function Transactions({
       };
       const description = form.description?.trim() || AUTO_DESC[type] || "Transaction";
 
+      // For FX exchange, IDR amount = foreign amount × user-entered rate
+      let computedAmtIDR = sn(amtIDR);
+      let computedFxRate = null;
+      if (type === "fx_exchange") {
+        const rate = sn(form.fx_rate_used);
+        computedFxRate = rate || null;
+        if (rate > 0) computedAmtIDR = Math.round(sn(form.amount) * rate);
+      }
+
       // Explicit full entry — every UUID field goes through uuid()
       const entry = {
         tx_date:        form.tx_date || new Date().toISOString().slice(0, 10),
         description,
         amount:         sn(form.amount),
         currency:       form.currency  || "IDR",
-        amount_idr:     sn(amtIDR),
+        amount_idr:     computedAmtIDR,
+        fx_rate_used:   computedFxRate,
         tx_type:        type,
         from_type,
         to_type,
@@ -282,6 +303,8 @@ export default function Transactions({
         ai_confidence:  null,
         installment_id: null,
         scan_batch_id:  null,
+        // client-only: stripped before DB insert in ledgerApi.create
+        fx_direction:   type === "fx_exchange" ? (form.fx_direction || "buy") : undefined,
       };
 
       console.log("Inserting ledger entry:", entry);
@@ -292,6 +315,23 @@ export default function Transactions({
       } else {
         const created = await ledgerApi.create(user.id, entry, accounts);
         setLedger(p => [created, ...p]);
+
+        // FX exchange: explicitly update account_currencies for the foreign currency side
+        if (type === "fx_exchange") {
+          const foreignAmt = sn(form.amount);
+          const direction  = form.fx_direction || "buy";
+          const currency   = form.currency;
+          if (foreignAmt > 0 && currency && currency !== "IDR") {
+            if (direction === "buy" && form.to_id) {
+              // Credit foreign currency into to-account's pocket
+              await accountCurrenciesApi.addBalance(uuid(form.to_id), currency, +foreignAmt, user.id);
+            } else if (direction === "sell" && form.from_id) {
+              // Debit foreign currency from from-account's pocket
+              await accountCurrenciesApi.addBalance(uuid(form.from_id), currency, -foreignAmt, user.id);
+            }
+          }
+        }
+
         showToast("Transaction added");
         await onRefresh();
       }
