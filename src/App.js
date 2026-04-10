@@ -169,9 +169,17 @@ export default function App() {
 
 // ─── FINANCE SHELL ────────────────────────────────────────────
 function Finance({ user, signOut }) {
-  const [tab, setTab]           = useState("dashboard");
+  const [tab, setTab]           = useState(() => {
+    const hash = window.location.hash.replace("#", "");
+    return TABS.some(t => t.id === hash) ? hash : "dashboard";
+  });
   const [loading, setLoading]   = useState(true);
   const [isDark, setIsDark]     = useState(false);
+
+  // Sync active tab → URL hash so refresh restores current page
+  useEffect(() => {
+    window.location.hash = tab;
+  }, [tab]);
   const [showMore, setShowMore] = useState(false);
 
   // ── Data state ──
