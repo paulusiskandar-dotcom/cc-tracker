@@ -42,6 +42,8 @@ const EMPTY = {
   employee_name: "", monthly_installment: "", loan_start_date: todayStr(),
   // buy_asset extras
   asset_name: "", asset_type: "Investment", asset_mode: "existing", asset_id: null,
+  // fx_exchange extras
+  fx_direction: "buy", fx_rate_used: "",
 };
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────
@@ -50,6 +52,7 @@ export default function Transactions({
   bankAccounts, creditCards, assets, liabilities, receivables,
   onRefresh, setLedger, pendingSyncs, setPendingSyncs, incomeSrcs,
   employeeLoans = [], setEmployeeLoans,
+  accountCurrencies = [],
 }) {
   const allCurrencies = C || [];
   const pendingCount  = pendingSyncs?.length || 0;
@@ -196,16 +199,74 @@ export default function Transactions({
         if (!form.asset_name?.trim()) { showToast("Asset name is required", "error"); return; }
       }
     }
-    // FX exchange extra validation
-    if (type === "fx_exchange") {
-      if (!form.currency || form.currency === "IDR") {
-        showToast("Select a foreign currency", "error");
-        return;
-      }
-      if (!form.fx_rate_used || Number(form.fx_rate_used) <= 0) {
-        showToast("Enter a valid exchange rate", "error");
-        return;
-      }
+    // FX exchange — handled separately below as early return
+
+
+    // ── FX Exchange — self-contained early return ──────────────
+    if (type === "fx_exchange" && !editEntry) {
+      const currency  = form.currency;
+      const rate      = Number(form.fx_rate_used || 0);
+      const foreignAmt = Number(form.amount || 0);
+      const idrAmt    = Math.round(foreignAmt * rate);
+      const direction = form.fx_direction || "buy";
+
+      if (!currency || currency === "IDR") { showToast("Select a foreign currency", "error"); return; }
+      if (!form.from_id)                   { showToast("Select From account", "error"); return; }
+      if (!form.to_id)                     { showToast("Select To account", "error"); return; }
+      if (rate <= 0)                       { showToast("Enter a valid rate", "error"); return; }
+      if (foreignAmt <= 0)                 { showToast("Enter amount", "error"); return; }
+
+      setSaving(true);
+      try {
+        const uuidV = (v) => (v && typeof v === "string" && v.length === 36) ? v : null;
+        const fromId = uuidV(form.from_id);
+        const toId   = uuidV(form.to_id);
+        const txDate = form.tx_date || todayStr();
+        const notes  = form.notes || null;
+
+        if (direction === "buy") {
+          // Debit IDR from From account
+          const ledgerEntry = {
+            tx_date: txDate, description: `Buy ${currency}`,
+            amount: idrAmt, currency: "IDR", amount_idr: idrAmt,
+            fx_rate_used: rate,
+            tx_type: "fx_exchange", from_type: "account", to_type: "account",
+            from_id: fromId, to_id: toId,
+            category_id: null, category_name: null, entity: "Personal",
+            is_reimburse: false, merchant_name: null, notes,
+            attachment_url: null, ai_categorized: false, ai_confidence: null,
+            installment_id: null, scan_batch_id: null,
+            fx_direction: "buy",
+          };
+          const created = await ledgerApi.create(user.id, ledgerEntry, accounts);
+          setLedger(p => [created, ...p]);
+          // Credit foreign currency into To account's pocket
+          await accountCurrenciesApi.addBalance(toId, currency, +foreignAmt, user.id);
+        } else {
+          // Debit foreign currency from From account's pocket
+          await accountCurrenciesApi.addBalance(fromId, currency, -foreignAmt, user.id);
+          // Credit IDR into To account
+          const ledgerEntry = {
+            tx_date: txDate, description: `Sell ${currency}`,
+            amount: idrAmt, currency: "IDR", amount_idr: idrAmt,
+            fx_rate_used: rate,
+            tx_type: "fx_exchange", from_type: "account", to_type: "account",
+            from_id: fromId, to_id: toId,
+            category_id: null, category_name: null, entity: "Personal",
+            is_reimburse: false, merchant_name: null, notes,
+            attachment_url: null, ai_categorized: false, ai_confidence: null,
+            installment_id: null, scan_batch_id: null,
+            fx_direction: "sell",
+          };
+          const created = await ledgerApi.create(user.id, ledgerEntry, accounts);
+          setLedger(p => [created, ...p]);
+        }
+        showToast(`FX ${direction === "buy" ? "Buy" : "Sell"} saved`);
+        await onRefresh();
+        setModal(null);
+      } catch (e) { showToast(e.message, "error"); }
+      setSaving(false);
+      return;
     }
 
     setSaving(true);
@@ -399,22 +460,6 @@ export default function Transactions({
       } else {
         const created = await ledgerApi.create(user.id, entry, accounts);
         setLedger(p => [created, ...p]);
-
-        // FX exchange: explicitly update account_currencies for the foreign currency side
-        if (type === "fx_exchange") {
-          const foreignAmt = sn(form.amount);
-          const direction  = form.fx_direction || "buy";
-          const currency   = form.currency;
-          if (foreignAmt > 0 && currency && currency !== "IDR") {
-            if (direction === "buy" && form.to_id) {
-              // Credit foreign currency into to-account's pocket
-              await accountCurrenciesApi.addBalance(uuid(form.to_id), currency, +foreignAmt, user.id);
-            } else if (direction === "sell" && form.from_id) {
-              // Debit foreign currency from from-account's pocket
-              await accountCurrenciesApi.addBalance(uuid(form.from_id), currency, -foreignAmt, user.id);
-            }
-          }
-        }
 
         showToast("Transaction added");
         await onRefresh();
@@ -628,7 +673,7 @@ export default function Transactions({
             accounts={accounts} categories={categories}
             incomeSrcs={incomeSrcs} allCurrencies={allCurrencies}
             amtIDR={amtIDR} receivables={receivables}
-            assets={assets}
+            assets={assets} accountCurrencies={accountCurrencies}
           />
         )}
       </Modal>
@@ -916,8 +961,156 @@ function SellAssetForm({ form, set, accounts, assets = [] }) {
   );
 }
 
+// ─── FX EXCHANGE FORM ────────────────────────────────────────
+function FxExchangeForm({ form, set, accounts, accountCurrencies = [], allCurrencies = [] }) {
+  const INP = {
+    width: "100%", height: 44, padding: "0 14px",
+    border: "1.5px solid #e5e7eb", borderRadius: 10,
+    fontFamily: "Figtree, sans-serif", fontSize: 14, fontWeight: 500,
+    color: "#111827", background: "#fff", outline: "none",
+    appearance: "none", WebkitAppearance: "none", boxSizing: "border-box",
+  };
+
+  const direction = form.fx_direction || "buy";
+  const currency  = form.currency && form.currency !== "IDR" ? form.currency : null;
+  const rate      = Number(form.fx_rate_used || 0);
+  const foreignAmt = Number(form.amount || 0);
+  const idrEquiv  = rate > 0 && foreignAmt > 0 ? Math.round(foreignAmt * rate) : null;
+
+  // Unique non-IDR currencies from account_currencies
+  const fxCurrencies = [...new Set(
+    accountCurrencies
+      .map(r => r.currency)
+      .filter(c => c && c !== "IDR")
+  )].sort();
+
+  // All bank accounts as From (IDR source for Buy, any account for Sell)
+  const bankAccs = accounts
+    .filter(a => a.is_active !== false && (a.type === "bank" || a.type === "credit_card"))
+    .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+  // To accounts: filtered by selected currency
+  // Buy: only accounts that have the chosen currency in account_currencies
+  // Sell: bank accounts (to receive IDR)
+  const accountsWithCurrency = currency
+    ? accountCurrencies.filter(r => r.currency === currency).map(r => r.account_id)
+    : [];
+  const toAccounts = direction === "buy"
+    ? accounts.filter(a => a.is_active !== false && accountsWithCurrency.includes(a.id))
+        .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
+    : bankAccs.filter(a => a.type === "bank");
+
+  // From accounts for Sell: only accounts that hold the chosen currency
+  const fromAccounts = direction === "sell" && currency
+    ? accounts.filter(a => a.is_active !== false && accountsWithCurrency.includes(a.id))
+        .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
+    : bankAccs;
+
+  const accLabel = a => a.name + (a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : "");
+
+  const handleDirectionChange = (d) => {
+    set("fx_direction", d);
+    set("from_id", null);
+    set("to_id", null);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* Direction toggle */}
+      <div style={{ display: "flex", gap: 8 }}>
+        {["buy", "sell"].map(d => (
+          <button key={d} type="button" onClick={() => handleDirectionChange(d)}
+            style={{
+              flex: 1, height: 36, borderRadius: 8, border: "1.5px solid",
+              borderColor: direction === d ? "#0891b2" : "#e5e7eb",
+              background: direction === d ? "#e0f2fe" : "#fff",
+              color: direction === d ? "#0891b2" : "#6b7280",
+              fontFamily: "Figtree, sans-serif", fontSize: 13, fontWeight: 700, cursor: "pointer",
+            }}>
+            {d === "buy" ? "Buy Foreign" : "Sell Foreign"}
+          </button>
+        ))}
+      </div>
+
+      {/* Date */}
+      <Input label="Date" type="date" value={form.tx_date} onChange={e => set("tx_date", e.target.value)} />
+
+      {/* Currency */}
+      <Field label="Currency *">
+        <select value={form.currency || ""} onChange={e => { set("currency", e.target.value); set("from_id", null); set("to_id", null); }} style={INP}>
+          <option value="">Select currency…</option>
+          {fxCurrencies.map(c => {
+            const meta = allCurrencies.find(x => x.code === c);
+            return <option key={c} value={c}>{meta?.flag ? `${meta.flag} ` : ""}{c}</option>;
+          })}
+          {/* also show currencies from allCurrencies not already listed */}
+          {allCurrencies.filter(c => c.code !== "IDR" && !fxCurrencies.includes(c.code)).map(c => (
+            <option key={c.code} value={c.code}>{c.flag ? `${c.flag} ` : ""}{c.code}</option>
+          ))}
+        </select>
+      </Field>
+
+      {/* From account */}
+      <Field label={direction === "buy" ? "From Account (IDR) *" : "From Account (foreign) *"}>
+        <select value={form.from_id || ""} onChange={e => set("from_id", e.target.value || null)} style={INP}>
+          <option value="">Select account…</option>
+          {fromAccounts.map(a => {
+            const pocket = direction === "sell" && currency
+              ? accountCurrencies.find(r => r.account_id === a.id && r.currency === currency)
+              : null;
+            const suffix = pocket ? ` — ${currency} ${Number(pocket.balance).toLocaleString("id-ID")}` : "";
+            return <option key={a.id} value={a.id}>{accLabel(a)}{suffix}</option>;
+          })}
+        </select>
+      </Field>
+
+      {/* To account */}
+      <Field label={direction === "buy" ? "To Account (receives foreign) *" : "To Account (receives IDR) *"}>
+        <select value={form.to_id || ""} onChange={e => set("to_id", e.target.value || null)} style={INP}>
+          <option value="">Select account…</option>
+          {toAccounts.length > 0 ? toAccounts.map(a => <option key={a.id} value={a.id}>{accLabel(a)}</option>) : (
+            direction === "buy" && currency
+              ? <option disabled value="">No accounts hold {currency} yet — add one in Accounts</option>
+              : null
+          )}
+        </select>
+      </Field>
+
+      {/* Rate */}
+      <Input label={`Rate: 1 ${currency || "foreign"} = ? IDR *`} type="number" min="0" step="any"
+        value={form.fx_rate_used || ""}
+        onChange={e => set("fx_rate_used", e.target.value)}
+        placeholder="e.g. 107.5" />
+
+      {/* Amount (foreign units) */}
+      <Input label={`Amount (${currency || "foreign units"}) *`} type="number" min="0" step="any"
+        value={form.amount || ""}
+        onChange={e => set("amount", e.target.value)}
+        placeholder="0" />
+
+      {/* IDR equivalent */}
+      {idrEquiv !== null && (
+        <div style={{
+          background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 10,
+          padding: "10px 14px", fontSize: 13, color: "#0369a1", fontWeight: 600,
+          fontFamily: "Figtree, sans-serif",
+        }}>
+          IDR equivalent: {fmtIDR(idrEquiv)}
+        </div>
+      )}
+
+      {/* Notes */}
+      <Field label="Notes (optional)">
+        <textarea value={form.notes || ""} onChange={e => set("notes", e.target.value)}
+          placeholder="Any details…" rows={2}
+          style={{ width: "100%", padding: "10px 14px", border: "1.5px solid #e5e7eb", borderRadius: 10, fontFamily: "Figtree, sans-serif", fontSize: 14, fontWeight: 500, color: "#111827", background: "#fff", outline: "none", resize: "vertical", boxSizing: "border-box" }} />
+      </Field>
+    </div>
+  );
+}
+
 // ─── TRANSACTION FORM ────────────────────────────────────────
-function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incomeSrcs = [], allCurrencies = [], amtIDR, receivables = [], assets = [] }) {
+function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incomeSrcs = [], allCurrencies = [], amtIDR, receivables = [], assets = [], accountCurrencies = [] }) {
   const type = form.tx_type;
   const [fromSource, setFromSource] = useState("bank");
 
@@ -1015,8 +1208,13 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
         </span>
       </div>
 
-      {/* Date */}
-      <Input label="Date" type="date" value={form.tx_date} onChange={e => set("tx_date", e.target.value)} />
+      {/* Date — hidden for fx_exchange (handled inside FxExchangeForm) */}
+      {type !== "fx_exchange" && (
+        <Input label="Date" type="date" value={form.tx_date} onChange={e => set("tx_date", e.target.value)} />
+      )}
+
+      {/* ── FX EXCHANGE form ────────────────────────────────────── */}
+      {type === "fx_exchange" && <FxExchangeForm form={form} set={set} accounts={accounts} accountCurrencies={accountCurrencies} allCurrencies={allCurrencies} />}
 
       {/* ── BUY ASSET form ──────────────────────────────────────── */}
       {type === "buy_asset" && <BuyAssetForm form={form} set={set} accounts={accounts} assets={assets} />}
@@ -1033,7 +1231,7 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
           placeholder={type === "income" ? "e.g. Monthly salary" : "e.g. Lunch at Warung Makan"}
         />
       )}
-      {["transfer","pay_cc","fx_exchange"].includes(type) && (
+      {["transfer","pay_cc"].includes(type) && (
         <Input
           label="Notes / Reference (optional)"
           value={form.description}
@@ -1042,8 +1240,8 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
         />
       )}
 
-      {/* Amount + Currency — hidden for buy/sell asset (their own forms handle it) */}
-      {!["buy_asset","sell_asset"].includes(type) && <>
+      {/* Amount + Currency — hidden for buy/sell asset and fx_exchange (their own forms handle it) */}
+      {!["buy_asset","sell_asset","fx_exchange"].includes(type) && <>
         <div style={{ display: "flex", gap: 8 }}>
           <AmountInput label="Amount" value={form.amount} onChange={v => set("amount", v)} currency={form.currency} style={{ flex: 1 }} />
           <Field label="Currency" style={{ width: 90, flexShrink: 0 }}>
@@ -1074,8 +1272,8 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
         />
       )}
 
-      {/* FROM ACCOUNT — grouped dropdown (hidden for buy/sell asset — handled inside their forms) */}
-      {hasTwoStep && !["buy_asset","sell_asset"].includes(type) && (() => {
+      {/* FROM ACCOUNT — grouped dropdown (hidden for buy/sell asset and fx_exchange) */}
+      {hasTwoStep && !["buy_asset","sell_asset","fx_exchange"].includes(type) && (() => {
         // Types that allow both Bank AND CC as source
         const showBothGroups = ["expense", "reimburse_out", "buy_asset"].includes(type);
         const byName  = (a, b) => (a.name || "").localeCompare(b.name || "");
@@ -1138,8 +1336,8 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
         );
       })()}
 
-      {/* FROM ACCOUNT — regular select for non-two-step types (sell_asset handled inside its own form) */}
-      {!hasTwoStep && fromOptions.length > 0 && !["buy_asset","sell_asset"].includes(type) && (
+      {/* FROM ACCOUNT — regular select for non-two-step types (sell_asset and fx_exchange handled inside their own forms) */}
+      {!hasTwoStep && fromOptions.length > 0 && !["buy_asset","sell_asset","fx_exchange"].includes(type) && (
         <Select
           label={(type === "collect_loan" || type === "reimburse_in") ? "Receivable" : "From Account"}
           value={form.from_id || ""}
@@ -1162,8 +1360,8 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
         </Field>
       )}
 
-      {/* TO ACCOUNT — skip for reimburse_out, give_loan, buy/sell asset */}
-      {needsTo && !["buy_asset","sell_asset"].includes(type) && (
+      {/* TO ACCOUNT — skip for reimburse_out, give_loan, buy/sell asset, fx_exchange */}
+      {needsTo && !["buy_asset","sell_asset","fx_exchange"].includes(type) && (
         <Select
           label={type === "give_loan" ? "Receivable" : type === "pay_cc" ? "Credit Card" : type === "pay_liability" ? "Liability" : "To Account"}
           value={form.to_id || ""}
@@ -1199,12 +1397,6 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
         />
       )}
 
-      {/* FX Exchange extra field */}
-      {type === "fx_exchange" && (
-        <Input label="To Amount (received currency)" type="number" value={form.to_amount || ""}
-          onChange={e => set("to_amount", e.target.value)} placeholder="0" />
-      )}
-
       {/* Pay CC fees */}
       {type === "pay_cc" && (
         <FormRow>
@@ -1218,8 +1410,8 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
         <AmountInput label="Transfer Fee (optional)" value={form.transfer_fee || ""} onChange={v => set("transfer_fee", v)} />
       )}
 
-      {/* Notes — hidden for buy/sell asset (handled inside their forms) */}
-      {!["buy_asset","sell_asset"].includes(type) && (
+      {/* Notes — hidden for buy/sell asset and fx_exchange (handled inside their forms) */}
+      {!["buy_asset","sell_asset","fx_exchange"].includes(type) && (
         <Field label="Notes (optional)">
           <textarea
             value={form.notes}
