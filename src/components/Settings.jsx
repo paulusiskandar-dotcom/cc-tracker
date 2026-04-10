@@ -1674,9 +1674,9 @@ function EStatementTab({
 
 // ─── PROCESS STATEMENT MODAL ─────────────────────────────────
 function ProcessStatementModal({ statement, passwordList, user, accounts, ledger, T, onClose, onDone }) {
-  const [phase, setPhase]       = useState("idle"); // idle | processing | preview | saving
-  const [missing, setMissing]   = useState([]);     // filtered + categorized missing txns
-  const [skipped, setSkipped]   = useState({});     // _id → true (user-manually skipped)
+  const [phase, setPhase]       = useState("processing"); // processing | needs_password | preview | saving
+  const [missing, setMissing]   = useState([]);
+  const [skipped, setSkipped]   = useState({});
   const [manualPwd, setManualPwd] = useState("");
   const [error, setError]       = useState("");
 
@@ -1724,6 +1724,9 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
     );
   };
 
+  // Auto-start processing as soon as the modal opens
+  useEffect(() => { callProcess(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // onlyPasswords: when set, send only these passwords (skip saved list) — used for manual Try
   const callProcess = async ({ extraPasswords = [], onlyPasswords = null } = {}) => {
     setPhase("processing"); setError("");
@@ -1749,12 +1752,12 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
 
       if (!result.success) {
         if (result.needs_password && result.encrypted) {
-          setPhase("idle");
+          setPhase("needs_password");
           setError(onlyPasswords
             ? "Wrong password — try a different one."
             : "PDF is password-protected. Enter the password below.");
         } else {
-          setPhase("idle");
+          setPhase("needs_password");
           setError("Could not extract transactions from this PDF. It may be a scanned image or unsupported format.");
         }
         return;
@@ -1848,45 +1851,46 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
         {/* Body */}
         <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
 
-          {phase === "idle" && (
-            <>
-              <div style={{ fontSize: 13, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
-                This will download the PDF from Gmail and extract transactions using AI.
-                {passwordList.length > 0 && ` Will try no password first, then ${passwordList.length} saved password(s).`}
+          {phase === "needs_password" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ padding: "10px 12px", background: "#fff5f5", border: "1px solid #fecaca", borderRadius: 9, fontSize: 12, color: "#dc2626", fontFamily: "Figtree, sans-serif" }}>
+                {error}
               </div>
-              {error && (
-                <div style={{ padding: "10px 12px", background: "#fff5f5", border: "1px solid #fecaca", borderRadius: 9, fontSize: 12, color: "#dc2626" }}>
-                  {error}
-                  {error.includes("password") && (
-                    <div style={{ marginTop: 8, display: "flex", gap: 6 }}>
-                      <input
-                        value={manualPwd}
-                        onChange={e => setManualPwd(e.target.value)}
-                        onKeyDown={e => e.key === "Enter" && manualPwd.trim() && callProcess({ onlyPasswords: [manualPwd] })}
-                        placeholder="Enter PDF password…"
-                        style={{ flex: 1, height: 34, padding: "0 10px", border: "1.5px solid #e5e7eb", borderRadius: 8, fontFamily: "Figtree, sans-serif", fontSize: 13 }}
-                      />
-                      <Button
-                        variant="primary" size="sm"
-                        onClick={() => manualPwd.trim() && callProcess({ onlyPasswords: [manualPwd] })}
-                      >
-                        Try
-                      </Button>
-                    </div>
-                  )}
+              {error.includes("password") && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ fontSize: 12, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
+                    Enter the PDF password manually:
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input
+                      autoFocus
+                      type="password"
+                      value={manualPwd}
+                      onChange={e => setManualPwd(e.target.value)}
+                      onKeyDown={e => e.key === "Enter" && manualPwd.trim() && callProcess({ onlyPasswords: [manualPwd] })}
+                      placeholder="PDF password…"
+                      style={{ flex: 1, height: 38, padding: "0 12px", border: "1.5px solid #3b5bdb", borderRadius: 8, fontFamily: "Figtree, sans-serif", fontSize: 13, outline: "none" }}
+                    />
+                    <Button
+                      variant="primary" size="sm"
+                      onClick={() => manualPwd.trim() && callProcess({ onlyPasswords: [manualPwd] })}
+                    >
+                      Try
+                    </Button>
+                  </div>
                 </div>
               )}
-              <Button variant="primary" onClick={() => callProcess()}>
-                ▶ Start Processing
-              </Button>
-            </>
+            </div>
           )}
 
           {phase === "processing" && (
-            <div style={{ textAlign: "center", padding: 32, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
-              <div style={{ fontSize: 24, marginBottom: 8 }}>⏳</div>
-              <div style={{ fontSize: 13 }}>Downloading PDF and extracting transactions…</div>
-              <div style={{ fontSize: 11, marginTop: 4 }}>This may take 10–30 seconds</div>
+            <div style={{ textAlign: "center", padding: "40px 20px", color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+              <div style={{ fontSize: 28, marginBottom: 12 }}>⏳</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Processing e-statement…</div>
+              <div style={{ fontSize: 11, marginTop: 6, lineHeight: 1.7 }}>
+                Downloading PDF · trying passwords · extracting with AI
+                <br />This may take 15–30 seconds
+              </div>
             </div>
           )}
 
@@ -1978,6 +1982,11 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
         </div>
 
         {/* Footer */}
+        {phase === "needs_password" && (
+          <div style={{ padding: "12px 20px", borderTop: "1px solid #f3f4f6" }}>
+            <Button fullWidth variant="secondary" onClick={onClose}>Close</Button>
+          </div>
+        )}
         {phase === "preview" && (
           <div style={{ padding: "12px 20px", borderTop: "1px solid #f3f4f6", display: "flex", gap: 8 }}>
             <Button variant="secondary" onClick={onClose} style={{ flexShrink: 0 }}>Cancel</Button>
