@@ -150,12 +150,12 @@ function AssetHistory({ asset, ledger, accounts }) {
 }
 
 // ─── ASSET CARD ───────────────────────────────────────────────
-function AssetCard({ asset: a, ledger, color, onUpdate, onHistory }) {
+function AssetCard({ asset: a, ledger, valueHistoryCount = 0, color, onUpdate, onHistory }) {
   const cur      = Number(a.current_value || 0);
   const bought   = Number(a.purchase_price || 0);
   const gain     = cur - bought;
   const gainPct  = bought > 0 ? (gain / bought) * 100 : 0;
-  const txCount  = ledger.filter(e => e.from_id === a.id || e.to_id === a.id).length;
+  const txCount  = ledger.filter(e => e.from_id === a.id || e.to_id === a.id).length + valueHistoryCount;
   const icon     = ASSET_ICON[a.subtype] || "📦";
 
   return (
@@ -220,6 +220,23 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
 
   // History modal
   const [histAsset, setHistAsset] = useState(null);
+
+  // asset_value_history counts per account_id
+  const [valueHistoryCounts, setValueHistoryCounts] = useState({});
+
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase
+      .from("asset_value_history")
+      .select("account_id")
+      .eq("user_id", user.id)
+      .then(({ data }) => {
+        if (!data) return;
+        const counts = {};
+        data.forEach(r => { counts[r.account_id] = (counts[r.account_id] || 0) + 1; });
+        setValueHistoryCounts(counts);
+      });
+  }, [user?.id]);
 
   // Add asset modal
   const emptyAssetForm = () => ({ name: "", subtype: "", current_value: "", purchase_price: "", notes: "" });
@@ -297,6 +314,7 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
       }
       console.log("[handleUpdateValue] history saved:", histRow);
 
+      setValueHistoryCounts(prev => ({ ...prev, [accountId]: (prev[accountId] || 0) + 1 }));
       setAccounts(prev => prev.map(a => a.id === accountId ? { ...a, current_value: newVal } : a));
       showToast(`${selectedAsset.name} updated to ${fmtIDR(newVal, true)}`);
       setUpdateModal(false);
@@ -386,6 +404,7 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
                   key={a.id}
                   asset={a}
                   ledger={ledger}
+                  valueHistoryCount={valueHistoryCounts[a.id] || 0}
                   color={color}
                   onUpdate={() => openUpdateModal(a)}
                   onHistory={() => setHistAsset(a)}
