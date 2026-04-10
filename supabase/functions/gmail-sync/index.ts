@@ -277,6 +277,30 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
   // Update last_sync
   await supabase.from("gmail_tokens").update({ last_sync: new Date().toISOString() }).eq("user_id", userId);
 
+  // Save sync log entry to app_settings (max 50 entries, newest first)
+  try {
+    const syncEntry = {
+      synced_at:        new Date().toISOString(),
+      emails_processed: processed,
+      new_transactions: newTransactions,
+      status:           "success",
+    };
+    const { data: existing } = await supabase
+      .from("app_settings")
+      .select("value")
+      .eq("user_id", userId)
+      .eq("key", "gmail_sync_log")
+      .maybeSingle();
+    const history: any[] = existing ? JSON.parse(existing.value) : [];
+    const updated = [syncEntry, ...history].slice(0, 50);
+    await supabase.from("app_settings").upsert(
+      { user_id: userId, key: "gmail_sync_log", value: JSON.stringify(updated) },
+      { onConflict: "user_id,key" }
+    );
+  } catch (logErr) {
+    console.warn("[gmail-sync] Failed to save sync log:", logErr);
+  }
+
   return { processed, new_transactions: newTransactions };
 }
 

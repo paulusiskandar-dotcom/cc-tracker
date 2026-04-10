@@ -57,6 +57,7 @@ export default function Settings({
   const [gmailLoaded, setGmailLoaded]     = useState(false);
   const [clientId, setClientId]           = useState("");
   const [syncingNow, setSyncingNow]       = useState(false);
+  const [syncLog, setSyncLog]             = useState([]);
   const [syncFromDate, setSyncFromDate]   = useState(() => {
     const d = new Date(); d.setDate(d.getDate() - 7);
     return d.toISOString().slice(0, 10);
@@ -124,6 +125,8 @@ export default function Settings({
     try {
       const t = await gmailApi.getToken(user.id);
       setGmailToken(t);
+      const log = await settingsApi.get(user.id, "gmail_sync_log", []);
+      setSyncLog(Array.isArray(log) ? log : []);
     } catch { /* table may not exist */ }
     setGmailLoaded(true);
   };
@@ -158,6 +161,8 @@ export default function Settings({
     try {
       const result = await gmailApi.triggerSync(user.id, syncFromDate, syncToDate);
       showToast(`Sync complete: ${result?.new_transactions || 0} new transactions`);
+      const log = await settingsApi.get(user.id, "gmail_sync_log", []);
+      setSyncLog(Array.isArray(log) ? log : []);
       await onRefresh?.();
     } catch (e) { showToast(e.message, "error"); }
     setSyncingNow(false);
@@ -439,10 +444,19 @@ export default function Settings({
             {gmailToken ? (
               <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{gmailToken.gmail_email || user?.email}</div>
-                {gmailToken.last_sync && (
+                <div style={{ fontSize: 11, color: T.text3 }}>Auto sync: Every 15 minutes ✅</div>
+                {syncLog.length > 0 ? (() => {
+                  const last = syncLog[0];
+                  const d = new Date(last.synced_at);
+                  const fmt = `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+                  return (
+                    <div style={{ fontSize: 11, color: T.text3 }}>
+                      Last sync: {fmt} · {last.emails_processed ?? 0} emails · {last.new_transactions ?? 0} transactions · {last.status === "success" ? "✅" : "❌"}
+                    </div>
+                  );
+                })() : gmailToken.last_sync ? (
                   <div style={{ fontSize: 11, color: T.text3 }}>Last sync: {new Date(gmailToken.last_sync).toLocaleString()}</div>
-                )}
-                <div style={{ fontSize: 11, color: T.text3 }}>Auto sync: Every 6 hours ✅</div>
+                ) : null}
               </div>
             ) : (
               <div style={{ marginTop: 8, fontSize: 12, color: T.text3, lineHeight: 1.6 }}>
@@ -481,6 +495,41 @@ export default function Settings({
               </div>
             );
           })()}
+
+          {/* ── Sync history (only when connected and log exists) ── */}
+          {gmailToken && syncLog.length > 0 && (
+            <div style={card}>
+              <SectionHeader title="Sync History" />
+              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 0 }}>
+                <div style={{
+                  display: "grid", gridTemplateColumns: "1fr 80px 80px 40px",
+                  padding: "4px 0", borderBottom: `1px solid ${T.border}`,
+                  fontSize: 10, fontWeight: 700, color: T.text3, textTransform: "uppercase", letterSpacing: "0.05em",
+                }}>
+                  <span>Time</span>
+                  <span style={{ textAlign: "right" }}>Emails</span>
+                  <span style={{ textAlign: "right" }}>Transactions</span>
+                  <span style={{ textAlign: "center" }}>Status</span>
+                </div>
+                {syncLog.slice(0, 10).map((entry, i) => {
+                  const d = new Date(entry.synced_at);
+                  const fmt = `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
+                  return (
+                    <div key={i} style={{
+                      display: "grid", gridTemplateColumns: "1fr 80px 80px 40px",
+                      padding: "7px 0", borderBottom: `1px solid ${T.border}`,
+                      fontSize: 11, color: T.text2,
+                    }}>
+                      <span>{fmt}</span>
+                      <span style={{ textAlign: "right", color: T.text3 }}>{entry.emails_processed ?? 0}</span>
+                      <span style={{ textAlign: "right", color: entry.new_transactions > 0 ? "#059669" : T.text3, fontWeight: entry.new_transactions > 0 ? 600 : 400 }}>{entry.new_transactions ?? 0}</span>
+                      <span style={{ textAlign: "center" }}>{entry.status === "success" ? "✅" : "❌"}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* ── Skipped transactions (only when connected) ── */}
           {gmailToken && (
