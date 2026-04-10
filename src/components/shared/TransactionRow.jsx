@@ -1,5 +1,55 @@
-import { fmtIDR, fmtDateLabel } from "../../utils";
+import { useState } from "react";
+import { fmtIDR, fmtDateLabel, fmtCur } from "../../utils";
 import { EXPENSE_CATEGORIES, TX_TYPE_MAP } from "../../constants";
+
+// ─── TWO-DIRECTIONAL TYPES ────────────────────────────────────
+const TWO_DIR_TYPES = new Set([
+  "transfer", "pay_cc", "buy_asset", "sell_asset", "fx_exchange",
+  "reimburse_out", "reimburse_in", "give_loan", "collect_loan", "pay_liability",
+]);
+
+// ─── EXPANDED ROW CONTENT ─────────────────────────────────────
+function getExpandedContent(entry, accounts) {
+  const fromAcc = accounts.find(a => a.id === entry.from_id);
+  const toAcc   = accounts.find(a => a.id === entry.to_id);
+  const amtIDR  = Number(entry.amount_idr || entry.amount || 0);
+
+  switch (entry.tx_type) {
+    case "transfer":
+      return { label: toAcc?.name || "?", amount: `+${fmtIDR(amtIDR)}`, positive: true };
+    case "pay_cc":
+      return { label: toAcc?.name || "?", amount: `+${fmtIDR(amtIDR)}`, positive: true };
+    case "buy_asset":
+      return { label: toAcc?.name || "?", amount: `+${fmtIDR(amtIDR)}`, positive: true };
+    case "sell_asset":
+      return { label: toAcc?.name || "?", amount: `+${fmtIDR(amtIDR)}`, positive: true };
+    case "fx_exchange": {
+      const desc = entry.description || "";
+      const foreignCurrency = desc.split(" ")[1] || "";
+      const rate = Number(entry.fx_rate_used || 0);
+      const isBuy = desc.startsWith("Buy");
+      if (isBuy && foreignCurrency && rate > 0) {
+        const foreignAmt = Math.round((amtIDR / rate) * 100) / 100;
+        return { label: toAcc?.name || "?", amount: `+${fmtCur(foreignAmt, foreignCurrency)}`, positive: true };
+      }
+      return { label: toAcc?.name || "?", amount: `+${fmtIDR(amtIDR)}`, positive: true };
+    }
+    case "reimburse_out": {
+      const entityLabel = entry.entity && entry.entity !== "Personal" ? entry.entity : (toAcc?.name || "?");
+      return { label: entityLabel, amount: `+${fmtIDR(amtIDR)}`, positive: true };
+    }
+    case "reimburse_in":
+      return { label: fromAcc?.name || "?", amount: `-${fmtIDR(amtIDR)}`, positive: false };
+    case "give_loan":
+      return { label: toAcc?.name || "?", amount: `+${fmtIDR(amtIDR)}`, positive: true };
+    case "collect_loan":
+      return { label: fromAcc?.name || "?", amount: `-${fmtIDR(amtIDR)}`, positive: false };
+    case "pay_liability":
+      return { label: toAcc?.name || "?", amount: `-${fmtIDR(amtIDR)}`, positive: false };
+    default:
+      return null;
+  }
+}
 
 // ─── CATEGORY ICON ────────────────────────────────────────────
 function CategoryIcon({ categoryId, txType, size = 36 }) {
@@ -60,6 +110,10 @@ export default function TransactionRow({
   onDelete,
   compact = false,
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const isTwoDir = TWO_DIR_TYPES.has(entry.tx_type);
+  const expandedContent = isTwoDir ? getExpandedContent(entry, accounts) : null;
+
   const fromAcc = accounts.find(a => a.id === entry.from_id);
   const toAcc   = accounts.find(a => a.id === entry.to_id);
 
@@ -84,71 +138,141 @@ export default function TransactionRow({
     entry.entity !== "Personal" ? entry.entity : null,
   ].filter(Boolean).join(" · ");
 
-  return (
-    <div
-      onClick={onClick}
-      style={{
-        display:      "flex",
-        alignItems:   "center",
-        gap:          12,
-        padding:      compact ? "10px 0" : "12px 0",
-        borderBottom: "1px solid #f3f4f6",
-        cursor:       onClick ? "pointer" : "default",
-        position:     "relative",
-      }}
-    >
-      <CategoryIcon categoryId={entry.category} txType={entry.tx_type} size={compact ? 32 : 36} />
+  const iconSize = compact ? 32 : 36;
+  // indent = chevron width (20) + gap (8) + icon width + gap (12)
+  const expandedIndent = 20 + 8 + iconSize + 12;
 
-      {/* Center: name + meta */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{
-          fontSize:    compact ? 13 : 14,
-          fontWeight:  600,
-          color:       "#111827",
-          fontFamily:  "Figtree, sans-serif",
-          whiteSpace:  "nowrap",
-          overflow:    "hidden",
-          textOverflow:"ellipsis",
-        }}>
-          {entry.description || entry.merchant_name || "—"}
+  const handleClick = () => {
+    if (isTwoDir) setExpanded(e => !e);
+    onClick?.();
+  };
+
+  return (
+    <div style={{ borderBottom: "1px solid #f3f4f6" }}>
+      {/* ── Main row ── */}
+      <div
+        onClick={handleClick}
+        style={{
+          display:    "flex",
+          alignItems: "center",
+          gap:        12,
+          padding:    compact ? "10px 0" : "12px 0",
+          cursor:     isTwoDir ? "pointer" : (onClick ? "pointer" : "default"),
+          position:   "relative",
+        }}
+      >
+        {/* Chevron */}
+        <div style={{ width: 20, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {isTwoDir && (
+            <span style={{
+              fontSize:   14,
+              color:      "#9ca3af",
+              display:    "inline-block",
+              transform:  expanded ? "rotate(90deg)" : "rotate(0deg)",
+              transition: "transform 0.2s ease",
+              lineHeight: 1,
+              userSelect: "none",
+            }}>
+              ›
+            </span>
+          )}
         </div>
-        {meta && (
+
+        <CategoryIcon categoryId={entry.category} txType={entry.tx_type} size={iconSize} />
+
+        {/* Center: name + meta */}
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
-            fontSize:    11,
-            fontWeight:  500,
-            color:       "#9ca3af",
+            fontSize:    compact ? 13 : 14,
+            fontWeight:  600,
+            color:       "#111827",
             fontFamily:  "Figtree, sans-serif",
-            marginTop:   2,
             whiteSpace:  "nowrap",
             overflow:    "hidden",
             textOverflow:"ellipsis",
           }}>
-            {meta}
+            {entry.description || entry.merchant_name || "—"}
           </div>
-        )}
+          {meta && (
+            <div style={{
+              fontSize:    11,
+              fontWeight:  500,
+              color:       "#9ca3af",
+              fontFamily:  "Figtree, sans-serif",
+              marginTop:   2,
+              whiteSpace:  "nowrap",
+              overflow:    "hidden",
+              textOverflow:"ellipsis",
+            }}>
+              {meta}
+            </div>
+          )}
+        </div>
+
+        {/* Right: amount */}
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
+          <div style={{
+            fontSize:   compact ? 13 : 14,
+            fontWeight: 700,
+            color:      color,
+            fontFamily: "Figtree, sans-serif",
+          }}>
+            {prefix}{amount}
+          </div>
+          {!compact && accLabel && (
+            <div style={{
+              fontSize:   10,
+              color:      "#9ca3af",
+              fontFamily: "Figtree, sans-serif",
+              marginTop:  2,
+            }}>
+              {fromAcc?.bank_name || toAcc?.bank_name || ""}
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Right: amount */}
-      <div style={{ textAlign: "right", flexShrink: 0 }}>
+      {/* ── Expanded row ── */}
+      {isTwoDir && expandedContent && (
         <div style={{
-          fontSize:   compact ? 13 : 14,
-          fontWeight: 700,
-          color:      color,
-          fontFamily: "Figtree, sans-serif",
+          overflow:   "hidden",
+          maxHeight:  expanded ? "48px" : "0px",
+          transition: "max-height 0.2s ease",
         }}>
-          {prefix}{amount}
-        </div>
-        {!compact && accLabel && (
           <div style={{
-            fontSize:   10,
-            color:      "#9ca3af",
-            fontFamily: "Figtree, sans-serif",
-            marginTop:  2,
+            paddingLeft:   expandedIndent,
+            paddingRight:  8,
+            paddingBottom: 8,
+            paddingTop:    2,
+            display:       "flex",
+            alignItems:    "center",
+            justifyContent:"space-between",
+            background:    "var(--color-background-secondary, #f9fafb)",
+            borderRadius:  "0 0 6px 6px",
           }}>
-            {fromAcc?.bank_name || toAcc?.bank_name || ""}
+            <span style={{
+              fontSize:   12,
+              color:      "var(--color-text-secondary, #9ca3af)",
+              fontFamily: "Figtree, sans-serif",
+              overflow:   "hidden",
+              textOverflow:"ellipsis",
+              whiteSpace: "nowrap",
+            }}>
+              {expandedContent.label}
+            </span>
+            <span style={{
+              fontSize:   12,
+              fontWeight: 600,
+              color:      expandedContent.positive ? "#059669" : "#dc2626",
+              fontFamily: "Figtree, sans-serif",
+              flexShrink: 0,
+              marginLeft: 12,
+            }}>
+              {expandedContent.amount}
+            </span>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

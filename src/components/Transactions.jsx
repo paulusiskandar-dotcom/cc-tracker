@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { ledgerApi, merchantApi, gmailApi, getTxFromToTypes, employeeLoanApi, accountCurrenciesApi, assetsApi } from "../api";
 import { EXPENSE_CATEGORIES, ENTITIES, TX_TYPES } from "../constants";
-import { fmtIDR, todayStr, ym, toIDR, groupByDate, fmtDateLabel } from "../utils";
+import { fmtIDR, fmtCur, todayStr, ym, toIDR, groupByDate, fmtDateLabel } from "../utils";
 import Modal, { ConfirmModal } from "./shared/Modal";
 import Button from "./shared/Button";
 import Input, { Field, AmountInput, FormRow, Toggle, Textarea } from "./shared/Input";
@@ -708,8 +708,56 @@ export default function Transactions({
   );
 }
 
+// ─── TWO-DIRECTIONAL TYPES ────────────────────────────────────
+const TWO_DIR_TYPES = new Set([
+  "transfer", "pay_cc", "buy_asset", "sell_asset", "fx_exchange",
+  "reimburse_out", "reimburse_in", "give_loan", "collect_loan", "pay_liability",
+]);
+
+function getTxExpandedContent(e, fromAcc, toAcc) {
+  const amtIDR = Number(e.amount_idr || e.amount || 0);
+  switch (e.tx_type) {
+    case "transfer":
+      return { label: toAcc?.name || "?", amount: `+${fmtIDR(amtIDR)}`, positive: true };
+    case "pay_cc":
+      return { label: toAcc?.name || "?", amount: `+${fmtIDR(amtIDR)}`, positive: true };
+    case "buy_asset":
+      return { label: toAcc?.name || "?", amount: `+${fmtIDR(amtIDR)}`, positive: true };
+    case "sell_asset":
+      return { label: toAcc?.name || "?", amount: `+${fmtIDR(amtIDR)}`, positive: true };
+    case "fx_exchange": {
+      const desc = e.description || "";
+      const foreignCurrency = desc.split(" ")[1] || "";
+      const rate = Number(e.fx_rate_used || 0);
+      const isBuy = desc.startsWith("Buy");
+      if (isBuy && foreignCurrency && rate > 0) {
+        const foreignAmt = Math.round((amtIDR / rate) * 100) / 100;
+        return { label: toAcc?.name || "?", amount: `+${fmtCur(foreignAmt, foreignCurrency)}`, positive: true };
+      }
+      return { label: toAcc?.name || "?", amount: `+${fmtIDR(amtIDR)}`, positive: true };
+    }
+    case "reimburse_out": {
+      const entityLabel = e.entity && e.entity !== "Personal" ? e.entity : (toAcc?.name || "?");
+      return { label: entityLabel, amount: `+${fmtIDR(amtIDR)}`, positive: true };
+    }
+    case "reimburse_in":
+      return { label: fromAcc?.name || "?", amount: `-${fmtIDR(amtIDR)}`, positive: false };
+    case "give_loan":
+      return { label: toAcc?.name || "?", amount: `+${fmtIDR(amtIDR)}`, positive: true };
+    case "collect_loan":
+      return { label: fromAcc?.name || "?", amount: `-${fmtIDR(amtIDR)}`, positive: false };
+    case "pay_liability":
+      return { label: toAcc?.name || "?", amount: `-${fmtIDR(amtIDR)}`, positive: false };
+    default:
+      return null;
+  }
+}
+
 // ─── TRANSACTION ROW ─────────────────────────────────────────
 function TxRow({ entry: e, accounts, onEdit, onDelete }) {
+  const [expanded, setExpanded] = useState(false);
+  const isTwoDir = TWO_DIR_TYPES.has(e.tx_type);
+
   const fromAcc = accounts.find(a => a.id === e.from_id);
   const toAcc   = accounts.find(a => a.id === e.to_id);
   const amt     = Number(e.amount_idr || e.amount || 0);
@@ -735,58 +783,127 @@ function TxRow({ entry: e, accounts, onEdit, onDelete }) {
     e.entity && e.entity !== "Personal" ? e.entity : null,
   ].filter(Boolean).join(" · ");
 
+  const expandedContent = isTwoDir ? getTxExpandedContent(e, fromAcc, toAcc) : null;
+  // indent = chevron (20) + gap (8) + icon (36) + gap (12)
+  const expandedIndent = 76;
+
   return (
-    <div style={{
-      display:      "flex",
-      alignItems:   "center",
-      gap:          12,
-      padding:      "10px 0",
-      borderBottom: "1px solid #f9fafb",
-    }}>
-      {/* Icon */}
-      <div style={{
-        width: 36, height: 36, borderRadius: 10,
-        background: iconBg,
-        display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: 16, flexShrink: 0,
-      }}>
-        {iconEmoji}
-      </div>
-
-      {/* Center */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{
-          fontSize: 13, fontWeight: 600, color: "#111827",
-          fontFamily: "Figtree, sans-serif",
-          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-        }}>
-          {e.description || "—"}
+    <div style={{ borderBottom: "1px solid #f9fafb" }}>
+      {/* ── Main row ── */}
+      <div
+        onClick={() => { if (isTwoDir) setExpanded(x => !x); }}
+        style={{
+          display:    "flex",
+          alignItems: "center",
+          gap:        12,
+          padding:    "10px 0",
+          cursor:     isTwoDir ? "pointer" : "default",
+        }}
+      >
+        {/* Chevron */}
+        <div style={{ width: 20, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {isTwoDir && (
+            <span style={{
+              fontSize:   14,
+              color:      "#9ca3af",
+              display:    "inline-block",
+              transform:  expanded ? "rotate(90deg)" : "rotate(0deg)",
+              transition: "transform 0.2s ease",
+              lineHeight: 1,
+              userSelect: "none",
+            }}>
+              ›
+            </span>
+          )}
         </div>
-        {meta && (
+
+        {/* Icon */}
+        <div style={{
+          width: 36, height: 36, borderRadius: 10,
+          background: iconBg,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: 16, flexShrink: 0,
+        }}>
+          {iconEmoji}
+        </div>
+
+        {/* Center */}
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
-            fontSize: 11, color: "#9ca3af",
+            fontSize: 13, fontWeight: 600, color: "#111827",
             fontFamily: "Figtree, sans-serif",
-            marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
           }}>
-            {meta}
+            {e.description || "—"}
           </div>
-        )}
+          {meta && (
+            <div style={{
+              fontSize: 11, color: "#9ca3af",
+              fontFamily: "Figtree, sans-serif",
+              marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            }}>
+              {meta}
+            </div>
+          )}
+        </div>
+
+        {/* Amount */}
+        <div style={{
+          fontSize: 13, fontWeight: 700,
+          color: amtColor, fontFamily: "Figtree, sans-serif",
+          flexShrink: 0, textAlign: "right",
+        }}>
+          {prefix}{fmtIDR(amt)}
+        </div>
+
+        {/* Actions */}
+        <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+          <button onClick={ev => { ev.stopPropagation(); onEdit(); }} style={ROW_BTN}>✎</button>
+          <button onClick={ev => { ev.stopPropagation(); onDelete(); }} style={{ ...ROW_BTN, color: "#dc2626", borderColor: "#fecaca" }}>✕</button>
+        </div>
       </div>
 
-      {/* Amount */}
-      <div style={{
-        fontSize: 13, fontWeight: 700,
-        color: amtColor, fontFamily: "Figtree, sans-serif",
-        flexShrink: 0, textAlign: "right",
-      }}>
-        {prefix}{fmtIDR(amt)}
-      </div>
-
-      {/* Actions */}
-      <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-        <button onClick={onEdit} style={ROW_BTN}>✎</button>
-        <button onClick={onDelete} style={{ ...ROW_BTN, color: "#dc2626", borderColor: "#fecaca" }}>✕</button>
-      </div>
+      {/* ── Expanded row ── */}
+      {isTwoDir && expandedContent && (
+        <div style={{
+          overflow:   "hidden",
+          maxHeight:  expanded ? "48px" : "0px",
+          transition: "max-height 0.2s ease",
+        }}>
+          <div style={{
+            paddingLeft:   expandedIndent,
+            paddingRight:  8,
+            paddingBottom: 8,
+            paddingTop:    2,
+            display:       "flex",
+            alignItems:    "center",
+            justifyContent:"space-between",
+            background:    "var(--color-background-secondary, #f9fafb)",
+            borderRadius:  "0 0 6px 6px",
+          }}>
+            <span style={{
+              fontSize:    12,
+              color:       "var(--color-text-secondary, #9ca3af)",
+              fontFamily:  "Figtree, sans-serif",
+              overflow:    "hidden",
+              textOverflow:"ellipsis",
+              whiteSpace:  "nowrap",
+            }}>
+              {expandedContent.label}
+            </span>
+            <span style={{
+              fontSize:   12,
+              fontWeight: 600,
+              color:      expandedContent.positive ? "#059669" : "#dc2626",
+              fontFamily: "Figtree, sans-serif",
+              flexShrink: 0,
+              marginLeft: 12,
+            }}>
+              {expandedContent.amount}
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
