@@ -1390,8 +1390,46 @@ function EStatementTab({
   T, card, user,
   accounts, ledger, installments = [], setInstallments,
 }) {
-  const [queue,    setQueue]    = useState([]);
-  const [dragging, setDragging] = useState(false);
+  const [queue,       setQueue]       = useState([]);
+  const [history,     setHistory]     = useState([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [dragging,    setDragging]    = useState(false);
+  const [dbLoading,   setDbLoading]   = useState(true);
+
+  // ── Load persisted queue + history from DB on mount ───────
+  useEffect(() => {
+    (async () => {
+      setDbLoading(true);
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
+      const [{ data: pending }, { data: done }] = await Promise.all([
+        supabase.from("estatement_pdfs").select("*")
+          .eq("user_id", user.id).in("status", ["queued", "failed"])
+          .order("created_at", { ascending: false }),
+        supabase.from("estatement_pdfs").select("*")
+          .eq("user_id", user.id).eq("status", "done")
+          .gte("processed_at", thirtyDaysAgo)
+          .order("processed_at", { ascending: false }),
+      ]);
+      if (pending) {
+        setQueue(pending.map(r => ({
+          id:        r.id,
+          file:      null,
+          file_path: r.file_path || null,
+          name:      r.filename,
+          size:      r.file_size || 0,
+          status:    r.status,
+          rows:      null,
+          selected:  {},
+          notesOpen: new Set(),
+          skipped:   new Set(),
+          error:     null,
+          savedCount: null,
+        })));
+      }
+      if (done) setHistory(done);
+      setDbLoading(false);
+    })();
+  }, [user.id]);
 
   const readFileAsBase64 = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1400,29 +1438,61 @@ function EStatementTab({
     reader.readAsDataURL(file);
   });
 
+  const readBlobAsBase64 = (blob) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(",")[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+
   const fmtSize = (bytes) => {
+    if (!bytes) return "";
     if (bytes < 1024) return `${bytes}B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)}KB`;
     return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
   };
 
-  const addFiles = (files) => {
+  // ── Upload PDFs → Storage + DB ─────────────────────────────
+  const addFiles = async (files) => {
     const pdfs = Array.from(files).filter(f => f.name.toLowerCase().endsWith(".pdf"));
     if (!pdfs.length) { showToast("Please select PDF files only", "error"); return; }
-    const newItems = pdfs.map(f => ({
-      id:           `${Date.now()}_${Math.random().toString(36).slice(2)}`,
-      file:         f,
-      name:         f.name,
-      size:         f.size,
-      status:       "queued",
-      rows:         null,      // EStatementTxCard-compatible rows
-      selected:     {},        // _id → bool
-      notesOpen:    new Set(),
-      skipped:      new Set(),
-      error:        null,
-      savedCount:   null,
-    }));
-    setQueue(prev => [...prev, ...newItems]);
+
+    for (const f of pdfs) {
+      const id       = crypto.randomUUID();
+      const filePath = `${user.id}/${id}.pdf`;
+
+      // Optimistically add to queue
+      setQueue(prev => [...prev, {
+        id, file: f, file_path: filePath,
+        name: f.name, size: f.size, status: "queued",
+        rows: null, selected: {}, notesOpen: new Set(), skipped: new Set(),
+        error: null, savedCount: null, _uploading: true,
+      }]);
+
+      try {
+        const { error: upErr } = await supabase.storage
+          .from("estatement-pdfs")
+          .upload(filePath, f, { contentType: "application/pdf" });
+        if (upErr) throw upErr;
+
+        const { error: dbErr } = await supabase.from("estatement_pdfs").insert({
+          id, user_id: user.id,
+          filename:          f.name,
+          file_size:         f.size,
+          file_path:         filePath,
+          status:            "queued",
+          gmail_message_id:  null,
+          bank_name:         "Upload",
+          created_at:        new Date().toISOString(),
+        });
+        if (dbErr) throw dbErr;
+
+        setQueue(prev => prev.map(i => i.id === id ? { ...i, _uploading: false } : i));
+      } catch (e) {
+        showToast(`Failed to upload ${f.name}: ${e.message}`, "error");
+        setQueue(prev => prev.filter(i => i.id !== id));
+      }
+    }
   };
 
   // ── Categorize AI output → internal shape ─────────────────
@@ -1547,7 +1617,18 @@ function EStatementTab({
       ? { ...i, status: "processing", error: null, rows: null } : i
     ));
     try {
-      const base64 = await readFileAsBase64(item.file);
+      let base64;
+      if (item.file) {
+        base64 = await readFileAsBase64(item.file);
+      } else if (item.file_path) {
+        const { data: blob, error: dlErr } = await supabase.storage
+          .from("estatement-pdfs").download(item.file_path);
+        if (dlErr) throw dlErr;
+        base64 = await readBlobAsBase64(blob);
+      } else {
+        throw new Error("No PDF source available");
+      }
+
       const reqBody = { action: "process_upload", user_id: user.id, pdf_base64: base64, filename: item.name };
       const res = await fetch(
         `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/gmail-estatement`,
@@ -1556,19 +1637,26 @@ function EStatementTab({
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || `HTTP ${res.status}`);
       if (!result.success) {
+        await supabase.from("estatement_pdfs").update({ status: "failed" }).eq("id", itemId);
         setQueue(prev => prev.map(i => i.id === itemId
           ? { ...i, status: "failed", error: result.error } : i
         ));
         return;
       }
+
+      // Delete PDF from Storage — no longer needed after extraction
+      if (item.file_path) {
+        await supabase.storage.from("estatement-pdfs").remove([item.file_path]);
+      }
+
       const rows = buildRows(result.transactions || []);
-      // default: new=selected, duplicate=unselected
       const sel = {};
       rows.forEach(r => { sel[r._id] = r.status !== "possible_duplicate"; });
       setQueue(prev => prev.map(i => i.id === itemId
-        ? { ...i, status: "done", rows, selected: sel, skipped: new Set(), notesOpen: new Set() } : i
+        ? { ...i, status: "reviewed", rows, selected: sel, skipped: new Set(), notesOpen: new Set(), file: null, file_path: null } : i
       ));
     } catch (e) {
+      await supabase.from("estatement_pdfs").update({ status: "failed" }).eq("id", itemId);
       setQueue(prev => prev.map(i => i.id === itemId
         ? { ...i, status: "failed", error: e.message } : i
       ));
@@ -1615,13 +1703,16 @@ function EStatementTab({
         count++;
       } catch { /* skip */ }
     }
-    await supabase.from("estatement_pdfs").insert({
-      user_id: user.id, gmail_message_id: null,
-      filename: item.name, bank_name: "Upload",
-      status: "done", transaction_count: count,
-      processed_at: new Date().toISOString(),
-    });
-    setQueue(prev => prev.map(i => i.id === itemId ? { ...i, status: "saved", savedCount: count } : i));
+    const now = new Date().toISOString();
+    await supabase.from("estatement_pdfs").update({
+      status: "done", transaction_count: count, processed_at: now,
+    }).eq("id", itemId);
+    // Move to history, remove from active queue
+    setHistory(prev => [{
+      id: itemId, filename: item.name, file_size: item.size,
+      status: "done", transaction_count: count, processed_at: now,
+    }, ...prev]);
+    setQueue(prev => prev.filter(i => i.id !== itemId));
     showToast(`Saved ${count} transaction${count !== 1 ? "s" : ""} from ${item.name}`);
   };
 
@@ -1637,13 +1728,12 @@ function EStatementTab({
         description:    row.description,
         total_amount:   total,
         monthly_amount: monthly,
-        months:         row._instTotal || 12,
+        total_months:   row._instTotal || 12,
         paid_months:    row._instNo ? row._instNo - 1 : 0,
         start_date:     row.tx_date,
         entity:         "Personal",
       });
       if (created) setInstallments?.(prev => [created, ...(prev || [])]);
-      // update the row to reflect instMatch
       setQueue(prev => prev.map(i => i.id === itemId
         ? { ...i, rows: i.rows.map(r => r._id === row._id ? { ...r, _instMatch: created } : r) } : i
       ));
@@ -1651,14 +1741,30 @@ function EStatementTab({
     } catch (e) { showToast(e.message, "error"); }
   };
 
-  const removeFromQueue = (itemId) => setQueue(prev => prev.filter(i => i.id !== itemId));
+  // ── Remove from queue (delete Storage + DB) ────────────────
+  const removeFromQueue = async (itemId) => {
+    const item = queue.find(i => i.id === itemId);
+    // Delete from Storage if PDF still there (queued/failed)
+    if (item?.file_path) {
+      await supabase.storage.from("estatement-pdfs").remove([item.file_path]);
+    }
+    // Delete from DB
+    await supabase.from("estatement_pdfs").delete().eq("id", itemId);
+    setQueue(prev => prev.filter(i => i.id !== itemId));
+  };
+
+  // ── Delete history record ─────────────────────────────────
+  const deleteHistoryItem = async (id) => {
+    await supabase.from("estatement_pdfs").delete().eq("id", id);
+    setHistory(prev => prev.filter(i => i.id !== id));
+  };
 
   const statusBadge = (status) => {
     const map = {
       queued:     { label: "⏳ Queued",     bg: "#f3f4f6", color: "#6b7280" },
       processing: { label: "🔄 Processing", bg: "#fef9c3", color: "#92400e" },
-      done:       { label: "✅ Processed",  bg: "#dcfce7", color: "#15803d" },
-      saved:      { label: "✅ Saved",      bg: "#dcfce7", color: "#15803d" },
+      reviewed:   { label: "👁 Review",     bg: "#eff6ff", color: "#1d4ed8" },
+      done:       { label: "✅ Done",       bg: "#dcfce7", color: "#15803d" },
       failed:     { label: "❌ Failed",     bg: "#fef2f2", color: "#dc2626" },
     };
     const s = map[status] || { label: status, bg: "#f3f4f6", color: "#6b7280" };
@@ -1670,6 +1776,11 @@ function EStatementTab({
         {s.label}
       </span>
     );
+  };
+
+  const fmtDateMed = (iso) => {
+    try { return new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }); }
+    catch { return iso || ""; }
   };
 
   return (
@@ -1705,8 +1816,12 @@ function EStatementTab({
         </div>
       </div>
 
-      {/* ── Section 3: Processing Queue ── */}
-      {queue.length > 0 && (
+      {/* ── Queue ── */}
+      {dbLoading ? (
+        <div style={{ textAlign: "center", padding: "16px 0", color: T.text3, fontSize: 12, fontFamily: "Figtree, sans-serif" }}>
+          Loading queue…
+        </div>
+      ) : queue.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {queue.map(item => (
             <EStmtQueueItem
@@ -1742,6 +1857,51 @@ function EStatementTab({
           ))}
         </div>
       )}
+
+      {/* ── History (last 30 days done) ── */}
+      {history.length > 0 && (
+        <div style={card}>
+          <div
+            onClick={() => setHistoryOpen(v => !v)}
+            style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}
+          >
+            <SectionHeader title={`History (${history.length})`} />
+            <span style={{ fontSize: 12, color: T.text3, fontFamily: "Figtree, sans-serif" }}>
+              {historyOpen ? "▲ hide" : "▼ show"}
+            </span>
+          </div>
+          {historyOpen && (
+            <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+              {history.map(h => (
+                <div key={h.id} style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "8px 10px", background: T.sur2, borderRadius: 8,
+                  border: `1px solid ${T.border}`,
+                }}>
+                  <span style={{ fontSize: 16, flexShrink: 0 }}>✅</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontSize: 12, fontWeight: 600, color: T.text, fontFamily: "Figtree, sans-serif",
+                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                    }}>{h.filename}</div>
+                    <div style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
+                      {h.transaction_count != null ? `${h.transaction_count} tx` : "Done"}
+                      {h.processed_at ? ` · ${fmtDateMed(h.processed_at)}` : ""}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => deleteHistoryItem(h.id)}
+                    style={{ border: "none", background: "none", cursor: "pointer", fontSize: 14, color: "#d1d5db", padding: 2, flexShrink: 0 }}
+                    onMouseEnter={e => e.currentTarget.style.color = "#ef4444"}
+                    onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}>
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1768,9 +1928,11 @@ function EStmtQueueItem({
       <div style={{
         display: "flex", alignItems: "center", gap: 10,
         padding: "10px 14px", background: T.sur2,
-        borderBottom: item.status === "done" ? `1px solid ${T.border}` : "none",
+        borderBottom: item.status === "reviewed" ? `1px solid ${T.border}` : "none",
       }}>
-        <span style={{ fontSize: 20, flexShrink: 0 }}>📄</span>
+        <span style={{ fontSize: 20, flexShrink: 0 }}>
+          {item._uploading ? "⏫" : "📄"}
+        </span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
             fontSize: 12, fontWeight: 600, color: T.text, fontFamily: "Figtree, sans-serif",
@@ -1780,20 +1942,20 @@ function EStmtQueueItem({
           </div>
           <div style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
             {fmtSize(item.size)}
-            {item.status === "saved"       && item.savedCount != null && ` · ${item.savedCount} tx saved`}
-            {item.status === "done"        && rows.length > 0          && ` · ${rows.length} tx found`}
-            {item.status === "processing"  && " · scanning with AI…"}
+            {item._uploading                && " · uploading…"}
+            {item.status === "reviewed"     && rows.length > 0 && ` · ${rows.length} tx found`}
+            {item.status === "processing"   && " · scanning with AI…"}
           </div>
         </div>
         {statusBadge(item.status)}
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-          {item.status === "queued" && (
+          {item.status === "queued" && !item._uploading && (
             <Button variant="primary" size="sm" onClick={onProcess}>▶ Process</Button>
           )}
           {item.status === "failed" && (
             <Button variant="secondary" size="sm" onClick={onProcess}>Retry</Button>
           )}
-          {["queued","failed","saved"].includes(item.status) && (
+          {["queued","failed","reviewed"].includes(item.status) && !item._uploading && (
             <button onClick={onRemove}
               style={{ border: "none", background: "none", cursor: "pointer", fontSize: 16, color: "#d1d5db", padding: 2 }}
               onMouseEnter={e => e.currentTarget.style.color = "#ef4444"}
@@ -1814,7 +1976,7 @@ function EStmtQueueItem({
       )}
 
       {/* ── Transaction preview (AI Import/Scan style) ── */}
-      {item.status === "done" && (
+      {item.status === "reviewed" && (
         <div style={{ padding: "12px 14px" }}>
           {rows.length === 0 ? (
             <div style={{ fontSize: 12, color: T.text3, fontFamily: "Figtree, sans-serif", padding: "8px 0" }}>
