@@ -1674,11 +1674,12 @@ function EStatementTab({
 
 // ─── PROCESS STATEMENT MODAL ─────────────────────────────────
 function ProcessStatementModal({ statement, passwordList, user, accounts, ledger, T, onClose, onDone }) {
-  const [phase, setPhase]       = useState("processing"); // processing | needs_password | preview | saving
-  const [missing, setMissing]   = useState([]);
-  const [skipped, setSkipped]   = useState({});
+  const [phase, setPhase]         = useState("loading"); // loading | needs_password | preview | saving
+  const [statusMsg, setStatusMsg] = useState("Downloading PDF...");
+  const [missing, setMissing]     = useState([]);
+  const [skipped, setSkipped]     = useState({});
   const [manualPwd, setManualPwd] = useState("");
-  const [error, setError]       = useState("");
+  const [error, setError]         = useState("");
 
   const SUPABASE_URL = process.env.REACT_APP_SUPABASE_URL || "";
 
@@ -1724,42 +1725,27 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
     );
   };
 
-  // Auto-start processing as soon as the modal opens
-  useEffect(() => { callProcess(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Auto-start as soon as modal opens
+  useEffect(() => { callPrepare(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // onlyPasswords: when set, send only these passwords (skip saved list) — used for manual Try
-  const callProcess = async ({ extraPasswords = [], onlyPasswords = null } = {}) => {
-    setPhase("processing"); setError("");
+  // Step 2: call extract with the working password returned from prepare
+  const callExtract = async (workingPassword) => {
+    setStatusMsg("Extracting transactions with AI...");
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
 
-      let pwdPayload = null;
-      if (onlyPasswords) {
-        // Manual Try: send only the specified password(s)
-        pwdPayload = onlyPasswords.map(v => ({ label: "Manual", pattern: v }));
-      } else if (extraPasswords.length > 0) {
-        pwdPayload = [...passwordList, ...extraPasswords.map(v => ({ label: "Manual", pattern: v }))];
-      }
-
       const res = await fetch(`${SUPABASE_URL}/functions/v1/gmail-estatement`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-        body: JSON.stringify({ action: "process", statement_id: statement.id, passwords: pwdPayload }),
+        body: JSON.stringify({ action: "extract", statement_id: statement.id, working_password: workingPassword }),
       });
       const result = await res.json();
-      if (!res.ok) throw new Error(result.error || "Processing failed");
+      if (!res.ok) throw new Error(result.error || "Extract failed");
 
       if (!result.success) {
-        if (result.needs_password && result.encrypted) {
-          setPhase("needs_password");
-          setError(onlyPasswords
-            ? "Wrong password — try a different one."
-            : "PDF is password-protected. Enter the password below.");
-        } else {
-          setPhase("needs_password");
-          setError("Could not extract transactions from this PDF. It may be a scanned image or unsupported format.");
-        }
+        setPhase("needs_password");
+        setError(result.error || "Could not extract transactions from this PDF. It may be a scanned image or unsupported format.");
         return;
       }
 
@@ -1767,7 +1753,58 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
       setMissing(categorized.filter(tx => tx.tx_category !== "payment" && !isDuplicate(tx)));
       setSkipped({});
       setPhase("preview");
-    } catch (e) { setPhase("idle"); setError(e.message); }
+    } catch (e) {
+      setPhase("needs_password");
+      setError(e.message);
+    }
+  };
+
+  // Step 1: download PDF + test passwords with pdf-lib (no AI)
+  // onlyPassword: if set, only test this single password (manual Try)
+  const callPrepare = async ({ onlyPassword = null } = {}) => {
+    setPhase("loading");
+    setError("");
+    setStatusMsg(onlyPassword ? "Testing password..." : "Downloading PDF...");
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+
+      const reqBody = { action: "prepare", statement_id: statement.id };
+      if (onlyPassword !== null) reqBody.only_password = onlyPassword;
+
+      if (!onlyPassword) {
+        // Show "Testing passwords..." after a brief delay so the first msg is visible
+        setTimeout(() => setStatusMsg("Testing passwords..."), 800);
+      }
+
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/gmail-estatement`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+        body: JSON.stringify(reqBody),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || "Prepare failed");
+
+      if (!result.success) {
+        if (result.needs_password && result.encrypted) {
+          setPhase("needs_password");
+          setError(onlyPassword
+            ? "Wrong password — try a different one."
+            : "PDF is password-protected. Enter the password below.");
+        } else {
+          setPhase("needs_password");
+          setError("Could not open this PDF. It may be a scanned image or an unsupported format.");
+        }
+        return;
+      }
+
+      // Prepare succeeded → proceed to AI extraction
+      setStatusMsg("Unlocked! Extracting transactions with AI...");
+      await callExtract(result.working_password);
+    } catch (e) {
+      setPhase("needs_password");
+      setError(e.message);
+    }
   };
 
   const saveAll = async () => {
@@ -1867,13 +1904,13 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
                       type="password"
                       value={manualPwd}
                       onChange={e => setManualPwd(e.target.value)}
-                      onKeyDown={e => e.key === "Enter" && manualPwd.trim() && callProcess({ onlyPasswords: [manualPwd] })}
+                      onKeyDown={e => e.key === "Enter" && manualPwd.trim() && callPrepare({ onlyPassword: manualPwd })}
                       placeholder="PDF password…"
                       style={{ flex: 1, height: 38, padding: "0 12px", border: "1.5px solid #3b5bdb", borderRadius: 8, fontFamily: "Figtree, sans-serif", fontSize: 13, outline: "none" }}
                     />
                     <Button
                       variant="primary" size="sm"
-                      onClick={() => manualPwd.trim() && callProcess({ onlyPasswords: [manualPwd] })}
+                      onClick={() => manualPwd.trim() && callPrepare({ onlyPassword: manualPwd })}
                     >
                       Try
                     </Button>
@@ -1883,13 +1920,12 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
             </div>
           )}
 
-          {phase === "processing" && (
+          {phase === "loading" && (
             <div style={{ textAlign: "center", padding: "40px 20px", color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
               <div style={{ fontSize: 28, marginBottom: 12 }}>⏳</div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Processing e-statement…</div>
-              <div style={{ fontSize: 11, marginTop: 6, lineHeight: 1.7 }}>
-                Downloading PDF · trying passwords · extracting with AI
-                <br />This may take 15–30 seconds
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>{statusMsg}</div>
+              <div style={{ fontSize: 11, marginTop: 6, color: "#9ca3af" }}>
+                This may take 20–40 seconds
               </div>
             </div>
           )}

@@ -1,13 +1,16 @@
 // ─────────────────────────────────────────────────────────────────
 // gmail-estatement/index.ts
-// Two actions:
-//   action: "scan"    → search Gmail for bank PDF attachments → insert estatement_pdfs
-//   action: "process" → download PDF → try passwords → parse with Claude → return txns
+// Actions:
+//   "scan"    → search Gmail for bank PDF attachments → insert estatement_pdfs
+//   "prepare" → download PDF + test passwords with pdf-lib (no AI)
+//   "extract" → unlock PDF + send to Claude AI → return transactions
+//   "mark_done" → mark statement as done
 //
 // Deploy: supabase functions deploy gmail-estatement
 // ─────────────────────────────────────────────────────────────────
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -110,16 +113,68 @@ async function getAccessToken(serviceSupabase: any, userId: string, googleSecret
   return accessToken;
 }
 
+// ── HELPER: download PDF from Gmail ───────────────────────────
+async function downloadPDFFromGmail(accessToken: string, messageId: string): Promise<string> {
+  const msgRes = await fetch(
+    `https://www.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!msgRes.ok) throw new Error("Failed to fetch Gmail message");
+  const msgData = await msgRes.json();
+
+  const allParts: any[] = [];
+  const collectParts = (part: any) => {
+    if (!part) return;
+    allParts.push(part);
+    if (part.parts) part.parts.forEach(collectParts);
+  };
+  collectParts(msgData.payload);
+
+  const pdfPart = allParts.find((p: any) =>
+    p.filename?.toLowerCase().endsWith(".pdf") || p.mimeType === "application/pdf"
+  );
+  if (!pdfPart?.body?.attachmentId) throw new Error("No PDF attachment found in message");
+
+  const attRes = await fetch(
+    `https://www.googleapis.com/gmail/v1/users/me/messages/${messageId}/attachments/${pdfPart.body.attachmentId}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+  if (!attRes.ok) throw new Error("Failed to download PDF attachment");
+  const attData = await attRes.json();
+  // Gmail returns base64url-encoded data
+  const pdfBase64 = (attData.data || "").replace(/-/g, "+").replace(/_/g, "/");
+  if (!pdfBase64) throw new Error("Empty PDF attachment");
+  return pdfBase64;
+}
+
+// ── HELPER: try to unlock PDF with pdf-lib ─────────────────────
+// Returns base64 of unlocked PDF, or null if password is wrong / PDF unreadable
+async function tryUnlockPDF(pdfBase64: string, password: string): Promise<string | null> {
+  try {
+    const bytes = Uint8Array.from(atob(pdfBase64), (c) => c.charCodeAt(0));
+    const opts: any = password ? { password } : {};
+    const pdfDoc = await PDFDocument.load(bytes, opts);
+    const saved = await pdfDoc.save();
+    // Chunked btoa to avoid stack overflow on large PDFs
+    let binary = "";
+    const chunk = 8192;
+    for (let i = 0; i < saved.length; i += chunk) {
+      binary += String.fromCharCode(...saved.subarray(i, i + chunk));
+    }
+    return btoa(binary);
+  } catch {
+    return null;
+  }
+}
+
 // ── ACTION: scan ───────────────────────────────────────────────
 async function scanGmailForStatements(
   serviceSupabase: any, userId: string, accessToken: string,
   fromDate?: string, toDate?: string
 ) {
-  // Gmail date format: YYYY/MM/DD
   const afterPart  = fromDate ? ` after:${fromDate.replace(/-/g, "/")}` : "";
   const beforePart = toDate   ? ` before:${toDate.replace(/-/g, "/")}` : "";
 
-  // Subject-keyword query covers statement emails from any domain
   const subjectQuery = [
     "subject:statement",
     'subject:estatement',
@@ -151,7 +206,6 @@ async function scanGmailForStatements(
 
   if (messages.length === 0) return { new_pdfs: 0, total_found: 0 };
 
-  // Batch-check which message IDs are already in DB (one query, not N)
   const msgIds = messages.map((m: any) => m.id);
   const { data: existingRows } = await serviceSupabase
     .from("estatement_pdfs")
@@ -163,7 +217,6 @@ async function scanGmailForStatements(
 
   if (newMsgs.length === 0) return { new_pdfs: 0, total_found: messages.length };
 
-  // Fetch metadata for new messages in parallel
   const metaResults = await Promise.all(
     newMsgs.map((msg: any) =>
       fetch(
@@ -192,7 +245,6 @@ async function scanGmailForStatements(
     const senderEmail = (senderMatch?.[1] || from).toLowerCase().trim();
     const bankName    = bankNameFromDomain(senderEmail);
 
-    // Parse statement month from subject or email date
     let statementMonth: string | null = null;
     const monthMatch = (subject + " " + dateHdr).match(
       /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s\-]*(\d{4})\b/i
@@ -216,77 +268,91 @@ async function scanGmailForStatements(
   return { new_pdfs: newCount, total_found: messages.length };
 }
 
-// ── ACTION: process ────────────────────────────────────────────
-async function processStatement(
+// ── ACTION: prepare ────────────────────────────────────────────
+// Download PDF + test passwords with pdf-lib. Returns working_password if found.
+async function prepareStatement(
   serviceSupabase: any, userId: string, accessToken: string,
   statementId: string, passwordPatterns: any[], userVars: Record<string, string>,
-  anthropicKey: string
+  onlyPassword?: string
 ) {
-  // Load estatement record
   const { data: stmt, error: stmtErr } = await serviceSupabase
     .from("estatement_pdfs").select("*").eq("id", statementId).eq("user_id", userId).single();
   if (stmtErr || !stmt) throw new Error("Statement not found");
 
-  // Mark as processing
+  console.log(`[gmail-estatement] prepare: downloading PDF for statement ${statementId}`);
+  const pdfBase64 = await downloadPDFFromGmail(accessToken, stmt.gmail_message_id);
+
+  // Build password list to try
+  let passwords: string[];
+  if (onlyPassword !== undefined) {
+    passwords = [onlyPassword];
+  } else {
+    const resolved = passwordPatterns
+      .map(p => resolvePassword(p.pattern || "", userVars))
+      .filter(Boolean);
+    passwords = ["", ...resolved];
+  }
+
+  console.log(`[gmail-estatement] prepare: trying ${passwords.length} password(s)`);
+
+  let workingPassword: string | null = null;
+  let isEncrypted = false;
+
+  for (let i = 0; i < passwords.length; i++) {
+    const pwd = passwords[i];
+    const unlocked = await tryUnlockPDF(pdfBase64, pwd);
+    if (unlocked !== null) {
+      workingPassword = pwd;
+      console.log(`[gmail-estatement] prepare: unlocked with password index ${i}`);
+      break;
+    }
+    // First attempt (no password) failed → PDF is encrypted
+    if (i === 0) isEncrypted = true;
+  }
+
+  if (workingPassword === null) {
+    await serviceSupabase.from("estatement_pdfs")
+      .update({ status: isEncrypted ? "password_needed" : "pending" }).eq("id", statementId);
+    return { success: false, needs_password: isEncrypted, encrypted: isEncrypted };
+  }
+
+  return { success: true, working_password: workingPassword };
+}
+
+// ── ACTION: extract ────────────────────────────────────────────
+// Download PDF, unlock with known password, send to Claude AI.
+async function extractStatement(
+  serviceSupabase: any, userId: string, accessToken: string,
+  statementId: string, workingPassword: string, anthropicKey: string
+) {
+  const { data: stmt, error: stmtErr } = await serviceSupabase
+    .from("estatement_pdfs").select("*").eq("id", statementId).eq("user_id", userId).single();
+  if (stmtErr || !stmt) throw new Error("Statement not found");
+
   await serviceSupabase.from("estatement_pdfs")
     .update({ status: "processing" }).eq("id", statementId);
 
-  // Fetch full message to find attachment
-  const msgRes = await fetch(
-    `https://www.googleapis.com/gmail/v1/users/me/messages/${stmt.gmail_message_id}?format=full`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  );
-  if (!msgRes.ok) throw new Error("Failed to fetch Gmail message");
-  const msgData = await msgRes.json();
+  console.log(`[gmail-estatement] extract: downloading PDF for statement ${statementId}`);
+  const pdfBase64 = await downloadPDFFromGmail(accessToken, stmt.gmail_message_id);
 
-  // Find PDF attachment part
-  const allParts: any[] = [];
-  const collectParts = (part: any) => {
-    if (!part) return;
-    allParts.push(part);
-    if (part.parts) part.parts.forEach(collectParts);
-  };
-  collectParts(msgData.payload);
-
-  const pdfPart = allParts.find((p: any) =>
-    p.filename?.toLowerCase().endsWith(".pdf") || p.mimeType === "application/pdf"
-  );
-  if (!pdfPart?.body?.attachmentId) throw new Error("No PDF attachment found in message");
-
-  // Download attachment
-  const attRes = await fetch(
-    `https://www.googleapis.com/gmail/v1/users/me/messages/${stmt.gmail_message_id}/attachments/${pdfPart.body.attachmentId}`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  );
-  if (!attRes.ok) throw new Error("Failed to download PDF attachment");
-  const attData = await attRes.json();
-  // Gmail returns base64url-encoded data
-  const pdfBase64 = (attData.data || "").replace(/-/g, "+").replace(/_/g, "/");
-
-  if (!pdfBase64) throw new Error("Empty PDF attachment");
-
-  // Build list of passwords to try (empty string = unprotected)
-  const passwords: Array<{ label: string; value: string }> = [
-    { label: "no password", value: "" },
-  ];
-  for (const p of passwordPatterns) {
-    const resolved = resolvePassword(p.pattern || "", userVars);
-    if (resolved) passwords.push({ label: p.label || p.pattern, value: resolved });
+  // Unlock with known password (or use original bytes if no password needed)
+  let pdfForAI: string;
+  if (!workingPassword) {
+    // No password needed — send original bytes
+    pdfForAI = pdfBase64;
+  } else {
+    const unlocked = await tryUnlockPDF(pdfBase64, workingPassword);
+    if (!unlocked) {
+      await serviceSupabase.from("estatement_pdfs")
+        .update({ status: "password_needed" }).eq("id", statementId);
+      return { success: false, error: "Failed to unlock PDF", needs_password: true, encrypted: true };
+    }
+    pdfForAI = unlocked;
   }
 
-  // Try each password with Claude
-  let transactions: any[] = [];
-  let usedPassword = "";
-  let lastError = "";
-  let isEncrypted = false; // true only if no-password attempt returns password_required
+  console.log(`[gmail-estatement] extract: sending to Claude AI`);
 
-  for (const pwd of passwords) {
-    try {
-      const promptPrefix = pwd.value
-        ? `This is a password-protected bank e-statement PDF. The password is: "${pwd.value}". Extract ALL transactions from this document.`
-        : `Extract ALL transactions from this bank e-statement PDF. This PDF has no password.`;
-
-      const fullPrompt = `${promptPrefix}
+  const prompt = `Extract ALL transactions from this bank e-statement PDF.
 
 Return a JSON array of transactions with this exact structure:
 [{
@@ -309,93 +375,72 @@ Rules for tx_category:
 - "regular": All other purchases, expenses, and income
 
 For installment rows extract installment_no and installment_total if shown (e.g. "Cicilan 3/12" → no=3, total=12). Leave null if not shown.
-If the PDF is password-protected and you cannot read it, return: {"error": "password_required"}
-If the password is wrong, return: {"error": "wrong_password"}
-Return ONLY the JSON array (or error object), no other text.`;
+Return ONLY the JSON array, no other text.`;
 
-      const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": anthropicKey,
-          "anthropic-version": "2023-06-01",
-          "anthropic-beta": "pdfs-2024-09-25",
-        },
-        body: JSON.stringify({
-          model: "claude-opus-4-6",
-          max_tokens: 4096,
-          messages: [{
-            role: "user",
-            content: [
-              {
-                type: "document",
-                source: {
-                  type:       "base64",
-                  media_type: "application/pdf",
-                  data:       pdfBase64,
-                },
-              },
-              {
-                type: "text",
-                text: fullPrompt,
-              },
-            ],
-          }],
-        }),
-      });
+  const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type":    "application/json",
+      "x-api-key":       anthropicKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-beta":  "pdfs-2024-09-25",
+    },
+    body: JSON.stringify({
+      model: "claude-opus-4-6",
+      max_tokens: 4096,
+      messages: [{
+        role: "user",
+        content: [
+          {
+            type: "document",
+            source: { type: "base64", media_type: "application/pdf", data: pdfForAI },
+          },
+          { type: "text", text: prompt },
+        ],
+      }],
+    }),
+  });
 
-      if (!aiRes.ok) {
-        lastError = `Claude API error: ${aiRes.status}`;
-        continue;
-      }
-
-      const aiData = await aiRes.json();
-      const rawText = aiData.content?.[0]?.text || "";
-      const jsonMatch = rawText.match(/\[[\s\S]*\]|\{[\s\S]*\}/);
-      if (!jsonMatch) { lastError = "No JSON in response"; continue; }
-
-      const parsed = JSON.parse(jsonMatch[0]);
-      if (parsed?.error === "password_required" || parsed?.error === "wrong_password") {
-        // Track that we confirmed the PDF is encrypted (only relevant on no-password attempt)
-        if (pwd.value === "") isEncrypted = true;
-        lastError = parsed.error;
-        continue;
-      }
-
-      const txns = Array.isArray(parsed) ? parsed : [];
-      if (txns.length === 0) { lastError = "No transactions extracted"; continue; }
-
-      transactions = txns;
-      usedPassword = pwd.label;
-      break;
-    } catch (e) {
-      lastError = String(e);
-      continue;
-    }
+  if (!aiRes.ok) {
+    const errText = await aiRes.text();
+    await serviceSupabase.from("estatement_pdfs")
+      .update({ status: "pending" }).eq("id", statementId);
+    throw new Error(`Claude API error: ${aiRes.status} ${errText}`);
   }
 
-  if (transactions.length === 0) {
-    if (isEncrypted) {
-      // PDF is definitely password-protected — user needs to provide password
-      await serviceSupabase.from("estatement_pdfs")
-        .update({ status: "password_needed" }).eq("id", statementId);
-      return { success: false, error: lastError, needs_password: true, encrypted: true };
-    } else {
-      // PDF was readable but no transactions could be extracted (format issue, image PDF, etc.)
-      await serviceSupabase.from("estatement_pdfs")
-        .update({ status: "pending" }).eq("id", statementId);
-      return { success: false, error: lastError || "No transactions extracted", needs_password: false, encrypted: false };
-    }
+  const aiData  = await aiRes.json();
+  const rawText = aiData.content?.[0]?.text || "";
+  const jsonMatch = rawText.match(/\[[\s\S]*\]/);
+
+  if (!jsonMatch) {
+    console.log(`[gmail-estatement] extract: no JSON array in Claude response`);
+    await serviceSupabase.from("estatement_pdfs")
+      .update({ status: "pending" }).eq("id", statementId);
+    return { success: false, error: "No transactions extracted — PDF may be a scanned image or unsupported format.", needs_password: false, encrypted: false };
   }
 
-  // Update record
+  let transactions: any[];
+  try {
+    transactions = JSON.parse(jsonMatch[0]);
+  } catch {
+    await serviceSupabase.from("estatement_pdfs")
+      .update({ status: "pending" }).eq("id", statementId);
+    return { success: false, error: "Could not parse transaction data from AI response.", needs_password: false, encrypted: false };
+  }
+
+  if (!Array.isArray(transactions) || transactions.length === 0) {
+    await serviceSupabase.from("estatement_pdfs")
+      .update({ status: "pending" }).eq("id", statementId);
+    return { success: false, error: "No transactions found in this statement.", needs_password: false, encrypted: false };
+  }
+
   await serviceSupabase.from("estatement_pdfs").update({
     status:            "parsed",
     transaction_count: transactions.length,
     processed_at:      new Date().toISOString(),
   }).eq("id", statementId);
 
-  return { success: true, transactions, used_password: usedPassword, count: transactions.length };
+  return { success: true, transactions, count: transactions.length };
 }
 
 // ── ACTION: mark_done ──────────────────────────────────────────
@@ -408,6 +453,37 @@ async function markDone(serviceSupabase: any, userId: string, statementId: strin
   return { success: true };
 }
 
+// ── SHARED: load password list + user vars from DB ─────────────
+async function loadPasswordsAndVars(
+  serviceSupabase: any, userId: string, body: any
+): Promise<{ pwdList: any[]; vars: Record<string, string> }> {
+  let pwdList = body.passwords;
+  if (!pwdList) {
+    const { data } = await serviceSupabase
+      .from("estatement_password_list")
+      .select("*")
+      .eq("user_id", userId)
+      .order("sort_order");
+    pwdList = data || [];
+  }
+
+  let vars: Record<string, string> = body.user_vars || {};
+  if (!vars.DDMMYYYY) {
+    const { data: setting } = await serviceSupabase
+      .from("app_settings")
+      .select("value")
+      .eq("user_id", userId)
+      .eq("key", "birth_date")
+      .maybeSingle();
+    if (setting?.value) {
+      const parts = String(setting.value).split("-");
+      if (parts.length === 3) vars.DDMMYYYY = `${parts[2]}${parts[1]}${parts[0]}`;
+    }
+  }
+
+  return { pwdList, vars };
+}
+
 // ── MAIN HANDLER ──────────────────────────────────────────────
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -418,7 +494,6 @@ Deno.serve(async (req: Request) => {
   const ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_KEY")             || "";
   const GOOGLE_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET")      || "";
 
-  // Authenticate user via Bearer token
   const authHeader = req.headers.get("Authorization") || "";
   if (!authHeader.startsWith("Bearer ")) {
     return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -444,7 +519,6 @@ Deno.serve(async (req: Request) => {
   const action = body.action || "scan";
 
   try {
-    // Get Gmail access token
     const accessToken = await getAccessToken(serviceSupabase, userId, GOOGLE_SECRET);
     if (!accessToken && action !== "mark_done") {
       return new Response(JSON.stringify({ error: "Gmail not connected" }), {
@@ -455,41 +529,31 @@ Deno.serve(async (req: Request) => {
     let result: any;
 
     if (action === "scan") {
-      result = await scanGmailForStatements(serviceSupabase, userId, accessToken!, body.from_date, body.to_date);
+      result = await scanGmailForStatements(
+        serviceSupabase, userId, accessToken!, body.from_date, body.to_date
+      );
 
-    } else if (action === "process") {
-      const { statement_id, passwords, user_vars } = body;
+    } else if (action === "prepare") {
+      const { statement_id } = body;
       if (!statement_id) throw new Error("statement_id required");
 
-      // Load password list from DB if not provided
-      let pwdList = passwords;
-      if (!pwdList) {
-        const { data } = await serviceSupabase
-          .from("estatement_password_list")
-          .select("*")
-          .eq("user_id", userId)
-          .order("sort_order");
-        pwdList = data || [];
+      if (body.only_password !== undefined) {
+        // Manual Try: only test the provided password
+        result = await prepareStatement(
+          serviceSupabase, userId, accessToken!, statement_id, [], {}, body.only_password
+        );
+      } else {
+        const { pwdList, vars } = await loadPasswordsAndVars(serviceSupabase, userId, body);
+        result = await prepareStatement(
+          serviceSupabase, userId, accessToken!, statement_id, pwdList, vars
+        );
       }
 
-      // Resolve user vars (birth date, account no)
-      let vars = user_vars || {};
-      if (!vars.DDMMYYYY) {
-        const { data: setting } = await serviceSupabase
-          .from("app_settings")
-          .select("value")
-          .eq("user_id", userId)
-          .eq("key", "birth_date")
-          .maybeSingle();
-        if (setting?.value) {
-          // Expect YYYY-MM-DD → convert to DDMMYYYY
-          const parts = String(setting.value).split("-");
-          if (parts.length === 3) vars.DDMMYYYY = `${parts[2]}${parts[1]}${parts[0]}`;
-        }
-      }
-
-      result = await processStatement(
-        serviceSupabase, userId, accessToken!, statement_id, pwdList, vars, ANTHROPIC_KEY
+    } else if (action === "extract") {
+      const { statement_id, working_password } = body;
+      if (!statement_id) throw new Error("statement_id required");
+      result = await extractStatement(
+        serviceSupabase, userId, accessToken!, statement_id, working_password ?? "", ANTHROPIC_KEY
       );
 
     } else if (action === "mark_done") {
