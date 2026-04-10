@@ -565,7 +565,7 @@ export default function Transactions({
       </div>
 
       {/* ── SUBTABS ── */}
-      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
         {[...SUBTABS, ...(pendingCount > 0 ? [{ id: "pending", label: `Pending (${pendingCount})` }] : [])].map(t => {
           const active = subTab === t.id;
           return (
@@ -576,8 +576,17 @@ export default function Transactions({
               color: active ? "#fff" : "#6b7280",
               fontSize: 12, fontWeight: active ? 700 : 500,
               cursor: "pointer", fontFamily: "Figtree, sans-serif",
+              display: "flex", alignItems: "center", gap: 5,
             }}>
               {t.label}
+              {t.id === "all" && missingTypeCount > 0 && (
+                <span style={{
+                  background: "#C0392B", color: "#fff",
+                  fontSize: 10, fontWeight: 700,
+                  padding: "0 5px", borderRadius: 99, lineHeight: "16px",
+                  minWidth: 16, textAlign: "center",
+                }}>{missingTypeCount}</span>
+              )}
             </button>
           );
         })}
