@@ -502,28 +502,28 @@ export default function Settings({
               <SectionHeader title="Sync History" />
               <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 0 }}>
                 <div style={{
-                  display: "grid", gridTemplateColumns: "1fr 80px 80px 40px",
+                  display: "flex", gap: 8,
                   padding: "4px 0", borderBottom: `1px solid ${T.border}`,
                   fontSize: 10, fontWeight: 700, color: T.text3, textTransform: "uppercase", letterSpacing: "0.05em",
                 }}>
-                  <span>Time</span>
-                  <span style={{ textAlign: "right" }}>Emails</span>
-                  <span style={{ textAlign: "right" }}>Transactions</span>
-                  <span style={{ textAlign: "center" }}>Status</span>
+                  <span style={{ flex: 1 }}>Time</span>
+                  <span style={{ width: 52, textAlign: "right", flexShrink: 0 }}>Emails</span>
+                  <span style={{ width: 90, textAlign: "right", flexShrink: 0 }}>Transactions</span>
+                  <span style={{ width: 44, textAlign: "center", flexShrink: 0 }}>Status</span>
                 </div>
                 {syncLog.slice(0, 10).map((entry, i) => {
                   const d = new Date(entry.synced_at);
                   const fmt = `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
                   return (
                     <div key={i} style={{
-                      display: "grid", gridTemplateColumns: "1fr 80px 80px 40px",
+                      display: "flex", gap: 8,
                       padding: "7px 0", borderBottom: `1px solid ${T.border}`,
                       fontSize: 11, color: T.text2,
                     }}>
-                      <span>{fmt}</span>
-                      <span style={{ textAlign: "right", color: T.text3 }}>{entry.emails_processed ?? 0}</span>
-                      <span style={{ textAlign: "right", color: entry.new_transactions > 0 ? "#059669" : T.text3, fontWeight: entry.new_transactions > 0 ? 600 : 400 }}>{entry.new_transactions ?? 0}</span>
-                      <span style={{ textAlign: "center" }}>{entry.status === "success" ? "✅" : "❌"}</span>
+                      <span style={{ flex: 1 }}>{fmt}</span>
+                      <span style={{ width: 52, textAlign: "right", flexShrink: 0, color: T.text3 }}>{entry.emails_processed ?? 0}</span>
+                      <span style={{ width: 90, textAlign: "right", flexShrink: 0, color: entry.new_transactions > 0 ? "#059669" : T.text3, fontWeight: entry.new_transactions > 0 ? 600 : 400 }}>{entry.new_transactions ?? 0}</span>
+                      <span style={{ width: 44, textAlign: "center", flexShrink: 0 }}>{entry.status === "success" ? "✅" : "❌"}</span>
                     </div>
                   );
                 })}
