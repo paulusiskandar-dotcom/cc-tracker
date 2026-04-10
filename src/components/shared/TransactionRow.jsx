@@ -128,12 +128,34 @@ export default function TransactionRow({
   const catLabel    = entry.category_name || entry.category || null;
   const tealLabel   = expandedContent?.label || null;
 
+  // ── Type badge ───────────────────────────────────────────────
+  const txDef = TX_TYPE_MAP[entry.tx_type];
+  const badgeEl = txDef ? (
+    <span key="badge" style={{
+      display:         "inline-block",
+      fontSize:        9,
+      fontWeight:      700,
+      lineHeight:      "1",
+      padding:         "2px 5px",
+      borderRadius:    4,
+      background:      txDef.color + "18",
+      color:           txDef.color,
+      marginRight:     4,
+      verticalAlign:   "middle",
+      letterSpacing:   "0.3px",
+      whiteSpace:      "nowrap",
+    }}>{txDef.label}</span>
+  ) : null;
+
   const renderMeta = () => {
     if (!isTwoDir || !tealLabel) {
       // Single-directional: plain text
       const accLabel = fromAcc?.name || toAcc?.name || "";
-      const parts = [accLabel, catLabel, entry.entity !== "Personal" ? entry.entity : null].filter(Boolean);
-      return parts.join(" · ");
+      const textParts = [accLabel, catLabel, entry.entity !== "Personal" ? entry.entity : null].filter(Boolean);
+      const textStr = textParts.join(" · ");
+      if (!badgeEl && !textStr) return null;
+      if (!badgeEl) return textStr;
+      return [badgeEl, <span key="txt">{textStr}</span>];
     }
 
     // Two-directional: build JSX with teal label
@@ -155,7 +177,7 @@ export default function TransactionRow({
       </span>
     );
 
-    const parts = [];
+    const parts = badgeEl ? [badgeEl] : [];
 
     if (entry.tx_type === "transfer" || entry.tx_type === "pay_cc" || entry.tx_type === "fx_exchange") {
       // "From → To" where To is teal

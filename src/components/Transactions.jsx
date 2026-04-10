@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { ledgerApi, merchantApi, gmailApi, getTxFromToTypes, employeeLoanApi, accountCurrenciesApi, assetsApi } from "../api";
-import { EXPENSE_CATEGORIES, ENTITIES, TX_TYPES } from "../constants";
+import { EXPENSE_CATEGORIES, ENTITIES, TX_TYPES, TX_TYPE_MAP } from "../constants";
 import { fmtIDR, fmtCur, todayStr, ym, toIDR, groupByDate, fmtDateLabel } from "../utils";
 import Modal, { ConfirmModal } from "./shared/Modal";
 import Button from "./shared/Button";
@@ -779,13 +779,35 @@ function TxRow({ entry: e, accounts, onEdit, onDelete }) {
 
   const catLabel = e.category_name || catDef?.label || null;
 
+  // ── Type badge ───────────────────────────────────────────────
+  const txDef = TX_TYPE_MAP[e.tx_type];
+  const badgeEl = txDef ? (
+    <span key="badge" style={{
+      display:       "inline-block",
+      fontSize:      9,
+      fontWeight:    700,
+      lineHeight:    "1",
+      padding:       "2px 5px",
+      borderRadius:  4,
+      background:    txDef.color + "18",
+      color:         txDef.color,
+      marginRight:   4,
+      verticalAlign: "middle",
+      letterSpacing: "0.3px",
+      whiteSpace:    "nowrap",
+    }}>{txDef.label}</span>
+  ) : null;
+
   const renderMeta = () => {
     if (!isTwoDir || !tealLabel) {
       const accLabel = isMove
         ? `${fromAcc?.name || "?"} → ${toAcc?.name || "?"}`
         : fromAcc?.name || toAcc?.name || "";
-      return [accLabel, catLabel, e.entity && e.entity !== "Personal" ? e.entity : null]
+      const textStr = [accLabel, catLabel, e.entity && e.entity !== "Personal" ? e.entity : null]
         .filter(Boolean).join(" · ");
+      if (!badgeEl && !textStr) return null;
+      if (!badgeEl) return textStr;
+      return [badgeEl, <span key="txt">{textStr}</span>];
     }
 
     const tealStyle = {
@@ -795,7 +817,7 @@ function TxRow({ entry: e, accounts, onEdit, onDelete }) {
     const handleTealClick = (ev) => { ev.stopPropagation(); setExpanded(x => !x); };
     const tealSpan = <span key="teal" style={tealStyle} onClick={handleTealClick}>{tealLabel}</span>;
 
-    const parts = [];
+    const parts = badgeEl ? [badgeEl] : [];
     if (e.tx_type === "transfer" || e.tx_type === "pay_cc" || e.tx_type === "fx_exchange") {
       parts.push(<span key="arrow">{fromAcc?.name || "?"} → </span>, tealSpan);
     } else {
