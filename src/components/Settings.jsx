@@ -1521,15 +1521,24 @@ function EStatementTab({
       if (cat === "installment") txType = "cc_installment";
       if (cat === "transfer" && isDebit) txType = "transfer";
 
-      // installment metadata
+      // installment metadata — AI returns installment_current / installment_total
       let inst_no    = t.installment_current ?? t.installment_no ?? null;
       let inst_total = t.installment_total ?? null;
-      if (cat === "installment" && !inst_no) {
+      // Fallback: parse from description if AI missed it
+      if (cat === "installment" && (!inst_no || !inst_total)) {
+        // Match "7/12", "7 / 12", "ke-7 dari 12", "KE 7 DARI 12"
         const m = (t.description || "").match(
-          /(?:cicilan|angsuran|installment)\s+(?:ke[\s-]*)?(\d+)(?:[\/\s](?:dari\s+)?(\d+))?/i
+          /(?:ke[\s-]*)?(\d+)\s*[\/\s]+(?:dari\s+)?(\d+)/i
+        ) || (t.description || "").match(
+          /(?:cicilan|angsuran|installment)[^\d]*(\d+)(?:[^\d]+(\d+))?/i
         );
-        if (m) { inst_no = parseInt(m[1]); inst_total = m[2] ? parseInt(m[2]) : null; }
+        if (m) {
+          if (!inst_no)    inst_no    = parseInt(m[1]);
+          if (!inst_total) inst_total = m[2] ? parseInt(m[2]) : null;
+        }
       }
+      inst_no    = inst_no    ? Number(inst_no)    : null;
+      inst_total = inst_total ? Number(inst_total) : null;
 
       // category_id
       let catId = null;
@@ -1720,18 +1729,39 @@ function EStatementTab({
   const createInstallment = async (itemId, row) => {
     const item = queue.find(i => i.id === itemId);
     if (!item) return;
-    const monthly = Number(row.amount_idr || row.amount || 0);
-    const total   = row._instTotal ? monthly * row._instTotal : monthly * 12;
+    const monthly    = Number(row.amount_idr || row.amount || 0);
+    const totalMos   = row._instTotal || 12;
+    const instNo     = row._instNo || 1;
+    const totalAmt   = monthly * totalMos;
+
+    // Calculate start_date: go back (instNo - 1) months from tx_date
+    let startDate = row.tx_date || null;
+    if (row.tx_date && instNo > 1) {
+      const d = new Date(row.tx_date + "T00:00:00");
+      d.setMonth(d.getMonth() - (instNo - 1));
+      startDate = d.toISOString().slice(0, 10);
+    }
+
+    // next_payment_date: start + instNo months (month after the current one)
+    let nextPaymentDate = null;
+    if (startDate) {
+      const d = new Date(startDate + "T00:00:00");
+      d.setMonth(d.getMonth() + instNo);
+      nextPaymentDate = d.toISOString().slice(0, 10);
+    }
+
     try {
       const created = await installmentsApi.create(user.id, {
-        account_id:     row.from_id || "",
-        description:    row.description,
-        total_amount:   total,
-        monthly_amount: monthly,
-        total_months:   row._instTotal || 12,
-        paid_months:    row._instNo ? row._instNo - 1 : 0,
-        start_date:     row.tx_date,
-        entity:         "Personal",
+        account_id:         row.from_id || "",
+        description:        row.description,
+        total_amount:       totalAmt,
+        monthly_amount:     monthly,
+        total_months:       totalMos,
+        paid_months:        instNo,   // current installment is on the statement = already paid
+        start_date:         startDate,
+        next_payment_date:  nextPaymentDate,
+        entity:             "Personal",
+        status:             "active",
       });
       if (created) setInstallments?.(prev => [created, ...(prev || [])]);
       setQueue(prev => prev.map(i => i.id === itemId

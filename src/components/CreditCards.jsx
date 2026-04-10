@@ -194,14 +194,27 @@ export default function CreditCards({
     }
     setSaving(true);
     try {
-      const monthlyAmt = instForm.monthly_amount
-        || Math.round(Number(instForm.total_amount) / Number(instForm.months || 12));
+      const totalMonths = Number(instForm.months || 12);
+      const monthlyAmt  = instForm.monthly_amount
+        || Math.round(Number(instForm.total_amount) / totalMonths);
+      // next_payment_date = start_date + 1 month
+      let nextPaymentDate = null;
+      if (instForm.start_date) {
+        const d = new Date(instForm.start_date + "T00:00:00");
+        d.setMonth(d.getMonth() + 1);
+        nextPaymentDate = d.toISOString().slice(0, 10);
+      }
       const d = {
-        ...instForm,
-        monthly_amount: Number(monthlyAmt),
-        total_amount:   Number(instForm.total_amount),
-        months:         Number(instForm.months),
-        paid_months:    0,
+        account_id:         instForm.account_id,
+        description:        instForm.description,
+        entity:             instForm.entity || "Personal",
+        monthly_amount:     Number(monthlyAmt),
+        total_amount:       Number(instForm.total_amount),
+        total_months:       totalMonths,
+        paid_months:        0,
+        start_date:         instForm.start_date || null,
+        next_payment_date:  nextPaymentDate,
+        status:             "active",
       };
       const created = await installmentsApi.create(user.id, d);
       if (created) setInstallments(p => [created, ...p]);
@@ -214,13 +227,26 @@ export default function CreditCards({
   // ── Mark installment month paid ──
   const markInstPaid = async (inst) => {
     try {
-      const newPaid = Math.min(inst.paid_months + 1, inst.months);
-      await installmentsApi.update(inst.id, { paid_months: newPaid });
-      setInstallments(p => p.map(x => x.id === inst.id ? { ...x, paid_months: newPaid } : x));
+      const total    = inst.total_months || inst.months || 0;
+      const newPaid  = Math.min(inst.paid_months + 1, total);
+      // Advance next_payment_date by 1 month
+      let nextDate = inst.next_payment_date || null;
+      if (nextDate) {
+        const d = new Date(nextDate + "T00:00:00");
+        d.setMonth(d.getMonth() + 1);
+        nextDate = d.toISOString().slice(0, 10);
+      }
+      const updates = {
+        paid_months: newPaid,
+        next_payment_date: nextDate,
+        ...(newPaid >= total ? { status: "completed" } : {}),
+      };
+      await installmentsApi.update(inst.id, updates);
+      setInstallments(p => p.map(x => x.id === inst.id ? { ...x, ...updates } : x));
       const sn2 = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
       const entry = {
         tx_date:         todayStr(),
-        description:     `${inst.description} — Month ${newPaid}/${inst.months}`,
+        description:     `${inst.description} — Month ${newPaid}/${total}`,
         amount:          sn2(inst.monthly_amount),
         currency:        inst.currency || "IDR",
         amount_idr:      sn2(inst.monthly_amount),
@@ -517,16 +543,24 @@ export default function CreditCards({
       {/* ══ INSTALLMENTS ══ */}
       {subTab === "installments" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+              CC installments auto-debit monthly. Mark as paid when statement arrives.
+            </div>
             <Button size="sm" onClick={() => setModal("inst")}>+ Add Installment</Button>
           </div>
           {ccInstallments.length === 0
             ? <EmptyState icon="📅" title="No installments" message="Track 0% installment plans here." />
             : ccInstallments.map(inst => {
-                const cc        = creditCards.find(c => c.id === inst.account_id);
-                const remaining = inst.months - inst.paid_months;
-                const pct       = inst.months > 0 ? (inst.paid_months / inst.months) * 100 : 0;
-                const isDone    = inst.paid_months >= inst.months;
+                const cc         = creditCards.find(c => c.id === inst.account_id);
+                const total      = inst.total_months || inst.months || 0;
+                const remaining  = total - inst.paid_months;
+                const pct        = total > 0 ? (inst.paid_months / total) * 100 : 0;
+                const isDone     = inst.paid_months >= total;
+                // Due day from next_payment_date or start_date
+                const dueDateSrc = inst.next_payment_date || inst.start_date;
+                const dueDay     = dueDateSrc ? new Date(dueDateSrc + "T00:00:00").getDate() : null;
+                const ordinal    = (n) => n + (n % 10 === 1 && n !== 11 ? "st" : n % 10 === 2 && n !== 12 ? "nd" : n % 10 === 3 && n !== 13 ? "rd" : "th");
                 return (
                   <div key={inst.id} style={{
                     background: "#ffffff", borderRadius: 14,
@@ -539,11 +573,19 @@ export default function CreditCards({
                         <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
                           {inst.description}
                         </div>
-                        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 3, display: "flex", gap: 8 }}>
+                        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 3, display: "flex", gap: 8, flexWrap: "wrap" }}>
                           <span>{cc?.name || "CC"}</span>
-                          <span>{inst.months} months</span>
+                          <span>{total} months</span>
                           <span style={{ fontWeight: 700, color: "#374151" }}>{fmtIDR(inst.monthly_amount)}/mo</span>
+                          {dueDay && !isDone && (
+                            <span style={{ color: "#3b5bdb" }}>Due {ordinal(dueDay)} each month</span>
+                          )}
                         </div>
+                        {inst.next_payment_date && !isDone && (
+                          <div style={{ fontSize: 10, color: "#3b5bdb", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
+                            Next: {new Date(inst.next_payment_date + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
+                          </div>
+                        )}
                       </div>
                       <div style={{ textAlign: "right" }}>
                         <div style={{ fontSize: 15, fontWeight: 800, color: isDone ? "#059669" : "#3b5bdb", fontFamily: "Figtree, sans-serif" }}>
@@ -557,9 +599,9 @@ export default function CreditCards({
 
                     {/* Progress dots */}
                     <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 10 }}>
-                      {Array.from({ length: inst.months }).map((_, i) => (
+                      {Array.from({ length: total }).map((_, i) => (
                         <div key={i} style={{
-                          width: Math.min(16, Math.max(8, Math.floor(240 / inst.months))),
+                          width: Math.min(16, Math.max(8, Math.floor(240 / total))),
                           height: 14, borderRadius: 3,
                           background: i < inst.paid_months ? "#059669" : "#f3f4f6",
                           border: `1px solid ${i < inst.paid_months ? "#059669" : "#e5e7eb"}`,
@@ -573,9 +615,9 @@ export default function CreditCards({
                     {/* Progress bar + label */}
                     <BarWithLabel
                       value={inst.paid_months}
-                      max={inst.months}
+                      max={total}
                       color={isDone ? "#059669" : "#3b5bdb"}
-                      label={`${inst.paid_months}/${inst.months} months paid`}
+                      label={`${inst.paid_months}/${total} months paid`}
                       labelRight={`${pct.toFixed(0)}%`}
                     />
 

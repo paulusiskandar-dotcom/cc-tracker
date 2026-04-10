@@ -284,7 +284,7 @@ FOR EACH TRANSACTION return:
 {
   "date": "YYYY-MM-DD",
   "description": "full description as written",
-  "merchant": "cleaned merchant name",
+  "merchant": "cleaned merchant name (no codes, no installment suffix)",
   "amount": 150000,
   "direction": "out",
   "currency_original": "USD",
@@ -305,7 +305,12 @@ Field notes:
 - direction: "out" for expenses/debits, "in" for credits (income/transfers in)
 - currency_original / amount_original / rate_used: fill if foreign currency shown, else null
 - is_installment: true if CICILAN/INSTALLMENT row
-- installment_current / installment_total: e.g. 10 and 12 from "10/12", else null
+- installment_current / installment_total: CRITICAL — always extract both numbers from "X/Y" pattern.
+  Example: "TOKOPEDIA_CYBS_CCL12 : 7/12" → installment_current=7, installment_total=12.
+  Example: "CICILAN KE-3 DARI 24" → installment_current=3, installment_total=24.
+  Never leave these null if the row is an installment — look hard for the X/Y pattern in description.
+- merchant: for installments, strip the installment suffix. "TOKOPEDIA_CYBS_CCL12" → "TOKOPEDIA".
+  Remove codes like _CYBS_, _CCL, trailing digits, etc.
 - is_fee: true if bank fee/charge (admin, materai, annual fee, bunga, denda, notifikasi)
 - fee_type: "materai" | "admin" | "annual_fee" | "interest" | "notification" | "penalty" | null
 - is_transfer: true if description contains "Transfer ke" or "Transfer dari"
