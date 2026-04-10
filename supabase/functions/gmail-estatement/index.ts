@@ -255,7 +255,7 @@ EXTRACT only actual financial transactions. Return a JSON array.
 INCLUDE these transaction types:
 - Regular purchases/expenses (merchant name + amount)
 - Installment payments (CICILAN/INSTALLMENT - note the X/Y pattern and total)
-- Bank fees: biaya admin, biaya layanan notifikasi, bea materai, iuran tahunan, bunga, denda, provisi
+- Bank fees: biaya admin, biaya layanan notifikasi, bea materai (stamp duty), iuran tahunan, bunga, denda, provisi
 - Foreign currency transactions (extract both IDR amount and original currency/amount if shown)
 - Transfers OUT (DEBIT column / direction "out")
 
@@ -311,8 +311,8 @@ Field notes:
   Never leave these null if the row is an installment — look hard for the X/Y pattern in description.
 - merchant: for installments, strip the installment suffix. "TOKOPEDIA_CYBS_CCL12" → "TOKOPEDIA".
   Remove codes like _CYBS_, _CCL, trailing digits, etc.
-- is_fee: true if bank fee/charge (admin, materai, annual fee, bunga, denda, notifikasi)
-- fee_type: "materai" | "admin" | "annual_fee" | "interest" | "notification" | "penalty" | null
+- is_fee: true if bank fee/charge (admin, stamp duty/materai/bea materai, annual fee, bunga, denda, notifikasi)
+- fee_type: "stamp_duty" | "admin" | "annual_fee" | "interest" | "notification" | "penalty" | null
 - is_transfer: true if description contains "Transfer ke" or "Transfer dari"
 - card_last4: last 4 digits of card if shown next to the transaction, else null
 - account_hint: account number from section header if applicable, else null

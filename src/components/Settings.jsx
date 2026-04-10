@@ -1545,7 +1545,7 @@ function EStatementTab({
       if (!ESTMT_NO_CAT.has(txType)) {
         if (cat === "fee" || t.is_fee) {
           const ft = (t.fee_type || "").toLowerCase();
-          catId = ft.includes("materai") ? "materai"
+          catId = ft.includes("stamp_duty") || ft.includes("materai") ? "materai"
                 : ft.includes("admin")   ? "bank_charges"
                 : ft.includes("annual")  ? "bank_charges"
                 : ft.includes("interest")|| ft.includes("bunga") ? "bank_charges"

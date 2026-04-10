@@ -737,8 +737,8 @@ Return a JSON object with a "transactions" array. Each item must have:
 - amount_idr: converted IDR amount. If only IDR shown, same as amount. If both shown (e.g. USD 100 = Rp 1.640.000), amount=100, currency=USD, amount_idr=1640000
 - type: one of expense|income|transfer|pay_cc|reimburse_in|reimburse_out|give_loan|collect_loan|fx_exchange
   IMPORTANT: "transfer" = ONLY between user's own accounts listed above. If destination is unknown/external, use "expense".
-  For bank admin fees, materai, stamp duty → use type "expense". For bank interest, cashback → use type "income".
-  Never use bank_charges, materai, tax, bank_interest, cashback as type values — they are categories, not types.
+  For bank admin fees, stamp duty (materai), bea materai → use type "expense". For bank interest, cashback → use type "income".
+  Never use bank_charges, stamp_duty, tax, bank_interest, cashback as type values — they are categories, not types.
 - from_account_id: matched account id or null
 - to_account_id: matched account id or null
 - category: expense category slug (food|transport|health|shopping|home|education|entertainment|business|finance|family|social|cash_advance_fee|other)

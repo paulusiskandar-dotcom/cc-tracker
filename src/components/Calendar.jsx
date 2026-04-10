@@ -102,7 +102,7 @@ export default function Calendar({
     const rems     = remindersByDate[dateStr] || [];
     const dots = [];
     if (entries.some(e => e.tx_type === "income"))     dots.push(DOT_COLORS.income);
-    if (entries.some(e => e.tx_type === "expense" || e.tx_type === "bank_charges" || e.tx_type === "materai" || e.tx_type === "tax")) dots.push(DOT_COLORS.expense);
+    if (entries.some(e => e.tx_type === "expense" || e.tx_type === "bank_charges" || e.tx_type === "stamp_duty" || e.tx_type === "tax")) dots.push(DOT_COLORS.expense);
     if (entries.some(e => ["transfer","pay_cc","fx_exchange"].includes(e.tx_type))) dots.push(DOT_COLORS.transfer);
     if (entries.some(e => e.tx_type?.includes("reimburse"))) dots.push(DOT_COLORS.reimburse);
     if (rems.length > 0) dots.push(DOT_COLORS.reminder);

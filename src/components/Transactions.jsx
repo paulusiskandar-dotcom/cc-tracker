@@ -1604,7 +1604,7 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
       {type === "pay_cc" && (
         <FormRow>
           <AmountInput label="Admin Fee (optional)" value={form.admin_fee || ""} onChange={v => set("admin_fee", v)} style={{ flex: 1 }} />
-          <AmountInput label="Materai (optional)"   value={form.materai || ""}   onChange={v => set("materai", v)}   style={{ flex: 1 }} />
+          <AmountInput label="Stamp Duty (optional)" value={form.stamp_duty || ""} onChange={v => set("stamp_duty", v)} style={{ flex: 1 }} />
         </FormRow>
       )}
 

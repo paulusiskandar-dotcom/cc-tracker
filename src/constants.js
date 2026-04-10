@@ -125,7 +125,7 @@ export const EXPENSE_CATEGORIES = [
     keywords: ["gift","donation","wedding","birthday","charity","flowers","social"] },
   { id: "cash_advance_fee", label: "Cash Advance Fee", icon: "💸", color: "#dc2626", keywords: ["cash advance", "advance fee", "ca fee"] },
   { id: "bank_charges",  label: "Bank Charges",     icon: "🏦",  color: "#6b7280", keywords: ["bank charge", "biaya admin", "admin fee", "service charge"] },
-  { id: "materai",       label: "Materai",          icon: "📋",  color: "#6b7280", keywords: ["materai", "stamp duty"] },
+  { id: "materai",       label: "Stamp Duty",       icon: "📋",  color: "#6b7280", keywords: ["materai", "bea materai", "stamp duty"] },
   { id: "tax",           label: "Tax",              icon: "🧾",  color: "#6b7280", keywords: ["pajak", "pph", "ppn", "tax"] },
   { id: "other",         label: "Other",            icon: "❓",  color: "#9ca3af", keywords: [] },
 ];

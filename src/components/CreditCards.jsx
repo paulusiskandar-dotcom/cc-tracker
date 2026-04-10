@@ -66,7 +66,7 @@ export default function CreditCards({
 
   // Pay CC form
   const [payForm, setPayForm] = useState({
-    cardId: "", bankId: "", amount: "", admin_fee: "", materai: "", notes: "",
+    cardId: "", bankId: "", amount: "", admin_fee: "", stamp_duty: "", notes: "",
   });
   const setP = (k, v) => setPayForm(f => ({ ...f, [k]: v }));
 
@@ -162,7 +162,7 @@ export default function CreditCards({
       const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
       const amt  = sn(payForm.amount);
       const cc   = accounts.find(a => a.id === payForm.cardId);
-      const total = amt + sn(payForm.admin_fee) + sn(payForm.materai);
+      const total = amt + sn(payForm.admin_fee) + sn(payForm.stamp_duty);
       const entry = {
         tx_date:         todayStr(),
         description:     `Pay ${cc?.name || "CC"} bill`,
@@ -182,7 +182,7 @@ export default function CreditCards({
       await onRefresh();
       showToast(`Paid ${fmtIDR(amt)} to ${cc?.name}`);
       setModal(null);
-      setPayForm({ cardId: "", bankId: "", amount: "", admin_fee: "", materai: "", notes: "" });
+      setPayForm({ cardId: "", bankId: "", amount: "", admin_fee: "", stamp_duty: "", notes: "" });
     } catch (e) { showToast(e.message, "error"); }
     setSaving(false);
   };
@@ -353,7 +353,7 @@ export default function CreditCards({
         <Button variant="secondary" size="sm" onClick={() => { setInstForm({ account_id: "", description: "", total_amount: "", months: 12, monthly_amount: "", start_date: todayStr(), entity: "Personal" }); setModal("inst"); }}>
           + Installment
         </Button>
-        <Button size="sm" onClick={() => { setPayForm({ cardId: "", bankId: "", amount: "", admin_fee: "", materai: "", notes: "" }); setModal("pay"); }}>
+        <Button size="sm" onClick={() => { setPayForm({ cardId: "", bankId: "", amount: "", admin_fee: "", stamp_duty: "", notes: "" }); setModal("pay"); }}>
           💳 Pay Bill
         </Button>
       </div>
@@ -754,7 +754,7 @@ export default function CreditCards({
 
           <FormRow>
             <AmountInput label="Admin Fee (optional)" value={payForm.admin_fee} onChange={v => setP("admin_fee", v)} style={{ flex: 1 }} />
-            <AmountInput label="Materai (optional)"   value={payForm.materai}   onChange={v => setP("materai", v)}   style={{ flex: 1 }} />
+            <AmountInput label="Stamp Duty (optional)" value={payForm.stamp_duty}   onChange={v => setP("stamp_duty", v)}   style={{ flex: 1 }} />
           </FormRow>
 
           <Input label="Notes (optional)" value={payForm.notes} onChange={e => setP("notes", e.target.value)} placeholder="Optional" />
