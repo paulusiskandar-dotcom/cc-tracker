@@ -47,7 +47,7 @@ const SKIP_KEYWORDS = [
   "activation", "welcome", "registration",
 ];
 
-const AI_EXTRACTION_PROMPT = (emailContent: string, accounts: any[]) => `
+const AI_EXTRACTION_PROMPT = (emailContent: string, accounts: any[], merchantContext: string) => `
 You are a financial transaction extractor for an Indonesian personal finance app.
 Analyze this bank email and extract ALL transactions.
 
@@ -56,6 +56,8 @@ ${JSON.stringify(accounts.map(a => ({
   id: a.id, name: a.name, type: a.type,
   last4: a.last4, account_no: a.account_no, bank_name: a.bank_name,
 })))}
+
+${merchantContext}
 
 Email content:
 ${emailContent.slice(0, 6000)}
@@ -92,6 +94,7 @@ For each transaction return a JSON array:
 Rules:
 - Extract from_account_masked: look in "Source of Fund", "Card number", "Account" fields. Copy the raw masked string exactly as it appears (e.g. "TAHAPAN - 0831****88", "437896******5130").
 - Leave from_account_id and to_account_id as null — account matching is done by post-processing code.
+- If merchant_name matches a known merchant above, use that mapping's category_id exactly.
 - QRIS/QR payment → is_qris=true, suggested_tx_type=qris_debit
 - Transfer to own account → is_transfer=true, suggested_tx_type=transfer
 - CC payment → is_cc_payment=true, suggested_tx_type=pay_cc
@@ -194,6 +197,22 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
   const { data: accounts } = await supabase.from("accounts").select("id,name,type,last4,account_no,bank_name").eq("user_id", userId).eq("is_active", true);
   const userAccounts = accounts || [];
 
+  // Load merchant mappings for AI context
+  const { data: merchantMappings } = await supabase
+    .from("merchant_mappings")
+    .select("merchant_name,canonical_name,category_id,account_id")
+    .eq("user_id", userId);
+  const mappingsMap = new Map<string, any>();
+  (merchantMappings || []).forEach((m: any) => {
+    if (m.merchant_name) mappingsMap.set(m.merchant_name.toLowerCase(), m);
+  });
+  const merchantContext = mappingsMap.size > 0
+    ? `Known merchants (use these to auto-assign category_id):\n` +
+      [...mappingsMap.values()].map((m: any) =>
+        `- "${m.merchant_name}" → canonical: "${m.canonical_name}", category_id: ${m.category_id}`
+      ).join("\n")
+    : "No merchant mappings yet.";
+
   // Build Gmail search query with date range
   let afterDate: string;
   let beforeDate: string | null = null;
@@ -294,7 +313,7 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
           max_tokens: 2048,
           messages: [{
             role: "user",
-            content: AI_EXTRACTION_PROMPT(plainBody, userAccounts),
+            content: AI_EXTRACTION_PROMPT(plainBody, userAccounts, merchantContext),
           }],
         }),
       });
@@ -306,7 +325,20 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
           let parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
           if (!Array.isArray(parsed) && parsed) parsed = [parsed];
           if (Array.isArray(parsed)) {
-            aiResult = resolveAccountIds(parsed, userAccounts);
+            const resolved = resolveAccountIds(parsed, userAccounts);
+            // Apply merchant mapping overrides (category_id, account_id)
+            aiResult = resolved.map((tx: any) => {
+              const key = (tx.merchant_name || "").toLowerCase();
+              const mapping = mappingsMap.get(key);
+              if (mapping) {
+                return {
+                  ...tx,
+                  category_id: mapping.category_id ?? tx.category_id,
+                  from_account_id: tx.from_account_id ?? mapping.account_id ?? null,
+                };
+              }
+              return tx;
+            });
             extractedCount = aiResult.length;
           }
         } catch {
@@ -334,6 +366,30 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
     if (!insertErr) {
       processed++;
       newTransactions += extractedCount;
+
+      // Upsert new merchants so future syncs learn from them
+      if (Array.isArray(aiResult) && aiResult.length > 0) {
+        for (const tx of aiResult) {
+          const name = (tx.merchant_name || "").trim();
+          if (!name || mappingsMap.has(name.toLowerCase())) continue;
+          try {
+            await supabase.from("merchant_mappings").upsert(
+              {
+                user_id:        userId,
+                merchant_name:  name,
+                canonical_name: name,
+                category_id:    tx.category_id || null,
+                account_id:     tx.from_account_id || null,
+              },
+              { onConflict: "user_id,merchant_name" }
+            );
+            // Add to in-memory map so duplicates within this batch are skipped
+            mappingsMap.set(name.toLowerCase(), { merchant_name: name, canonical_name: name, category_id: tx.category_id, account_id: tx.from_account_id });
+          } catch (e) {
+            console.warn("[gmail-sync] Failed to upsert merchant mapping:", e);
+          }
+        }
+      }
     }
   }
 
