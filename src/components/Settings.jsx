@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import PILogo from "./PILogo";
-import { fxApi, merchantApi, settingsApi, recurringApi, gmailApi, accountsApi } from "../api";
+import { fxApi, merchantApi, settingsApi, recurringApi, gmailApi, accountsApi, installmentsApi } from "../api";
 import { fmtIDR } from "../utils";
 import { CURRENCIES, EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST, TX_TYPES, APP_VERSION, APP_BUILD } from "../constants";
 import { LIGHT, DARK } from "../theme";
@@ -41,7 +41,8 @@ export default function Settings({
   merchantMaps, setMerchantMaps,
   onRefresh,
   accounts = [], setAccounts, bankAccounts = [], creditCards = [],
-  ledger = [],
+  ledger = [], installments = [],
+  setInstallments,
 }) {
   const T = dark ? DARK : LIGHT;
 
@@ -637,6 +638,7 @@ export default function Settings({
           newPwdPattern={newPwdPattern} setNewPwdPattern={setNewPwdPattern}
           onAddPassword={addPassword} onDeletePassword={deletePassword}
           accounts={accounts} ledger={ledger}
+          installments={installments} setInstallments={setInstallments}
         />
       )}
 
@@ -1394,6 +1396,34 @@ function BackupSection({ user, T, card, ledger }) {
   );
 }
 
+// ── Constants shared by E-Statement preview ───────────────────
+const ESTMT_TX_TYPES = [
+  { value: "expense",       label: "Expense",       color: "#A32D2D" },
+  { value: "income",        label: "Income",        color: "#3B6D11" },
+  { value: "cc_installment",label: "CC Installment",color: "#185FA5" },
+  { value: "transfer",      label: "Transfer",      color: "#185FA5" },
+];
+const ESTMT_NO_CAT    = new Set(["transfer","pay_cc","give_loan","collect_loan","fx_exchange"]);
+const ESTMT_AMT_COLOR = { expense: "#A32D2D", income: "#3B6D11", cc_installment: "#185FA5", transfer: "#185FA5" };
+const ESTMT_CAT_FOR_TYPE = (t) =>
+  t === "income" ? INCOME_CATEGORIES_LIST : EXPENSE_CATEGORIES;
+
+const fmtDateShort = (d) => {
+  try { return new Date(d + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short" }); }
+  catch { return d || ""; }
+};
+const estmtInSel = (T, extra = {}) => ({
+  fontSize: 11, padding: "3px 4px", border: `1px solid ${T.border}`,
+  borderRadius: 5, background: T.surface, color: T.text,
+  fontFamily: "Figtree, sans-serif", cursor: "pointer",
+  boxSizing: "border-box", ...extra,
+});
+const estmtACT = (extra = {}) => ({
+  width: 26, height: 26, borderRadius: 6, border: "1px solid #e5e7eb",
+  background: "#f9fafb", cursor: "pointer", fontSize: 12, fontWeight: 700,
+  display: "flex", alignItems: "center", justifyContent: "center",
+  fontFamily: "Figtree, sans-serif", padding: 0, flexShrink: 0, ...extra,
+});
 
 // ─── E-STATEMENT TAB ─────────────────────────────────────────
 function EStatementTab({
@@ -1402,13 +1432,10 @@ function EStatementTab({
   addPwdOpen, setAddPwdOpen,
   newPwdPattern, setNewPwdPattern,
   onAddPassword, onDeletePassword,
-  accounts, ledger,
+  accounts, ledger, installments = [], setInstallments,
 }) {
-  // ── Password section ───────────────────────────────────────
   const [showList, setShowList] = useState(false);
   const [revealed, setRevealed] = useState({});
-
-  // ── Upload queue ───────────────────────────────────────────
   const [queue,    setQueue]    = useState([]);
   const [dragging, setDragging] = useState(false);
 
@@ -1418,7 +1445,6 @@ function EStatementTab({
     { var: "{last4}", desc: "Last 4 digits of card" },
   ];
 
-  // ── Read file as base64 ────────────────────────────────────
   const readFileAsBase64 = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result.split(",")[1]);
@@ -1432,7 +1458,6 @@ function EStatementTab({
     return `${(bytes / 1024 / 1024).toFixed(1)}MB`;
   };
 
-  // ── Add files to queue ─────────────────────────────────────
   const addFiles = (files) => {
     const pdfs = Array.from(files).filter(f => f.name.toLowerCase().endsWith(".pdf"));
     if (!pdfs.length) { showToast("Please select PDF files only", "error"); return; }
@@ -1442,54 +1467,128 @@ function EStatementTab({
       name:         f.name,
       size:         f.size,
       status:       "queued",
-      transactions: null,
+      rows:         null,      // EStatementTxCard-compatible rows
+      selected:     {},        // _id → bool
+      notesOpen:    new Set(),
+      skipped:      new Set(),
       error:        null,
-      skipped:      {},
       savedCount:   null,
     }));
     setQueue(prev => [...prev, ...newItems]);
   };
 
-  // ── Categorize AI output ───────────────────────────────────
-  const categorize = (t) => {
-    let cat = t.tx_category;
-    if (!cat) {
-      const d = (t.description || "").toLowerCase();
-      if (t.is_installment) cat = "installment";
-      else if (t.is_fee) cat = "fee";
-      else if (t.is_transfer) cat = "transfer";
-      else if (/payment|pembayaran|bayar\s+tagihan|pelunasan|pay\s+bill|tagihan\s+kartu/i.test(d)) cat = "payment";
-      else if (/cicilan|angsuran|installment|cicil/i.test(d)) cat = "installment";
-      else if (/biaya\s+admin|admin[\s-]fee|late[\s-]charge|bunga|interest|annual[\s-]fee|denda|iuran|service[\s-]charge|provisi/i.test(d)) cat = "fee";
-      else cat = "regular";
-    }
-    let inst_no    = t.installment_current ?? t.installment_no    ?? null;
-    let inst_total = t.installment_total ?? null;
-    if (cat === "installment" && !inst_no) {
-      const m = (t.description || "").match(
-        /(?:cicilan|angsuran|installment)\s+(?:ke[\s-]*)?(\d+)(?:[\/\s](?:dari\s+)?(\d+))?/i
-      );
-      if (m) { inst_no = parseInt(m[1]); inst_total = m[2] ? parseInt(m[2]) : null; }
-    }
-    const isDebit = t.direction ? t.direction === "out" : (t.type || "debit").toLowerCase() !== "credit";
-    return { ...t, tx_category: cat, installment_no: inst_no, installment_total: inst_total, _isDebit: isDebit };
-  };
+  // ── Categorize AI output → internal shape ─────────────────
+  const buildRows = (transactions) => {
+    return transactions.map((t, idx) => {
+      // direction
+      const isDebit = t.direction ? t.direction === "out"
+                                  : (t.type || "debit").toLowerCase() !== "credit";
+      // tx_category
+      let cat = t.tx_category;
+      if (!cat) {
+        const d = (t.description || "").toLowerCase();
+        if (t.is_installment) cat = "installment";
+        else if (t.is_fee) cat = "fee";
+        else if (t.is_transfer) cat = "transfer";
+        else if (/payment|pembayaran|bayar\s+tagihan|pelunasan/i.test(d)) cat = "payment";
+        else if (/cicilan|angsuran|installment|cicil/i.test(d)) cat = "installment";
+        else if (/biaya\s*adm|admin[\s-]fee|bunga|interest|annual[\s-]fee|denda|iuran|service[\s-]charge|materai|provisi/i.test(d)) cat = "fee";
+        else cat = "regular";
+      }
+      if (cat === "payment") return null; // skip payments
+      if (cat === "transfer" && !isDebit) return null; // skip transfers-in
 
-  // Auto-skip: payments, transfers-in
-  const shouldShow = (tx) => {
-    if (tx.tx_category === "payment") return false;
-    if (tx.tx_category === "transfer" && !tx._isDebit) return false;
-    return true;
-  };
+      // tx_type
+      let txType = isDebit ? "expense" : "income";
+      if (cat === "installment") txType = "cc_installment";
+      if (cat === "transfer" && isDebit) txType = "transfer";
 
-  // Duplicate check: same amount ± 1 day in ledger
-  const isDuplicate = (tx) => {
-    const amt = Number(tx.amount || 0);
-    return ledger.some(e => {
-      if (Math.abs(Number(e.amount_idr || e.amount || 0) - amt) > 1) return false;
-      if (!e.tx_date || !tx.date) return false;
-      return Math.abs(new Date(e.tx_date) - new Date(tx.date)) / 86400000 <= 1;
-    });
+      // installment metadata
+      let inst_no    = t.installment_current ?? t.installment_no ?? null;
+      let inst_total = t.installment_total ?? null;
+      if (cat === "installment" && !inst_no) {
+        const m = (t.description || "").match(
+          /(?:cicilan|angsuran|installment)\s+(?:ke[\s-]*)?(\d+)(?:[\/\s](?:dari\s+)?(\d+))?/i
+        );
+        if (m) { inst_no = parseInt(m[1]); inst_total = m[2] ? parseInt(m[2]) : null; }
+      }
+
+      // category_id
+      let catId = null;
+      if (!ESTMT_NO_CAT.has(txType)) {
+        if (cat === "fee" || t.is_fee) {
+          const ft = (t.fee_type || "").toLowerCase();
+          catId = ft.includes("materai") ? "materai"
+                : ft.includes("admin")   ? "bank_charges"
+                : ft.includes("annual")  ? "bank_charges"
+                : ft.includes("interest")|| ft.includes("bunga") ? "bank_charges"
+                : ft.includes("penalty") || ft.includes("denda") ? "bank_charges"
+                : "bank_charges";
+        } else {
+          catId = "other";
+        }
+      }
+
+      // account matching via card_last4
+      const last4 = t.card_last4 || null;
+      const matchedAcc = last4
+        ? accounts.find(a => a.last4 === last4 || a.card_last4 === last4)
+        : null;
+      const ccAccounts = accounts.filter(a => a.type === "credit_card");
+      const defaultCC  = matchedAcc || ccAccounts[0] || null;
+      const bankAccounts = accounts.filter(a => a.type === "bank");
+      const defaultBank = bankAccounts[0] || null;
+
+      const fromId = isDebit ? (defaultCC?.id || defaultBank?.id || "") : "";
+      const toId   = !isDebit ? (defaultBank?.id || "") : "";
+
+      // duplicate check
+      const amt = Number(t.amount || 0);
+      const isDup = ledger.some(e => {
+        if (Math.abs(Number(e.amount_idr || e.amount || 0) - amt) > 1) return false;
+        if (!e.tx_date || !t.date) return false;
+        return Math.abs(new Date(e.tx_date) - new Date(t.date)) / 86400000 <= 1;
+      });
+      const dupEntry = isDup ? ledger.find(e => {
+        if (Math.abs(Number(e.amount_idr || e.amount || 0) - amt) > 1) return false;
+        if (!e.tx_date || !t.date) return false;
+        return Math.abs(new Date(e.tx_date) - new Date(t.date)) / 86400000 <= 1;
+      }) : null;
+
+      // installment cross-check
+      const isInstallment = cat === "installment";
+      let instMatch = null;
+      if (isInstallment && installments.length > 0) {
+        const descBase = (t.merchant || t.description || "").toLowerCase()
+          .replace(/cicilan.*|installment.*/gi, "").replace(/\s+/g, " ").trim();
+        instMatch = descBase.length > 3
+          ? installments.find(i =>
+              (i.description || "").toLowerCase().includes(descBase.slice(0, Math.min(descBase.length, 20)))
+            )
+          : null;
+      }
+
+      return {
+        _id:             idx,
+        tx_date:         t.date,
+        description:     t.merchant || t.description || "",
+        amount:          String(amt),
+        amount_idr:      String(amt),
+        currency:        "IDR",
+        tx_type:         txType,
+        from_id:         fromId,
+        to_id:           toId,
+        category_id:     catId,
+        notes:           "",
+        status:          isDup ? "possible_duplicate" : "new",
+        _dupEntry:       dupEntry,
+        _isInstallment:  isInstallment,
+        _instMatch:      instMatch,
+        _instNo:         inst_no,
+        _instTotal:      inst_total,
+        _card_last4:     last4,
+      };
+    }).filter(Boolean);
   };
 
   // ── Process a queued file ──────────────────────────────────
@@ -1497,7 +1596,7 @@ function EStatementTab({
     const item = queue.find(i => i.id === itemId);
     if (!item) return;
     setQueue(prev => prev.map(i => i.id === itemId
-      ? { ...i, status: "processing", error: null, transactions: null } : i
+      ? { ...i, status: "processing", error: null, rows: null } : i
     ));
     try {
       const base64 = await readFileAsBase64(item.file);
@@ -1515,10 +1614,12 @@ function EStatementTab({
         ));
         return;
       }
-      const categorized = (result.transactions || []).map((t, idx) => categorize({ ...t, _id: idx }));
-      const filtered = categorized.filter(shouldShow);
+      const rows = buildRows(result.transactions || []);
+      // default: new=selected, duplicate=unselected
+      const sel = {};
+      rows.forEach(r => { sel[r._id] = r.status !== "possible_duplicate"; });
       setQueue(prev => prev.map(i => i.id === itemId
-        ? { ...i, status: "done", transactions: filtered, skipped: {} } : i
+        ? { ...i, status: "done", rows, selected: sel, skipped: new Set(), notesOpen: new Set() } : i
       ));
     } catch (e) {
       setQueue(prev => prev.map(i => i.id === itemId
@@ -1527,66 +1628,80 @@ function EStatementTab({
     }
   };
 
-  // ── Save transactions for a file ───────────────────────────
+  // ── Update a row field ─────────────────────────────────────
+  const updateRow = (itemId, rowId, patch) => {
+    setQueue(prev => prev.map(i => i.id === itemId
+      ? { ...i, rows: i.rows.map(r => r._id === rowId ? { ...r, ...patch } : r) } : i
+    ));
+  };
+
+  // ── Save selected transactions for a file ──────────────────
   const saveFile = async (itemId) => {
     const item = queue.find(i => i.id === itemId);
-    if (!item?.transactions) return;
-    const toSave = item.transactions.filter(t => !item.skipped[t._id]);
+    if (!item?.rows) return;
+    const toSave = item.rows.filter(r => item.selected[r._id] && !item.skipped.has(r._id));
     let count = 0;
-    for (const tx of toSave) {
-      const acct = accounts.find(a => a.type === "bank") || accounts[0];
-      const isDebit    = tx._isDebit !== false;
-      const fxCurrency = tx.currency_original || null;
-      const fxAmount   = tx.amount_original   || null;
-      const notes = tx.tx_category === "installment" && tx.installment_no
-        ? `Cicilan ${tx.installment_no}${tx.installment_total ? `/${tx.installment_total}` : ""}`
-        : (tx.fee_type || null);
+    for (const r of toSave) {
+      const isDebit = ["expense","cc_installment","transfer"].includes(r.tx_type);
+      const notes = r._isInstallment && r._instNo
+        ? `Cicilan ${r._instNo}${r._instTotal ? `/${r._instTotal}` : ""}${r.notes ? ` — ${r.notes}` : ""}`
+        : (r.notes || null);
       try {
         await supabase.from("ledger").insert({
           user_id:        user.id,
-          tx_date:        tx.date,
-          description:    tx.merchant || tx.description || "E-Statement import",
-          amount:         fxCurrency ? (fxAmount || Number(tx.amount || 0)) : Number(tx.amount || 0),
-          amount_idr:     Number(tx.amount || 0),
-          currency:       fxCurrency || "IDR",
-          tx_type:        isDebit ? "expense" : "income",
+          tx_date:        r.tx_date,
+          description:    r.description || "E-Statement import",
+          amount:         Number(r.amount || 0),
+          amount_idr:     Number(r.amount_idr || r.amount || 0),
+          currency:       "IDR",
+          tx_type:        r.tx_type === "cc_installment" ? "expense" : r.tx_type,
           from_type:      isDebit ? "account" : null,
           to_type:        isDebit ? null : "account",
-          from_id:        isDebit ? (acct?.id || null) : null,
-          to_id:          isDebit ? null : (acct?.id || null),
-          category_id:    null, category_name: null,
-          entity: "Personal", is_reimburse: false,
+          from_id:        isDebit ? (r.from_id || null) : null,
+          to_id:          isDebit ? null : (r.to_id || null),
+          category_id:    r.category_id || null,
+          category_name:  r.category_id || null,
+          entity:         "Personal", is_reimburse: false,
           ai_categorized: false, ai_confidence: null,
           notes,
         });
         count++;
-      } catch { /* skip on error */ }
+      } catch { /* skip */ }
     }
-    // Track in estatement_pdfs
     await supabase.from("estatement_pdfs").insert({
-      user_id:           user.id,
-      gmail_message_id:  null,
-      filename:          item.name,
-      bank_name:         "Upload",
-      status:            "done",
-      transaction_count: count,
-      processed_at:      new Date().toISOString(),
+      user_id: user.id, gmail_message_id: null,
+      filename: item.name, bank_name: "Upload",
+      status: "done", transaction_count: count,
+      processed_at: new Date().toISOString(),
     });
     setQueue(prev => prev.map(i => i.id === itemId ? { ...i, status: "saved", savedCount: count } : i));
     showToast(`Saved ${count} transaction${count !== 1 ? "s" : ""} from ${item.name}`);
   };
 
-  const toggleSkip = (itemId, txId) =>
-    setQueue(prev => prev.map(i => i.id === itemId
-      ? { ...i, skipped: { ...i.skipped, [txId]: !i.skipped[txId] } } : i
-    ));
-
-  const skipAllDuplicates = (itemId) => {
+  // ── Create installment from a row ──────────────────────────
+  const createInstallment = async (itemId, row) => {
     const item = queue.find(i => i.id === itemId);
-    if (!item?.transactions) return;
-    const newSkipped = { ...item.skipped };
-    item.transactions.forEach(tx => { if (isDuplicate(tx)) newSkipped[tx._id] = true; });
-    setQueue(prev => prev.map(i => i.id === itemId ? { ...i, skipped: newSkipped } : i));
+    if (!item) return;
+    const monthly = Number(row.amount_idr || row.amount || 0);
+    const total   = row._instTotal ? monthly * row._instTotal : monthly * 12;
+    try {
+      const created = await installmentsApi.create(user.id, {
+        account_id:     row.from_id || "",
+        description:    row.description,
+        total_amount:   total,
+        monthly_amount: monthly,
+        months:         row._instTotal || 12,
+        paid_months:    row._instNo ? row._instNo - 1 : 0,
+        start_date:     row.tx_date,
+        entity:         "Personal",
+      });
+      if (created) setInstallments?.(prev => [created, ...(prev || [])]);
+      // update the row to reflect instMatch
+      setQueue(prev => prev.map(i => i.id === itemId
+        ? { ...i, rows: i.rows.map(r => r._id === row._id ? { ...r, _instMatch: created } : r) } : i
+      ));
+      showToast("Installment plan created");
+    } catch (e) { showToast(e.message, "error"); }
   };
 
   const removeFromQueue = (itemId) => setQueue(prev => prev.filter(i => i.id !== itemId));
@@ -1638,22 +1753,18 @@ function EStatementTab({
                 <span style={{
                   flex: 1, fontSize: 13,
                   letterSpacing: revealed[p.id] ? "normal" : "0.12em",
-                  color: T.text,
-                  fontFamily: revealed[p.id] ? "Figtree, monospace" : "monospace",
+                  color: T.text, fontFamily: revealed[p.id] ? "Figtree, monospace" : "monospace",
                 }}>
                   {revealed[p.id] ? p.pattern : "••••••••"}
                 </span>
-                <button
-                  onClick={() => setRevealed(r => ({ ...r, [p.id]: !r[p.id] }))}
-                  title={revealed[p.id] ? "Hide" : "Reveal"}
-                  style={{ border: "none", background: "none", cursor: "pointer", fontSize: 14, padding: "2px 4px", color: T.text3 }}
-                >
+                <button onClick={() => setRevealed(r => ({ ...r, [p.id]: !r[p.id] }))}
+                  style={{ border: "none", background: "none", cursor: "pointer", fontSize: 14, padding: "2px 4px", color: T.text3 }}>
                   {revealed[p.id] ? "🙈" : "👁"}
                 </button>
-                <button
-                  onClick={() => onDeletePassword(p.id)}
-                  style={{ border: "none", background: "none", cursor: "pointer", fontSize: 13, color: "#dc2626", padding: "2px 4px" }}
-                >✕</button>
+                <button onClick={() => onDeletePassword(p.id)}
+                  style={{ border: "none", background: "none", cursor: "pointer", fontSize: 13, color: "#dc2626", padding: "2px 4px" }}>
+                  ✕
+                </button>
               </div>
             ))}
           </div>
@@ -1671,8 +1782,7 @@ function EStatementTab({
               Password or pattern:
             </div>
             <input
-              type="password"
-              autoFocus
+              type="password" autoFocus
               value={newPwdPattern}
               onChange={e => setNewPwdPattern(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter") onAddPassword(); if (e.key === "Escape") { setAddPwdOpen(false); setNewPwdPattern(""); } }}
@@ -1721,10 +1831,8 @@ function EStatementTab({
           style={{
             marginTop: 12,
             border: `2px dashed ${dragging ? "#3b5bdb" : T.border}`,
-            borderRadius: 12,
-            padding: "28px 20px",
-            textAlign: "center",
-            cursor: "pointer",
+            borderRadius: 12, padding: "28px 20px",
+            textAlign: "center", cursor: "pointer",
             background: dragging ? "#eff6ff" : T.sur2,
             transition: "border-color 0.15s, background 0.15s",
           }}
@@ -1736,64 +1844,78 @@ function EStatementTab({
           <div style={{ fontSize: 11, color: T.text3, marginTop: 4, fontFamily: "Figtree, sans-serif" }}>
             Upload bank or credit card statements (password-free PDFs)
           </div>
-          <input
-            id="pdf-upload-input"
-            type="file"
-            accept=".pdf"
-            multiple
+          <input id="pdf-upload-input" type="file" accept=".pdf" multiple
             style={{ display: "none" }}
-            onChange={e => { addFiles(e.target.files); e.target.value = ""; }}
-          />
+            onChange={e => { addFiles(e.target.files); e.target.value = ""; }} />
         </div>
       </div>
 
       {/* ── Section 3: Processing Queue ── */}
       {queue.length > 0 && (
-        <div style={card}>
-          <SectionHeader title="Processing Queue" />
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
-            {queue.map(item => (
-              <QueueFileItem
-                key={item.id}
-                item={item}
-                T={T}
-                onProcess={() => processFile(item.id)}
-                onTryPassword={pwd => processFile(item.id, pwd)}
-                onToggleSkip={txId => toggleSkip(item.id, txId)}
-                onSkipAllDuplicates={() => skipAllDuplicates(item.id)}
-                onSave={() => saveFile(item.id)}
-                onRemove={() => removeFromQueue(item.id)}
-                isDuplicate={isDuplicate}
-                statusBadge={statusBadge}
-                fmtSize={fmtSize}
-              />
-            ))}
-          </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {queue.map(item => (
+            <EStmtQueueItem
+              key={item.id}
+              item={item}
+              T={T} card={card}
+              accounts={accounts}
+              onProcess={() => processFile(item.id)}
+              onTryPassword={pwd => processFile(item.id, pwd)}
+              onUpdateRow={(rowId, patch) => updateRow(item.id, rowId, patch)}
+              onToggleSel={(rowId) => setQueue(prev => prev.map(i => i.id === item.id
+                ? { ...i, selected: { ...i.selected, [rowId]: !i.selected[rowId] } } : i))}
+              onToggleSkip={(rowId) => setQueue(prev => prev.map(i => i.id === item.id ? {
+                ...i,
+                skipped: (() => { const ns = new Set(i.skipped); ns.has(rowId) ? ns.delete(rowId) : ns.add(rowId); return ns; })(),
+                selected: { ...i.selected, [rowId]: false },
+              } : i))}
+              onToggleNotes={(rowId) => setQueue(prev => prev.map(i => i.id === item.id ? {
+                ...i,
+                notesOpen: (() => { const ns = new Set(i.notesOpen); ns.has(rowId) ? ns.delete(rowId) : ns.add(rowId); return ns; })(),
+              } : i))}
+              onToggleAll={() => {
+                const allSel = item.rows?.every(r => item.selected[r._id] && !item.skipped.has(r._id));
+                const ns = {};
+                item.rows?.forEach(r => { ns[r._id] = !allSel; });
+                setQueue(prev => prev.map(i => i.id === item.id ? { ...i, selected: ns } : i));
+              }}
+              onSave={() => saveFile(item.id)}
+              onCreateInstallment={(row) => createInstallment(item.id, row)}
+              onRemove={() => removeFromQueue(item.id)}
+              statusBadge={statusBadge}
+              fmtSize={fmtSize}
+            />
+          ))}
         </div>
       )}
     </div>
   );
 }
 
-// ─── QUEUE FILE ITEM ─────────────────────────────────────────
-function QueueFileItem({
-  item, T, onProcess, onTryPassword,
-  onToggleSkip, onSkipAllDuplicates, onSave, onRemove,
-  isDuplicate, statusBadge, fmtSize,
+// ─── QUEUE FILE ITEM (card wrapper + preview) ─────────────────
+function EStmtQueueItem({
+  item, T, card, accounts,
+  onProcess, onTryPassword,
+  onUpdateRow, onToggleSel, onToggleSkip, onToggleNotes, onToggleAll,
+  onSave, onCreateInstallment, onRemove,
+  statusBadge, fmtSize,
 }) {
   const [manualPwd, setManualPwd] = useState("");
 
-  const hasDuplicates  = item.transactions?.some(tx => isDuplicate(tx)) ?? false;
-  const toSaveCount    = item.transactions?.filter(t => !item.skipped[t._id]).length ?? 0;
-  const dupCount       = item.transactions?.filter(t => isDuplicate(t) && !item.skipped[t._id]).length ?? 0;
+  const rows         = item.rows || [];
+  const countSel     = rows.filter(r => item.selected[r._id] && !item.skipped.has(r._id)).length;
+  const countNew     = rows.filter(r => r.status !== "possible_duplicate").length;
+  const countDup     = rows.filter(r => r.status === "possible_duplicate").length;
+  const allSel       = rows.length > 0 && rows.every(r => item.selected[r._id] && !item.skipped.has(r._id));
 
   return (
-    <div style={{ borderRadius: 10, overflow: "hidden", border: `1px solid ${T.border}` }}>
+    <div style={{ ...card, padding: 0, overflow: "hidden" }}>
 
-      {/* File header row */}
+      {/* ── File header row ── */}
       <div style={{
         display: "flex", alignItems: "center", gap: 10,
-        padding: "10px 12px", background: T.sur2,
+        padding: "10px 14px", background: T.sur2,
+        borderBottom: item.status === "done" ? `1px solid ${T.border}` : "none",
       }}>
         <span style={{ fontSize: 20, flexShrink: 0 }}>📄</span>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -1805,8 +1927,9 @@ function QueueFileItem({
           </div>
           <div style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
             {fmtSize(item.size)}
-            {item.status === "saved" && item.savedCount != null && ` · ${item.savedCount} tx saved`}
-            {item.status === "done"  && item.transactions != null && ` · ${item.transactions.length} tx found`}
+            {item.status === "saved"       && item.savedCount != null && ` · ${item.savedCount} tx saved`}
+            {item.status === "done"        && rows.length > 0          && ` · ${rows.length} tx found`}
+            {item.status === "processing"  && " · scanning with AI…"}
           </div>
         </div>
         {statusBadge(item.status)}
@@ -1814,142 +1937,300 @@ function QueueFileItem({
           {item.status === "queued" && (
             <Button variant="primary" size="sm" onClick={onProcess}>▶ Process</Button>
           )}
-          {item.status === "processing" && (
-            <span style={{ fontSize: 11, color: "#92400e", fontFamily: "Figtree, sans-serif" }}>…</span>
-          )}
-          {item.status === "done" && item.transactions?.length > 0 && (
-            <Button variant="primary" size="sm" onClick={onSave}>
-              Save ({toSaveCount})
-            </Button>
-          )}
-          {item.status === "done" && item.transactions?.length === 0 && (
-            <Button variant="secondary" size="sm" onClick={onRemove}>Dismiss</Button>
-          )}
           {item.status === "failed" && (
             <Button variant="secondary" size="sm" onClick={onProcess}>Retry</Button>
           )}
-          {["queued", "failed", "saved"].includes(item.status) && (
-            <button
-              onClick={onRemove}
-              style={{
-                border: "none", background: "none", cursor: "pointer",
-                fontSize: 16, color: "#d1d5db", padding: "2px", flexShrink: 0,
-              }}
+          {["queued","failed","saved"].includes(item.status) && (
+            <button onClick={onRemove}
+              style={{ border: "none", background: "none", cursor: "pointer", fontSize: 16, color: "#d1d5db", padding: 2 }}
               onMouseEnter={e => e.currentTarget.style.color = "#ef4444"}
-              onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}
-            >×</button>
+              onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}>
+              ×
+            </button>
           )}
         </div>
       </div>
 
-      {/* Error / password input */}
+      {/* ── Error / password input ── */}
       {item.error && (
-        <div style={{ padding: "10px 12px", background: "#fff5f5", borderTop: "1px solid #fecaca" }}>
+        <div style={{ padding: "10px 14px", background: "#fff5f5", borderBottom: "1px solid #fecaca" }}>
           <div style={{ fontSize: 11, color: "#dc2626", fontFamily: "Figtree, sans-serif" }}>
             {item.error}
           </div>
           {item.status === "needs_password" && (
             <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              <input
-                type="password"
-                value={manualPwd}
-                onChange={e => setManualPwd(e.target.value)}
+              <input type="password" value={manualPwd} onChange={e => setManualPwd(e.target.value)}
                 onKeyDown={e => e.key === "Enter" && manualPwd.trim() && onTryPassword(manualPwd)}
                 placeholder="Enter PDF password…"
-                style={{
-                  flex: 1, height: 34, padding: "0 10px",
-                  border: "1.5px solid #3b5bdb", borderRadius: 7,
-                  fontFamily: "Figtree, sans-serif", fontSize: 12, outline: "none",
-                }}
-              />
-              <Button variant="primary" size="sm" onClick={() => manualPwd.trim() && onTryPassword(manualPwd)}>
-                Try
-              </Button>
+                style={{ flex: 1, height: 34, padding: "0 10px", border: "1.5px solid #3b5bdb", borderRadius: 7, fontFamily: "Figtree, sans-serif", fontSize: 12, outline: "none" }} />
+              <Button variant="primary" size="sm" onClick={() => manualPwd.trim() && onTryPassword(manualPwd)}>Try</Button>
             </div>
           )}
         </div>
       )}
 
-      {/* Transaction preview */}
-      {item.status === "done" && item.transactions && (
-        <div style={{ padding: "10px 12px", borderTop: "1px solid #f3f4f6" }}>
-          {item.transactions.length === 0 ? (
-            <div style={{ fontSize: 12, color: T.text3, fontFamily: "Figtree, sans-serif", padding: "4px 0" }}>
-              No new transactions found in this statement.
+      {/* ── Transaction preview (AI Import/Scan style) ── */}
+      {item.status === "done" && (
+        <div style={{ padding: "12px 14px" }}>
+          {rows.length === 0 ? (
+            <div style={{ fontSize: 12, color: T.text3, fontFamily: "Figtree, sans-serif", padding: "8px 0" }}>
+              No transactions found in this statement.
             </div>
           ) : (
-            <>
-              {hasDuplicates && dupCount > 0 && (
-                <button
-                  onClick={onSkipAllDuplicates}
-                  style={{
-                    fontSize: 11, fontWeight: 600, color: "#3b5bdb",
-                    background: "none", border: "none", cursor: "pointer",
-                    fontFamily: "Figtree, sans-serif", padding: "2px 0",
-                    marginBottom: 8, display: "block",
-                  }}
-                >
-                  Skip All Duplicates &amp; Save New ({dupCount} duplicate{dupCount !== 1 ? "s" : ""})
-                </button>
-              )}
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {item.transactions.map(tx => {
-                  const skip = !!item.skipped[tx._id];
-                  const dup  = isDuplicate(tx);
-                  const isDebit = tx._isDebit !== false;
-                  return (
-                    <div key={tx._id} style={{
-                      display: "flex", alignItems: "center", gap: 8,
-                      padding: "7px 10px", borderRadius: 8,
-                      background: skip ? "#f9fafb" : dup ? "#fffbeb" : "#f0fdf4",
-                      border: `1px solid ${skip ? "#e5e7eb" : dup ? "#fde68a" : "#bbf7d0"}`,
-                      opacity: skip ? 0.5 : 1,
-                    }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "nowrap" }}>
-                          {dup && (
-                            <span style={{
-                              fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 4,
-                              background: "#fef9c3", color: "#92400e", flexShrink: 0, whiteSpace: "nowrap",
-                            }}>⚠️ DUP</span>
-                          )}
-                          <span style={{
-                            fontSize: 12, fontWeight: 600, color: "#111827",
-                            fontFamily: "Figtree, sans-serif",
-                            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                          }}>
-                            {tx.description || tx.merchant || "—"}
-                          </span>
-                        </div>
-                        <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
-                          {tx.date}
-                          {tx.installment_no
-                            ? ` · Cicilan ${tx.installment_no}${tx.installment_total ? `/${tx.installment_total}` : ""}`
-                            : ""}
-                        </div>
-                      </div>
-                      <div style={{
-                        fontSize: 12, fontWeight: 700, fontFamily: "Figtree, sans-serif",
-                        color: isDebit ? "#dc2626" : "#059669", flexShrink: 0,
-                      }}>
-                        {isDebit ? "−" : "+"}Rp {Number(tx.amount || 0).toLocaleString("id-ID")}
-                      </div>
-                      <button
-                        onClick={() => onToggleSkip(tx._id)}
-                        style={{
-                          border: "1px solid #e5e7eb", borderRadius: 6, padding: "3px 8px",
-                          fontSize: 10, fontWeight: 600, cursor: "pointer", flexShrink: 0,
-                          background: skip ? "#f3f4f6" : "#fff",
-                          color: skip ? "#059669" : "#6b7280",
-                          fontFamily: "Figtree, sans-serif",
-                        }}
-                      >
-                        {skip ? "Include" : "Skip"}
-                      </button>
-                    </div>
-                  );
-                })}
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {/* Summary header */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>
+                    {rows.length} transaction{rows.length !== 1 ? "s" : ""} found
+                  </div>
+                  <div style={{ display: "flex", gap: 10, marginTop: 3 }}>
+                    <span style={{ fontSize: 11, color: "#059669", fontFamily: "Figtree, sans-serif" }}>
+                      ✅ {countNew} new
+                    </span>
+                    {countDup > 0 && (
+                      <span style={{ fontSize: 11, color: "#d97706", fontFamily: "Figtree, sans-serif" }}>
+                        ⚠️ {countDup} duplicate{countDup !== 1 ? "s" : ""}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <Button variant="secondary" size="sm" onClick={onToggleAll}>
+                    {allSel ? "Deselect All" : "Select All"}
+                  </Button>
+                  <Button variant="primary" size="sm" onClick={onSave}>
+                    Import {countSel} Selected ▶
+                  </Button>
+                </div>
               </div>
+
+              {/* Transaction cards */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {rows.map(r => (
+                  <EStmtTxCard
+                    key={r._id}
+                    r={r} T={T}
+                    isSelected={!!item.selected[r._id]}
+                    isSkipped={item.skipped.has(r._id)}
+                    isNotesOpen={item.notesOpen.has(r._id)}
+                    accounts={accounts}
+                    onToggleSel={() => onToggleSel(r._id)}
+                    onToggleSkip={() => onToggleSkip(r._id)}
+                    onToggleNotes={() => onToggleNotes(r._id)}
+                    onUpdate={(patch) => onUpdateRow(r._id, patch)}
+                    onCreateInstallment={() => onCreateInstallment(r)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── E-STATEMENT TX CARD ──────────────────────────────────────
+// Mirrors AIImport TxCard style exactly
+function EStmtTxCard({
+  r, T, isSelected, isSkipped, isNotesOpen,
+  accounts, onToggleSel, onToggleSkip, onToggleNotes, onUpdate, onCreateInstallment,
+}) {
+  const isDup      = r.status === "possible_duplicate";
+  const cardBg     = isSkipped ? T.sur2 : isDup ? "#fffbeb" : T.surface;
+  const cardBorder = isDup ? "1.5px solid #d97706" : `1px solid ${T.border}`;
+  const color      = ESTMT_AMT_COLOR[r.tx_type] || "#A32D2D";
+  const showCat    = !ESTMT_NO_CAT.has(r.tx_type);
+  const cats       = ESTMT_CAT_FOR_TYPE(r.tx_type);
+
+  const sign = ["income"].includes(r.tx_type) ? "+" : ["transfer"].includes(r.tx_type) ? "" : "-";
+  const amtStr = `${sign}Rp ${Number(r.amount_idr || r.amount || 0).toLocaleString("id-ID")}`;
+
+  const bankAccounts = accounts.filter(a => a.type === "bank");
+  const ccAccounts   = accounts.filter(a => a.type === "credit_card");
+  const spendAccounts = [...ccAccounts, ...bankAccounts];
+  const sel = estmtInSel(T);
+
+  return (
+    <div style={{ background: cardBg, border: cardBorder, borderRadius: 10, opacity: isSkipped ? 0.55 : 1, overflow: "hidden" }}>
+
+      {/* ── ROW 1: ☑ date description amount ✓ ✕ ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px 5px" }}>
+        <input type="checkbox"
+          checked={isSelected && !isSkipped}
+          onChange={onToggleSel}
+          disabled={isSkipped}
+          style={{ accentColor: "#3b5bdb", width: 15, height: 15, flexShrink: 0, cursor: "pointer" }} />
+
+        <span style={{ width: 52, fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif", flexShrink: 0, whiteSpace: "nowrap" }}>
+          {fmtDateShort(r.tx_date)}
+        </span>
+
+        <input
+          style={{
+            flex: 1, minWidth: 0, border: "none", background: "transparent", outline: "none",
+            fontSize: 13, fontWeight: 600,
+            color: isSkipped ? T.text3 : T.text,
+            fontFamily: "Figtree, sans-serif",
+            textDecoration: isSkipped ? "line-through" : "none",
+          }}
+          value={r.description}
+          onChange={e => onUpdate({ description: e.target.value })}
+          placeholder="Description…"
+        />
+
+        <span style={{ fontSize: 13, fontWeight: 800, color, fontFamily: "Figtree, sans-serif", flexShrink: 0, whiteSpace: "nowrap", marginLeft: 4 }}>
+          {amtStr}
+        </span>
+
+        {/* ✓ import single */}
+        <button
+          onClick={onToggleSel}
+          disabled={isSkipped}
+          style={estmtACT({ background: isSelected ? "#dcfce7" : "#f9fafb", color: isSelected ? "#059669" : "#9ca3af", border: isSelected ? "1px solid #bbf7d0" : "1px solid #e5e7eb" })}
+          title={isSelected ? "Deselect" : "Select"}>
+          ✓
+        </button>
+
+        {/* ✕ skip */}
+        <button
+          onClick={onToggleSkip}
+          style={estmtACT({ color: isSkipped ? "#059669" : "#9ca3af" })}
+          title={isSkipped ? "Restore" : "Skip"}>
+          {isSkipped ? "↩" : "✕"}
+        </button>
+      </div>
+
+      {/* ── ROW 2: type [badges] [category] account [✏️] ── */}
+      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 5, padding: "2px 12px 9px 35px" }}>
+        <select
+          style={{ ...sel, width: 120, color: ESTMT_AMT_COLOR[r.tx_type] || T.text, fontWeight: 600 }}
+          value={r.tx_type}
+          onChange={e => onUpdate({ tx_type: e.target.value, category_id: ESTMT_NO_CAT.has(e.target.value) ? null : r.category_id })}>
+          {ESTMT_TX_TYPES.map(t => (
+            <option key={t.value} value={t.value} style={{ color: t.color, fontWeight: 600 }}>{t.label}</option>
+          ))}
+        </select>
+
+        {/* DUPLICATE badge */}
+        {isDup && (
+          <span style={{ fontSize: 9, fontWeight: 800, background: "#fef9c3", color: "#92400e", padding: "2px 5px", borderRadius: 4, whiteSpace: "nowrap" }}>
+            ⚠️ DUPLICATE
+          </span>
+        )}
+
+        {/* CICILAN badge */}
+        {r._isInstallment && (
+          <span style={{ fontSize: 9, fontWeight: 800, background: "#dbeafe", color: "#1d4ed8", padding: "2px 5px", borderRadius: 4, whiteSpace: "nowrap" }}>
+            CICILAN {r._instNo && r._instTotal ? `${r._instNo}/${r._instTotal}` : r._instNo || ""}
+          </span>
+        )}
+
+        {/* Category */}
+        {showCat && (
+          <select style={{ ...sel, width: 130 }}
+            value={r.category_id || ""}
+            onChange={e => onUpdate({ category_id: e.target.value })}>
+            {cats.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+          </select>
+        )}
+
+        {/* Account */}
+        <div style={{ flex: 1, minWidth: 140 }}>
+          {["expense","cc_installment"].includes(r.tx_type) ? (
+            <select style={{ ...sel, width: "100%" }}
+              value={r.from_id || ""}
+              onChange={e => onUpdate({ from_id: e.target.value })}>
+              <option value="">From Account…</option>
+              {spendAccounts.map(a => (
+                <option key={a.id} value={a.id}>
+                  {a.name}{(a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
+                </option>
+              ))}
+            </select>
+          ) : r.tx_type === "income" ? (
+            <select style={{ ...sel, width: "100%" }}
+              value={r.to_id || ""}
+              onChange={e => onUpdate({ to_id: e.target.value })}>
+              <option value="">To Account…</option>
+              {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          ) : (
+            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+              <select style={{ ...sel, flex: 1 }} value={r.from_id || ""}
+                onChange={e => onUpdate({ from_id: e.target.value })}>
+                <option value="">From…</option>
+                {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              <span style={{ fontSize: 10, color: T.text3, flexShrink: 0 }}>→</span>
+              <select style={{ ...sel, flex: 1 }} value={r.to_id || ""}
+                onChange={e => onUpdate({ to_id: e.target.value })}>
+                <option value="">To…</option>
+                {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+          )}
+        </div>
+
+        {/* ✏️ notes toggle */}
+        <button onClick={onToggleNotes}
+          style={estmtACT({
+            background: isNotesOpen ? "#dbeafe" : T.sur2,
+            color: isNotesOpen ? "#3b5bdb" : T.text3,
+            width: 24, height: 24, fontSize: 11,
+          })}
+          title="Notes">
+          ✏️
+        </button>
+      </div>
+
+      {/* ── Notes row ── */}
+      {isNotesOpen && (
+        <div style={{ borderTop: `1px solid ${T.border}`, background: T.sur2, padding: "6px 12px 8px 35px", display: "flex", gap: 6, alignItems: "center" }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: T.text3, textTransform: "uppercase", letterSpacing: "0.04em", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
+            Notes
+          </span>
+          <input
+            style={estmtInSel(T, { flex: 1, border: `1px solid ${T.border}`, padding: "3px 5px" })}
+            value={r.notes || ""}
+            onChange={e => onUpdate({ notes: e.target.value })}
+            placeholder="Optional notes…"
+          />
+        </div>
+      )}
+
+      {/* ── Duplicate info ── */}
+      {isDup && r._dupEntry && (
+        <div style={{ borderTop: `1px solid #fde68a`, background: "#fffbeb", padding: "5px 12px 6px 35px" }}>
+          <span style={{ fontSize: 10, color: "#92400e", fontFamily: "Figtree, sans-serif" }}>
+            Similar: {r._dupEntry.description} · {r._dupEntry.tx_date}
+          </span>
+        </div>
+      )}
+
+      {/* ── Installment cross-check ── */}
+      {r._isInstallment && (
+        <div style={{ borderTop: `1px solid #bfdbfe`, background: "#eff6ff", padding: "6px 12px 7px 35px", display: "flex", alignItems: "center", gap: 8 }}>
+          {r._instMatch ? (
+            <span style={{ fontSize: 10, color: "#1d4ed8", fontFamily: "Figtree, sans-serif" }}>
+              ✓ Already tracked in installments: {r._instMatch.description}
+              {r._instMatch.months ? ` (${r._instMatch.paid_months}/${r._instMatch.months} paid)` : ""}
+            </span>
+          ) : (
+            <>
+              <span style={{ fontSize: 10, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
+                Not tracked in installments
+              </span>
+              <button
+                onClick={onCreateInstallment}
+                style={{
+                  fontSize: 10, fontWeight: 700, color: "#1d4ed8", background: "none",
+                  border: "1px solid #bfdbfe", borderRadius: 4, padding: "2px 8px",
+                  cursor: "pointer", fontFamily: "Figtree, sans-serif",
+                }}>
+                + Create Installment
+              </button>
             </>
           )}
         </div>
