@@ -976,7 +976,7 @@ export const loanPaymentsApi = {
   },
 };
 
-const AI_MODEL = "claude-sonnet-4-20250514";
+const AI_MODEL = "claude-haiku-4-5-20251001";
 
 // ─── AI PROXY ─────────────────────────────────────────────────
 export async function aiCall(body) {
