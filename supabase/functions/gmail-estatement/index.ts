@@ -301,15 +301,19 @@ async function processStatement(
   }
   console.log(`[gmail-estatement] process: trying ${passwords.length} password(s) with pdf-lib`);
 
-  // Try each password with pdf-lib
+  // Try each password with pdf-lib (password detection only)
+  // For unencrypted PDFs: keep original bytes — pdf-lib re-serialization strips font streams
+  // For encrypted PDFs: use pdf-lib unlocked bytes (necessary to remove encryption)
   let pdfForAI: string | null = null;
   let isEncrypted = false;
 
   for (let i = 0; i < passwords.length; i++) {
     const unlocked = await tryUnlockPDF(pdfBase64, passwords[i]);
     if (unlocked !== null) {
-      pdfForAI = unlocked;
-      console.log(`[gmail-estatement] process: unlocked with password index ${i} (${passwords[i] ? "password" : "no password"})`);
+      // Unencrypted (empty password): send original bytes so Claude sees intact text/fonts
+      // Encrypted (real password): send unlocked bytes — encryption removed by pdf-lib
+      pdfForAI = passwords[i] === "" ? pdfBase64 : unlocked;
+      console.log(`[gmail-estatement] process: unlocked with password index ${i} (${passwords[i] ? "password" : "no password"}) — using ${passwords[i] === "" ? "original" : "pdf-lib"} bytes`);
       break;
     }
     if (i === 0) isEncrypted = true; // no-password attempt failed → encrypted
@@ -321,8 +325,8 @@ async function processStatement(
     return { success: false, needs_password: isEncrypted, encrypted: isEncrypted };
   }
 
-  // Send unlocked PDF to Claude
-  console.log(`[gmail-estatement] process: sending to Claude AI`);
+  // Send PDF to Claude as base64 document
+  console.log(`[gmail-estatement] process: sending to Claude AI, pdf size=${pdfForAI.length}`);
 
   const prompt = `Extract ALL transactions from this bank e-statement PDF.
 
@@ -358,14 +362,18 @@ Return ONLY the JSON array, no other text.`;
       "anthropic-beta":    "pdfs-2024-09-25",
     },
     body: JSON.stringify({
-      model: "claude-opus-4-6",
-      max_tokens: 4096,
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 16000,
       messages: [{
         role: "user",
         content: [
           {
             type: "document",
-            source: { type: "base64", media_type: "application/pdf", data: pdfForAI },
+            source: {
+              type:       "base64",
+              media_type: "application/pdf",
+              data:       pdfForAI,
+            },
           },
           { type: "text", text: prompt },
         ],
