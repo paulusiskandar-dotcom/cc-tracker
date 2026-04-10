@@ -140,6 +140,8 @@ export default function Transactions({
       .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0),
   [filtered]);
 
+  const missingTypeCount = useMemo(() => filtered.filter(e => !e.tx_type).length, [filtered]);
+
   // ── Open add ──
   const openAdd = () => {
     setForm({ ...EMPTY });
@@ -150,16 +152,17 @@ export default function Transactions({
 
   // ── Open edit ──
   const openEdit = (e) => {
+    const missingType = !e.tx_type;
     setForm({
       tx_date:         e.tx_date,
       description:     e.description || "",
       amount:          e.amount,
       currency:        e.currency || "IDR",
-      tx_type:         e.tx_type,
+      tx_type:         e.tx_type || "expense",
       from_id:         e.from_id || null,
       to_id:           e.to_id   || null,
-      from_type:       e.from_type || getTxFromToTypes(e.tx_type).from_type,
-      to_type:         e.to_type   || getTxFromToTypes(e.tx_type).to_type,
+      from_type:       e.from_type || getTxFromToTypes(e.tx_type || "expense").from_type,
+      to_type:         e.to_type   || getTxFromToTypes(e.tx_type || "expense").to_type,
       category_id:     e.category_id   || null,
       category_name:   e.category_name || null,
       entity:          e.entity          || "Personal",
@@ -167,7 +170,7 @@ export default function Transactions({
       is_reimburse:    e.is_reimburse     || false,
     });
     setEditEntry(e);
-    setStep(2);
+    setStep(missingType ? 1 : 2);
     setModal("edit");
   };
 
@@ -590,6 +593,14 @@ export default function Transactions({
           <span style={{ color: "#9ca3af" }}>{filtered.length} transactions</span>
           <span style={{ color: "#dc2626", fontWeight: 700 }}>−{fmtIDR(outTotal, true)}</span>
           <span style={{ color: "#059669", fontWeight: 700 }}>+{fmtIDR(inTotal, true)}</span>
+          {missingTypeCount > 0 && (
+            <span style={{
+              background: "#fee2e2", color: "#dc2626", fontWeight: 700,
+              padding: "2px 7px", borderRadius: 99, fontSize: 11,
+            }}>
+              ⚠ {missingTypeCount} missing type
+            </span>
+          )}
           <span style={{ color: inTotal - outTotal >= 0 ? "#059669" : "#dc2626", fontWeight: 700, marginLeft: "auto" }}>
             Net: {inTotal - outTotal >= 0 ? "+" : ""}{fmtIDR(inTotal - outTotal, true)}
           </span>
@@ -779,9 +790,9 @@ function TxRow({ entry: e, accounts, onEdit, onDelete }) {
 
   const catLabel = e.category_name || catDef?.label || null;
 
-  // ── Type badge ───────────────────────────────────────────────
+  // ── Type badge / missing-type warning ────────────────────────
   const txDef = TX_TYPE_MAP[e.tx_type];
-  const badgeEl = txDef ? (
+  const badgeEl = e.tx_type ? (txDef ? (
     <span key="badge" style={{
       display:       "inline-block",
       fontSize:      9,
@@ -796,7 +807,21 @@ function TxRow({ entry: e, accounts, onEdit, onDelete }) {
       letterSpacing: "0.3px",
       whiteSpace:    "nowrap",
     }}>{txDef.label}</span>
-  ) : null;
+  ) : null) : (
+    <span key="badge" style={{
+      display:       "inline-block",
+      fontSize:      9,
+      fontWeight:    800,
+      lineHeight:    "1",
+      padding:       "2px 5px",
+      borderRadius:  4,
+      background:    "#fee2e2",
+      color:         "#dc2626",
+      marginRight:   4,
+      verticalAlign: "middle",
+      whiteSpace:    "nowrap",
+    }}>! missing type</span>
+  );
 
   const renderMeta = () => {
     if (!isTwoDir || !tealLabel) {

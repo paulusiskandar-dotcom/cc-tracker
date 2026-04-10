@@ -128,9 +128,9 @@ export default function TransactionRow({
   const catLabel    = entry.category_name || entry.category || null;
   const tealLabel   = expandedContent?.label || null;
 
-  // ── Type badge ───────────────────────────────────────────────
+  // ── Type badge / missing-type warning ────────────────────────
   const txDef = TX_TYPE_MAP[entry.tx_type];
-  const badgeEl = txDef ? (
+  const badgeEl = entry.tx_type ? (txDef ? (
     <span key="badge" style={{
       display:         "inline-block",
       fontSize:        9,
@@ -145,7 +145,21 @@ export default function TransactionRow({
       letterSpacing:   "0.3px",
       whiteSpace:      "nowrap",
     }}>{txDef.label}</span>
-  ) : null;
+  ) : null) : (
+    <span key="badge" style={{
+      display:         "inline-block",
+      fontSize:        9,
+      fontWeight:      800,
+      lineHeight:      "1",
+      padding:         "2px 5px",
+      borderRadius:    4,
+      background:      "#fee2e2",
+      color:           "#dc2626",
+      marginRight:     4,
+      verticalAlign:   "middle",
+      whiteSpace:      "nowrap",
+    }}>! missing type</span>
+  );
 
   const renderMeta = () => {
     if (!isTwoDir || !tealLabel) {
