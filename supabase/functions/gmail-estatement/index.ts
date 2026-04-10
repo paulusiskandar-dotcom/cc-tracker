@@ -9,6 +9,7 @@
 // ─────────────────────────────────────────────────────────────────
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -314,9 +315,112 @@ Field notes:
 Return ONLY valid JSON array. No markdown, no explanation.
 If no transactions found, return [].`;
 
+// ── HELPER: try to decrypt PDF with pdf-lib ────────────────────
+// Returns { base64: string } on success, or { error: 'wrong_password'|'unsupported' }
+async function tryDecryptPDF(
+  pdfBase64: string, password: string
+): Promise<{ base64: string } | { error: "wrong_password" | "unsupported" }> {
+  try {
+    const bytes = Uint8Array.from(atob(pdfBase64), (c) => c.charCodeAt(0));
+    const pdfDoc = await PDFDocument.load(bytes, { password });
+    const saved  = await pdfDoc.save();
+    // Use Array.from for reliable base64 encoding in Deno
+    const base64 = btoa(
+      Array.from(new Uint8Array(saved))
+        .map((b: number) => String.fromCharCode(b))
+        .join("")
+    );
+    return { base64 };
+  } catch (e: any) {
+    const msg = String(e?.message || e).toLowerCase();
+    // pdf-lib can't handle this encryption type (AES-256, etc.)
+    if (msg.includes("unsupport") || msg.includes("aes") || msg.includes("encrypt") && !msg.includes("password")) {
+      return { error: "unsupported" };
+    }
+    return { error: "wrong_password" };
+  }
+}
+
+// ── HELPER: send PDF bytes to Claude, return extracted transactions ─
+type ClaudeResult =
+  | { ok: true;  transactions: any[] }
+  | { ok: false; is_encrypted: true }
+  | { ok: false; is_encrypted: false; error: string };
+
+async function callClaude(pdfBase64: string, prompt: string, anthropicKey: string): Promise<ClaudeResult> {
+  // Log sizes to debug large PDF issues
+  const base64Len = pdfBase64.length;
+  const approxBytes = Math.round(base64Len * 0.75);
+  console.log(`[gmail-estatement] callClaude: base64_len=${base64Len} approx_bytes=${approxBytes}`);
+
+  // Claude document API has ~32MB base64 limit (~24MB raw); warn at 10MB
+  if (approxBytes > 10 * 1024 * 1024) {
+    console.error(`[gmail-estatement] PDF too large: ${approxBytes} bytes`);
+    return { ok: false, is_encrypted: false, error: "PDF too large to process automatically (>10MB). Please use AI Import / Scan instead." };
+  }
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type":      "application/json",
+      "x-api-key":         anthropicKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-beta":    "pdfs-2024-09-25",
+    },
+    body: JSON.stringify({
+      model:      "claude-sonnet-4-20250514",
+      max_tokens: 16000,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "document", source: { type: "base64", media_type: "application/pdf", data: pdfBase64 } },
+          { type: "text", text: prompt },
+        ],
+      }],
+    }),
+  });
+
+  // 400 from Claude usually means the PDF is encrypted/invalid
+  if (res.status === 400) {
+    const errText = await res.text();
+    console.error(`[gmail-estatement] Claude 400 error: ${errText}`);
+    return { ok: false, is_encrypted: true };
+  }
+  if (!res.ok) {
+    const errText = await res.text();
+    console.error(`[gmail-estatement] Claude ${res.status}: ${errText.slice(0, 500)}`);
+    return { ok: false, is_encrypted: false, error: `Claude API error: ${res.status}` };
+  }
+
+  const data    = await res.json();
+  const rawText = data.content?.[0]?.text || "";
+  console.log(`[gmail-estatement] Claude response length=${rawText.length}`);
+
+  // Claude explicitly says it can't read the PDF (encrypted)
+  if (rawText.length < 500 && /password|encrypt|cannot\s+(read|access|open)|protected/i.test(rawText)) {
+    return { ok: false, is_encrypted: true };
+  }
+
+  const jsonMatch = rawText.match(/\[[\s\S]*\]/);
+  if (!jsonMatch) {
+    return { ok: false, is_encrypted: false, error: "No transactions found in Claude response" };
+  }
+  try {
+    const transactions = JSON.parse(jsonMatch[0]);
+    if (!Array.isArray(transactions)) throw new Error("not array");
+    return { ok: true, transactions };
+  } catch {
+    return { ok: false, is_encrypted: false, error: "Could not parse Claude response" };
+  }
+}
+
 // ── ACTION: process ────────────────────────────────────────────
-// Download PDF → send directly to Claude (Claude reads natively).
-// Password hint passed in prompt text if provided — no pdf-lib needed.
+// Fallback chain:
+//   1. Send raw PDF to Claude (handles owner-password / unencrypted PDFs)
+//   2. If Claude says encrypted → try pdf-lib decrypt with each password
+//   3. If pdf-lib succeeds → send decrypted PDF to Claude
+//   4. If all passwords fail → needs_password (ask user)
+//   5. If pdf-lib throws unsupported encryption → encryption_unsupported flag
 async function processStatement(
   serviceSupabase: any, userId: string, accessToken: string,
   statementId: string, passwordPatterns: any[], userVars: Record<string, string>,
@@ -331,109 +435,98 @@ async function processStatement(
   await serviceSupabase.from("estatement_pdfs")
     .update({ status: "processing" }).eq("id", statementId);
 
-  // Download PDF — original bytes, no pre-processing
   console.log(`[gmail-estatement] process: downloading PDF (message=${stmt.gmail_message_id})`);
   const pdfBase64 = await downloadPDFFromGmail(accessToken, stmt.gmail_message_id);
-  console.log(`[gmail-estatement] process: PDF downloaded, size=${pdfBase64.length}`);
+  const pdfBytes  = Math.round(pdfBase64.length * 0.75);
+  console.log(`[gmail-estatement] process: PDF downloaded base64_len=${pdfBase64.length} approx_bytes=${pdfBytes}`);
 
-  // Build password hint to prepend to prompt (if passwords available)
-  // Claude can read many password-protected PDFs natively when given the password in the prompt
-  let passwordHint = "";
-  if (onlyPassword !== undefined && onlyPassword !== "") {
-    passwordHint = `The PDF password is: ${onlyPassword}\n\n`;
-    console.log(`[gmail-estatement] process: using manual password hint`);
-  } else if (onlyPassword === undefined) {
-    // Auto mode: try resolved passwords from priority list
-    const resolved = passwordPatterns
-      .map((p: any) => resolvePassword(p.pattern || "", userVars))
-      .filter(Boolean);
-    if (resolved.length > 0) {
-      passwordHint = `If this PDF is password-protected, try these passwords in order: ${resolved.join(", ")}\n\n`;
-      console.log(`[gmail-estatement] process: providing ${resolved.length} password hint(s) to Claude`);
+  // ── Step 1: try Claude with raw PDF ───────────────────────────
+  // Handles unencrypted PDFs and owner-password PDFs (read-only protection)
+  console.log(`[gmail-estatement] process: step 1 — sending raw PDF to Claude`);
+  let claudeResult = await callClaude(pdfBase64, EXTRACTION_PROMPT, anthropicKey);
+
+  if (claudeResult.ok) {
+    return await finalizeTransactions(serviceSupabase, statementId, claudeResult.transactions);
+  }
+  if (!claudeResult.is_encrypted) {
+    // Non-encryption failure (bad PDF format, etc.)
+    await serviceSupabase.from("estatement_pdfs")
+      .update({ status: "pending" }).eq("id", statementId);
+    return { success: false, error: claudeResult.error, needs_password: false, encrypted: false };
+  }
+
+  // ── Step 2: PDF is encrypted — try pdf-lib with passwords ─────
+  const passwords: string[] = onlyPassword !== undefined
+    ? (onlyPassword ? [onlyPassword] : [])
+    : passwordPatterns.map((p: any) => resolvePassword(p.pattern || "", userVars)).filter(Boolean);
+
+  console.log(`[gmail-estatement] process: step 2 — trying ${passwords.length} password(s) with pdf-lib`);
+
+  let lastDecryptError: "wrong_password" | "unsupported" = "wrong_password";
+
+  for (let i = 0; i < passwords.length; i++) {
+    const pwd = passwords[i];
+    const decResult = await tryDecryptPDF(pdfBase64, pwd);
+
+    if ("base64" in decResult) {
+      console.log(`[gmail-estatement] process: pdf-lib unlocked with password index ${i} — sending to Claude`);
+      claudeResult = await callClaude(decResult.base64, EXTRACTION_PROMPT, anthropicKey);
+      if (claudeResult.ok) {
+        return await finalizeTransactions(serviceSupabase, statementId, claudeResult.transactions);
+      }
+      // Decrypted OK but Claude still couldn't extract — bad format
+      await serviceSupabase.from("estatement_pdfs")
+        .update({ status: "pending" }).eq("id", statementId);
+      return {
+        success: false,
+        error: "PDF was decrypted but no transactions could be extracted. It may be a scanned image.",
+        needs_password: false, encrypted: false,
+      };
     }
+
+    lastDecryptError = decResult.error;
+    console.log(`[gmail-estatement] process: pdf-lib failed password ${i}: ${decResult.error}`);
   }
 
-  const prompt = passwordHint + EXTRACTION_PROMPT;
+  // ── Step 3: all passwords exhausted ───────────────────────────
+  await serviceSupabase.from("estatement_pdfs")
+    .update({ status: "password_needed" }).eq("id", statementId);
 
-  console.log(`[gmail-estatement] process: sending to Claude AI`);
-
-  const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type":      "application/json",
-      "x-api-key":         anthropicKey,
-      "anthropic-version": "2023-06-01",
-      "anthropic-beta":    "pdfs-2024-09-25",
-    },
-    body: JSON.stringify({
-      model:      "claude-sonnet-4-20250514",
-      max_tokens: 16000,
-      messages: [{
-        role: "user",
-        content: [
-          {
-            type: "document",
-            source: { type: "base64", media_type: "application/pdf", data: pdfBase64 },
-          },
-          { type: "text", text: prompt },
-        ],
-      }],
-    }),
-  });
-
-  if (!aiRes.ok) {
-    const errText = await aiRes.text();
-    console.error(`[gmail-estatement] Claude API error: ${aiRes.status} ${errText}`);
-    await serviceSupabase.from("estatement_pdfs")
-      .update({ status: "pending" }).eq("id", statementId);
-    throw new Error(`Claude API error: ${aiRes.status}`);
-  }
-
-  const aiData  = await aiRes.json();
-  const rawText = aiData.content?.[0]?.text || "";
-  console.log(`[gmail-estatement] process: Claude response length=${rawText.length}`);
-
-  // Detect password-required response from Claude
-  if (/password|encrypted|cannot (read|access|open)|protected/i.test(rawText) && rawText.length < 300) {
-    console.log(`[gmail-estatement] process: Claude indicates PDF is password-protected`);
-    await serviceSupabase.from("estatement_pdfs")
-      .update({ status: "password_needed" }).eq("id", statementId);
-    return { success: false, needs_password: true, encrypted: true };
-  }
-
-  const jsonMatch = rawText.match(/\[[\s\S]*\]/);
-  if (!jsonMatch) {
-    await serviceSupabase.from("estatement_pdfs")
-      .update({ status: "pending" }).eq("id", statementId);
+  if (lastDecryptError === "unsupported") {
     return {
       success: false,
-      error: "No transactions extracted — PDF may be a scanned image or unsupported format.",
-      needs_password: false, encrypted: false,
+      needs_password: true,
+      encrypted: true,
+      encryption_unsupported: true,
+      error: "This PDF uses advanced encryption (AES-256) that cannot be decrypted automatically. Please download and decrypt it manually, then upload via AI Import / Scan instead.",
     };
   }
 
-  let transactions: any[];
-  try {
-    transactions = JSON.parse(jsonMatch[0]);
-  } catch {
-    await serviceSupabase.from("estatement_pdfs")
-      .update({ status: "pending" }).eq("id", statementId);
-    return { success: false, error: "Could not parse AI response.", needs_password: false, encrypted: false };
-  }
+  // Wrong passwords or no passwords provided — ask user
+  return {
+    success: false,
+    needs_password: true,
+    encrypted: true,
+    encryption_unsupported: false,
+    error: passwords.length > 0
+      ? "None of the saved passwords worked. Enter the PDF password below."
+      : "This PDF is password-protected. Enter the password below.",
+  };
+}
 
+// ── HELPER: save transactions + update status ──────────────────
+async function finalizeTransactions(serviceSupabase: any, statementId: string, transactions: any[]) {
   if (!Array.isArray(transactions) || transactions.length === 0) {
     await serviceSupabase.from("estatement_pdfs")
       .update({ status: "pending" }).eq("id", statementId);
     return { success: false, error: "No transactions found in this statement.", needs_password: false, encrypted: false };
   }
-
   console.log(`[gmail-estatement] process: extracted ${transactions.length} transactions`);
   await serviceSupabase.from("estatement_pdfs").update({
     status:            "parsed",
     transaction_count: transactions.length,
     processed_at:      new Date().toISOString(),
   }).eq("id", statementId);
-
   return { success: true, transactions, count: transactions.length };
 }
 
