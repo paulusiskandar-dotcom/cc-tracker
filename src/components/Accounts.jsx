@@ -1267,13 +1267,17 @@ function AccountHistory({ account, ledger, accounts }) {
       const foreignAmt = rate > 0 ? Math.round((amtIDR / rate) * 100) / 100 : 0;
       const isBuy  = desc.startsWith("Buy");
 
+      const rateSub = rate > 0 && fxCur
+        ? `${e.tx_date} · @Rp ${Math.round(rate).toLocaleString("id-ID")} / ${fxCur}`
+        : e.tx_date;
+
       if (isBuy) {
         // Row 1: IDR debit — "Buy EUR" · -Rp X
         rows.push(
           <HistoryRow
             key={`${e.id}-idr`}
             label={desc || "FX Buy"}
-            sub={`${e.tx_date} · ${fromAcc?.name || "?"} → ${toAcc?.name || "?"}`}
+            sub={rateSub}
             amountStr={fmtIDR(amtIDR, true)}
             positive={false}
           />
@@ -1284,7 +1288,7 @@ function AccountHistory({ account, ledger, accounts }) {
             <HistoryRow
               key={`${e.id}-fx`}
               label={`${fxCur} received`}
-              sub={e.tx_date}
+              sub={rateSub}
               amountStr={fmtCur(foreignAmt, fxCur).replace(/^[+\-]/, "")}
               positive={true}
             />
@@ -1297,7 +1301,7 @@ function AccountHistory({ account, ledger, accounts }) {
             <HistoryRow
               key={`${e.id}-fx`}
               label={desc || "FX Sell"}
-              sub={`${e.tx_date} · ${fromAcc?.name || "?"} → ${toAcc?.name || "?"}`}
+              sub={rateSub}
               amountStr={fmtCur(foreignAmt, fxCur).replace(/^[+\-]/, "")}
               positive={false}
             />
@@ -1308,7 +1312,7 @@ function AccountHistory({ account, ledger, accounts }) {
           <HistoryRow
             key={`${e.id}-idr`}
             label={`${fxCur || "FX"} sold`}
-            sub={e.tx_date}
+            sub={rateSub}
             amountStr={fmtIDR(amtIDR, true)}
             positive={true}
           />
