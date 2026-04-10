@@ -2,14 +2,13 @@
 // gmail-estatement/index.ts
 // Actions:
 //   "scan"      → search Gmail for bank PDF attachments → insert estatement_pdfs
-//   "process"   → download PDF → pdf-lib password unlock → Claude AI extract
+//   "process"   → download PDF → send to Claude AI (Claude reads natively)
 //   "mark_done" → mark statement as done
 //
 // Deploy: supabase functions deploy gmail-estatement --no-verify-jwt
 // ─────────────────────────────────────────────────────────────────
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -146,26 +145,6 @@ async function downloadPDFFromGmail(accessToken: string, messageId: string): Pro
   return pdfBase64;
 }
 
-// ── HELPER: try to unlock PDF with pdf-lib ─────────────────────
-// Returns base64 of unlocked PDF, or null if password is wrong / PDF unreadable
-async function tryUnlockPDF(pdfBase64: string, password: string): Promise<string | null> {
-  try {
-    const bytes = Uint8Array.from(atob(pdfBase64), (c) => c.charCodeAt(0));
-    const opts: any = password ? { password } : {};
-    const pdfDoc = await PDFDocument.load(bytes, opts);
-    const saved = await pdfDoc.save();
-    // Chunked btoa to avoid stack overflow on large PDFs
-    let binary = "";
-    const chunk = 8192;
-    for (let i = 0; i < saved.length; i += chunk) {
-      binary += String.fromCharCode(...saved.subarray(i, i + chunk));
-    }
-    return btoa(binary);
-  } catch {
-    return null;
-  }
-}
-
 // ── ACTION: scan ───────────────────────────────────────────────
 async function scanGmailForStatements(
   serviceSupabase: any, userId: string, accessToken: string,
@@ -268,67 +247,7 @@ async function scanGmailForStatements(
   return { new_pdfs: newCount, total_found: messages.length };
 }
 
-// ── ACTION: process ────────────────────────────────────────────
-// Download PDF → test passwords with pdf-lib → unlock → extract with Claude.
-async function processStatement(
-  serviceSupabase: any, userId: string, accessToken: string,
-  statementId: string, passwordPatterns: any[], userVars: Record<string, string>,
-  anthropicKey: string, onlyPassword?: string
-) {
-  console.log(`[gmail-estatement] process: statement=${statementId}`);
-
-  const { data: stmt, error: stmtErr } = await serviceSupabase
-    .from("estatement_pdfs").select("*").eq("id", statementId).eq("user_id", userId).single();
-  if (stmtErr || !stmt) throw new Error("Statement not found");
-
-  await serviceSupabase.from("estatement_pdfs")
-    .update({ status: "processing" }).eq("id", statementId);
-
-  // Download PDF
-  console.log(`[gmail-estatement] process: downloading PDF (message=${stmt.gmail_message_id})`);
-  const pdfBase64 = await downloadPDFFromGmail(accessToken, stmt.gmail_message_id);
-  console.log(`[gmail-estatement] process: PDF downloaded, size=${pdfBase64.length}`);
-
-  // Build password list
-  let passwords: string[];
-  if (onlyPassword !== undefined) {
-    passwords = [onlyPassword];
-  } else {
-    const resolved = passwordPatterns
-      .map((p: any) => resolvePassword(p.pattern || "", userVars))
-      .filter(Boolean);
-    passwords = ["", ...resolved];
-  }
-  console.log(`[gmail-estatement] process: trying ${passwords.length} password(s) with pdf-lib`);
-
-  // Try each password with pdf-lib (password detection only)
-  // For unencrypted PDFs: keep original bytes — pdf-lib re-serialization strips font streams
-  // For encrypted PDFs: use pdf-lib unlocked bytes (necessary to remove encryption)
-  let pdfForAI: string | null = null;
-  let isEncrypted = false;
-
-  for (let i = 0; i < passwords.length; i++) {
-    const unlocked = await tryUnlockPDF(pdfBase64, passwords[i]);
-    if (unlocked !== null) {
-      // Unencrypted (empty password): send original bytes so Claude sees intact text/fonts
-      // Encrypted (real password): send unlocked bytes — encryption removed by pdf-lib
-      pdfForAI = passwords[i] === "" ? pdfBase64 : unlocked;
-      console.log(`[gmail-estatement] process: unlocked with password index ${i} (${passwords[i] ? "password" : "no password"}) — using ${passwords[i] === "" ? "original" : "pdf-lib"} bytes`);
-      break;
-    }
-    if (i === 0) isEncrypted = true; // no-password attempt failed → encrypted
-  }
-
-  if (pdfForAI === null) {
-    await serviceSupabase.from("estatement_pdfs")
-      .update({ status: isEncrypted ? "password_needed" : "pending" }).eq("id", statementId);
-    return { success: false, needs_password: isEncrypted, encrypted: isEncrypted };
-  }
-
-  // Send PDF to Claude as base64 document
-  console.log(`[gmail-estatement] process: sending to Claude AI, pdf size=${pdfForAI.length}`);
-
-  const prompt = `You are an expert at extracting transactions from Indonesian bank and credit card statements.
+const EXTRACTION_PROMPT = `You are an expert at extracting transactions from Indonesian bank and credit card statements.
 
 EXTRACT only actual financial transactions. Return a JSON array.
 
@@ -395,6 +314,49 @@ Field notes:
 Return ONLY valid JSON array. No markdown, no explanation.
 If no transactions found, return [].`;
 
+// ── ACTION: process ────────────────────────────────────────────
+// Download PDF → send directly to Claude (Claude reads natively).
+// Password hint passed in prompt text if provided — no pdf-lib needed.
+async function processStatement(
+  serviceSupabase: any, userId: string, accessToken: string,
+  statementId: string, passwordPatterns: any[], userVars: Record<string, string>,
+  anthropicKey: string, onlyPassword?: string
+) {
+  console.log(`[gmail-estatement] process: statement=${statementId}`);
+
+  const { data: stmt, error: stmtErr } = await serviceSupabase
+    .from("estatement_pdfs").select("*").eq("id", statementId).eq("user_id", userId).single();
+  if (stmtErr || !stmt) throw new Error("Statement not found");
+
+  await serviceSupabase.from("estatement_pdfs")
+    .update({ status: "processing" }).eq("id", statementId);
+
+  // Download PDF — original bytes, no pre-processing
+  console.log(`[gmail-estatement] process: downloading PDF (message=${stmt.gmail_message_id})`);
+  const pdfBase64 = await downloadPDFFromGmail(accessToken, stmt.gmail_message_id);
+  console.log(`[gmail-estatement] process: PDF downloaded, size=${pdfBase64.length}`);
+
+  // Build password hint to prepend to prompt (if passwords available)
+  // Claude can read many password-protected PDFs natively when given the password in the prompt
+  let passwordHint = "";
+  if (onlyPassword !== undefined && onlyPassword !== "") {
+    passwordHint = `The PDF password is: ${onlyPassword}\n\n`;
+    console.log(`[gmail-estatement] process: using manual password hint`);
+  } else if (onlyPassword === undefined) {
+    // Auto mode: try resolved passwords from priority list
+    const resolved = passwordPatterns
+      .map((p: any) => resolvePassword(p.pattern || "", userVars))
+      .filter(Boolean);
+    if (resolved.length > 0) {
+      passwordHint = `If this PDF is password-protected, try these passwords in order: ${resolved.join(", ")}\n\n`;
+      console.log(`[gmail-estatement] process: providing ${resolved.length} password hint(s) to Claude`);
+    }
+  }
+
+  const prompt = passwordHint + EXTRACTION_PROMPT;
+
+  console.log(`[gmail-estatement] process: sending to Claude AI`);
+
   const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -404,18 +366,14 @@ If no transactions found, return [].`;
       "anthropic-beta":    "pdfs-2024-09-25",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
+      model:      "claude-sonnet-4-20250514",
       max_tokens: 16000,
       messages: [{
         role: "user",
         content: [
           {
             type: "document",
-            source: {
-              type:       "base64",
-              media_type: "application/pdf",
-              data:       pdfForAI,
-            },
+            source: { type: "base64", media_type: "application/pdf", data: pdfBase64 },
           },
           { type: "text", text: prompt },
         ],
@@ -434,6 +392,14 @@ If no transactions found, return [].`;
   const aiData  = await aiRes.json();
   const rawText = aiData.content?.[0]?.text || "";
   console.log(`[gmail-estatement] process: Claude response length=${rawText.length}`);
+
+  // Detect password-required response from Claude
+  if (/password|encrypted|cannot (read|access|open)|protected/i.test(rawText) && rawText.length < 300) {
+    console.log(`[gmail-estatement] process: Claude indicates PDF is password-protected`);
+    await serviceSupabase.from("estatement_pdfs")
+      .update({ status: "password_needed" }).eq("id", statementId);
+    return { success: false, needs_password: true, encrypted: true };
+  }
 
   const jsonMatch = rawText.match(/\[[\s\S]*\]/);
   if (!jsonMatch) {
