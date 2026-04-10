@@ -5,7 +5,7 @@
 //   "process"   → download PDF → pdf-lib password unlock → Claude AI extract
 //   "mark_done" → mark statement as done
 //
-// Deploy: supabase functions deploy gmail-estatement
+// Deploy: supabase functions deploy gmail-estatement --no-verify-jwt
 // ─────────────────────────────────────────────────────────────────
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
