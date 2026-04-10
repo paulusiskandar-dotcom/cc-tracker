@@ -96,6 +96,8 @@ export default function Settings({
   const [passwordList,      setPasswordList]       = useState([]);
   const [eStmtLoaded,       setEStmtLoaded]        = useState(false);
   const [scanning,          setScanning]           = useState(false);
+  const [scanFromDate,      setScanFromDate]       = useState("2026-01-01");
+  const [scanToDate,        setScanToDate]         = useState(() => new Date().toISOString().slice(0, 10));
   const [processModal,      setProcessModal]       = useState(null); // statement record
   const [addPwdOpen,        setAddPwdOpen]         = useState(false);
   const [newPwdPattern,     setNewPwdPattern]      = useState("");
@@ -121,7 +123,7 @@ export default function Settings({
       const res = await fetch(
         `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/gmail-estatement`,
         { method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-          body: JSON.stringify({ action: "scan" }) }
+          body: JSON.stringify({ action: "scan", from_date: scanFromDate, to_date: scanToDate }) }
       );
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || "Scan failed");
@@ -656,6 +658,8 @@ export default function Settings({
           statements={eStatements} setStatements={setEStatements}
           passwordList={passwordList} setPasswordList={setPasswordList}
           scanning={scanning} onScan={scanGmail}
+          scanFromDate={scanFromDate} setScanFromDate={setScanFromDate}
+          scanToDate={scanToDate} setScanToDate={setScanToDate}
           addPwdOpen={addPwdOpen} setAddPwdOpen={setAddPwdOpen}
           newPwdPattern={newPwdPattern} setNewPwdPattern={setNewPwdPattern}
           onAddPassword={addPassword} onDeletePassword={deletePassword}
@@ -1423,6 +1427,7 @@ function EStatementTab({
   T, card, user, statements, setStatements,
   passwordList, setPasswordList,
   scanning, onScan,
+  scanFromDate, setScanFromDate, scanToDate, setScanToDate,
   addPwdOpen, setAddPwdOpen,
   newPwdPattern, setNewPwdPattern,
   onAddPassword, onDeletePassword,
@@ -1559,8 +1564,36 @@ function EStatementTab({
 
       {/* ── Pending Statements ── */}
       <div style={card}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-          <SectionHeader title="📄 Pending Statements" />
+        <SectionHeader title="📄 Pending Statements" />
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 10, marginBottom: 10 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: T.text3, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif" }}>From</div>
+            <input
+              type="date"
+              value={scanFromDate}
+              onChange={e => setScanFromDate(e.target.value)}
+              style={{
+                width: "100%", boxSizing: "border-box", height: 36,
+                padding: "0 10px", border: `1.5px solid ${T.border}`, borderRadius: 8,
+                fontFamily: "Figtree, sans-serif", fontSize: 13, color: T.text,
+                background: T.surface, outline: "none",
+              }}
+            />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: T.text3, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif" }}>To</div>
+            <input
+              type="date"
+              value={scanToDate}
+              onChange={e => setScanToDate(e.target.value)}
+              style={{
+                width: "100%", boxSizing: "border-box", height: 36,
+                padding: "0 10px", border: `1.5px solid ${T.border}`, borderRadius: 8,
+                fontFamily: "Figtree, sans-serif", fontSize: 13, color: T.text,
+                background: T.surface, outline: "none",
+              }}
+            />
+          </div>
           <Button variant="primary" size="sm" busy={scanning} onClick={onScan}>
             🔍 Scan Gmail
           </Button>

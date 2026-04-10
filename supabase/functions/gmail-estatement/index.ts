@@ -110,9 +110,15 @@ async function getAccessToken(serviceSupabase: any, userId: string, googleSecret
 }
 
 // ── ACTION: scan ───────────────────────────────────────────────
-async function scanGmailForStatements(serviceSupabase: any, userId: string, accessToken: string) {
+async function scanGmailForStatements(
+  serviceSupabase: any, userId: string, accessToken: string,
+  fromDate?: string, toDate?: string
+) {
   const domainQuery = BANK_DOMAINS.map(d => `from:${d}`).join(" OR ");
-  const query = `has:attachment filename:pdf (${domainQuery})`;
+  // Gmail date format: YYYY/MM/DD
+  const afterPart  = fromDate ? ` after:${fromDate.replace(/-/g, "/")}` : "";
+  const beforePart = toDate   ? ` before:${toDate.replace(/-/g, "/")}` : "";
+  const query = `has:attachment filename:pdf (${domainQuery})${afterPart}${beforePart}`;
 
   const listRes = await fetch(
     `https://www.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=50`,
@@ -421,7 +427,7 @@ Deno.serve(async (req: Request) => {
     let result: any;
 
     if (action === "scan") {
-      result = await scanGmailForStatements(serviceSupabase, userId, accessToken!);
+      result = await scanGmailForStatements(serviceSupabase, userId, accessToken!, body.from_date, body.to_date);
 
     } else if (action === "process") {
       const { statement_id, passwords, user_vars } = body;
