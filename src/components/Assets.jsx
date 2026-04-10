@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { accountsApi } from "../api";
+import { supabase } from "../lib/supabase";
 import { fmtIDR, todayStr } from "../utils";
 import { ASSET_SUBTYPES, ASSET_ICON, ASSET_COL } from "../constants";
 import { LIGHT, DARK } from "../theme";
@@ -197,9 +198,46 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
     if (!updateForm.value || !selectedAsset) return;
     setSaving(true);
     try {
-      const newVal = Number(updateForm.value);
-      await accountsApi.update(selectedAsset.id, { current_value: newVal });
-      setAccounts(prev => prev.map(a => a.id === selectedAsset.id ? { ...a, current_value: newVal } : a));
+      const accountId  = selectedAsset.id;
+      const newVal     = Number(updateForm.value);
+      const selectedDate = updateForm.date || todayStr();
+      const notes      = updateForm.notes || null;
+
+      // Fetch current value before updating
+      const { data: current } = await supabase
+        .from("accounts")
+        .select("current_value")
+        .eq("id", accountId)
+        .single();
+      const oldValue = current?.current_value || 0;
+
+      // Update the account's current value
+      await supabase
+        .from("accounts")
+        .update({ current_value: newVal })
+        .eq("id", accountId);
+
+      // Insert history record
+      const { data: histRow, error: histErr } = await supabase
+        .from("asset_value_history")
+        .insert({
+          account_id: accountId,
+          user_id:    user.id,
+          old_value:  oldValue,
+          new_value:  newVal,
+          date:       selectedDate,
+          notes:      notes || "Manual update",
+        })
+        .select()
+        .single();
+
+      if (histErr) {
+        console.error("[handleUpdateValue] asset_value_history insert failed:", histErr);
+        throw new Error(histErr.message);
+      }
+      console.log("[handleUpdateValue] history saved:", histRow);
+
+      setAccounts(prev => prev.map(a => a.id === accountId ? { ...a, current_value: newVal } : a));
       showToast(`${selectedAsset.name} updated to ${fmtIDR(newVal, true)}`);
       setUpdateModal(false);
     } catch (e) { showToast(e.message, "error"); }
