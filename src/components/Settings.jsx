@@ -2256,7 +2256,7 @@ function EStmtTxCard({
       )}
 
       {/* ── Duplicate info ── */}
-      {isDup && r._dupEntry && (
+      {dupLevel > 0 && r._dupEntry && (
         <div style={{ borderTop: `1px solid #fde68a`, background: "#fffbeb", padding: "5px 12px 6px 35px" }}>
           <span style={{ fontSize: 10, color: "#92400e", fontFamily: "Figtree, sans-serif" }}>
             Similar: {r._dupEntry.description} · {r._dupEntry.tx_date}
