@@ -124,12 +124,10 @@ export default function Settings({
   const scanGmail = async () => {
     setScanning(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) throw new Error("Not authenticated — please reload and try again.");
       const res = await fetch(
         `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/gmail-estatement`,
-        { method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session.access_token}` },
-          body: JSON.stringify({ action: "scan", from_date: scanFromDate, to_date: scanToDate }) }
+        { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "scan", user_id: user.id, from_date: scanFromDate, to_date: scanToDate }) }
       );
       const result = await res.json();
       if (!res.ok) throw new Error(result.error || "Scan failed");
@@ -1802,22 +1800,17 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
     setError("");
 
     const fnUrl = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/gmail-estatement`;
-    console.log("[estatement] callProcess for statement:", statement?.id);
-    console.log("[estatement] fn url:", fnUrl);
+    console.log("[estatement] callProcess for statement:", statement?.id, "user:", user?.id);
 
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) throw new Error("Not authenticated — please reload and try again.");
-      console.log("[estatement] auth token: present");
-
-      const reqBody = { action: "process", statement_id: statement.id };
+      const reqBody = { action: "process", statement_id: statement.id, user_id: user.id };
       if (onlyPassword !== null) reqBody.only_password = onlyPassword;
 
-      console.log("[estatement] fetching with body:", JSON.stringify(reqBody));
+      console.log("[estatement] fetching:", fnUrl, "body:", JSON.stringify(reqBody));
 
       const res = await fetch(fnUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${session.access_token}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(reqBody),
       });
 
@@ -1884,14 +1877,11 @@ function ProcessStatementModal({ statement, passwordList, user, accounts, ledger
         count++;
       } catch { /* skip on error */ }
     }
-    const { data: { session: sess2 } } = await supabase.auth.getSession();
-    if (sess2?.access_token) {
-      await fetch(`${process.env.REACT_APP_SUPABASE_URL}/functions/v1/gmail-estatement`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${sess2.access_token}` },
-        body: JSON.stringify({ action: "mark_done", statement_id: statement.id, tx_count: count }),
-      });
-    }
+    await fetch(`${process.env.REACT_APP_SUPABASE_URL}/functions/v1/gmail-estatement`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "mark_done", statement_id: statement.id, user_id: user.id, tx_count: count }),
+    });
     onDone(statement.id, count);
   };
 

@@ -467,34 +467,25 @@ Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
   const SUPABASE_URL  = Deno.env.get("SUPABASE_URL")              || "";
-  const ANON_KEY      = Deno.env.get("SUPABASE_ANON_KEY")         || "";
   const SERVICE_KEY   = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
   const ANTHROPIC_KEY = Deno.env.get("ANTHROPIC_KEY")             || "";
   const GOOGLE_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET")      || "";
 
-  console.log("[gmail-estatement] anon key exists:", !!ANON_KEY, "service key exists:", !!SERVICE_KEY);
-  console.log("[gmail-estatement] auth header:", req.headers.get("Authorization")?.substring(0, 20));
-
-  // Validate JWT using anon client with forwarded Authorization header
-  const supabaseClient = createClient(SUPABASE_URL, ANON_KEY, {
-    global: { headers: { Authorization: req.headers.get("Authorization")! } },
-  });
-
-  const { data: { user }, error: authErr } = await supabaseClient.auth.getUser();
-  if (authErr || !user) {
-    console.error("[gmail-estatement] auth failed:", authErr?.message);
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401, headers: { ...CORS, "Content-Type": "application/json" },
-    });
-  }
-  const userId = user.id;
-  console.log("[gmail-estatement] authenticated user:", userId);
-
-  // Service role client for all DB operations (bypasses RLS)
+  // Service role client — same pattern as gmail-sync
   const serviceSupabase = createClient(SUPABASE_URL, SERVICE_KEY);
 
   let body: any = {};
   try { body = await req.json(); } catch { /* no body */ }
+
+  const userId = body.user_id;
+  if (!userId) {
+    return new Response(JSON.stringify({ error: "user_id required" }), {
+      status: 400, headers: { ...CORS, "Content-Type": "application/json" },
+    });
+  }
+
+  console.log("[gmail-estatement] user_id:", userId, "action:", body.action);
+
   const action = body.action || "scan";
 
   try {
