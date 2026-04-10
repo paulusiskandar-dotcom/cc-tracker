@@ -331,29 +331,44 @@ export default function Transactions({
         const assetName = isExisting
           ? (assets.find(a => a.id === form.asset_id)?.name || "Asset Purchase")
           : (form.asset_name?.trim() || "Asset Purchase");
-        const txEntry = {
-          tx_date:       form.tx_date || todayStr(),
-          description:   assetName,
-          amount:        price, currency: "IDR", amount_idr: price,
-          tx_type:       "buy_asset", from_type: "account", to_type: "account",
-          from_id:       uuid(form.from_id), to_id: null,
-          category_id:   null, category_name: null,
-          entity:        "Personal", is_reimburse: false,
-          merchant_name: null, notes: form.notes || null,
-          attachment_url: null, ai_categorized: false, ai_confidence: null,
-          installment_id: null, scan_batch_id: null,
-        };
-        const created = await ledgerApi.create(user.id, txEntry, accounts);
-        setLedger(p => [created, ...p]);
-        try {
-          if (isExisting) {
-            // Add to existing asset's current value
-            const existing = assets.find(a => a.id === form.asset_id);
-            const newValue = Number(existing?.current_value || 0) + price;
-            await assetsApi.update(form.asset_id, { current_value: newValue });
-          } else {
-            // Create new asset record
-            await assetsApi.create(user.id, {
+
+        if (isExisting) {
+          // Pass to_id = asset account so ledgerApi.create applies +price to current_value via getDeltas
+          const txEntry = {
+            tx_date:       form.tx_date || todayStr(),
+            description:   assetName,
+            amount:        price, currency: "IDR", amount_idr: price,
+            tx_type:       "buy_asset", from_type: "account", to_type: "account",
+            from_id:       uuid(form.from_id), to_id: uuid(form.asset_id),
+            category_id:   null, category_name: null,
+            entity:        "Personal", is_reimburse: false,
+            merchant_name: null, notes: form.notes || null,
+            attachment_url: null, ai_categorized: false, ai_confidence: null,
+            installment_id: null, scan_batch_id: null,
+          };
+          const created = await ledgerApi.create(user.id, txEntry, accounts);
+          console.log("[buy_asset] ledger insert:", created?.id, "from_id:", txEntry.from_id, "to_id:", txEntry.to_id, "amount:", price);
+          setLedger(p => [created, ...p]);
+        } else {
+          // New asset — no account to credit, ledger debit only
+          const txEntry = {
+            tx_date:       form.tx_date || todayStr(),
+            description:   assetName,
+            amount:        price, currency: "IDR", amount_idr: price,
+            tx_type:       "buy_asset", from_type: "account", to_type: "account",
+            from_id:       uuid(form.from_id), to_id: null,
+            category_id:   null, category_name: null,
+            entity:        "Personal", is_reimburse: false,
+            merchant_name: null, notes: form.notes || null,
+            attachment_url: null, ai_categorized: false, ai_confidence: null,
+            installment_id: null, scan_batch_id: null,
+          };
+          const created = await ledgerApi.create(user.id, txEntry, accounts);
+          console.log("[buy_asset] ledger insert (new asset):", created?.id, "amount:", price);
+          setLedger(p => [created, ...p]);
+          // Create asset record in assets table for tracking
+          try {
+            const newAsset = await assetsApi.create(user.id, {
               name:           form.asset_name.trim(),
               type:           form.asset_type || "Investment",
               current_value:  price,
@@ -361,8 +376,9 @@ export default function Transactions({
               purchase_date:  form.tx_date || todayStr(),
               notes:          form.notes || null,
             });
-          }
-        } catch (ae) { console.warn("[buy_asset] assets table update failed:", ae.message); }
+            console.log("[buy_asset] asset record created:", newAsset?.id);
+          } catch (ae) { console.warn("[buy_asset] asset record create failed:", ae.message); }
+        }
         showToast("Asset purchased");
         await onRefresh();
         setModal(null);
@@ -373,9 +389,11 @@ export default function Transactions({
       // ── Sell Asset ─────────────────────────────────────────────
       if (type === "sell_asset" && !editEntry) {
         const sellPrice = sn(form.amount);
+        // from_id = asset account (current_value decreases via getDeltas { from: { asset: -a } })
+        // to_id   = bank account  (current_balance increases via getDeltas { to: { bank: +a } })
         const txEntry = {
           tx_date:       form.tx_date || todayStr(),
-          description:   "Asset Sale",
+          description:   assets.find(a => a.id === form.from_id)?.name ? `Sell ${assets.find(a => a.id === form.from_id).name}` : "Asset Sale",
           amount:        sellPrice, currency: "IDR", amount_idr: sellPrice,
           tx_type:       "sell_asset", from_type: "account", to_type: "account",
           from_id:       uuid(form.from_id), to_id: uuid(form.to_id),
@@ -386,11 +404,10 @@ export default function Transactions({
           installment_id: null, scan_batch_id: null,
         };
         const created = await ledgerApi.create(user.id, txEntry, accounts);
+        console.log("[sell_asset] ledger insert:", created?.id, "from_id (asset):", txEntry.from_id, "to_id (bank):", txEntry.to_id, "amount:", sellPrice);
         setLedger(p => [created, ...p]);
-        // Try to mark asset as sold
-        try {
-          if (form.from_id) await assetsApi.update(form.from_id, { current_value: 0 });
-        } catch (ae) { console.warn("[sell_asset] assets table update failed:", ae.message); }
+        // ledgerApi.create already decrements asset current_value via getDeltas
+        // No secondary update needed
         showToast("Asset sold");
         await onRefresh();
         setModal(null);
