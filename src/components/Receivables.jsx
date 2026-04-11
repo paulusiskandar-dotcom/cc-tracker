@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { ledgerApi, employeeLoanApi, loanPaymentsApi } from "../api";
 import { supabase } from "../lib/supabase";
 import { fmtIDR, todayStr, agingLabel } from "../utils";
@@ -100,7 +100,7 @@ function LoanFormFields({ form, setForm, T, showAlreadyPaid = false }) {
 }
 
 export default function Receivables({
-  user, accounts, ledger,
+  user, accounts, ledger, categories,
   employeeLoans, setEmployeeLoans,
   loanPayments,  setLoanPayments,
   onRefresh, setAccounts, setLedger, dark,
@@ -119,13 +119,12 @@ export default function Receivables({
     entity: "Hamasa", from_id: "", notes: "", cash_advance_fee: "",
   });
 
-  // ── Settle (reimburse_in checklist) modal ─────────────────────
-  const [settleModal,   setSettleModal]   = useState(false);
-  const [settleRec,     setSettleRec]     = useState(null);   // receivable account
-  const [settleChecked, setSettleChecked] = useState({});     // { entry.id: boolean }
-  const [settleAmount,  setSettleAmount]  = useState("");     // editable received amount
-  const [settleBankId,  setSettleBankId]  = useState("");
-  const [settleShortfallCatId, setSettleShortfallCatId] = useState(null);
+  // ── Settle two-column state ───────────────────────────────────
+  const [settlements,   setSettlements]  = useState([]);
+  const [selectedOut,   setSelectedOut]  = useState({}); // { accId: Set<ledgerId> }
+  const [selectedIn,    setSelectedIn]   = useState({}); // { accId: Set<ledgerId> }
+  const [settling,      setSettling]     = useState(false);
+  const [expandedSett,  setExpandedSett] = useState(new Set());
 
   // ── Employee Loan modals ──────────────────────────────────────
   const [addLoanModal,  setAddLoanModal]  = useState(false);
@@ -236,131 +235,105 @@ export default function Receivables({
     setSaving(false);
   };
 
-  // ── SETTLE FLOW ──────────────────────────────────────────────
-  // Open settle modal for a receivable account
-  const openSettle = (rec) => {
-    const outEntries = ledger.filter(e => e.tx_type === "reimburse_out" && e.to_id === rec.id);
-    // Default: check all items
-    const checked = {};
-    outEntries.forEach(e => { checked[e.id] = true; });
-    const defaultBank = bankAccounts.find(b =>
-      (b.name || "").toLowerCase().includes("reimburse") || b.subtype === "reimburse"
-    ) || bankAccounts[0];
-    setSettleRec(rec);
-    setSettleChecked(checked);
-    setSettleAmount(String(Number(rec.receivable_outstanding || 0)));
-    setSettleBankId(defaultBank?.id || "");
-    setSettleShortfallCatId("cash_advance_fee");
-    setSettleModal(true);
-  };
+  // ── Fetch settlements on mount ────────────────────────────────
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase.from("reimburse_settlements")
+      .select("*")
+      .eq("user_id", user.id)
+      .order("settled_at", { ascending: false })
+      .then(({ data }) => { if (data) setSettlements(data); });
+  }, [user?.id]);
 
-  const handleSettle = async () => {
-    if (!settleRec || !settleBankId) return showToast("Select a bank account", "error");
-    const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
-    const received = sn(settleAmount);
-    if (received <= 0) return showToast("Enter amount received", "error");
+  // ── RE category lookup ────────────────────────────────────────
+  const RE_CAT_NAMES = { Hamasa: "Hamasa RE", SDC: "SDC RE", Travelio: "Travelio RE" };
+  const getRECat = (entity) =>
+    (categories || []).find(c => c.label === RE_CAT_NAMES[entity] || c.name === RE_CAT_NAMES[entity]);
 
-    const outEntries = ledger.filter(e => e.tx_type === "reimburse_out" && e.to_id === settleRec.id);
-    const checkedEntries = outEntries.filter(e => settleChecked[e.id]);
-    const selectedTotal  = checkedEntries.reduce((s, e) => s + Number(e.amount || 0), 0);
-    const shortfall      = Math.max(0, selectedTotal - received);
-    const excess         = Math.max(0, received - selectedTotal);
+  // ── Toggle row selection ───────────────────────────────────────
+  const toggleOutRow = (accId, entryId) => setSelectedOut(prev => {
+    const s = new Set(prev[accId] || []);
+    s.has(entryId) ? s.delete(entryId) : s.add(entryId);
+    return { ...prev, [accId]: s };
+  });
+  const toggleInRow = (accId, entryId) => setSelectedIn(prev => {
+    const s = new Set(prev[accId] || []);
+    s.has(entryId) ? s.delete(entryId) : s.add(entryId);
+    return { ...prev, [accId]: s };
+  });
 
-    setSaving(true);
+  // ── Settle entity ─────────────────────────────────────────────
+  const handleSettleEntity = async (entity, acc) => {
+    const outIds = Array.from(selectedOut[acc.id] || []);
+    const inIds  = Array.from(selectedIn[acc.id]  || []);
+    if (!outIds.length || !inIds.length)
+      return showToast("Select at least one expense and one received item", "error");
+
+    const outEntries = ledger.filter(e => outIds.includes(e.id));
+    const inEntries  = ledger.filter(e => inIds.includes(e.id));
+    const totalOut   = outEntries.reduce((s, e) => s + Number(e.amount || 0), 0);
+    const totalIn    = inEntries.reduce((s, e) => s + Number(e.amount || 0), 0);
+    const reimbursable = totalOut - totalIn;
+    const recat = getRECat(entity);
+
+    setSettling(true);
     try {
-      const created = [];
+      const { data: settlement, error: sErr } = await supabase
+        .from("reimburse_settlements")
+        .insert([{
+          user_id:              user.id,
+          entity,
+          settled_at:           new Date().toISOString(),
+          out_ledger_ids:       outIds,
+          in_ledger_ids:        inIds,
+          total_out:            totalOut,
+          total_in:             totalIn,
+          reimbursable_expense: reimbursable,
+          re_category_id:       recat?.id || null,
+          notes:                null,
+        }])
+        .select().single();
+      if (sErr) throw new Error(sErr.message);
 
-      // One reimburse_in for the received amount
-      const inEntry = {
-        tx_date:      todayStr(),
-        description:  `${settleRec.entity} reimburse received`,
-        amount:       received,
-        currency:     "IDR",
-        amount_idr:   received,
-        tx_type:      "reimburse_in",
-        from_type:    "account",
-        to_type:      "account",
-        from_id:      settleRec.id,
-        to_id:        settleBankId,
-        entity:       settleRec.entity,
-        is_reimburse: true,
-        notes:        checkedEntries.map(e => e.description).join(", ") || null,
-        merchant_name: null, attachment_url: null,
-        ai_categorized: false, ai_confidence: null,
-        installment_id: null, scan_batch_id: null,
-        category_id: null, category_name: null,
-      };
-      const r1 = await ledgerApi.create(user.id, inEntry, accounts);
-      if (r1) created.push(r1);
-
-      // If shortfall: record as expense from receivable (write-off)
-      if (shortfall > 0) {
-        const expEntry = {
-          tx_date:      todayStr(),
-          description:  `${settleRec.entity} settlement shortfall`,
-          amount:       shortfall,
-          currency:     "IDR",
-          amount_idr:   shortfall,
-          tx_type:      "reimburse_in",  // use reimburse_in so receivable is debited
-          from_type:    "account",
-          to_type:      "account",
-          from_id:      settleRec.id,
-          to_id:        settleBankId,    // goes to same bank (will be zero-value net)
-          entity:       settleRec.entity,
-          is_reimburse: true,
-          category_id:  settleShortfallCatId || null,
-          notes:        "Shortfall write-off",
-          merchant_name: null, attachment_url: null,
-          ai_categorized: false, ai_confidence: null,
-          installment_id: null, scan_batch_id: null,
-          category_name: null,
-        };
-        // Manually reduce receivable_outstanding for shortfall, then reverse bank delta
-        const r2 = await ledgerApi.create(user.id, expEntry, accounts);
-        if (r2) created.push(r2);
-        // Reverse the bank credit (shortfall didn't actually arrive)
-        // We do this by applying a -shortfall to the bank account directly
-        const bankAcc = bankAccounts.find(a => a.id === settleBankId);
-        if (bankAcc) {
-          await supabase.rpc("increment_account_balance", {
-            p_account_id: settleBankId,
-            p_field:      "current_balance",
-            p_delta:      -shortfall,
-          }).catch(() => {});
-        }
+      if (reimbursable > 0) {
+        const fromId = outEntries[0]?.from_id || null;
+        const { error: lErr } = await supabase.from("ledger").insert([{
+          user_id:       user.id,
+          tx_date:       todayStr(),
+          description:   `${entity} Reimbursable Expense`,
+          amount:        reimbursable,
+          amount_idr:    reimbursable,
+          currency:      "IDR",
+          tx_type:       "expense",
+          from_type:     "account",
+          to_type:       "expense",
+          from_id:       fromId,
+          to_id:         null,
+          category_id:   recat?.id || null,
+          category_name: recat?.label || RE_CAT_NAMES[entity],
+          entity:        "Personal",
+          is_reimburse:  false,
+          notes:         `Settlement: ${entity}`,
+          reimburse_settlement_id: settlement.id,
+        }]);
+        if (lErr) throw new Error(lErr.message);
       }
 
-      // If excess: create income entry
-      if (excess > 0) {
-        const exEntry = {
-          tx_date:      todayStr(),
-          description:  `${settleRec.entity} settlement excess`,
-          amount:       excess,
-          currency:     "IDR",
-          amount_idr:   excess,
-          tx_type:      "income",
-          from_type:    "income_source",
-          to_type:      "account",
-          from_id:      null,
-          to_id:        settleBankId,
-          entity:       "Personal",
-          is_reimburse: false,
-          notes:        "Excess reimbursement",
-          merchant_name: null, attachment_url: null,
-          ai_categorized: false, ai_confidence: null,
-          installment_id: null, scan_batch_id: null,
-          category_id: null, category_name: null,
-        };
-        const r3 = await ledgerApi.create(user.id, exEntry, accounts);
-        if (r3) created.push(r3);
-      }
+      const allIds = [...outIds, ...inIds];
+      const { error: uErr } = await supabase.from("ledger")
+        .update({ reimburse_settlement_id: settlement.id })
+        .in("id", allIds);
+      if (uErr) throw new Error(uErr.message);
 
-      setLedger(prev => [...created, ...prev]);
+      setLedger(prev => prev.map(e => allIds.includes(e.id) ? { ...e, reimburse_settlement_id: settlement.id } : e));
+      setSettlements(prev => [settlement, ...prev]);
+      setSelectedOut(prev => ({ ...prev, [acc.id]: new Set() }));
+      setSelectedIn(prev =>  ({ ...prev, [acc.id]: new Set() }));
+
       await onRefresh();
-      showToast(`Settled ${fmtIDR(received, true)} for ${settleRec.entity}`);
-      setSettleModal(false);
+      showToast(`${entity} settled${reimbursable > 0 ? ` · RE: ${fmtIDR(reimbursable, true)}` : ""}`);
     } catch (e) { showToast(e.message, "error"); }
-    setSaving(false);
+    setSettling(false);
   };
 
   // ── EMPLOYEE LOAN ACTIONS ──────────────────────────────────
@@ -551,9 +524,7 @@ export default function Receivables({
                 { label: "Active Entities",   value: String(activeReimburse),       color: "#3b5bdb" },
                 { label: "Total Entities",    value: String(reimburseAccs.length),  color: "#d97706" },
               ].map(s => (
-                <div key={s.label} style={{
-                  background: s.color + "14", borderRadius: 14, padding: "14px 14px",
-                }}>
+                <div key={s.label} style={{ background: s.color + "14", borderRadius: 14, padding: "14px 14px" }}>
                   <div style={{ fontSize: 9, fontWeight: 700, color: s.color, textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 5, opacity: 0.8 }}>
                     {s.label}
                   </div>
@@ -566,115 +537,210 @@ export default function Receivables({
           )}
 
           {reimburseAccs.length === 0 ? (
-            <EmptyState
-              icon="📋"
-              message="No reimburse accounts. Add one from Accounts (type: Receivable → Reimburse)."
-            />
+            <EmptyState icon="📋" message="No reimburse accounts. Add one from Accounts (type: Receivable → Reimburse)." />
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
-              {recStats.map(r => {
-                const outstanding   = Number(r.receivable_outstanding || 0);
-                const entCol        = ENT_COL[r.entity] || T.ac;
-                const entBg         = ENT_BG[r.entity]  || T.sur2;
-                const recentEntries = r.entries.slice(0, 3);
+            recStats.map(r => {
+              const outstanding = Number(r.receivable_outstanding || 0);
+              const entCol      = ENT_COL[r.entity] || T.ac;
+              const entBg       = ENT_BG[r.entity]  || T.sur2;
 
-                return (
-                  <div key={r.id} style={{
-                    background: "#ffffff", borderRadius: 16,
-                    border: "0.5px solid #e5e7eb",
-                    overflow: "hidden",
-                    display: "flex", flexDirection: "column",
-                  }}>
-                    {/* Color bar */}
-                    <div style={{ height: 3, background: entCol }} />
+              // Unsettled rows for this entity account
+              const outRows = ledger.filter(e =>
+                e.tx_type === "reimburse_out" && e.to_id === r.id && !e.reimburse_settlement_id
+              ).sort((a, b) => b.tx_date.localeCompare(a.tx_date));
+              const inRows = ledger.filter(e =>
+                e.tx_type === "reimburse_in" && e.from_id === r.id && !e.reimburse_settlement_id
+              ).sort((a, b) => b.tx_date.localeCompare(a.tx_date));
 
-                    <div style={{ padding: "14px 14px 12px", flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
-                      {/* Entity badge */}
+              const entitySettlements = settlements.filter(s => s.entity === r.entity);
+
+              const selOut = selectedOut[r.id] || new Set();
+              const selIn  = selectedIn[r.id]  || new Set();
+              const selOutEntries = outRows.filter(e => selOut.has(e.id));
+              const selInEntries  = inRows.filter(e => selIn.has(e.id));
+              const totalOutSel  = selOutEntries.reduce((s, e) => s + Number(e.amount || 0), 0);
+              const totalInSel   = selInEntries.reduce((s, e) => s + Number(e.amount || 0), 0);
+              const reimbursable = totalOutSel - totalInSel;
+              const canSettle    = selOut.size > 0 && selIn.size > 0;
+
+              return (
+                <div key={r.id} style={{ background: "#ffffff", border: "0.5px solid #e5e7eb", borderRadius: 16, overflow: "hidden" }}>
+                  {/* Color bar */}
+                  <div style={{ height: 3, background: entCol }} />
+
+                  <div style={{ padding: "14px 16px" }}>
+                    {/* ── Card header ── */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
                       <div>
-                        <span style={{
-                          display: "inline-block",
-                          background: entBg, color: entCol,
-                          borderRadius: 6, padding: "2px 8px",
-                          fontSize: 11, fontWeight: 700, fontFamily: "Figtree, sans-serif",
-                        }}>
+                        <span style={{ display: "inline-block", background: entBg, color: entCol, borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 700, fontFamily: "Figtree, sans-serif" }}>
                           {r.entity}
                         </span>
-                      </div>
-
-                      {/* Outstanding amount */}
-                      <div>
-                        <div style={{ fontSize: 22, fontWeight: 900, color: outstanding > 0 ? entCol : "#9ca3af", fontFamily: "Figtree, sans-serif", lineHeight: 1.2 }}>
+                        <div style={{ fontSize: 20, fontWeight: 900, color: outstanding > 0 ? entCol : "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 4, lineHeight: 1.2 }}>
                           {fmtIDR(outstanding)}
                         </div>
-                        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>outstanding</div>
+                        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>outstanding</div>
                       </div>
-
-                      {/* Aging badge */}
-                      {r.aging && outstanding > 0 && (
-                        <div style={{
-                          display: "inline-flex", alignSelf: "flex-start",
-                          background: r.aging.color + "22", color: r.aging.color,
-                          borderRadius: 5, padding: "2px 7px",
-                          fontSize: 10, fontWeight: 700, fontFamily: "Figtree, sans-serif",
-                        }}>
-                          ⏱ {r.aging.label}
-                        </div>
-                      )}
-
-                      {/* Recent entries */}
-                      {recentEntries.length > 0 && (
-                        <div style={{ borderTop: "0.5px solid #f3f4f6", paddingTop: 8 }}>
-                          {recentEntries.map(e => (
-                            <div key={e.id} style={{
-                              display: "flex", justifyContent: "space-between",
-                              fontSize: 11, color: "#6b7280", marginBottom: 4, gap: 6,
-                            }}>
-                              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                {e.tx_date.slice(5)} · {e.description}
-                              </span>
-                              <span style={{ fontWeight: 700, flexShrink: 0, color: e.tx_type === "reimburse_in" ? "#059669" : "#dc2626" }}>
-                                {e.tx_type === "reimburse_in" ? "−" : "+"}{fmtIDR(Number(e.amount || 0), true)}
-                              </span>
-                            </div>
-                          ))}
-                          {r.entries.length > 3 && (
-                            <div style={{ fontSize: 10, color: "#9ca3af" }}>
-                              +{r.entries.length - 3} more
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Bottom action bar */}
-                    <div style={{ borderTop: "0.5px solid #f3f4f6", padding: "8px 14px", display: "flex", gap: 6 }}>
                       <button
                         onClick={() => { setOutForm(f => ({ ...f, entity: r.entity })); setOutModal(true); }}
-                        style={{
-                          flex: 1, height: 30, border: "none", borderRadius: 8, cursor: "pointer",
-                          background: entBg, color: entCol,
-                          fontSize: 12, fontWeight: 700, fontFamily: "Figtree, sans-serif",
-                        }}
+                        style={{ height: 30, padding: "0 14px", border: "none", borderRadius: 8, cursor: "pointer", background: entBg, color: entCol, fontSize: 12, fontWeight: 700, fontFamily: "Figtree, sans-serif" }}
                       >
                         + Expense
                       </button>
-                      {outstanding > 0 && (
-                        <button
-                          onClick={() => openSettle(r)}
-                          style={{
-                            flex: 1, height: 30, border: "1px solid #bbf7d0", borderRadius: 8, cursor: "pointer",
-                            background: "#f0fdf4", color: "#059669",
-                            fontSize: 12, fontWeight: 700, fontFamily: "Figtree, sans-serif",
-                          }}
-                        >
-                          ✓ Settle
-                        </button>
-                      )}
                     </div>
+
+                    {/* ── Two-column settle UI ── */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                      {/* Left: Expenses OUT */}
+                      <div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#dc2626", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif", marginBottom: 6 }}>
+                          Expenses (Out)
+                        </div>
+                        {outRows.length === 0 ? (
+                          <div style={{ fontSize: 11, color: "#9ca3af", padding: "6px 0" }}>No unsettled expenses</div>
+                        ) : outRows.map(e => {
+                          const isSelected = selOut.has(e.id);
+                          const fromAcc = accounts.find(a => a.id === e.from_id);
+                          return (
+                            <div
+                              key={e.id}
+                              onClick={() => toggleOutRow(r.id, e.id)}
+                              style={{ cursor: "pointer", border: isSelected ? "1.5px solid #dc2626" : "1px solid #f3f4f6", borderRadius: 8, padding: "8px 10px", marginBottom: 4, background: isSelected ? "#fff5f5" : "#fafafa" }}
+                            >
+                              <div style={{ display: "flex", justifyContent: "space-between", gap: 4 }}>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "Figtree, sans-serif" }}>{e.description}</div>
+                                  <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1 }}>{e.tx_date} · {fromAcc?.name || "—"}</div>
+                                </div>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: "#dc2626", flexShrink: 0 }}>{fmtIDR(Number(e.amount || 0), true)}</div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Right: Received IN */}
+                      <div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#059669", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif", marginBottom: 6 }}>
+                          Received (In)
+                        </div>
+                        {inRows.length === 0 ? (
+                          <div style={{ fontSize: 11, color: "#9ca3af", padding: "6px 0" }}>No unsettled received</div>
+                        ) : inRows.map(e => {
+                          const isSelected = selIn.has(e.id);
+                          const toAcc = accounts.find(a => a.id === e.to_id);
+                          return (
+                            <div
+                              key={e.id}
+                              onClick={() => toggleInRow(r.id, e.id)}
+                              style={{ cursor: "pointer", border: isSelected ? "1.5px solid #059669" : "1px solid #f3f4f6", borderRadius: 8, padding: "8px 10px", marginBottom: 4, background: isSelected ? "#f0fdf4" : "#fafafa" }}
+                            >
+                              <div style={{ display: "flex", justifyContent: "space-between", gap: 4 }}>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "Figtree, sans-serif" }}>{e.description}</div>
+                                  <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1 }}>{e.tx_date} · {toAcc?.name || "—"}</div>
+                                </div>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: "#059669", flexShrink: 0 }}>+{fmtIDR(Number(e.amount || 0), true)}</div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* ── Summary + Settle ── */}
+                    {(selOut.size > 0 || selIn.size > 0) && (
+                      <div style={{ marginTop: 10, borderTop: "0.5px solid #f3f4f6", paddingTop: 10 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3, fontFamily: "Figtree, sans-serif" }}>
+                          <span style={{ color: "#9ca3af" }}>Total Out selected</span>
+                          <span style={{ fontWeight: 700, color: "#dc2626" }}>{fmtIDR(totalOutSel)}</span>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 8, fontFamily: "Figtree, sans-serif" }}>
+                          <span style={{ color: "#9ca3af" }}>Total In selected</span>
+                          <span style={{ fontWeight: 700, color: "#059669" }}>+{fmtIDR(totalInSel)}</span>
+                        </div>
+                        <div style={{ borderTop: "0.5px solid #e5e7eb", paddingTop: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <div>
+                            <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>Reimbursable Expense ({r.entity} RE)</div>
+                            <div style={{ fontSize: 16, fontWeight: 900, fontFamily: "Figtree, sans-serif", color: reimbursable > 0 ? "#dc2626" : "#059669" }}>
+                              {fmtIDR(Math.abs(reimbursable))}
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => handleSettleEntity(r.entity, r)}
+                            disabled={!canSettle || settling}
+                            style={{
+                              height: 34, padding: "0 18px", border: "none", borderRadius: 8,
+                              cursor: canSettle && !settling ? "pointer" : "not-allowed",
+                              background: canSettle ? entCol : "#e5e7eb",
+                              color: canSettle ? "#fff" : "#9ca3af",
+                              fontSize: 13, fontWeight: 700, fontFamily: "Figtree, sans-serif",
+                              opacity: settling ? 0.6 : 1,
+                            }}
+                          >
+                            {settling ? "Settling…" : "Settle →"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── Settlement history ── */}
+                    {entitySettlements.length > 0 && (
+                      <div style={{ marginTop: 14, borderTop: "0.5px solid #f3f4f6", paddingTop: 10 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif", marginBottom: 6 }}>
+                          Settlement History
+                        </div>
+                        {entitySettlements.map(s => {
+                          const isExpanded = expandedSett.has(s.id);
+                          const date = new Date(s.settled_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                          const outLedger = ledger.filter(e => (s.out_ledger_ids || []).includes(e.id));
+                          const inLedger  = ledger.filter(e => (s.in_ledger_ids  || []).includes(e.id));
+                          const re = Number(s.reimbursable_expense || 0);
+                          return (
+                            <div key={s.id} style={{ border: "0.5px solid #f3f4f6", borderRadius: 8, marginBottom: 4, overflow: "hidden" }}>
+                              <div
+                                onClick={() => setExpandedSett(prev => { const ns = new Set(prev); ns.has(s.id) ? ns.delete(s.id) : ns.add(s.id); return ns; })}
+                                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", cursor: "pointer", background: "#fafafa" }}
+                              >
+                                <div>
+                                  <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", fontFamily: "Figtree, sans-serif" }}>{date}</div>
+                                  <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1, fontFamily: "Figtree, sans-serif" }}>
+                                    Out {fmtIDR(Number(s.total_out || 0), true)} · In {fmtIDR(Number(s.total_in || 0), true)} ·{" "}
+                                    <span style={{ fontWeight: 700, color: re > 0 ? "#dc2626" : "#059669" }}>RE {fmtIDR(re, true)}</span>
+                                  </div>
+                                </div>
+                                <span style={{ fontSize: 10, color: "#9ca3af" }}>{isExpanded ? "▲" : "▼"}</span>
+                              </div>
+                              {isExpanded && (
+                                <div style={{ padding: "8px 10px", borderTop: "0.5px solid #f3f4f6", background: "#fff" }}>
+                                  <div style={{ fontSize: 10, fontWeight: 700, color: "#dc2626", marginBottom: 4, fontFamily: "Figtree, sans-serif" }}>OUT</div>
+                                  {outLedger.map(e => (
+                                    <div key={e.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3, fontFamily: "Figtree, sans-serif" }}>
+                                      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#374151" }}>{e.description} · {e.tx_date}</span>
+                                      <span style={{ fontWeight: 700, color: "#dc2626", flexShrink: 0, marginLeft: 6 }}>{fmtIDR(Number(e.amount || 0), true)}</span>
+                                    </div>
+                                  ))}
+                                  <div style={{ fontSize: 10, fontWeight: 700, color: "#059669", margin: "8px 0 4px", fontFamily: "Figtree, sans-serif" }}>IN</div>
+                                  {inLedger.map(e => (
+                                    <div key={e.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3, fontFamily: "Figtree, sans-serif" }}>
+                                      <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#374151" }}>{e.description} · {e.tx_date}</span>
+                                      <span style={{ fontWeight: 700, color: "#059669", flexShrink: 0, marginLeft: 6 }}>+{fmtIDR(Number(e.amount || 0), true)}</span>
+                                    </div>
+                                  ))}
+                                  <div style={{ borderTop: "0.5px solid #f3f4f6", paddingTop: 6, marginTop: 4, display: "flex", justifyContent: "space-between", fontSize: 12, fontFamily: "Figtree, sans-serif" }}>
+                                    <span style={{ fontWeight: 700, color: "#374151" }}>{r.entity} RE</span>
+                                    <span style={{ fontWeight: 900, color: re > 0 ? "#dc2626" : "#059669" }}>{fmtIDR(re)}</span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                );
-              })}
-            </div>
+                </div>
+              );
+            })
           )}
         </div>
       )}
@@ -940,116 +1006,6 @@ export default function Receivables({
         </div>
       </Modal>
 
-      {/* ── SETTLE REIMBURSEMENT MODAL (checklist) ────── */}
-      <Modal
-        isOpen={settleModal && !!settleRec}
-        onClose={() => setSettleModal(false)}
-        title={`Settle ${settleRec?.entity || ""} Receivables`}
-        footer={
-          <div style={{ display: "flex", gap: 8 }}>
-            <Button variant="secondary" size="md" onClick={() => setSettleModal(false)}>Cancel</Button>
-            <Button variant="primary" size="md" busy={saving} onClick={handleSettle}>
-              Confirm Settlement
-            </Button>
-          </div>
-        }
-      >
-        {settleRec && (() => {
-          const outEntries = ledger.filter(e => e.tx_type === "reimburse_out" && e.to_id === settleRec.id);
-          const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
-          const selectedTotal = outEntries.filter(e => settleChecked[e.id]).reduce((s, e) => s + Number(e.amount || 0), 0);
-          const received  = sn(settleAmount);
-          const shortfall = Math.max(0, selectedTotal - received);
-          const excess    = Math.max(0, received - selectedTotal);
-
-          const allCats = [
-            { value: "", label: "— no category —" },
-          ].concat(
-            (window._catOptions || [])
-          );
-
-          return (
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              {/* Checklist */}
-              {outEntries.length === 0 ? (
-                <div style={{ fontSize: 13, color: "#9ca3af", textAlign: "center", padding: "20px 0" }}>
-                  No reimburse_out entries found for {settleRec.entity}.
-                </div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", padding: "4px 0 8px", borderBottom: "1px solid #f3f4f6", marginBottom: 4 }}>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af" }}>ITEM</span>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#9ca3af" }}>AMOUNT</span>
-                  </div>
-                  {outEntries.map(e => (
-                    <label key={e.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid #f9fafb", cursor: "pointer" }}>
-                      <input
-                        type="checkbox"
-                        checked={!!settleChecked[e.id]}
-                        onChange={ev => {
-                          setSettleChecked(c => ({ ...c, [e.id]: ev.target.checked }));
-                        }}
-                        style={{ width: 16, height: 16, cursor: "pointer", accentColor: "#059669" }}
-                      />
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
-                          {e.description || "—"}
-                        </div>
-                        <div style={{ fontSize: 10, color: "#9ca3af" }}>{e.tx_date}</div>
-                      </div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "#dc2626", fontFamily: "Figtree, sans-serif", flexShrink: 0 }}>
-                        {fmtIDR(Number(e.amount || 0), true)}
-                      </div>
-                    </label>
-                  ))}
-                  <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0 0", fontSize: 12, fontWeight: 700 }}>
-                    <span style={{ color: "#6b7280" }}>Selected total</span>
-                    <span style={{ color: "#111827" }}>{fmtIDR(selectedTotal)}</span>
-                  </div>
-                </div>
-              )}
-
-              {/* To account */}
-              <Select
-                label="To Bank Account *"
-                value={settleBankId}
-                onChange={e => setSettleBankId(e.target.value)}
-                options={bankAccounts.map(b => ({ value: b.id, label: b.name }))}
-                placeholder="Select bank…"
-              />
-
-              {/* Amount received (editable) */}
-              <AmountInput
-                label="Amount Received *"
-                value={settleAmount}
-                onChange={v => setSettleAmount(v)}
-                currency="IDR"
-              />
-
-              {/* Shortfall / excess indicator */}
-              {shortfall > 0 && (
-                <div style={{ background: "#fef9ec", border: "1px solid #fde68a", borderRadius: 10, padding: "10px 14px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#92400e", marginBottom: 8 }}>
-                    Shortfall: {fmtIDR(shortfall)} — write off as expense?
-                  </div>
-                  <Select
-                    label="Category (optional)"
-                    value={settleShortfallCatId || ""}
-                    onChange={e => setSettleShortfallCatId(e.target.value || null)}
-                    options={allCats}
-                    placeholder="— skip —"
-                  />
-                </div>
-              )}
-              {excess > 0 && (
-                <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "10px 14px", fontSize: 12, fontWeight: 600, color: "#059669" }}>
-                  Excess: {fmtIDR(excess)} — will be recorded as income.
-                </div>
-              )}
-            </div>
-          );
-        })()}
-      </Modal>
 
       {/* ── ADD LOAN MODAL ───────────────────────────────── */}
       <Modal
