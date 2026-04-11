@@ -523,50 +523,55 @@ export default function Dashboard({
       </div>
 
       {/* ── GMAIL PENDING BANNER ── */}
-      {pendingSyncs?.length > 0 && (
-        <div style={{
-          background:   "#fef9ec",
-          border:       "1.5px solid #fde68a",
-          borderRadius: 14,
-          padding:      "14px 16px",
-          display:      "flex",
-          alignItems:   "center",
-          justifyContent: "space-between",
-          gap:          12,
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 20 }}>📧</span>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#92400e", fontFamily: "Figtree, sans-serif" }}>
-                {pendingSyncs.length} transaction{pendingSyncs.length > 1 ? "s" : ""} from Gmail need review
-              </div>
-              <div style={{ fontSize: 11, color: "#b45309", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
-                {lastSyncMins != null
-                  ? `Last sync ${lastSyncMins < 1 ? "just now" : `${lastSyncMins} min ago`}`
-                  : "Gmail sync found new transactions"}
+      {(() => {
+        // Only count rows that have actual extracted transactions
+        const gmailCount = (pendingSyncs || []).filter(s => s.ai_raw_result && Number(s.extracted_count || 0) > 0).length;
+        if (gmailCount === 0) return null;
+        return (
+          <div style={{
+            background:   "#fef9ec",
+            border:       "1.5px solid #fde68a",
+            borderRadius: 14,
+            padding:      "14px 16px",
+            display:      "flex",
+            alignItems:   "center",
+            justifyContent: "space-between",
+            gap:          12,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 20 }}>📧</span>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#92400e", fontFamily: "Figtree, sans-serif" }}>
+                  {gmailCount} transaction{gmailCount > 1 ? "s" : ""} from Gmail need review
+                </div>
+                <div style={{ fontSize: 11, color: "#b45309", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
+                  {lastSyncMins != null
+                    ? `Last sync ${lastSyncMins < 1 ? "just now" : `${lastSyncMins} min ago`}`
+                    : "Gmail sync found new transactions"}
+                </div>
               </div>
             </div>
+            <button
+              onClick={() => openAiImport?.("gmail")}
+              style={{
+                background:   "#d97706",
+                color:        "#fff",
+                border:       "none",
+                borderRadius: 8,
+                padding:      "7px 14px",
+                fontSize:     12,
+                fontWeight:   700,
+                cursor:       "pointer",
+                fontFamily:   "Figtree, sans-serif",
+                whiteSpace:   "nowrap",
+                flexShrink:   0,
+              }}
+            >
+              Review Now →
+            </button>
           </div>
-          <button
-            onClick={() => openAiImport?.("gmail")}
-            style={{
-              background:   "#d97706",
-              color:        "#fff",
-              border:       "none",
-              borderRadius: 8,
-              padding:      "7px 14px",
-              fontSize:     12,
-              fontWeight:   700,
-              cursor:       "pointer",
-              fontFamily:   "Figtree, sans-serif",
-              whiteSpace:   "nowrap",
-              flexShrink:   0,
-            }}
-          >
-            Review Now →
-          </button>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── BENTO GRID ── */}
       <div style={{

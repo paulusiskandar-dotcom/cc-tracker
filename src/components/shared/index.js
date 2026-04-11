@@ -15,3 +15,5 @@ export { BentoCard, HeroCard, StatRow, Badge, SectionHeader, EmptyState, Spinner
 
 export { default as TransactionRow }  from "./TransactionRow";
 export { DateGroupHeader, GroupedTransactionList } from "./TransactionRow";
+
+export { default as SortDropdown } from "./SortDropdown";

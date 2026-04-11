@@ -9,6 +9,7 @@ import Modal, { ConfirmModal } from "./shared/Modal";
 import Button from "./shared/Button";
 import Input, { Field, AmountInput, FormRow } from "./shared/Input";
 import Select from "./shared/Select";
+import SortDropdown from "./shared/SortDropdown";
 import { EmptyState, showToast } from "./shared/Card";
 
 const MULTICURRENCY_BANKS = ["BCA", "OCBC", "Jenius", "Danamon"];
@@ -737,19 +738,35 @@ function CashAccountCard({ account: a, fxRates = {}, CURRENCIES: C = [], ledger,
 }
 
 // ─── BANK PAGE CONTENT ───────────────────────────────────────
+const BANK_SORT_OPTS = [
+  { value: "balance_desc", label: "Saldo tertinggi → terendah" },
+  { value: "balance_asc",  label: "Saldo terendah → tertinggi" },
+  { value: "name_asc",     label: "Nama A → Z" },
+  { value: "bank_asc",     label: "Bank A → Z" },
+  { value: "updated_desc", label: "Terakhir diupdate" },
+];
+
 function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, CURRENCIES: C = [], onEdit, onDelete, onHistory }) {
   const [bankFilter, setBankFilter] = useState("all");
+  const [sort, setSort] = useState(() => localStorage.getItem("sort_bank") || "balance_desc");
 
   const bankNames = useMemo(() =>
     [...new Set(accounts.map(a => a.bank_name).filter(Boolean))].sort(),
   [accounts]);
 
-  // Sort highest balance first, preserve original index for palette color
-  const sorted = useMemo(() =>
-    accounts
-      .map((a, i) => ({ a, i }))
-      .sort((x, y) => Number(y.a.current_balance || 0) - Number(x.a.current_balance || 0)),
-  [accounts]);
+  const sorted = useMemo(() => {
+    const indexed = accounts.map((a, i) => ({ a, i }));
+    indexed.sort((x, y) => {
+      switch (sort) {
+        case "balance_asc":  return Number(x.a.current_balance || 0) - Number(y.a.current_balance || 0);
+        case "name_asc":     return (x.a.name || "").localeCompare(y.a.name || "");
+        case "bank_asc":     return (x.a.bank_name || "").localeCompare(y.a.bank_name || "");
+        case "updated_desc": return (y.a.updated_at || "").localeCompare(x.a.updated_at || "");
+        default:             return Number(y.a.current_balance || 0) - Number(x.a.current_balance || 0);
+      }
+    });
+    return indexed;
+  }, [accounts, sort]);
 
   const visible = bankFilter === "all" ? sorted : sorted.filter(({ a }) => a.bank_name === bankFilter);
 
@@ -790,26 +807,34 @@ function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, CURRENC
         ))}
       </div>
 
-      {/* Bank filter pills */}
-      {bankNames.length > 1 && (
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {["all", ...bankNames].map(b => {
-            const active = bankFilter === b;
-            return (
-              <button key={b} onClick={() => setBankFilter(b)} style={{
-                height: 28, padding: "0 12px", borderRadius: 20, cursor: "pointer",
-                border: `1.5px solid ${active ? "#111827" : "#e5e7eb"}`,
-                background: active ? "#111827" : "#fff",
-                color: active ? "#fff" : "#6b7280",
-                fontSize: 12, fontWeight: active ? 700 : 500,
-                fontFamily: "Figtree, sans-serif", transition: "all 0.15s",
-              }}>
-                {b === "all" ? "All" : b}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {/* Sort + bank filter row */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+        {bankNames.length > 1 ? (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {["all", ...bankNames].map(b => {
+              const active = bankFilter === b;
+              return (
+                <button key={b} onClick={() => setBankFilter(b)} style={{
+                  height: 28, padding: "0 12px", borderRadius: 20, cursor: "pointer",
+                  border: `1.5px solid ${active ? "#111827" : "#e5e7eb"}`,
+                  background: active ? "#111827" : "#fff",
+                  color: active ? "#fff" : "#6b7280",
+                  fontSize: 12, fontWeight: active ? 700 : 500,
+                  fontFamily: "Figtree, sans-serif", transition: "all 0.15s",
+                }}>
+                  {b === "all" ? "All" : b}
+                </button>
+              );
+            })}
+          </div>
+        ) : <div />}
+        <SortDropdown
+          storageKey="sort_bank"
+          options={BANK_SORT_OPTS}
+          value={sort}
+          onChange={v => setSort(v)}
+        />
+      </div>
 
       {/* 3-col grid — same spacing as Cash page */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
@@ -833,8 +858,16 @@ function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, CURRENC
   );
 }
 
+const CASH_SORT_OPTS = [
+  { value: "balance_desc", label: "Saldo tertinggi → terendah" },
+  { value: "balance_asc",  label: "Saldo terendah → tertinggi" },
+  { value: "name_asc",     label: "Nama A → Z" },
+];
+
 // ─── CASH PAGE CONTENT ───────────────────────────────────────
 function CashPageContent({ accounts, fxRates, CURRENCIES: C = [], ledger, onEdit, onDelete, onHistory }) {
+  const [sort, setSort] = useState(() => localStorage.getItem("sort_cash") || "balance_desc");
+
   const idrAccts    = accounts.filter(a => !a.currency || a.currency === "IDR");
   const foreignAccts = accounts.filter(a => a.currency && a.currency !== "IDR");
   const totalIDR    = idrAccts.reduce((s, a) => s + Number(a.current_balance || 0), 0);
@@ -844,6 +877,15 @@ function CashPageContent({ accounts, fxRates, CURRENCIES: C = [], ledger, onEdit
     return a2 + Math.round(Number(a.current_balance || 0) * rate);
   }, 0);
   const grandTotal = totalIDR + foreignIDR;
+
+  const sortedAccounts = useMemo(() => {
+    const arr = [...accounts];
+    switch (sort) {
+      case "balance_asc": return arr.sort((a, b) => Number(a.current_balance || 0) - Number(b.current_balance || 0));
+      case "name_asc":    return arr.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+      default:            return arr.sort((a, b) => Number(b.current_balance || 0) - Number(a.current_balance || 0));
+    }
+  }, [accounts, sort]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -861,9 +903,19 @@ function CashPageContent({ accounts, fxRates, CURRENCIES: C = [], ledger, onEdit
         ))}
       </div>
 
+      {/* Sort row */}
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <SortDropdown
+          storageKey="sort_cash"
+          options={CASH_SORT_OPTS}
+          value={sort}
+          onChange={v => setSort(v)}
+        />
+      </div>
+
       {/* 3-col grid */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
-        {accounts.map((a, i) => (
+        {sortedAccounts.map((a, i) => (
           <CashAccountCard
             key={a.id}
             account={a}

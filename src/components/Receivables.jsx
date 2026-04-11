@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { ledgerApi, employeeLoanApi, loanPaymentsApi } from "../api";
 import { supabase } from "../lib/supabase";
 import { fmtIDR, todayStr, agingLabel } from "../utils";
+import SortDropdown from "./shared/SortDropdown";
 import { ENT_COL, ENT_BG, LIGHT, DARK } from "../theme";
 import {
   Modal, Button,
@@ -109,6 +110,9 @@ export default function Receivables({
 
   const [subTab, setSubTab] = useState("reimburse");
   const [saving, setSaving] = useState(false);
+
+  // ── Sort state ───────────────────────────────────────────────
+  const [reimSort, setReimSort] = useState(() => localStorage.getItem("sort_receivables") || "outstanding_desc");
 
   // ── Reimburse modals ─────────────────────────────────────────
   const [outModal, setOutModal]         = useState(false);
@@ -541,7 +545,32 @@ export default function Receivables({
           {reimburseAccs.length === 0 ? (
             <EmptyState icon="📋" message="No reimburse accounts. Add one from Accounts (type: Receivable → Reimburse)." />
           ) : (
-            recStats.map(r => {
+            <>
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <SortDropdown
+                  storageKey="sort_receivables"
+                  options={[
+                    { value: "outstanding_desc", label: "Outstanding tertinggi → terendah" },
+                    { value: "outstanding_asc",  label: "Outstanding terendah → tertinggi" },
+                    { value: "oldest",           label: "Terlama belum dibayar" },
+                    { value: "name_asc",         label: "Nama A → Z" },
+                  ]}
+                  value={reimSort}
+                  onChange={v => setReimSort(v)}
+                />
+              </div>
+              {[...recStats].sort((a, b) => {
+                switch (reimSort) {
+                  case "outstanding_asc":  return Number(a.receivable_outstanding || 0) - Number(b.receivable_outstanding || 0);
+                  case "oldest": {
+                    const oldA = a.entries.length ? a.entries[a.entries.length - 1].tx_date : "9999";
+                    const oldB = b.entries.length ? b.entries[b.entries.length - 1].tx_date : "9999";
+                    return oldA.localeCompare(oldB);
+                  }
+                  case "name_asc":         return (a.entity || a.name || "").localeCompare(b.entity || b.name || "");
+                  default:                 return Number(b.receivable_outstanding || 0) - Number(a.receivable_outstanding || 0);
+                }
+              }).map(r => {
               const outstanding = Number(r.receivable_outstanding || 0);
               const entCol      = ENT_COL[r.entity] || T.ac;
               const entBg       = ENT_BG[r.entity]  || T.sur2;
@@ -750,7 +779,8 @@ export default function Receivables({
                   </div>
                 </div>
               );
-            })
+            })}
+            </>
           )}
         </div>
       )}

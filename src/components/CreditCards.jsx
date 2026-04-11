@@ -7,6 +7,7 @@ import Button from "./shared/Button";
 import Input, { Field, AmountInput, FormRow } from "./shared/Input";
 import Select from "./shared/Select";
 import { EmptyState, showToast } from "./shared/Card";
+import SortDropdown from "./shared/SortDropdown";
 
 const SUBTABS = [
   { id: "overview",     label: "Overview" },
@@ -54,6 +55,7 @@ export default function CreditCards({
   const [subTab,       setSubTab]       = useState("overview");
   const [selectedCard, setSelectedCard] = useState(null);
   const [ccBankFilter, setCcBankFilter] = useState("all");
+  const [ccSort,       setCcSort]       = useState(() => localStorage.getItem("sort_cc") || "debt_desc");
   const [filterMonth,  setFilterMonth]  = useState("");
   const [modal,        setModal]        = useState(null);
   const [saving,       setSaving]       = useState(false);
@@ -457,19 +459,55 @@ export default function CreditCards({
                     );
                   })()}
 
-                  {/* Standalone cards in 3-col grid */}
-                  {standaloneCards.filter(cc => !ccBankFilter || ccBankFilter === "all" || cc.bank_name === ccBankFilter).length > 0 && (
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
-                      {standaloneCards.filter(cc => !ccBankFilter || ccBankFilter === "all" || cc.bank_name === ccBankFilter).map((cc, i) => (
-                        <CCCard key={cc.id} cc={cc}
-                          color={CARD_PALETTE[(paletteIdx + i) % CARD_PALETTE.length]}
-                          onPay={() => { setPayForm(f => ({ ...f, cardId: cc.id, amount: cc.debt })); setModal("pay"); }}
-                          onTransactions={() => { setSelectedCard(cc.id); setSubTab("transactions"); }}
-                          onInstallments={() => setSubTab("installments")}
-                        />
-                      ))}
-                    </div>
-                  )}
+                  {/* Sort + standalone cards */}
+                  {(() => {
+                    const filtered = standaloneCards.filter(cc => !ccBankFilter || ccBankFilter === "all" || cc.bank_name === ccBankFilter);
+                    const CC_SORT_OPTS = [
+                      { value: "debt_desc",  label: "Tagihan tertinggi → terendah" },
+                      { value: "limit_desc", label: "Limit tertinggi → terendah" },
+                      { value: "util_desc",  label: "Utilisasi tertinggi" },
+                      { value: "due_asc",    label: "Jatuh tempo terdekat" },
+                      { value: "name_asc",   label: "Nama A → Z" },
+                    ];
+                    const sortedCC = [...filtered].sort((a, b) => {
+                      switch (ccSort) {
+                        case "limit_desc": return Number(b.limit || 0) - Number(a.limit || 0);
+                        case "util_desc":  return Number(b.util  || 0) - Number(a.util  || 0);
+                        case "due_asc": {
+                          const da = a.due_day ?? 999;
+                          const db = b.due_day ?? 999;
+                          const dueA = da === 999 ? da : (a.dueIn != null ? a.dueIn : da);
+                          const dueB = db === 999 ? db : (b.dueIn != null ? b.dueIn : db);
+                          return dueA - dueB;
+                        }
+                        case "name_asc":   return (a.name || "").localeCompare(b.name || "");
+                        default:           return Number(b.debt  || 0) - Number(a.debt  || 0);
+                      }
+                    });
+                    if (!filtered.length) return null;
+                    return (
+                      <>
+                        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                          <SortDropdown
+                            storageKey="sort_cc"
+                            options={CC_SORT_OPTS}
+                            value={ccSort}
+                            onChange={v => setCcSort(v)}
+                          />
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
+                          {sortedCC.map((cc, i) => (
+                            <CCCard key={cc.id} cc={cc}
+                              color={CARD_PALETTE[(paletteIdx + i) % CARD_PALETTE.length]}
+                              onPay={() => { setPayForm(f => ({ ...f, cardId: cc.id, amount: cc.debt })); setModal("pay"); }}
+                              onTransactions={() => { setSelectedCard(cc.id); setSubTab("transactions"); }}
+                              onInstallments={() => setSubTab("installments")}
+                            />
+                          ))}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               );
             })()

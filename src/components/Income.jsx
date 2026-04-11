@@ -8,6 +8,7 @@ import {
   Field, AmountInput, Input, FormRow, Toggle,
   Select,
   SectionHeader, EmptyState, showToast,
+  SortDropdown,
 } from "./shared/index";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
@@ -26,6 +27,7 @@ export default function Income({
   const T = dark ? DARK : LIGHT;
 
   const [subTab, setSubTab]         = useState("sources");
+  const [incSort, setIncSort]       = useState(() => localStorage.getItem("sort_income") || "amount_desc");
   const [saving, setSaving]         = useState(false);
   const [filterMonth, setFilterMonth] = useState(curMonth || ym(todayStr()));
 
@@ -184,9 +186,24 @@ export default function Income({
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
       {/* ── HEADER ─────────────────────────────────────── */}
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <Button variant="secondary" size="sm" onClick={() => openSrcModal()}>+ Source</Button>
-        <Button variant="primary"   size="sm" onClick={openIncModal}>+ Income</Button>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        {subTab === "sources" ? (
+          <SortDropdown
+            storageKey="sort_income"
+            options={[
+              { value: "amount_desc",  label: "Amount tertinggi → terendah" },
+              { value: "amount_asc",   label: "Amount terendah → tertinggi" },
+              { value: "created_desc", label: "Terbaru" },
+              { value: "name_asc",     label: "Nama A → Z" },
+            ]}
+            value={incSort}
+            onChange={v => setIncSort(v)}
+          />
+        ) : <div />}
+        <div style={{ display: "flex", gap: 8 }}>
+          <Button variant="secondary" size="sm" onClick={() => openSrcModal()}>+ Source</Button>
+          <Button variant="primary"   size="sm" onClick={openIncModal}>+ Income</Button>
+        </div>
       </div>
 
       {/* ── SUB-TABS ─────────────────────────────────────── */}
@@ -264,7 +281,14 @@ export default function Income({
           {incomeSrcs.length === 0 && loanAccs.length === 0 ? (
             <EmptyState icon="💰" message="No income sources. Add your salary, rent, etc." />
           ) : (
-            incomeSrcs.map(src => (
+            [...incomeSrcs].sort((a, b) => {
+              switch (incSort) {
+                case "amount_asc":   return Number(a.expected_amount || 0) - Number(b.expected_amount || 0);
+                case "created_desc": return (b.created_at || "").localeCompare(a.created_at || "");
+                case "name_asc":     return (a.name || "").localeCompare(b.name || "");
+                default:             return Number(b.expected_amount || 0) - Number(a.expected_amount || 0);
+              }
+            }).map(src => (
               <div key={src.id} style={card}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                   <div>

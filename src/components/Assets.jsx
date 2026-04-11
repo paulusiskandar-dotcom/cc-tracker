@@ -9,6 +9,7 @@ import {
   Field, AmountInput, Input, FormRow,
   Select,
   SectionHeader, EmptyState, showToast,
+  SortDropdown,
 } from "./shared/index";
 
 // ─── CONSTANTS ────────────────────────────────────────────────
@@ -259,10 +260,29 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
 
   const donutColors = byCategory.map(c => ASSET_COL[c.name] || "#9ca3af");
 
-  // Sorted highest value first, keep original index for palette
-  const sorted = useMemo(() =>
-    assets.map((a, i) => ({ a, i })).sort((x, y) => Number(y.a.current_value || 0) - Number(x.a.current_value || 0)),
-  [assets]);
+  const [assetSort, setAssetSort] = useState(() => localStorage.getItem("sort_assets") || "value_desc");
+
+  const ASSET_SORT_OPTS = [
+    { value: "value_desc",   label: "Nilai tertinggi → terendah" },
+    { value: "value_asc",    label: "Nilai terendah → tertinggi" },
+    { value: "gain_desc",    label: "Gain/Loss tertinggi" },
+    { value: "updated_desc", label: "Terbaru diupdate" },
+    { value: "name_asc",     label: "Nama A → Z" },
+  ];
+
+  const sorted = useMemo(() => {
+    const indexed = assets.map((a, i) => ({ a, i }));
+    indexed.sort((x, y) => {
+      switch (assetSort) {
+        case "value_asc":    return Number(x.a.current_value || 0) - Number(y.a.current_value || 0);
+        case "gain_desc":    return (Number(y.a.current_value || 0) - Number(y.a.purchase_price || 0)) - (Number(x.a.current_value || 0) - Number(x.a.purchase_price || 0));
+        case "updated_desc": return (y.a.updated_at || "").localeCompare(x.a.updated_at || "");
+        case "name_asc":     return (x.a.name || "").localeCompare(y.a.name || "");
+        default:             return Number(y.a.current_value || 0) - Number(x.a.current_value || 0);
+      }
+    });
+    return indexed;
+  }, [assets, assetSort]);
 
   // ── ACTIONS ─────────────────────────────────────────────────
   const openUpdateModal = (asset) => {
@@ -350,7 +370,13 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
       {/* ── HEADER ─────────────────────────────────────────── */}
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <SortDropdown
+          storageKey="sort_assets"
+          options={ASSET_SORT_OPTS}
+          value={assetSort}
+          onChange={v => setAssetSort(v)}
+        />
         <Button size="sm" onClick={() => { setAddAssetForm(emptyAssetForm()); setAddAssetModal(true); }}>
           + Add Asset
         </Button>
