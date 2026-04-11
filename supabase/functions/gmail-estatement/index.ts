@@ -250,6 +250,10 @@ async function scanGmailForStatements(
 
 const EXTRACTION_PROMPT = `You are an expert at extracting transactions from Indonesian bank and credit card statements.
 
+IMPORTANT: This statement contains a TRANSACTION TABLE. Scan every single page for rows in the transaction table.
+Each row typically has: Date | Description/Keterangan | Debit amount | Kredit amount | Balance/Saldo.
+Extract ALL rows from ALL pages of the transaction table. Do not stop early.
+
 EXTRACT only actual financial transactions. Return a JSON array.
 
 INCLUDE these transaction types:
@@ -318,6 +322,31 @@ Field notes:
 - account_hint: account number from section header if applicable, else null
 
 Return ONLY valid JSON array. No markdown, no explanation.
+If no transactions found, return [].`;
+
+const FALLBACK_PROMPT = `This is a bank statement PDF. Extract every single transaction row from the transaction table.
+Look for a table with columns like: Tanggal/Date, Keterangan/Description, Debet/Debit, Kredit/Credit, Saldo/Balance.
+Return ONLY a JSON array — no markdown, no explanation. Each item:
+{
+  "date": "YYYY-MM-DD",
+  "description": "transaction description as written",
+  "merchant": "merchant or payee name",
+  "amount": 150000,
+  "direction": "out",
+  "is_installment": false,
+  "installment_current": null,
+  "installment_total": null,
+  "is_fee": false,
+  "fee_type": null,
+  "is_transfer": false,
+  "card_last4": null,
+  "account_hint": null,
+  "currency_original": null,
+  "amount_original": null,
+  "rate_used": null
+}
+direction: "out" for debits/expenses, "in" for credits received.
+amount: positive number in IDR (no dots/commas formatting).
 If no transactions found, return [].`;
 
 // ── HELPER: try to decrypt PDF with pdf-lib ────────────────────
@@ -399,7 +428,12 @@ async function callClaude(pdfBase64: string, prompt: string, anthropicKey: strin
 
   const data    = await res.json();
   const rawText = data.content?.[0]?.text || "";
-  console.log(`[gmail-estatement] Claude response length=${rawText.length}`);
+  console.log(`[gmail-estatement] Claude response length=${rawText.length}, preview="${rawText.slice(0, 120).replace(/\n/g, " ")}"`);
+
+  // Empty response
+  if (rawText.length === 0) {
+    return { ok: false, is_encrypted: false, error: "Claude returned an empty response (possible timeout or model error)" };
+  }
 
   // Claude explicitly says it can't read the PDF (encrypted)
   if (rawText.length < 500 && /password|encrypt|cannot\s+(read|access|open)|protected/i.test(rawText)) {
@@ -408,15 +442,90 @@ async function callClaude(pdfBase64: string, prompt: string, anthropicKey: strin
 
   const jsonMatch = rawText.match(/\[[\s\S]*\]/);
   if (!jsonMatch) {
-    return { ok: false, is_encrypted: false, error: "No transactions found in Claude response" };
+    const snippet = rawText.slice(0, 200).replace(/\n/g, " ");
+    return { ok: false, is_encrypted: false, error: `Claude response contained no JSON array. Response: "${snippet}"` };
   }
   try {
     const transactions = JSON.parse(jsonMatch[0]);
     if (!Array.isArray(transactions)) throw new Error("not array");
     return { ok: true, transactions };
-  } catch {
-    return { ok: false, is_encrypted: false, error: "Could not parse Claude response" };
+  } catch (parseErr: any) {
+    return { ok: false, is_encrypted: false, error: `JSON parse error: ${parseErr.message}. Match length: ${jsonMatch[0].length}` };
   }
+}
+
+// ── HELPER: callClaude with fallback prompt on failure ─────────
+async function callClaudeWithFallback(
+  pdfBase64: string, anthropicKey: string
+): Promise<ClaudeResult> {
+  const result = await callClaude(pdfBase64, EXTRACTION_PROMPT, anthropicKey);
+  if (result.ok || result.is_encrypted) return result;
+
+  // Non-encrypted failure → retry with simpler prompt
+  console.log(`[gmail-estatement] primary prompt failed (${result.error}), retrying with fallback prompt`);
+  const fallback = await callClaude(pdfBase64, FALLBACK_PROMPT, anthropicKey);
+  if (fallback.ok) {
+    console.log(`[gmail-estatement] fallback prompt succeeded`);
+    return fallback;
+  }
+  // Return original error so the message is informative
+  return result;
+}
+
+// ── HELPER: chunk large PDFs and process each chunk ────────────
+async function chunkAndProcessPDF(
+  pdfBase64: string, anthropicKey: string
+): Promise<ClaudeResult> {
+  // Try to load PDF to get page count
+  let srcDoc: PDFDocument | null = null;
+  let pageCount = 0;
+  try {
+    const bytes = Uint8Array.from(atob(pdfBase64), c => c.charCodeAt(0));
+    srcDoc = await PDFDocument.load(bytes);
+    pageCount = srcDoc.getPageCount();
+    console.log(`[gmail-estatement] PDF has ${pageCount} pages`);
+  } catch (e) {
+    console.log(`[gmail-estatement] could not count pages, using single call: ${e}`);
+    return callClaudeWithFallback(pdfBase64, anthropicKey);
+  }
+
+  if (pageCount <= 10) {
+    return callClaudeWithFallback(pdfBase64, anthropicKey);
+  }
+
+  // Split into 5-page chunks
+  const CHUNK_SIZE = 5;
+  const allTransactions: any[] = [];
+  const bytes = Uint8Array.from(atob(pdfBase64), c => c.charCodeAt(0));
+  const fullDoc = await PDFDocument.load(bytes);
+
+  for (let start = 0; start < pageCount; start += CHUNK_SIZE) {
+    const end = Math.min(start + CHUNK_SIZE, pageCount);
+    console.log(`[gmail-estatement] chunking: processing pages ${start + 1}–${end} of ${pageCount}`);
+
+    const chunkDoc = await PDFDocument.create();
+    const indices  = Array.from({ length: end - start }, (_, i) => start + i);
+    const copied   = await chunkDoc.copyPages(fullDoc, indices);
+    copied.forEach(p => chunkDoc.addPage(p));
+
+    const chunkBytes  = await chunkDoc.save();
+    const chunkBase64 = btoa(
+      Array.from(new Uint8Array(chunkBytes)).map(b => String.fromCharCode(b)).join("")
+    );
+
+    const chunkResult = await callClaudeWithFallback(chunkBase64, anthropicKey);
+    if (chunkResult.ok) {
+      allTransactions.push(...chunkResult.transactions);
+    } else if (chunkResult.is_encrypted) {
+      return chunkResult; // Propagate encrypted signal
+    } else {
+      console.log(`[gmail-estatement] chunk ${start + 1}–${end} failed: ${chunkResult.error}`);
+      // Continue processing remaining chunks
+    }
+  }
+
+  console.log(`[gmail-estatement] chunking complete: ${allTransactions.length} total transactions`);
+  return { ok: true, transactions: allTransactions };
 }
 
 // ── ACTION: process ────────────────────────────────────────────
@@ -448,7 +557,7 @@ async function processStatement(
   // ── Step 1: try Claude with raw PDF ───────────────────────────
   // Handles unencrypted PDFs and owner-password PDFs (read-only protection)
   console.log(`[gmail-estatement] process: step 1 — sending raw PDF to Claude`);
-  let claudeResult = await callClaude(pdfBase64, EXTRACTION_PROMPT, anthropicKey);
+  let claudeResult = await chunkAndProcessPDF(pdfBase64, anthropicKey);
 
   if (claudeResult.ok) {
     return await finalizeTransactions(serviceSupabase, statementId, claudeResult.transactions);
@@ -475,7 +584,7 @@ async function processStatement(
 
     if ("base64" in decResult) {
       console.log(`[gmail-estatement] process: pdf-lib unlocked with password index ${i} — sending to Claude`);
-      claudeResult = await callClaude(decResult.base64, EXTRACTION_PROMPT, anthropicKey);
+      claudeResult = await chunkAndProcessPDF(decResult.base64, anthropicKey);
       if (claudeResult.ok) {
         return await finalizeTransactions(serviceSupabase, statementId, claudeResult.transactions);
       }
@@ -650,8 +759,8 @@ Deno.serve(async (req: Request) => {
       } else {
         const { pwdList, vars } = await loadPasswordsAndVars(serviceSupabase, userId, body);
 
-        // Step 1: try Claude with raw PDF
-        let claudeResult = await callClaude(pdf_base64, EXTRACTION_PROMPT, ANTHROPIC_KEY);
+        // Step 1: try Claude with raw PDF (with chunking + fallback)
+        let claudeResult = await chunkAndProcessPDF(pdf_base64, ANTHROPIC_KEY);
 
         if (claudeResult.ok) {
           result = { success: true, transactions: claudeResult.transactions };
@@ -670,7 +779,7 @@ Deno.serve(async (req: Request) => {
           for (let i = 0; i < passwords.length; i++) {
             const decResult = await tryDecryptPDF(pdf_base64, passwords[i]);
             if ("base64" in decResult) {
-              claudeResult = await callClaude(decResult.base64, EXTRACTION_PROMPT, ANTHROPIC_KEY);
+              claudeResult = await chunkAndProcessPDF(decResult.base64, ANTHROPIC_KEY);
               if (claudeResult.ok) {
                 result = { success: true, transactions: claudeResult.transactions };
               } else {

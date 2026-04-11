@@ -27,6 +27,7 @@ import Reports      from "./components/Reports";
 import Calendar     from "./components/Calendar";
 import Settings     from "./components/Settings";
 import AIImport     from "./components/AIImport";
+import Email        from "./components/Email";
 
 // ─── AUTH GATE ────────────────────────────────────────────────
 function AuthGate({ children }) {
@@ -175,8 +176,8 @@ function Finance({ user, signOut }) {
   });
   const [settingsInitialTab,  setSettingsInitialTab]  = useState(null);
   const setSettingsTab = (subTabId) => { setSettingsInitialTab(subTabId); setTab("settings"); };
-  const [aiImportInitialMode, setAiImportInitialMode] = useState("scan");
-  const openAiImport = (mode = "scan") => { setAiImportInitialMode(mode); setTab("aiimport"); };
+  const [emailInitialTab, setEmailInitialTab] = useState("pending");
+  const openEmail = (emailTab = "pending") => { setEmailInitialTab(emailTab); setTab("email"); };
   const [loading, setLoading]   = useState(true);
   const [isDark, setIsDark]     = useState(false);
 
@@ -313,7 +314,7 @@ function Finance({ user, signOut }) {
     receivables, curMonth, pendingSyncs,
     isDark, dark: isDark,         // alias: new components use `dark`, old use `isDark`
     setIsDark, setDark: setIsDark,
-    setTab, setSettingsTab, openAiImport, setPendingSyncs,
+    setTab, setSettingsTab, openEmail, setPendingSyncs,
     reimburseSettlements, setReimburseSettlements,
     employeeLoans, setEmployeeLoans, loanPayments, setLoanPayments,
     accountCurrencies, setAccountCurrencies,
@@ -334,7 +335,8 @@ function Finance({ user, signOut }) {
     </div>
   );
 
-  const pageLabel = TABS.find(t => t.id === tab)?.label || "Dashboard";
+  const EXTRA_LABELS = { scan: "AI Scan", aiimport: "AI Scan", email: "Email" };
+  const pageLabel = TABS.find(t => t.id === tab)?.label || EXTRA_LABELS[tab] || "Dashboard";
   const nwColor   = netWorth.total >= 0 ? "#059669" : "#dc2626";
   const overdueReminders = reminders.filter(r => {
     const daysLeft = Math.ceil((new Date(r.due_date) - new Date()) / 86400000);
@@ -355,7 +357,9 @@ function Finance({ user, signOut }) {
       case "reports":      return <Reports      {...shared} />;
       case "calendar":     return <Calendar     {...shared} />;
       case "settings":     return <Settings     {...shared} signOut={signOut} initialTab={settingsInitialTab} />;
-      case "aiimport":     return <AIImport     {...shared} initialMode={aiImportInitialMode} />;
+      case "scan":         return <AIImport     {...shared} />;
+      case "aiimport":     return <AIImport     {...shared} />; // legacy redirect
+      case "email":        return <Email        {...shared} initialTab={emailInitialTab} />;
       default:             return <Dashboard    {...shared} />;
     }
   };

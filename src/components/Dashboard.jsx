@@ -11,7 +11,7 @@ export default function Dashboard({
   reminders, recurTemplates, netWorth, bankAccounts,
   creditCards, assets, receivables, liabilities,
   installments = [],
-  curMonth, pendingSyncs, setTab, setSettingsTab, openAiImport,
+  curMonth, pendingSyncs, setTab, setSettingsTab, openEmail,
   setLedger, setReminders, onRefresh,
   employeeLoans = [], loanPayments = [],
   setLoanPayments, setEmployeeLoans,
@@ -495,9 +495,9 @@ export default function Dashboard({
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {[
-            { label: "Email Sync",  onClick: () => openAiImport?.("gmail") },
+            { label: "Email Sync",  onClick: () => openEmail?.("pending") },
             { label: "E-Statement", onClick: () => setSettingsTab?.("estatement") },
-            { label: "AI Scan",     onClick: () => openAiImport?.("scan"), icon: true },
+            { label: "AI Scan",     onClick: () => setTab?.("scan"), icon: true },
           ].map(({ label, onClick, icon }) => (
             <button key={label} onClick={onClick} style={{
               display: "flex", alignItems: "center", gap: 5,
@@ -552,7 +552,7 @@ export default function Dashboard({
               </div>
             </div>
             <button
-              onClick={() => openAiImport?.("gmail")}
+              onClick={() => openEmail?.("pending")}
               style={{
                 background:   "#d97706",
                 color:        "#fff",

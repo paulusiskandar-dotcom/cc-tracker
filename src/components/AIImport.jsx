@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from "react";
-import { ledgerApi, gmailApi, scanApi, merchantApi, getTxFromToTypes } from "../api";
+import { useState, useRef } from "react";
+import { ledgerApi, scanApi, merchantApi, getTxFromToTypes } from "../api";
 import { fmtIDR, todayStr, checkDuplicateTransaction } from "../utils";
 import { LIGHT, DARK } from "../theme";
 import { Button, EmptyState, Spinner, showToast, NativeAccountSelect } from "./shared/index";
@@ -137,11 +137,10 @@ const ACT_BTN = (extra = {}) => ({
 });
 
 // ─────────────────────────────────────────────────────────────────
-export default function AIImport({ user, accounts, ledger, onRefresh, setLedger, dark, merchantMaps = [], fxRates = {}, CURRENCIES = [], setPendingSyncs, initialMode = "scan" }) {
+export default function AIImport({ user, accounts, ledger, onRefresh, setLedger, dark, merchantMaps = [], fxRates = {}, CURRENCIES = [], setPendingSyncs }) {
   const T = dark ? DARK : LIGHT;
   const fileRef = useRef();
 
-  const [mode,        setMode]        = useState(initialMode);
   const [scanning,    setScanning]    = useState(false);
   const [results,     setResults]     = useState([]);
   const [selected,    setSelected]    = useState({});
@@ -149,15 +148,6 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
   const [notesOpen,   setNotesOpen]   = useState(new Set());
   const [importing,   setImporting]   = useState(false);
   const [importingId, setImportingId] = useState(null);
-
-  const [gmailPending, setGmailPending] = useState([]); // raw email_sync rows
-  const [gmailRows,   setGmailRows]    = useState([]); // flattened tx rows for TxCard
-  const [gmailSel,    setGmailSel]     = useState({});
-  const [gmailSkip,   setGmailSkip]    = useState(new Set());
-  const [gmailNotes,  setGmailNotes]   = useState(new Set());
-  const [gmailImpId,  setGmailImpId]   = useState(null);
-  const [gmailLoading, setGmailLoading] = useState(false);
-  const [gmailLoaded,  setGmailLoaded]  = useState(false);
 
   const bankAccounts  = accounts.filter(a => a.type === "bank");
   const ccAccounts    = accounts.filter(a => a.type === "credit_card");
@@ -406,137 +396,6 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
     setImportingId(null);
   };
 
-  // ── Gmail ─────────────────────────────────────────────────────
-  // Convert email_sync rows → TxCard-compatible rows
-  const flattenEmailSync = (rows) => {
-    const out = [];
-    for (const es of rows) {
-      const txList = Array.isArray(es.ai_raw_result) ? es.ai_raw_result : [];
-      if (!txList.length) continue;
-      txList.forEach((tx, i) => {
-        const rawType = tx.suggested_tx_type || "expense";
-        const { tx_type, category_id: overrideCat } = normaliseTxType(rawType, tx.category_id);
-        const txCurrency = (tx.currency || "IDR").toUpperCase();
-        const txIsFX     = txCurrency !== "IDR";
-        const txAmount   = Number(tx.amount || 0);
-        const txRate     = txIsFX ? getDefaultRate(txCurrency) : 1;
-        const txAmtIDR   = txIsFX
-          ? Math.round(txAmount * txRate)
-          : Number(tx.amount_idr || tx.amount || 0);
-
-        // Apply transfer detection — same logic as scan flow
-        let resolvedType = tx_type;
-        let resolvedToId = tx.to_account_id || null;
-        if (resolvedType === "transfer") {
-          const fixed = fixTransferType({
-            tx_type:         resolvedType,
-            from_account_id: tx.from_account_id || null,
-            to_account_id:   resolvedToId,
-            to_account_no:   tx.to_account_no   || null,
-            from_account_no: tx.from_account_no || null,
-          });
-          resolvedType = fixed.tx_type;
-          if (fixed.tx_type !== "transfer") resolvedToId = null;
-        }
-        // Category: null for no-cat types, else use AI suggestion or "other" as fallback
-        const resolvedCatId = NO_CAT.has(resolvedType)
-          ? null
-          : (overrideCat || tx.category_id || "other");
-
-        out.push({
-          _id:             `${es.id}__${i}`,
-          _email_sync_id:  es.id,
-          _email_subject:  es.subject,
-          tx_date:         tx.date || es.received_at?.slice(0, 10) || todayStr(),
-          description:     tx.description || es.subject || "(no description)",
-          merchant_name:   tx.merchant_name || null,
-          amount:          txAmount,
-          amount_idr:      txAmtIDR,
-          currency:        txCurrency,
-          fx_rate:         String(txRate),
-          tx_type:         resolvedType,
-          category_id:     resolvedCatId,
-          category_name:   tx.suggested_category || null,
-          from_id:         tx.from_account_id || null,
-          to_id:           resolvedToId,
-          _dupMatch:       checkDuplicateTransaction(ledger, { tx_date: tx.date || es.received_at?.slice(0, 10) || todayStr(), amount_idr: txAmtIDR, currency: txCurrency }),
-          status:          checkDuplicateTransaction(ledger, { tx_date: tx.date || es.received_at?.slice(0, 10) || todayStr(), amount_idr: txAmtIDR, currency: txCurrency }) ? "possible_duplicate" : "new",
-          notes:           es.subject || "",
-          conf:            Number(tx.confidence || 0) >= 0.85 ? 1 : 0,
-          is_qris:         tx.is_qris || false,
-          learned_cat:     null,
-          flagged:         false,
-        });
-      });
-    }
-    return out;
-  };
-
-  const loadGmailPending = async () => {
-    if (gmailLoaded) return;
-    setGmailLoading(true);
-    try {
-      const data = await gmailApi.getPending(user.id);
-      setGmailPending(data || []);
-      const rows = flattenEmailSync(data || []);
-      setGmailRows(rows);
-      const sel = {};
-      rows.forEach(r => { sel[r._id] = true; });
-      setGmailSel(sel);
-      setGmailLoaded(true);
-    } catch { showToast("Could not load Gmail pending", "error"); }
-    setGmailLoading(false);
-  };
-
-  // Sync mode when initialMode prop changes (e.g. Dashboard shortcut re-navigates)
-  useEffect(() => {
-    if (initialMode === "gmail") {
-      setMode("gmail");
-      loadGmailPending();
-    }
-  }, [initialMode]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const updateGmailRow = (id, patch) => {
-    setGmailRows(prev => prev.map(r => r._id === id ? { ...r, ...patch } : r));
-  };
-
-  const importOneGmail = async (r) => {
-    setGmailImpId(r._id);
-    try {
-      const { from_type, to_type } = getTxFromToTypes(r.tx_type);
-      const entry = {
-        tx_date: r.tx_date, description: r.description,
-        merchant_name: r.merchant_name,
-        amount: r.amount, currency: r.currency, amount_idr: r.amount_idr,
-        tx_type: r.tx_type, from_type, to_type,
-        from_id: r.from_id || null, to_id: r.to_id || null,
-        entity: "Personal",
-        category_id: r.category_id || null,
-        notes: r.notes || null,
-        ai_categorized: true, ai_confidence: r.conf || null,
-        scan_batch_id: null,
-      };
-      const created = await ledgerApi.create(user.id, entry, accounts);
-      if (created) setLedger(prev => [created, ...prev]);
-      // Remove all rows from same email, mark email confirmed
-      const syncId = r._email_sync_id;
-      setGmailRows(prev => prev.filter(x => x._email_sync_id !== syncId));
-      setGmailPending(prev => prev.filter(x => x.id !== syncId));
-      setPendingSyncs?.(prev => (prev || []).filter(x => x.id !== syncId));
-      await gmailApi.markImported(user.id, syncId);
-      showToast(`Imported: ${r.description}`);
-    } catch (e) { showToast(e.message, "error"); }
-    setGmailImpId(null);
-  };
-
-  const skipOneGmail = async (r) => {
-    const syncId = r._email_sync_id;
-    setGmailRows(prev => prev.filter(x => x._email_sync_id !== syncId));
-    setGmailPending(prev => prev.filter(x => x.id !== syncId));
-    setPendingSyncs?.(prev => (prev || []).filter(x => x.id !== syncId));
-    try { await gmailApi.markSkipped(user.id, syncId); } catch {}
-  };
-
   // ── Summary ────────────────────────────────────────────────────
   const countSelected = results.filter(r => selected[r._id] && !skipped.has(r._id)).length;
   const countDup      = results.filter(r => r.status === "possible_duplicate").length;
@@ -557,29 +416,8 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
-      {/* ── MODE TABS ── */}
-      <div style={{ display: "flex", gap: 4 }}>
-        {[
-          { id: "scan",  label: "📷 Scan Document" },
-          { id: "gmail", label: "✉️ Email Pending" },
-        ].map(t => (
-          <button key={t.id}
-            onClick={() => { setMode(t.id); if (t.id === "gmail") loadGmailPending(); }}
-            style={{
-              padding: "7px 16px", borderRadius: 99, border: "none",
-              cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "Figtree, sans-serif",
-              background: mode === t.id ? T.text : T.sur2,
-              color:      mode === t.id ? T.darkText : T.text2,
-              transition: "background .15s, color .15s",
-            }}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {/* ══════════════════════════════ SCAN TAB ═════════════════ */}
-      {mode === "scan" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* ══════════════════════════════ SCAN ═════════════════════ */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
           {/* Drop zone */}
           <div
@@ -657,55 +495,6 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
             </div>
           )}
         </div>
-      )}
-
-      {/* ══════════════════════════════ GMAIL TAB ════════════════ */}
-      {mode === "gmail" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {gmailLoading ? (
-            <div style={{ textAlign: "center", padding: 32 }}>
-              <Spinner size={24} />
-              <div style={{ fontSize: 12, color: T.text3, marginTop: 8 }}>Loading Gmail…</div>
-            </div>
-          ) : gmailRows.length === 0 ? (
-            <EmptyState icon="✉️" message="No pending transactions." />
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {/* Header */}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-                <div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>
-                    {gmailRows.length} transaction{gmailRows.length !== 1 ? "s" : ""} pending
-                  </div>
-                  <div style={{ fontSize: 11, color: T.text3, marginTop: 2, fontFamily: "Figtree, sans-serif" }}>
-                    {gmailPending.length} email{gmailPending.length !== 1 ? "s" : ""} from Gmail
-                  </div>
-                </div>
-                <Button variant="secondary" size="sm" onClick={() => {
-                  const all = {};
-                  gmailRows.forEach(r => { all[r._id] = true; });
-                  setGmailSel(all);
-                  setGmailSkip(new Set());
-                }}>Select All</Button>
-              </div>
-              {/* Cards — same TxCard style as scan tab */}
-              <TxCardList
-                results={gmailRows}
-                selected={gmailSel} skipped={gmailSkip} notesOpen={gmailNotes}
-                importingId={gmailImpId} T={T}
-                accounts={accounts}
-                updateRow={updateGmailRow}
-                setSelected={setGmailSel}
-                setSkipped={(fn) => {
-                  setGmailSkip(fn);
-                }}
-                toggleNotes={(id) => setGmailNotes(s => { const ns = new Set(s); ns.has(id) ? ns.delete(id) : ns.add(id); return ns; })}
-                importOne={importOneGmail}
-              />
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
