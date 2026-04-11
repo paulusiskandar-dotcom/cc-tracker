@@ -476,6 +476,9 @@ export default function Receivables({
     padding:      "16px 18px",
   });
 
+  const totalReimburse = reimburseAccs.reduce((s, a) => s + Number(a.receivable_outstanding || 0), 0);
+  const activeReimburse = reimburseAccs.filter(a => Number(a.receivable_outstanding || 0) > 0).length;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
@@ -524,97 +527,139 @@ export default function Receivables({
       {/* ── REIMBURSE TAB ────────────────────────────── */}
       {/* ══════════════════════════════════════════════════ */}
       {subTab === "reimburse" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* ── Summary cards ── */}
+          {reimburseAccs.length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+              {[
+                { label: "Total Outstanding", value: fmtIDR(totalReimburse, true), color: totalReimburse > 0 ? "#059669" : "#6b7280" },
+                { label: "Active Entities",   value: String(activeReimburse),       color: "#3b5bdb" },
+                { label: "Total Entities",    value: String(reimburseAccs.length),  color: "#d97706" },
+              ].map(s => (
+                <div key={s.label} style={{
+                  background: s.color + "14", borderRadius: 14, padding: "14px 14px",
+                }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: s.color, textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 5, opacity: 0.8 }}>
+                    {s.label}
+                  </div>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
+                    {s.value}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           {reimburseAccs.length === 0 ? (
             <EmptyState
               icon="📋"
               message="No reimburse accounts. Add one from Accounts (type: Receivable → Reimburse)."
             />
           ) : (
-            recStats.map(r => {
-              const outstanding = Number(r.receivable_outstanding || 0);
-              const entCol      = ENT_COL[r.entity] || T.ac;
-              const entBg       = ENT_BG[r.entity]  || T.sur2;
-              const recentEntries = r.entries.slice(0, 3);
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
+              {recStats.map(r => {
+                const outstanding   = Number(r.receivable_outstanding || 0);
+                const entCol        = ENT_COL[r.entity] || T.ac;
+                const entBg         = ENT_BG[r.entity]  || T.sur2;
+                const recentEntries = r.entries.slice(0, 3);
 
-              return (
-                <div key={r.id} style={card(entCol)}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-                    {/* Left */}
-                    <div>
-                      <span style={{
-                        display: "inline-block",
-                        background: entBg, color: entCol,
-                        borderRadius: 6, padding: "2px 8px",
-                        fontSize: 11, fontWeight: 700,
-                      }}>
-                        {r.entity}
-                      </span>
-                      <div style={{ fontSize: 24, fontWeight: 900, color: entCol, marginTop: 6 }}>
-                        {fmtIDR(outstanding)}
+                return (
+                  <div key={r.id} style={{
+                    background: "#ffffff", borderRadius: 16,
+                    border: "0.5px solid #e5e7eb",
+                    overflow: "hidden",
+                    display: "flex", flexDirection: "column",
+                  }}>
+                    {/* Color bar */}
+                    <div style={{ height: 3, background: entCol }} />
+
+                    <div style={{ padding: "14px 14px 12px", flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+                      {/* Entity badge */}
+                      <div>
+                        <span style={{
+                          display: "inline-block",
+                          background: entBg, color: entCol,
+                          borderRadius: 6, padding: "2px 8px",
+                          fontSize: 11, fontWeight: 700, fontFamily: "Figtree, sans-serif",
+                        }}>
+                          {r.entity}
+                        </span>
                       </div>
-                      <div style={{ fontSize: 11, color: T.text3 }}>outstanding</div>
+
+                      {/* Outstanding amount */}
+                      <div>
+                        <div style={{ fontSize: 22, fontWeight: 900, color: outstanding > 0 ? entCol : "#9ca3af", fontFamily: "Figtree, sans-serif", lineHeight: 1.2 }}>
+                          {fmtIDR(outstanding)}
+                        </div>
+                        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>outstanding</div>
+                      </div>
+
+                      {/* Aging badge */}
                       {r.aging && outstanding > 0 && (
                         <div style={{
-                          display: "inline-flex", marginTop: 6,
+                          display: "inline-flex", alignSelf: "flex-start",
                           background: r.aging.color + "22", color: r.aging.color,
                           borderRadius: 5, padding: "2px 7px",
-                          fontSize: 10, fontWeight: 700,
+                          fontSize: 10, fontWeight: 700, fontFamily: "Figtree, sans-serif",
                         }}>
                           ⏱ {r.aging.label}
                         </div>
                       )}
+
+                      {/* Recent entries */}
+                      {recentEntries.length > 0 && (
+                        <div style={{ borderTop: "0.5px solid #f3f4f6", paddingTop: 8 }}>
+                          {recentEntries.map(e => (
+                            <div key={e.id} style={{
+                              display: "flex", justifyContent: "space-between",
+                              fontSize: 11, color: "#6b7280", marginBottom: 4, gap: 6,
+                            }}>
+                              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {e.tx_date.slice(5)} · {e.description}
+                              </span>
+                              <span style={{ fontWeight: 700, flexShrink: 0, color: e.tx_type === "reimburse_in" ? "#059669" : "#dc2626" }}>
+                                {e.tx_type === "reimburse_in" ? "−" : "+"}{fmtIDR(Number(e.amount || 0), true)}
+                              </span>
+                            </div>
+                          ))}
+                          {r.entries.length > 3 && (
+                            <div style={{ fontSize: 10, color: "#9ca3af" }}>
+                              +{r.entries.length - 3} more
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
 
-                    {/* Actions */}
-                    <div style={{ display: "flex", gap: 6, flexDirection: "column" }}>
-                      <Button
-                        variant="primary"
-                        size="sm"
-                        onClick={() => {
-                          setOutForm(f => ({ ...f, entity: r.entity }));
-                          setOutModal(true);
+                    {/* Bottom action bar */}
+                    <div style={{ borderTop: "0.5px solid #f3f4f6", padding: "8px 14px", display: "flex", gap: 6 }}>
+                      <button
+                        onClick={() => { setOutForm(f => ({ ...f, entity: r.entity })); setOutModal(true); }}
+                        style={{
+                          flex: 1, height: 30, border: "none", borderRadius: 8, cursor: "pointer",
+                          background: entBg, color: entCol,
+                          fontSize: 12, fontWeight: 700, fontFamily: "Figtree, sans-serif",
                         }}
                       >
                         + Expense
-                      </Button>
+                      </button>
                       {outstanding > 0 && (
-                        <Button
-                          variant="secondary"
-                          size="sm"
+                        <button
                           onClick={() => openSettle(r)}
-                          style={{ color: "#059669", borderColor: "#059669" }}
+                          style={{
+                            flex: 1, height: 30, border: "1px solid #bbf7d0", borderRadius: 8, cursor: "pointer",
+                            background: "#f0fdf4", color: "#059669",
+                            fontSize: 12, fontWeight: 700, fontFamily: "Figtree, sans-serif",
+                          }}
                         >
                           ✓ Settle
-                        </Button>
+                        </button>
                       )}
                     </div>
                   </div>
-
-                  {/* Recent entries */}
-                  {recentEntries.length > 0 && (
-                    <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 8 }}>
-                      {recentEntries.map(e => (
-                        <div key={e.id} style={{
-                          display: "flex", justifyContent: "space-between",
-                          fontSize: 11, color: T.text3, marginBottom: 4,
-                        }}>
-                          <span>{e.tx_date} · {e.description}</span>
-                          <span style={{ fontWeight: 700, color: e.tx_type === "reimburse_in" ? "#059669" : "#dc2626" }}>
-                            {e.tx_type === "reimburse_in" ? "−" : "+"}{fmtIDR(Number(e.amount || 0), true)}
-                          </span>
-                        </div>
-                      ))}
-                      {r.entries.length > 3 && (
-                        <div style={{ fontSize: 10, color: T.text3 }}>
-                          +{r.entries.length - 3} more entries
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })
+                );
+              })}
+            </div>
           )}
         </div>
       )}
