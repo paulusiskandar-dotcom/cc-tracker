@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
-import { recurringApi, loanPaymentsApi } from "../api";
+import { recurringApi, loanPaymentsApi, ledgerApi } from "../api";
 import { fmtIDR, todayStr } from "../utils";
 import { showToast, Button, Modal, AmountInput, Field, Input, FormRow } from "./shared/index";
+import Select from "./shared/Select";
 import { LIGHT, DARK } from "../theme";
 
 const TYPE_META = {
@@ -20,11 +21,16 @@ export default function Upcoming({
   onRefresh, setTab, dark,
 }) {
   const T = dark ? DARK : LIGHT;
-  const [confirmingId, setConfirmingId] = useState(null);
-  const [payModal, setPayModal]   = useState(false);
-  const [payLoan,  setPayLoan]    = useState(null);
-  const [payForm,  setPayForm]    = useState({ amount: "", pay_date: todayStr(), notes: "" });
-  const [saving,   setSaving]     = useState(false);
+  const [confirmingId,  setConfirmingId]  = useState(null);
+  const [payModal,      setPayModal]      = useState(false);
+  const [payLoan,       setPayLoan]       = useState(null);
+  const [payForm,       setPayForm]       = useState({ amount: "", pay_date: todayStr(), notes: "" });
+  const [saving,        setSaving]        = useState(false);
+  const [settleModal,   setSettleModal]   = useState(false);
+  const [settleRec,     setSettleRec]     = useState(null);
+  const [settleAmount,  setSettleAmount]  = useState("");
+  const [settleBankId,  setSettleBankId]  = useState("");
+  const [settleSaving,  setSettleSaving]  = useState(false);
 
   // ── Loan stats ──────────────────────────────────────────────
   const loansWithStats = useMemo(() => {
@@ -145,6 +151,40 @@ export default function Upcoming({
     setPayModal(true);
   };
 
+  const openSettleModal = (rec) => {
+    setSettleRec(rec);
+    setSettleAmount(String(rec.receivable_outstanding || ""));
+    setSettleBankId(bankAccounts[0]?.id || "");
+    setSettleModal(true);
+  };
+
+  const doSettle = async () => {
+    if (!settleRec || !settleBankId) return showToast("Select a bank account", "error");
+    setSettleSaving(true);
+    try {
+      const amount = Number(settleAmount) || Number(settleRec.receivable_outstanding) || 0;
+      await ledgerApi.create(user.id, {
+        tx_date:     todayStr(),
+        description: `${settleRec.entity || settleRec.name} reimburse received`,
+        amount,
+        currency:    "IDR",
+        amount_idr:  amount,
+        tx_type:     "reimburse_in",
+        from_type:   "account",
+        from_id:     settleRec.id,
+        to_type:     "account",
+        to_id:       settleBankId,
+        entity:      settleRec.entity || "Personal",
+        category_id: null,
+        notes:       "",
+      }, accounts);
+      showToast("Reimburse recorded");
+      setSettleModal(false);
+      await onRefresh?.();
+    } catch (e) { showToast(e.message, "error"); }
+    setSettleSaving(false);
+  };
+
   const handleRecordPayment = async () => {
     if (!payLoan || !payForm.amount) return showToast("Amount is required", "error");
     setSaving(true);
@@ -258,26 +298,35 @@ export default function Upcoming({
                 {isReminder && (
                   <>
                     <button
-                      onClick={() => confirmReminder(item.raw)}
+                      onClick={e => { e.stopPropagation(); e.preventDefault(); confirmReminder(item.raw); }}
                       disabled={confirmingId === item.raw.id}
                       style={BTN_GREEN}
                       title="Confirm"
                     >
                       {confirmingId === item.raw.id ? "…" : "✓"}
                     </button>
-                    <button onClick={() => skipReminder(item.raw)} style={BTN_GHOST} title="Skip">
+                    <button
+                      onClick={e => { e.stopPropagation(); e.preventDefault(); skipReminder(item.raw); }}
+                      style={BTN_GHOST} title="Skip"
+                    >
                       ✕
                     </button>
                   </>
                 )}
                 {isLoan && (
-                  <button onClick={() => openPayModal(item.raw)} style={BTN_AMBER}>
+                  <button
+                    onClick={e => { e.stopPropagation(); e.preventDefault(); openPayModal(item.raw); }}
+                    style={BTN_AMBER}
+                  >
                     Pay
                   </button>
                 )}
                 {isReceivable && (
-                  <button onClick={() => setTab?.("receivables")} style={BTN_AMBER}>
-                    Settle →
+                  <button
+                    onClick={e => { e.stopPropagation(); e.preventDefault(); openSettleModal(item.raw); }}
+                    style={BTN_AMBER}
+                  >
+                    Settle
                   </button>
                 )}
                 {isInstall && (
@@ -295,6 +344,41 @@ export default function Upcoming({
           );
         })
       )}
+
+      {/* Settle Receivable Modal */}
+      <Modal
+        isOpen={settleModal && !!settleRec}
+        onClose={() => setSettleModal(false)}
+        title={`Settle — ${settleRec?.entity || settleRec?.name || "Reimburse"}`}
+        footer={
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <Button variant="secondary" size="md" onClick={() => setSettleModal(false)}>Cancel</Button>
+            <Button variant="primary" size="md" busy={settleSaving} onClick={doSettle}>✓ Record</Button>
+          </div>
+        }
+      >
+        {settleRec && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ background: "#f9fafb", borderRadius: 10, padding: "10px 14px", fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
+              Outstanding: <strong style={{ color: "#111827" }}>{fmtIDR(Number(settleRec.receivable_outstanding || 0))}</strong>
+            </div>
+            <AmountInput
+              label="Amount Received"
+              value={settleAmount}
+              onChange={v => setSettleAmount(v)}
+              currency="IDR"
+            />
+            <Field label="To Bank Account">
+              <Select
+                value={settleBankId}
+                onChange={e => setSettleBankId(e.target.value)}
+                options={bankAccounts.map(a => ({ value: a.id, label: a.name }))}
+                placeholder="Select bank…"
+              />
+            </Field>
+          </div>
+        )}
+      </Modal>
 
       {/* Record Loan Payment Modal */}
       <Modal

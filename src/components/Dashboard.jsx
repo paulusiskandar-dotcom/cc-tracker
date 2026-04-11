@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from "react";
-import { ledgerApi, recurringApi, reimburseSettlementsApi, settingsApi } from "../api";
+import { ledgerApi, recurringApi, reimburseSettlementsApi, settingsApi, loanPaymentsApi, employeeLoanApi } from "../api";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
 import { fmtIDR, ym, mlShort, getGreeting, todayStr, groupByDate } from "../utils";
 import { showToast, EmptyState, Modal, Button, AmountInput, Field, Input, FormRow } from "./shared/index";
@@ -14,6 +14,7 @@ export default function Dashboard({
   curMonth, pendingSyncs, setTab, setSettingsTab, openAiImport,
   setLedger, setReminders, onRefresh,
   employeeLoans = [], loanPayments = [],
+  setLoanPayments, setEmployeeLoans,
   reimburseSettlements = [], setReimburseSettlements,
 }) {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
@@ -41,6 +42,10 @@ export default function Dashboard({
   const [settleBankId,  setSettleBankId]  = useState("");
   const [settleAmount,  setSettleAmount]  = useState("");
   const [settleSaving,  setSettleSaving]  = useState(false);
+  const [payModal,      setPayModal]      = useState(false);
+  const [payLoan,       setPayLoan]       = useState(null);
+  const [payForm,       setPayForm]       = useState({ amount: "", pay_date: todayStr(), notes: "" });
+  const [paySaving,     setPaySaving]     = useState(false);
 
   // ─── DERIVED STATS ───────────────────────────────────────────
   const nw = netWorth || { total: 0, bank: 0, assets: 0, receivables: 0, ccDebt: 0, liabilities: 0 };
@@ -406,6 +411,38 @@ export default function Dashboard({
 
   const dismissUpcoming = (itemId) => {
     setDismissed(prev => new Set([...prev, itemId]));
+  };
+
+  const openLoanPayModal = (loan) => {
+    setPayLoan(loan);
+    setPayForm({ amount: String(loan.monthly_installment || ""), pay_date: todayStr(), notes: "" });
+    setPayModal(true);
+  };
+
+  const handleLoanPayment = async () => {
+    if (!payLoan || !payForm.amount) return showToast("Amount is required", "error");
+    setPaySaving(true);
+    try {
+      const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
+      const amt = sn(payForm.amount);
+      const created = await loanPaymentsApi.create(user.id, {
+        loan_id:  payLoan.id,
+        pay_date: payForm.pay_date || todayStr(),
+        amount:   amt,
+        notes:    payForm.notes || null,
+      });
+      if (created) setLoanPayments?.(prev => [created, ...prev]);
+      const newPaid = (payLoan.paidSoFar || 0) + amt;
+      if (newPaid >= Number(payLoan.total_amount || 0)) {
+        await employeeLoanApi.update(payLoan.id, { status: "settled" });
+        setEmployeeLoans?.(prev => prev.map(l => l.id === payLoan.id ? { ...l, status: "settled" } : l));
+        showToast("Payment recorded — loan fully settled! 🎉");
+      } else {
+        showToast(`Payment of ${fmtIDR(amt, true)} recorded`);
+      }
+      setPayModal(false);
+    } catch (e) { showToast(e.message, "error"); }
+    setPaySaving(false);
   };
 
   const openSettleModal = (rec) => {
@@ -785,13 +822,13 @@ export default function Dashboard({
                         onEdit={
                           item.type === "reminder"   ? () => openConfirmModal(item.raw, true) :
                           item.type === "receivable" ? () => openSettleModal(item.raw) :
-                          item.type === "loan"       ? () => setTab?.("receivables") :
+                          item.type === "loan"       ? () => openLoanPayModal(item.raw) :
                           null
                         }
                         onConfirm={
                           item.type === "reminder"   ? () => openConfirmModal(item.raw) :
                           item.type === "receivable" ? () => openSettleModal(item.raw) :
-                          item.type === "loan"       ? () => dismissUpcoming(item.id) :
+                          item.type === "loan"       ? () => openLoanPayModal(item.raw) :
                           item.type === "reimburse"  ? () => openReimburseModal(item.raw) :
                           null
                         }
@@ -833,6 +870,44 @@ export default function Dashboard({
           />
         )}
       </div>
+
+      {/* ── LOAN PAYMENT MODAL ── */}
+      <Modal
+        isOpen={payModal && !!payLoan}
+        onClose={() => setPayModal(false)}
+        title={`Record Payment — ${payLoan?.employee_name || ""}`}
+        footer={
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <Button variant="secondary" size="md" onClick={() => setPayModal(false)}>Cancel</Button>
+            <Button variant="primary" size="md" busy={paySaving} disabled={!payForm.amount} onClick={handleLoanPayment}>
+              Save
+            </Button>
+          </div>
+        }
+      >
+        {payLoan && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{
+              background: "#f9fafb", borderRadius: 10, padding: "10px 14px",
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+            }}>
+              <div style={{ fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>Remaining</div>
+              <div style={{ fontSize: 16, fontWeight: 800, color: "#d97706", fontFamily: "Figtree, sans-serif" }}>
+                {fmtIDR(payLoan.remaining || 0)}
+              </div>
+            </div>
+            <FormRow>
+              <AmountInput label="Amount *" value={payForm.amount} onChange={v => setPayForm(f => ({ ...f, amount: v }))} currency="IDR" />
+              <Field label="Date">
+                <Input type="date" value={payForm.pay_date} onChange={e => setPayForm(f => ({ ...f, pay_date: e.target.value }))} />
+              </Field>
+            </FormRow>
+            <Field label="Notes">
+              <Input value={payForm.notes} onChange={e => setPayForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional" />
+            </Field>
+          </div>
+        )}
+      </Modal>
 
       {/* ── QUICK SETTLE MODAL (receivable) ── */}
       <Modal
