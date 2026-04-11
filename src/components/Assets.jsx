@@ -369,13 +369,7 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
       {/* ── HEADER ─────────────────────────────────────────── */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-        <SortDropdown
-          storageKey="sort_assets"
-          options={ASSET_SORT_PILLS}
-          value={assetSort}
-          onChange={v => setAssetSort(v)}
-        />
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <Button size="sm" onClick={() => { setAddAssetForm(emptyAssetForm()); setAddAssetModal(true); }}>
           + Add Asset
         </Button>
@@ -420,7 +414,13 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
             </div>
           )}
 
-          {/* ── ASSET GRID ─────────────────────────────────── */}
+          {/* ── SORT + ASSET GRID ──────────────────────────── */}
+          <SortDropdown
+            storageKey="sort_assets"
+            options={ASSET_SORT_PILLS}
+            value={assetSort}
+            onChange={v => setAssetSort(v)}
+          />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
             {sorted.map(({ a, i }) => {
               const color = ASSET_COL[a.subtype] || "#9ca3af";
