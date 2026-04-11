@@ -41,6 +41,7 @@ export default function Settings({
   merchantMaps, setMerchantMaps,
   onRefresh,
   accounts = [], setAccounts, bankAccounts = [], creditCards = [],
+  categories = [],
   ledger = [], installments = [],
   setInstallments,
   initialTab,
@@ -261,35 +262,13 @@ export default function Settings({
       const isUUID = (v) => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
       const toUUID = (v) => (!v || v === "" || !isUUID(v)) ? null : v;
 
-      // Resolve category_id: constants use string labels (e.g. "salary"), DB needs UUID
-      let categoryId = null;
-      const rawCat = recurForm.category_id;
-      if (rawCat) {
-        if (isUUID(rawCat)) {
-          categoryId = rawCat;
-        } else {
-          // Look up the label from the constant list, then query expense_categories for the UUID
-          const allConsts = [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES_LIST];
-          const catDef = allConsts.find(c => c.id === rawCat);
-          const labelToSearch = catDef?.label || rawCat;
-          const { data: catRow } = await supabase
-            .from("expense_categories")
-            .select("id")
-            .ilike("label", labelToSearch)
-            .or(`user_id.is.null,user_id.eq.${user.id}`)
-            .limit(1)
-            .maybeSingle();
-          categoryId = catRow?.id || null;
-        }
-      }
-
       const payload = {
         name:         recurForm.name,
         tx_type:      recurForm.tx_type,
         amount:       sn(recurForm.amount),
         currency:     recurForm.currency,
         frequency:    recurForm.frequency,
-        category_id:  categoryId,
+        category_id:  toUUID(recurForm.category_id),
         notes:        recurForm.notes || null,
         from_id:      toUUID(recurForm.from_id),
         to_id:        toUUID(recurForm.to_id),
@@ -985,7 +964,7 @@ export default function Settings({
                 <Select
                   value={recurForm.category_id}
                   onChange={e => setRecurForm(f => ({ ...f, category_id: e.target.value }))}
-                  options={INCOME_CATEGORIES_LIST.map(c => ({ value: c.id, label: `${c.icon} ${c.label}` }))}
+                  options={categories.map(c => ({ value: c.id, label: c.label || c.name || c.id }))}
                   placeholder="None"
                 />
               </Field>
@@ -1031,7 +1010,7 @@ export default function Settings({
                 <Select
                   value={recurForm.category_id}
                   onChange={e => setRecurForm(f => ({ ...f, category_id: e.target.value }))}
-                  options={EXPENSE_CATEGORIES.map(c => ({ value: c.id, label: `${c.icon} ${c.label}` }))}
+                  options={categories.map(c => ({ value: c.id, label: c.label || c.name || c.id }))}
                   placeholder="None"
                 />
               </Field>
