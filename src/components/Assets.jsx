@@ -263,9 +263,9 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
   const [assetSort, setAssetSort] = useState(() => localStorage.getItem("sort_assets") || "value_desc");
 
   const ASSET_SORT_PILLS = [
-    { key: "value", label: "Nilai",     defaultDir: "desc" },
-    { key: "gain",  label: "Gain/Loss", defaultDir: "desc" },
-    { key: "name",  label: "Name",      defaultDir: "asc"  },
+    { key: "value", label: "Value", defaultDir: "desc" },
+    { key: "gain",  label: "Gain",  defaultDir: "desc" },
+    { key: "name",  label: "Name",  defaultDir: "asc"  },
   ];
 
   const sorted = useMemo(() => {

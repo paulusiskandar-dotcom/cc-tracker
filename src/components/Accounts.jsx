@@ -738,12 +738,10 @@ function CashAccountCard({ account: a, fxRates = {}, CURRENCIES: C = [], ledger,
 }
 
 // ─── BANK PAGE CONTENT ───────────────────────────────────────
-const BANK_SORT_OPTS = [
-  { value: "balance_desc", label: "Saldo tertinggi → terendah" },
-  { value: "balance_asc",  label: "Saldo terendah → tertinggi" },
-  { value: "name_asc",     label: "Nama A → Z" },
-  { value: "bank_asc",     label: "Bank A → Z" },
-  { value: "updated_desc", label: "Terakhir diupdate" },
+const BANK_SORT_PILLS = [
+  { key: "balance", label: "Balance", defaultDir: "desc" },
+  { key: "name",    label: "Name",    defaultDir: "asc"  },
+  { key: "bank",    label: "Bank",    defaultDir: "asc"  },
 ];
 
 function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, CURRENCIES: C = [], onEdit, onDelete, onHistory }) {
@@ -758,11 +756,12 @@ function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, CURRENC
     const indexed = accounts.map((a, i) => ({ a, i }));
     indexed.sort((x, y) => {
       switch (sort) {
-        case "balance_asc":  return Number(x.a.current_balance || 0) - Number(y.a.current_balance || 0);
-        case "name_asc":     return (x.a.name || "").localeCompare(y.a.name || "");
-        case "bank_asc":     return (x.a.bank_name || "").localeCompare(y.a.bank_name || "");
-        case "updated_desc": return (y.a.updated_at || "").localeCompare(x.a.updated_at || "");
-        default:             return Number(y.a.current_balance || 0) - Number(x.a.current_balance || 0);
+        case "balance_asc": return Number(x.a.current_balance || 0) - Number(y.a.current_balance || 0);
+        case "name_asc":    return (x.a.name || "").localeCompare(y.a.name || "");
+        case "name_desc":   return (y.a.name || "").localeCompare(x.a.name || "");
+        case "bank_asc":    return (x.a.bank_name || "").localeCompare(y.a.bank_name || "");
+        case "bank_desc":   return (y.a.bank_name || "").localeCompare(x.a.bank_name || "");
+        default:            return Number(y.a.current_balance || 0) - Number(x.a.current_balance || 0);
       }
     });
     return indexed;
@@ -830,7 +829,7 @@ function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, CURRENC
         ) : <div />}
         <SortDropdown
           storageKey="sort_bank"
-          options={BANK_SORT_OPTS}
+          options={BANK_SORT_PILLS}
           value={sort}
           onChange={v => setSort(v)}
         />
@@ -858,10 +857,9 @@ function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, CURRENC
   );
 }
 
-const CASH_SORT_OPTS = [
-  { value: "balance_desc", label: "Saldo tertinggi → terendah" },
-  { value: "balance_asc",  label: "Saldo terendah → tertinggi" },
-  { value: "name_asc",     label: "Nama A → Z" },
+const CASH_SORT_PILLS = [
+  { key: "balance", label: "Balance", defaultDir: "desc" },
+  { key: "name",    label: "Name",    defaultDir: "asc"  },
 ];
 
 // ─── CASH PAGE CONTENT ───────────────────────────────────────
@@ -883,6 +881,7 @@ function CashPageContent({ accounts, fxRates, CURRENCIES: C = [], ledger, onEdit
     switch (sort) {
       case "balance_asc": return arr.sort((a, b) => Number(a.current_balance || 0) - Number(b.current_balance || 0));
       case "name_asc":    return arr.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+      case "name_desc":   return arr.sort((a, b) => (b.name || "").localeCompare(a.name || ""));
       default:            return arr.sort((a, b) => Number(b.current_balance || 0) - Number(a.current_balance || 0));
     }
   }, [accounts, sort]);
@@ -907,7 +906,7 @@ function CashPageContent({ accounts, fxRates, CURRENCIES: C = [], ledger, onEdit
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
         <SortDropdown
           storageKey="sort_cash"
-          options={CASH_SORT_OPTS}
+          options={CASH_SORT_PILLS}
           value={sort}
           onChange={v => setSort(v)}
         />

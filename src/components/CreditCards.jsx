@@ -399,10 +399,10 @@ export default function CreditCards({
 
               // Filtered + sorted cards
                 const CC_SORT_PILLS = [
-                  { key: "debt",  label: "Tagihan",   defaultDir: "desc" },
-                  { key: "limit", label: "Limit",     defaultDir: "desc" },
-                  { key: "util",  label: "Utilisasi", defaultDir: "desc" },
-                  { key: "name",  label: "Name",      defaultDir: "asc"  },
+                  { key: "debt",  label: "Debt",  defaultDir: "desc" },
+                  { key: "limit", label: "Limit", defaultDir: "desc" },
+                  { key: "util",  label: "Usage", defaultDir: "desc" },
+                  { key: "name",  label: "Name",  defaultDir: "asc"  },
                 ];
                 const allBanks   = [...new Set(cardStats.map(c => c.bank_name).filter(Boolean))].sort();
                 const filtered   = cardStats.filter(cc => !ccBankFilter || ccBankFilter === "all" || cc.bank_name === ccBankFilter);
