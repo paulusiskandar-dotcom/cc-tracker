@@ -54,7 +54,7 @@ export default function CreditCards({
   const [subTab,       setSubTab]       = useState("overview");
   const [selectedCard, setSelectedCard] = useState(null);
   const [ccBankFilter, setCcBankFilter] = useState("all");
-  const [filterMonth,  setFilterMonth]  = useState(ym(todayStr()));
+  const [filterMonth,  setFilterMonth]  = useState("");
   const [modal,        setModal]        = useState(null);
   const [saving,       setSaving]       = useState(false);
   const [deleteInstId, setDeleteInstId] = useState(null);
@@ -482,7 +482,7 @@ export default function CreditCards({
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <select value={filterMonth} onChange={e => setFilterMonth(e.target.value)} style={FILTER_SEL}>
               <option value="">All months</option>
-              {Array.from({ length: 12 }).map((_, i) => {
+              {Array.from({ length: 24 }).map((_, i) => {
                 const d = new Date(); d.setMonth(d.getMonth() - i);
                 const m = d.toISOString().slice(0, 7);
                 return <option key={m} value={m}>{d.toLocaleDateString("en-US", { month: "short", year: "numeric" })}</option>;
@@ -499,7 +499,7 @@ export default function CreditCards({
           {ccLedger.length === 0
             ? <EmptyState icon="📋" message="No CC transactions found" />
             : ccLedger.map(e => {
-                const cc  = creditCards.find(c => c.id === e.from_id);
+                const cc  = creditCards.find(c => c.id === e.from_id || c.id === e.to_id);
                 const cat = categories.find(c => c.id === e.category_id);
                 const isPayment = e.tx_type === "pay_cc";
                 return (
