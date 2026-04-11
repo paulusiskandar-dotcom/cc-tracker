@@ -6,7 +6,7 @@
 //   value       — current sort value, e.g. "balance_desc" or "name_asc"
 //   onChange    — called with new value string, e.g. "balance_asc"
 //
-// Button label: "Sort: [Label] ↑/↓"
+// Button label: "[Label] ↑/↓"  e.g. "Latest ↓" or "Name ↑"
 // Clicking active option  → toggles ↑ ↔ ↓ direction, closes dropdown
 // Clicking inactive option → activates with defaultDir, closes dropdown
 // Click outside           → closes dropdown
