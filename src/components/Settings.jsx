@@ -674,50 +674,123 @@ export default function Settings({
       {/* ══════════════════════════════════════════════════ */}
       {/* ── RECURRING ────────────────────────────────── */}
       {/* ══════════════════════════════════════════════════ */}
-      {subTab === "recurring" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <Button variant="primary" size="sm" onClick={() => openRecurModal()}>+ Add Template</Button>
-          </div>
+      {subTab === "recurring" && (() => {
+        const isIncome  = t => t.tx_type === "income";
+        const toMonthly = t => {
+          const a = Number(t.amount || 0);
+          if (t.frequency === "Weekly")    return a * 52 / 12;
+          if (t.frequency === "Quarterly") return a / 3;
+          if (t.frequency === "Annual")    return a / 12;
+          return a; // Monthly default
+        };
+        const totalIncome  = recurTemplates.filter(isIncome).reduce((s, t) => s + toMonthly(t), 0);
+        const totalExpense = recurTemplates.filter(t => !isIncome(t)).reduce((s, t) => s + toMonthly(t), 0);
+        const net          = totalIncome - totalExpense;
 
-          {recurTemplates.length === 0 ? (
-            <EmptyState icon="🔄" message="No recurring templates yet." />
-          ) : (
-            recurTemplates.map(t => {
-              const txDef = TX_TYPES.find(x => x.id === t.tx_type);
-              return (
-                <div key={t.id} style={card}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{t.name}</div>
-                      <div style={{ fontSize: 11, color: T.text3, marginTop: 3 }}>
-                        {t.frequency} · {txDef?.label || t.tx_type}
-                        {t.day_of_month && ` · day ${t.day_of_month}`}
-                        {t.from_id && (() => { const a = accounts.find(x => x.id === t.from_id); return a ? ` · from ${a.name}` : ""; })()}
-                        {t.to_id && (() => { const a = accounts.find(x => x.id === t.to_id); return a ? ` · to ${a.name}` : ""; })()}
-                        {t.category_id && (() => {
-                          const c = [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES_LIST].find(c => c.id === t.category_id);
-                          return c ? ` · ${c.icon} ${c.label}` : "";
-                        })()}
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {/* ── Summary cards + Add button row ── */}
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, flex: 1 }}>
+                {[
+                  { label: "Monthly Income",  value: fmtIDR(totalIncome, true),  color: "#059669" },
+                  { label: "Monthly Expense", value: fmtIDR(totalExpense, true), color: "#dc2626" },
+                  { label: "Net Monthly",     value: fmtIDR(net, true),          color: net >= 0 ? "#059669" : "#dc2626" },
+                ].map(s => (
+                  <div key={s.label} style={{ background: s.color + "14", borderRadius: 14, padding: "14px 14px" }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, color: s.color, textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 5, opacity: 0.8 }}>{s.label}</div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif" }}>{s.value}</div>
+                  </div>
+                ))}
+              </div>
+              <Button variant="primary" size="sm" onClick={() => openRecurModal()} style={{ flexShrink: 0, alignSelf: "center" }}>
+                + Add
+              </Button>
+            </div>
+
+            {recurTemplates.length === 0 ? (
+              <EmptyState icon="🔄" message="No recurring templates yet." />
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
+                {recurTemplates.map(t => {
+                  const income      = t.tx_type === "income";
+                  const accentColor = income ? "#059669" : "#dc2626";
+                  const accentBg    = income ? "#f0fdf4" : "#fff5f5";
+                  const txDef       = TX_TYPES.find(x => x.id === t.tx_type);
+                  const toAcc       = accounts.find(a => a.id === t.to_id);
+                  const fromAcc     = accounts.find(a => a.id === t.from_id);
+                  const catName     = t.category_id
+                    ? (categories.find(c => c.id === t.category_id)?.label
+                      || incomeSrcs.find(s => s.id === t.category_id)?.name
+                      || null)
+                    : null;
+
+                  const subtitleParts = [
+                    t.frequency,
+                    txDef?.label || t.tx_type,
+                    t.day_of_month ? `day ${t.day_of_month}` : null,
+                    fromAcc ? `from ${fromAcc.name}` : null,
+                    toAcc   ? `to ${toAcc.name}`     : null,
+                    catName ? catName                 : null,
+                  ].filter(Boolean);
+
+                  return (
+                    <div key={t.id} style={{ background: "#ffffff", border: "0.5px solid #e5e7eb", borderRadius: 16, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                      {/* Color bar */}
+                      <div style={{ height: 3, background: accentColor }} />
+
+                      <div style={{ padding: "14px 14px 12px", flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+                        {/* Type badge */}
+                        <span style={{ display: "inline-block", alignSelf: "flex-start", background: accentBg, color: accentColor, borderRadius: 6, padding: "2px 8px", fontSize: 10, fontWeight: 700, fontFamily: "Figtree, sans-serif" }}>
+                          {income ? "INCOME" : "EXPENSE"}
+                        </span>
+
+                        {/* Name */}
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {t.name}
+                        </div>
+
+                        {/* Subtitle */}
+                        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", display: "flex", flexWrap: "wrap", gap: "2px 4px" }}>
+                          {subtitleParts.map((p, i) => (
+                            <span key={i}>{i > 0 && <span style={{ opacity: 0.4 }}>·</span>} {p}</span>
+                          ))}
+                        </div>
+
+                        {/* Amount */}
+                        <div style={{ marginTop: 2 }}>
+                          <div style={{ fontSize: 20, fontWeight: 900, color: accentColor, fontFamily: "Figtree, sans-serif", lineHeight: 1.2 }}>
+                            {fmtIDR(Number(t.amount || 0), true)}
+                          </div>
+                          <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>{t.currency || "IDR"}</div>
+                        </div>
+                      </div>
+
+                      {/* Bottom action bar */}
+                      <div style={{ borderTop: "0.5px solid #f3f4f6", padding: "8px 14px", display: "flex", gap: 6 }}>
+                        <button
+                          onClick={() => openRecurModal(t)}
+                          style={{ flex: 1, height: 30, border: "0.5px solid #e5e7eb", borderRadius: 8, cursor: "pointer", background: "#ffffff", color: "#374151", fontSize: 12, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => deleteRecur(t)}
+                          style={{ height: 30, padding: "0 10px", border: "none", borderRadius: 8, cursor: "pointer", background: "none", color: "#d1d5db", fontSize: 12, fontFamily: "Figtree, sans-serif" }}
+                          onMouseEnter={e => e.currentTarget.style.color = "#ef4444"}
+                          onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}
+                        >
+                          🗑
+                        </button>
                       </div>
                     </div>
-                    <div style={{ textAlign: "right" }}>
-                      <div style={{ fontSize: 14, fontWeight: 800, color: txDef?.color || T.ac }}>
-                        {fmtIDR(Number(t.amount || 0), true)}
-                      </div>
-                      <div style={{ fontSize: 10, color: T.text3 }}>{t.currency || "IDR"}</div>
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                    <Button variant="secondary" size="sm" onClick={() => openRecurModal(t)}>✏️ Edit</Button>
-                    <Button variant="danger"    size="sm" onClick={() => deleteRecur(t)}>🗑 Delete</Button>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      )}
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ══════════════════════════════════════════════════ */}
       {/* ── MERCHANTS ────────────────────────────────── */}
