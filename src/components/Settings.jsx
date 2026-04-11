@@ -1690,48 +1690,91 @@ function EStatementTab({
     ));
   };
 
-  // ── Save selected transactions for a file ──────────────────
+  // ── Remove a single row from preview ───────────────────────
+  const removeRow = (itemId, rowId) => {
+    setQueue(prev => prev.map(i => {
+      if (i.id !== itemId) return i;
+      const rows = i.rows.filter(r => r._id !== rowId);
+      const selected = { ...i.selected }; delete selected[rowId];
+      const skipped  = new Set(i.skipped);  skipped.delete(rowId);
+      const notesOpen= new Set(i.notesOpen);notesOpen.delete(rowId);
+      return { ...i, rows, selected, skipped, notesOpen };
+    }));
+  };
+
+  // ── Build ledger payload from a row ────────────────────────
+  const isUUID = (v) => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+
+  const buildPayload = (r) => {
+    const txType  = r.tx_type === "cc_installment" ? "expense" : (r.tx_type || "expense");
+    const isDebit = ["expense","transfer","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan","fx_exchange"].includes(txType);
+    const notes   = r._isInstallment && r._instNo
+      ? `Cicilan ${r._instNo}${r._instTotal ? `/${r._instTotal}` : ""}${r.notes ? ` — ${r.notes}` : ""}`
+      : (r.notes || null);
+    return {
+      user_id:       user.id,
+      tx_date:       r.tx_date,
+      description:   r.description || "E-Statement import",
+      merchant_name: r.description || null,
+      amount:        Number(r.amount || 0),
+      amount_idr:    Number(r.amount_idr || r.amount || 0),
+      currency:      r.currency || "IDR",
+      tx_type:       txType,
+      from_id:       isDebit && isUUID(r.from_id) ? r.from_id : null,
+      to_id:         !isDebit && isUUID(r.to_id) ? r.to_id : null,
+      category_id:   isUUID(r.category_id) ? r.category_id : null,
+      category_name: r.category_name || null,
+      entity:        r.entity || "Personal",
+      is_reimburse:  false,
+      notes,
+    };
+  };
+
+  // ── Save ONE row immediately, remove from preview ──────────
+  const saveRow = async (itemId, row) => {
+    const { error: insErr } = await supabase.from("ledger").insert(buildPayload(row));
+    if (insErr) {
+      console.error("ledger insert error", insErr);
+      showToast(`Error: ${insErr.message}`, "error");
+      return;
+    }
+    removeRow(itemId, row._id);
+    showToast(`Saved: ${row.description || "transaction"}`);
+  };
+
+  // ── Save all checked rows (bulk import) ────────────────────
   const saveFile = async (itemId) => {
     const item = queue.find(i => i.id === itemId);
     if (!item?.rows) return;
     const toSave = item.rows.filter(r => item.selected[r._id] && !item.skipped.has(r._id));
+    if (toSave.length === 0) { showToast("Nothing selected", "error"); return; }
     let count = 0;
+    const savedIds = [];
     for (const r of toSave) {
-      const isDebit = ["expense","cc_installment","transfer"].includes(r.tx_type);
-      const notes = r._isInstallment && r._instNo
-        ? `Cicilan ${r._instNo}${r._instTotal ? `/${r._instTotal}` : ""}${r.notes ? ` — ${r.notes}` : ""}`
-        : (r.notes || null);
-      const { error: insErr } = await supabase.from("ledger").insert({
-        user_id:       user.id,
-        tx_date:       r.tx_date,
-        description:   r.description || "E-Statement import",
-        merchant_name: r.description || null,
-        amount:        Number(r.amount || 0),
-        amount_idr:    Number(r.amount_idr || r.amount || 0),
-        currency:      "IDR",
-        tx_type:       r.tx_type === "cc_installment" ? "expense" : r.tx_type,
-        from_id:       isDebit ? (r.from_id || null) : null,
-        to_id:         isDebit ? null : (r.to_id || null),
-        category_id:   r.category_id || null,
-        category_name: r.category_name || null,
-        entity:        "Personal",
-        is_reimburse:  false,
-        notes,
-      });
-      if (insErr) { showToast(`Save error: ${insErr.message}`, "error"); continue; }
+      const { error: insErr } = await supabase.from("ledger").insert(buildPayload(r));
+      if (insErr) { console.error("ledger insert error", insErr); showToast(`Error: ${insErr.message}`, "error"); continue; }
+      savedIds.push(r._id);
       count++;
     }
+    if (savedIds.length === 0) return;
+    // Remove saved rows; if all gone move item to history
+    setQueue(prev => prev.map(i => {
+      if (i.id !== itemId) return i;
+      const rows = i.rows.filter(r => !savedIds.includes(r._id));
+      if (rows.length === 0) return null; // remove entirely below
+      const selected = { ...i.selected };
+      savedIds.forEach(id => delete selected[id]);
+      return { ...i, rows, selected };
+    }).filter(Boolean));
     const now = new Date().toISOString();
     await supabase.from("estatement_pdfs").update({
       status: "done", transaction_count: count, processed_at: now,
     }).eq("id", itemId);
-    // Move to history, remove from active queue
     setHistory(prev => [{
       id: itemId, filename: item.name, file_size: item.size,
       status: "done", transaction_count: count, processed_at: now,
     }, ...prev]);
-    setQueue(prev => prev.filter(i => i.id !== itemId));
-    showToast(`Saved ${count} transaction${count !== 1 ? "s" : ""} from ${item.name}`);
+    showToast(`${count} transaction${count !== 1 ? "s" : ""} imported`);
   };
 
   // ── Create installment from a row ──────────────────────────
@@ -1872,11 +1915,7 @@ function EStatementTab({
               onUpdateRow={(rowId, patch) => updateRow(item.id, rowId, patch)}
               onToggleSel={(rowId) => setQueue(prev => prev.map(i => i.id === item.id
                 ? { ...i, selected: { ...i.selected, [rowId]: !i.selected[rowId] } } : i))}
-              onToggleSkip={(rowId) => setQueue(prev => prev.map(i => i.id === item.id ? {
-                ...i,
-                skipped: (() => { const ns = new Set(i.skipped); ns.has(rowId) ? ns.delete(rowId) : ns.add(rowId); return ns; })(),
-                selected: { ...i.selected, [rowId]: false },
-              } : i))}
+              onToggleSkip={(rowId) => removeRow(item.id, rowId)}
               onToggleNotes={(rowId) => setQueue(prev => prev.map(i => i.id === item.id ? {
                 ...i,
                 notesOpen: (() => { const ns = new Set(i.notesOpen); ns.has(rowId) ? ns.delete(rowId) : ns.add(rowId); return ns; })(),
@@ -1888,6 +1927,8 @@ function EStatementTab({
                 setQueue(prev => prev.map(i => i.id === item.id ? { ...i, selected: ns } : i));
               }}
               onSave={() => saveFile(item.id)}
+              onSaveRow={(row) => saveRow(item.id, row)}
+              onRemoveRow={(rowId) => removeRow(item.id, rowId)}
               onCreateInstallment={(row) => createInstallment(item.id, row)}
               onRemove={() => removeFromQueue(item.id)}
               statusBadge={statusBadge}
@@ -1950,7 +1991,7 @@ function EStmtQueueItem({
   item, T, card, accounts,
   onProcess,
   onUpdateRow, onToggleSel, onToggleSkip, onToggleNotes, onToggleAll,
-  onSave, onCreateInstallment, onRemove,
+  onSave, onSaveRow, onRemoveRow, onCreateInstallment, onRemove,
   statusBadge, fmtSize,
 }) {
 
@@ -2064,6 +2105,8 @@ function EStmtQueueItem({
                     onToggleSkip={() => onToggleSkip(r._id)}
                     onToggleNotes={() => onToggleNotes(r._id)}
                     onUpdate={(patch) => onUpdateRow(r._id, patch)}
+                    onSaveRow={() => onSaveRow(r)}
+                    onRemoveRow={() => onRemoveRow(r._id)}
                     onCreateInstallment={() => onCreateInstallment(r)}
                   />
                 ))}
@@ -2080,7 +2123,8 @@ function EStmtQueueItem({
 // Mirrors AIImport TxCard style exactly
 function EStmtTxCard({
   r, T, isSelected, isSkipped, isNotesOpen,
-  accounts, onToggleSel, onToggleSkip, onToggleNotes, onUpdate, onCreateInstallment,
+  accounts, onToggleSel, onToggleSkip, onToggleNotes, onUpdate,
+  onSaveRow, onRemoveRow, onCreateInstallment,
 }) {
   const dupLevel   = r.status === "duplicate" ? 3 : r.status === "possible_duplicate" ? 2 : r.status === "review" ? 1 : 0;
   const cardBg     = isSkipped ? T.sur2 : dupLevel === 3 ? "#fff1f2" : dupLevel === 2 ? "#fff7ed" : dupLevel === 1 ? "#fefce8" : T.surface;
@@ -2129,21 +2173,20 @@ function EStmtTxCard({
           {amtStr}
         </span>
 
-        {/* ✓ import single */}
+        {/* ✓ import this row now */}
         <button
-          onClick={onToggleSel}
-          disabled={isSkipped}
-          style={estmtACT({ background: isSelected ? "#dcfce7" : "#f9fafb", color: isSelected ? "#059669" : "#9ca3af", border: isSelected ? "1px solid #bbf7d0" : "1px solid #e5e7eb" })}
-          title={isSelected ? "Deselect" : "Select"}>
+          onClick={onSaveRow}
+          style={estmtACT({ background: "#dcfce7", color: "#059669", border: "1px solid #bbf7d0" })}
+          title="Import this transaction now">
           ✓
         </button>
 
-        {/* ✕ skip */}
+        {/* ✕ remove row */}
         <button
-          onClick={onToggleSkip}
-          style={estmtACT({ color: isSkipped ? "#059669" : "#9ca3af" })}
-          title={isSkipped ? "Restore" : "Skip"}>
-          {isSkipped ? "↩" : "✕"}
+          onClick={onRemoveRow}
+          style={estmtACT({ color: "#9ca3af", border: "1px solid #e5e7eb" })}
+          title="Skip — remove from list">
+          ✕
         </button>
       </div>
 
