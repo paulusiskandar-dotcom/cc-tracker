@@ -414,6 +414,13 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
   // Update last_sync
   await supabase.from("gmail_tokens").update({ last_sync: new Date().toISOString() }).eq("user_id", userId);
 
+  // Record when this sync ran (read by Dashboard banner, updated even if no new emails)
+  const syncNow = new Date().toISOString();
+  await supabase.from("app_settings").upsert(
+    { user_id: userId, key: "gmail_last_sync_at", value: JSON.stringify(syncNow) },
+    { onConflict: "user_id,key" }
+  );
+
   // Save sync log entry to app_settings (max 50 entries, newest first)
   try {
     const syncEntry = {

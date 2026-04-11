@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect } from "react";
-import { ledgerApi, recurringApi } from "../api";
+import { ledgerApi, recurringApi, reimburseSettlementsApi, settingsApi } from "../api";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
 import { fmtIDR, ym, mlShort, getGreeting, todayStr, groupByDate } from "../utils";
 import { showToast, EmptyState, Modal, Button, AmountInput, Field, Input, FormRow } from "./shared/index";
@@ -11,9 +11,10 @@ export default function Dashboard({
   reminders, recurTemplates, netWorth, bankAccounts,
   creditCards, assets, receivables, liabilities,
   installments = [],
-  curMonth, pendingSyncs, setTab, setSettingsTab,
+  curMonth, pendingSyncs, setTab, setSettingsTab, openAiImport,
   setLedger, setReminders, onRefresh,
   employeeLoans = [], loanPayments = [],
+  reimburseSettlements = [], setReimburseSettlements,
 }) {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
   useEffect(() => {
@@ -22,9 +23,17 @@ export default function Dashboard({
     return () => window.removeEventListener("resize", h);
   }, []);
 
+  const [gmailLastSyncAt, setGmailLastSyncAt] = useState(null);
+  useEffect(() => {
+    if (!user?.id) return;
+    settingsApi.get(user.id, "gmail_last_sync_at", null)
+      .then(v => setGmailLastSyncAt(v))
+      .catch(() => {});
+  }, [user?.id]);
+
   const [confirmModal,  setConfirmModal]  = useState(false);
-  const [confirmTarget, setConfirmTarget] = useState(null);  // { reminder, tmpl, editMode }
-  const [confirmForm,   setConfirmForm]   = useState({ date: todayStr(), amount: "", notes: "" });
+  const [confirmTarget, setConfirmTarget] = useState(null);  // { kind, reminder?, tmpl?, editMode?, settlement? }
+  const [confirmForm,   setConfirmForm]   = useState({ date: todayStr(), amount: "", notes: "", toAccountId: "" });
   const [confirmSaving, setConfirmSaving] = useState(false);
   const [dismissed,     setDismissed]     = useState(new Set()); // dismissed upcoming item ids
   const [settleModal,   setSettleModal]   = useState(false);
@@ -133,6 +142,8 @@ export default function Dashboard({
     });
   }, [employeeLoans, loanPayments]);
 
+  const RE_CAT_NAMES = { Hamasa: "Hamasa RE", SDC: "SDC RE", Travelio: "Travelio RE" };
+
   // ── UNIFIED UPCOMING ITEMS (next 7 days, max 10) ─────────────
   const upcomingItems = useMemo(() => {
     const today = todayStr();
@@ -194,7 +205,21 @@ export default function Dashboard({
         });
       });
 
-    // D) CC installments (info only)
+    // D) Pending reimburse settlements (expected income)
+    reimburseSettlements.forEach(s => {
+      all.push({
+        id:   `rs-${s.id}`, type: "reimburse", raw: s,
+        date: today,
+        title: s.entity,
+        sub:   `Expected reimbursement · ${fmtIDR(Number(s.total_out || 0), true)}`,
+        amount: Number(s.total_out || 0),
+        amountColor: "#059669", amountSign: "+",
+        icon: "💰", iconBg: "#dcfce7", iconColor: "#059669",
+        actionable: true,
+      });
+    });
+
+    // E) CC installments (info only)
     installments
       .filter(inst => (inst.paid_months || 0) < (inst.months || 0))
       .slice(0, 3)
@@ -216,7 +241,7 @@ export default function Dashboard({
       .filter(item => !dismissed.has(item.id))
       .sort((a, b) => a.date.localeCompare(b.date) || (a.type === "installment" ? 1 : -1))
       .slice(0, 10);
-  }, [reminders, loansWithStats, receivables, installments, creditCards, dismissed]);
+  }, [reminders, loansWithStats, receivables, installments, creditCards, dismissed, reimburseSettlements]);
 
   // Group upcoming by date
   const upcomingGroups = useMemo(() => {
@@ -239,14 +264,11 @@ export default function Dashboard({
     return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
   }, [upcomingItems]);
 
-  // Last sync time
+  // Last sync time — reads from gmail_last_sync_at setting (updated every time gmail-sync runs)
   const lastSyncMins = useMemo(() => {
-    if (!pendingSyncs?.length) return null;
-    const latest = pendingSyncs.reduce((max, s) =>
-      new Date(s.received_at) > new Date(max.received_at) ? s : max
-    );
-    return Math.floor((Date.now() - new Date(latest.received_at)) / 60000);
-  }, [pendingSyncs]);
+    if (!gmailLastSyncAt) return null;
+    return Math.floor((Date.now() - new Date(gmailLastSyncAt)) / 60000);
+  }, [gmailLastSyncAt]);
 
   const monthlyChange = useMemo(() => {
     const inc  = thisMonthLedger.filter(e => e.tx_type === "income").reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
@@ -257,53 +279,119 @@ export default function Dashboard({
   // ─── REMINDER ACTIONS ────────────────────────────────────────
   const openConfirmModal = (r, editMode = false) => {
     const tmpl = r.recurring_templates || {};
-    setConfirmTarget({ reminder: r, tmpl, editMode });
+    setConfirmTarget({ kind: "reminder", reminder: r, tmpl, editMode });
     setConfirmForm({
-      date:   todayStr(),
-      amount: String(tmpl.amount || ""),
-      notes:  "",
+      date:        todayStr(),
+      amount:      String(tmpl.amount || ""),
+      notes:       "",
+      toAccountId: tmpl.to_id || bankAccounts[0]?.id || "",
     });
     setConfirmModal(true);
   };
 
-  const doConfirmReminder = async () => {
-    if (!confirmTarget) return;
-    const { reminder, tmpl } = confirmTarget;
-    setConfirmSaving(true);
-    const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
+  const openReimburseModal = (s) => {
+    setConfirmTarget({ kind: "reimburse", settlement: s });
+    setConfirmForm({
+      date:        todayStr(),
+      amount:      String(s.total_out || ""),
+      notes:       "",
+      toAccountId: bankAccounts[0]?.id || "",
+    });
+    setConfirmModal(true);
+  };
+
+  const dismissReimburse = async (s) => {
     try {
-      // Create ledger entry from template
-      const isIncome  = tmpl.tx_type === "income";
-      const isExpense = tmpl.tx_type === "expense";
-      if (isIncome || isExpense) {
+      await reimburseSettlementsApi.update(s.id, { status: "dismissed" });
+      setReimburseSettlements?.(p => p.filter(x => x.id !== s.id));
+      showToast("Dismissed");
+    } catch (e) { showToast(e.message, "error"); }
+  };
+
+  const doConfirm = async () => {
+    if (!confirmTarget) return;
+    setConfirmSaving(true);
+    try {
+      if (confirmTarget.kind === "reimburse") {
+        const { settlement } = confirmTarget;
+        const amount = Number(confirmForm.amount) || 0;
+        if (!amount)                    { showToast("Enter amount", "error"); setConfirmSaving(false); return; }
+        if (!confirmForm.toAccountId)   { showToast("Select a bank account", "error"); setConfirmSaving(false); return; }
+
+        const entity      = settlement.entity;
+        const recat       = (categories || []).find(c => c.label === RE_CAT_NAMES[entity] || c.name === RE_CAT_NAMES[entity]);
+        const receivableAcc = receivables.find(r => r.entity === entity);
+
         const entry = {
           tx_date:     confirmForm.date || todayStr(),
-          description: tmpl.name,
-          amount:      sn(confirmForm.amount),
-          currency:    tmpl.currency || "IDR",
-          amount_idr:  sn(confirmForm.amount),
-          tx_type:     tmpl.tx_type,
-          entity:      "Personal",
+          description: `${entity} reimburse received`,
+          amount,
+          currency:    "IDR",
+          amount_idr:  amount,
+          tx_type:     "reimburse_in",
+          from_type:   "account",
+          from_id:     receivableAcc?.id || null,
+          to_type:     "account",
+          to_id:       confirmForm.toAccountId,
+          entity,
+          category_id: recat?.id || null,
+          is_reimburse: true,
           notes:       confirmForm.notes || null,
-          category_id: tmpl.category_id || null,
           merchant_name: null, attachment_url: null,
           ai_categorized: false, ai_confidence: null,
           installment_id: null, scan_batch_id: null,
-          ...(isIncome
-            ? { from_type: "income_source", from_id: null, to_type: "account",  to_id: tmpl.to_id || null }
-            : { from_type: "account",       from_id: tmpl.from_id || null, to_type: "expense", to_id: null }
-          ),
         };
         const created = await ledgerApi.create(user.id, entry, accounts);
         if (created) setLedger?.(p => [created, ...p]);
+
+        await reimburseSettlementsApi.update(settlement.id, {
+          status:       "settled",
+          total_in:     amount,
+          to_account_id: confirmForm.toAccountId,
+          settled_at:   new Date().toISOString(),
+        });
+        setReimburseSettlements?.(p => p.filter(x => x.id !== settlement.id));
+        showToast(`✓ ${entity} reimbursement recorded`);
+      } else {
+        // Reminder (recurring income / expense)
+        const { reminder, tmpl } = confirmTarget;
+        const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
+        const isIncome  = tmpl.tx_type === "income";
+        const isExpense = tmpl.tx_type === "expense";
+        if (isIncome || isExpense) {
+          const entry = {
+            tx_date:     confirmForm.date || todayStr(),
+            description: tmpl.name,
+            amount:      sn(confirmForm.amount),
+            currency:    tmpl.currency || "IDR",
+            amount_idr:  sn(confirmForm.amount),
+            tx_type:     tmpl.tx_type,
+            entity:      "Personal",
+            notes:       confirmForm.notes || null,
+            category_id: tmpl.category_id || null,
+            merchant_name: null, attachment_url: null,
+            ai_categorized: false, ai_confidence: null,
+            installment_id: null, scan_batch_id: null,
+            ...(isIncome
+              ? { from_type: "income_source", from_id: null, to_type: "account",
+                  to_id: confirmForm.toAccountId || tmpl.to_id || null }
+              : { from_type: "account", from_id: tmpl.from_id || null, to_type: "expense", to_id: null }
+            ),
+          };
+          const created = await ledgerApi.create(user.id, entry, accounts);
+          if (created) setLedger?.(p => [created, ...p]);
+        }
+        await recurringApi.confirmReminder(reminder.id);
+        setReminders?.(p => p.filter(x => x.id !== reminder.id));
+        showToast(`✓ ${tmpl.name || "Reminder"} confirmed`);
       }
-      await recurringApi.confirmReminder(reminder.id);
-      setReminders?.(p => p.filter(x => x.id !== reminder.id));
-      showToast(`✓ ${tmpl.name || "Reminder"} confirmed`);
       setConfirmModal(false);
     } catch (e) { showToast(e.message, "error"); }
     setConfirmSaving(false);
   };
+
+  // Keep alias for Skip button reference
+  const doConfirmReminder = doConfirm;
 
   const skipReminder = async (r) => {
     const tmpl = r.recurring_templates || {};
@@ -375,7 +463,7 @@ export default function Dashboard({
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {[
-            { label: "Email Sync",  onClick: () => setSettingsTab?.("email") },
+            { label: "Email Sync",  onClick: () => openAiImport?.("gmail") },
             { label: "E-Statement", onClick: () => setSettingsTab?.("estatement") },
             { label: "AI Scan",     onClick: () => setTab?.("aiimport"), icon: true },
           ].map(({ label, onClick, icon }) => (
@@ -428,7 +516,7 @@ export default function Dashboard({
             </div>
           </div>
           <button
-            onClick={() => setTab?.("aiimport")}
+            onClick={() => openAiImport?.("gmail")}
             style={{
               background:   "#d97706",
               color:        "#fff",
@@ -703,12 +791,14 @@ export default function Dashboard({
                         onConfirm={
                           item.type === "reminder"   ? () => openConfirmModal(item.raw) :
                           item.type === "receivable" ? () => openSettleModal(item.raw) :
-                          item.type === "loan"       ? () => setTab?.("receivables") :
+                          item.type === "loan"       ? () => dismissUpcoming(item.id) :
+                          item.type === "reimburse"  ? () => openReimburseModal(item.raw) :
                           null
                         }
                         onSkip={
-                          item.type === "reminder"   ? () => skipReminder(item.raw) :
-                          item.type === "loan" || item.type === "receivable" ? () => dismissUpcoming(item.id) :
+                          item.type === "reminder"                            ? () => skipReminder(item.raw) :
+                          item.type === "loan" || item.type === "receivable"  ? () => dismissUpcoming(item.id) :
+                          item.type === "reimburse"                           ? () => dismissReimburse(item.raw) :
                           null
                         }
                       />
@@ -777,26 +867,87 @@ export default function Dashboard({
         </div>
       </Modal>
 
-      {/* ── CONFIRM / EDIT REMINDER MODAL ── */}
+      {/* ── CONFIRM / REMIND / REIMBURSE MODAL ── */}
       <Modal
         isOpen={confirmModal && !!confirmTarget}
         onClose={() => setConfirmModal(false)}
-        title={confirmTarget?.editMode ? `Edit — ${confirmTarget?.tmpl?.name || ""}` : `Confirm — ${confirmTarget?.tmpl?.name || ""}`}
+        title={
+          confirmTarget?.kind === "reimburse"
+            ? `Terima Reimburse — ${confirmTarget?.settlement?.entity || ""}`
+            : confirmTarget?.editMode
+              ? `Edit — ${confirmTarget?.tmpl?.name || ""}`
+              : `Confirm — ${confirmTarget?.tmpl?.name || ""}`
+        }
         footer={
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            {confirmTarget?.type !== "info" && (
+            {confirmTarget?.kind !== "reimburse" && confirmTarget?.type !== "info" && (
               <Button variant="ghost" size="md" onClick={() => { skipReminder(confirmTarget?.reminder); setConfirmModal(false); }}>
                 Skip
               </Button>
             )}
             <Button variant="secondary" size="md" onClick={() => setConfirmModal(false)}>Cancel</Button>
-            <Button variant="primary" size="md" busy={confirmSaving} onClick={doConfirmReminder}>
-              {confirmTarget?.tmpl?.tx_type === "income" ? "✓ Record Income" : "✓ Record Expense"}
+            <Button variant="primary" size="md" busy={confirmSaving} onClick={doConfirm}>
+              {confirmTarget?.kind === "reimburse"
+                ? "✓ Confirm & Save"
+                : confirmTarget?.tmpl?.tx_type === "income"
+                  ? "✓ Record Income"
+                  : "✓ Record Expense"}
             </Button>
           </div>
         }
       >
         {confirmTarget && (() => {
+          if (confirmTarget.kind === "reimburse") {
+            const { settlement } = confirmTarget;
+            return (
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <div style={{
+                  background: "#f0fdf4", border: "1px solid #bbf7d0",
+                  borderRadius: 10, padding: "10px 14px",
+                  display: "flex", flexDirection: "column", gap: 4,
+                }}>
+                  <div style={{ fontSize: 12, color: "#166534", fontFamily: "Figtree, sans-serif" }}>
+                    Entity: <strong>{settlement.entity}</strong>
+                  </div>
+                  <div style={{ fontSize: 12, color: "#166534", fontFamily: "Figtree, sans-serif" }}>
+                    Category: <strong>{RE_CAT_NAMES[settlement.entity] || "—"}</strong>
+                  </div>
+                </div>
+                <FormRow>
+                  <AmountInput
+                    label="Nilai yang masuk"
+                    value={confirmForm.amount}
+                    onChange={v => setConfirmForm(f => ({ ...f, amount: v }))}
+                    currency="IDR"
+                  />
+                  <Field label="Tanggal terima">
+                    <Input
+                      type="date"
+                      value={confirmForm.date}
+                      onChange={e => setConfirmForm(f => ({ ...f, date: e.target.value }))}
+                    />
+                  </Field>
+                </FormRow>
+                <Field label="Rekening tujuan">
+                  <Select
+                    value={confirmForm.toAccountId}
+                    onChange={e => setConfirmForm(f => ({ ...f, toAccountId: e.target.value }))}
+                    options={bankAccounts.map(a => ({ value: a.id, label: a.name }))}
+                    placeholder="Pilih rekening…"
+                  />
+                </Field>
+                <Field label="Notes (optional)">
+                  <Input
+                    value={confirmForm.notes}
+                    onChange={e => setConfirmForm(f => ({ ...f, notes: e.target.value }))}
+                    placeholder="Add note…"
+                  />
+                </Field>
+              </div>
+            );
+          }
+
+          // ── Reminder (income / expense) ──
           const tmpl = confirmTarget.tmpl || {};
           const allCats = [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES_LIST];
           const cat = allCats.find(c => c.id === tmpl.category_id);
@@ -809,17 +960,9 @@ export default function Dashboard({
                 background: "#f9fafb", borderRadius: 10, padding: "10px 14px",
                 display: "flex", flexDirection: "column", gap: 4,
               }}>
-                {cat && (
-                  <div style={{ fontSize: 11, color: "#6b7280" }}>
-                    {cat.icon} {cat.label}
-                  </div>
-                )}
-                {fromAcc && (
-                  <div style={{ fontSize: 11, color: "#6b7280" }}>From: {fromAcc.name}</div>
-                )}
-                {toAcc && (
-                  <div style={{ fontSize: 11, color: "#6b7280" }}>To: {toAcc.name}</div>
-                )}
+                {cat && <div style={{ fontSize: 11, color: "#6b7280" }}>{cat.icon} {cat.label}</div>}
+                {fromAcc && <div style={{ fontSize: 11, color: "#6b7280" }}>From: {fromAcc.name}</div>}
+                {toAcc && tmpl.tx_type !== "income" && <div style={{ fontSize: 11, color: "#6b7280" }}>To: {toAcc.name}</div>}
               </div>
               <FormRow>
                 <AmountInput
@@ -836,6 +979,16 @@ export default function Dashboard({
                   />
                 </Field>
               </FormRow>
+              {tmpl.tx_type === "income" && (
+                <Field label="Rekening tujuan">
+                  <Select
+                    value={confirmForm.toAccountId}
+                    onChange={e => setConfirmForm(f => ({ ...f, toAccountId: e.target.value }))}
+                    options={bankAccounts.map(a => ({ value: a.id, label: a.name }))}
+                    placeholder="Pilih rekening…"
+                  />
+                </Field>
+              )}
               <Field label="Notes (optional)">
                 <Input
                   value={confirmForm.notes}

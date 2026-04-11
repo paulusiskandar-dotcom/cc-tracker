@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { ledgerApi, gmailApi, scanApi, merchantApi, getTxFromToTypes } from "../api";
 import { fmtIDR, todayStr } from "../utils";
 import { LIGHT, DARK } from "../theme";
@@ -137,11 +137,11 @@ const ACT_BTN = (extra = {}) => ({
 });
 
 // ─────────────────────────────────────────────────────────────────
-export default function AIImport({ user, accounts, ledger, onRefresh, setLedger, dark, merchantMaps = [], fxRates = {}, CURRENCIES = [], setPendingSyncs }) {
+export default function AIImport({ user, accounts, ledger, onRefresh, setLedger, dark, merchantMaps = [], fxRates = {}, CURRENCIES = [], setPendingSyncs, initialMode = "scan" }) {
   const T = dark ? DARK : LIGHT;
   const fileRef = useRef();
 
-  const [mode,        setMode]        = useState("scan");
+  const [mode,        setMode]        = useState(initialMode);
   const [scanning,    setScanning]    = useState(false);
   const [results,     setResults]     = useState([]);
   const [selected,    setSelected]    = useState({});
@@ -485,6 +485,11 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
     } catch { showToast("Could not load Gmail pending", "error"); }
     setGmailLoading(false);
   };
+
+  // Auto-load gmail pending when opened directly in gmail mode
+  useEffect(() => {
+    if (initialMode === "gmail") loadGmailPending();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateGmailRow = (id, patch) => {
     setGmailRows(prev => prev.map(r => r._id === id ? { ...r, ...patch } : r));

@@ -228,6 +228,22 @@ export const ledgerApi = {
         await applyBalanceDelta(toAcc.id, toAcc.type, deltas.to[toAcc.type]);
     }
 
+    // Auto-create a pending reimburse settlement for each reimburse_out
+    const REIMBURSE_ENTITIES = ["Hamasa", "SDC", "Travelio"];
+    if (safeEntry.tx_type === "reimburse_out" && REIMBURSE_ENTITIES.includes(safeEntry.entity) && data?.id) {
+      supabase.from("reimburse_settlements").insert([{
+        user_id:              userId,
+        entity:               safeEntry.entity,
+        status:               "pending",
+        total_out:            amount,
+        linked_ledger_id:     data.id,
+        out_ledger_ids:       [data.id],
+        in_ledger_ids:        [],
+        total_in:             0,
+        reimbursable_expense: amount,
+      }]).catch(() => {}); // fire-and-forget — don't block the main tx
+    }
+
     return data;
   },
 
@@ -828,7 +844,9 @@ export const gmailApi = {
       .from("email_sync")
       .select("*")
       .eq("user_id", userId)
-      .eq("status", "pending")
+      .in("status", ["pending", "review"])
+      .not("ai_raw_result", "is", null)
+      .gt("extracted_count", 0)
       .order("received_at", { ascending: false })
       .limit(limit);
     if (error) throw new Error(error.message);
@@ -973,6 +991,31 @@ export const loanPaymentsApi = {
   delete: async (id) => {
     const { error } = await supabase.from("employee_loan_payments").delete().eq("id", id);
     if (error) throw new Error(error.message);
+  },
+};
+
+// ─── REIMBURSE SETTLEMENTS ────────────────────────────────────
+export const reimburseSettlementsApi = {
+  getPending: async (userId) => {
+    const { data, error } = await supabase
+      .from("reimburse_settlements")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("status", "pending")
+      .order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return data || [];
+  },
+
+  update: async (id, updates) => {
+    const { data, error } = await supabase
+      .from("reimburse_settlements")
+      .update(updates)
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return data;
   },
 };
 

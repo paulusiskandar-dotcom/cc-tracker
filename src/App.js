@@ -11,7 +11,7 @@ import {
   accountsApi, ledgerApi, categoriesApi, incomeSrcApi,
   installmentsApi, recurringApi, merchantApi, fxApi,
   settingsApi, gmailApi, employeeLoanApi, loanPaymentsApi,
-  accountCurrenciesApi,
+  accountCurrenciesApi, reimburseSettlementsApi,
 } from "./api";
 import { calcNetWorth, fmtIDR, todayStr, ym } from "./utils";
 import { Spinner, ToastContainer, showToast } from "./components/shared/index";
@@ -173,8 +173,10 @@ function Finance({ user, signOut }) {
     const hash = window.location.hash.replace("#", "");
     return TABS.some(t => t.id === hash) ? hash : "dashboard";
   });
-  const [settingsInitialTab, setSettingsInitialTab] = useState(null);
+  const [settingsInitialTab,  setSettingsInitialTab]  = useState(null);
   const setSettingsTab = (subTabId) => { setSettingsInitialTab(subTabId); setTab("settings"); };
+  const [aiImportInitialMode, setAiImportInitialMode] = useState("scan");
+  const openAiImport = (mode = "scan") => { setAiImportInitialMode(mode); setTab("aiimport"); };
   const [loading, setLoading]   = useState(true);
   const [isDark, setIsDark]     = useState(false);
 
@@ -197,7 +199,8 @@ function Finance({ user, signOut }) {
     USD: 16400, SGD: 12200, MYR: 3700, JPY: 110, EUR: 17800, AUD: 10500,
     GBP: 21200, CHF: 18500, CNY: 2250, THB: 470, KRW: 12,
   });
-  const [pendingSyncs,   setPendingSyncs]   = useState([]);
+  const [pendingSyncs,          setPendingSyncs]          = useState([]);
+  const [reimburseSettlements,  setReimburseSettlements]  = useState([]);
   const [employeeLoans,     setEmployeeLoans]     = useState([]);
   const [loanPayments,      setLoanPayments]      = useState([]);
   const [accountCurrencies, setAccountCurrencies] = useState([]);
@@ -208,7 +211,7 @@ function Finance({ user, signOut }) {
   const loadData = useCallback(async () => {
     const safe = (p, fallback) => p.catch(e => { console.warn("[loadData]", e.message); return fallback; });
 
-    const [acc, led, cats, inc, inst, rtempl, rem, merch, fx, dark, pending, loans, payments, accs] = await Promise.all([
+    const [acc, led, cats, inc, inst, rtempl, rem, merch, fx, dark, pending, loans, payments, accs, reimburse] = await Promise.all([
       safe(accountsApi.getAll(user.id),                      []),
       safe(ledgerApi.getAll(user.id, { limit: 500 }),        []),
       safe(categoriesApi.getAll(user.id),                    []),
@@ -223,6 +226,7 @@ function Finance({ user, signOut }) {
       safe(employeeLoanApi.getAll(user.id),                  []),
       safe(loanPaymentsApi.getAll(user.id),                  []),
       safe(accountCurrenciesApi.getAll(user.id),             []),
+      safe(reimburseSettlementsApi.getPending(user.id),      []),
     ]);
 
     console.log("[loadData] accounts:", acc.length, "ledger:", led.length);
@@ -261,6 +265,7 @@ function Finance({ user, signOut }) {
     if (Object.keys(fx).length) setFxRates(fx);
     setIsDark(dark);
     setPendingSyncs(pending);
+    setReimburseSettlements(reimburse);
     setEmployeeLoans(loans);
     setLoanPayments(payments);
     setAccountCurrencies(accs);
@@ -308,7 +313,8 @@ function Finance({ user, signOut }) {
     receivables, curMonth, pendingSyncs,
     isDark, dark: isDark,         // alias: new components use `dark`, old use `isDark`
     setIsDark, setDark: setIsDark,
-    setTab, setSettingsTab, setPendingSyncs,
+    setTab, setSettingsTab, openAiImport, setPendingSyncs,
+    reimburseSettlements, setReimburseSettlements,
     employeeLoans, setEmployeeLoans, loanPayments, setLoanPayments,
     accountCurrencies, setAccountCurrencies,
     setAccounts, setLedger, setCategories, setIncomeSrcs,
@@ -349,7 +355,7 @@ function Finance({ user, signOut }) {
       case "reports":      return <Reports      {...shared} />;
       case "calendar":     return <Calendar     {...shared} />;
       case "settings":     return <Settings     {...shared} signOut={signOut} initialTab={settingsInitialTab} />;
-      case "aiimport":     return <AIImport     {...shared} />;
+      case "aiimport":     return <AIImport     {...shared} initialMode={aiImportInitialMode} />;
       default:             return <Dashboard    {...shared} />;
     }
   };
