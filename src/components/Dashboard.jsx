@@ -497,7 +497,7 @@ export default function Dashboard({
           {[
             { label: "Email Sync",  onClick: () => openAiImport?.("gmail") },
             { label: "E-Statement", onClick: () => setSettingsTab?.("estatement") },
-            { label: "AI Scan",     onClick: () => setTab?.("aiimport"), icon: true },
+            { label: "AI Scan",     onClick: () => openAiImport?.("scan"), icon: true },
           ].map(({ label, onClick, icon }) => (
             <button key={label} onClick={onClick} style={{
               display: "flex", alignItems: "center", gap: 5,
