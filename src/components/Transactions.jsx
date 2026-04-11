@@ -131,11 +131,13 @@ export default function Transactions({
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
+    const byName = (a, b) => (a.description || a.merchant_name || "").localeCompare(b.description || b.merchant_name || "");
     switch (txSort) {
       case "date_asc":    return arr.sort((a, b) => a.tx_date.localeCompare(b.tx_date));
       case "amount_desc": return arr.sort((a, b) => Number(b.amount_idr || b.amount || 0) - Number(a.amount_idr || a.amount || 0));
       case "amount_asc":  return arr.sort((a, b) => Number(a.amount_idr || a.amount || 0) - Number(b.amount_idr || b.amount || 0));
-      case "merchant_asc":return arr.sort((a, b) => (a.description || a.merchant_name || "").localeCompare(b.description || b.merchant_name || ""));
+      case "name_asc":    return arr.sort(byName);
+      case "name_desc":   return arr.sort((a, b) => byName(b, a));
       default:            return arr.sort((a, b) => b.tx_date.localeCompare(a.tx_date));
     }
   }, [filtered, txSort]);
@@ -603,20 +605,16 @@ export default function Transactions({
             </button>
           );
         })}
-        <div style={{ marginLeft: "auto" }}>
-          <SortDropdown
-            storageKey="sort_transactions"
-            options={[
-              { value: "date_desc",    label: "Terbaru → Terlama" },
-              { value: "date_asc",     label: "Terlama → Terbaru" },
-              { value: "amount_desc",  label: "Amount Terbesar" },
-              { value: "amount_asc",   label: "Amount Terkecil" },
-              { value: "merchant_asc", label: "Merchant A → Z" },
-            ]}
-            value={txSort}
-            onChange={v => setTxSort(v)}
-          />
-        </div>
+        <SortDropdown
+          storageKey="sort_transactions"
+          options={[
+            { key: "date",   label: "Date",   defaultDir: "desc" },
+            { key: "amount", label: "Amount", defaultDir: "desc" },
+            { key: "name",   label: "Name",   defaultDir: "asc"  },
+          ]}
+          value={txSort}
+          onChange={v => setTxSort(v)}
+        />
       </div>
 
       {/* ── SUMMARY STRIP ── */}
