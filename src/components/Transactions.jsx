@@ -7,6 +7,7 @@ import Button from "./shared/Button";
 import Input, { Field, AmountInput, FormRow, Toggle, Textarea } from "./shared/Input";
 import Select from "./shared/Select";
 import { EmptyState, showToast } from "./shared/Card";
+import SortDropdown from "./shared/SortDropdown";
 
 // ─── CONSTANTS ───────────────────────────────────────────────
 const SUBTABS = [
@@ -58,6 +59,7 @@ export default function Transactions({
   const pendingCount  = pendingSyncs?.length || 0;
 
   // ── UI state ──
+  const [txSort,  setTxSort]  = useState(() => localStorage.getItem("sort_transactions") || "date_desc");
   const [subTab,  setSubTab]  = useState("all");
   const [modal,   setModal]   = useState(null); // "add" | "edit" | "delete" | null
   const [step,    setStep]    = useState(1);
@@ -127,7 +129,18 @@ export default function Transactions({
     return list;
   }, [ledger, subTab, filterMonth, filterEntity, filterAccId, search]);
 
-  const grouped = useMemo(() => groupByDate(filtered), [filtered]);
+  const sorted = useMemo(() => {
+    const arr = [...filtered];
+    switch (txSort) {
+      case "date_asc":    return arr.sort((a, b) => a.tx_date.localeCompare(b.tx_date));
+      case "amount_desc": return arr.sort((a, b) => Number(b.amount_idr || b.amount || 0) - Number(a.amount_idr || a.amount || 0));
+      case "amount_asc":  return arr.sort((a, b) => Number(a.amount_idr || a.amount || 0) - Number(b.amount_idr || b.amount || 0));
+      case "merchant_asc":return arr.sort((a, b) => (a.description || a.merchant_name || "").localeCompare(b.description || b.merchant_name || ""));
+      default:            return arr.sort((a, b) => b.tx_date.localeCompare(a.tx_date));
+    }
+  }, [filtered, txSort]);
+
+  const grouped = useMemo(() => groupByDate(sorted), [sorted]);
 
   // ── Totals ──
   const outTotal = useMemo(() =>
@@ -564,7 +577,7 @@ export default function Transactions({
         )}
       </div>
 
-      {/* ── SUBTABS ── */}
+      {/* ── SUBTABS + SORT ── */}
       <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
         {[...SUBTABS, ...(pendingCount > 0 ? [{ id: "pending", label: `Pending (${pendingCount})` }] : [])].map(t => {
           const active = subTab === t.id;
@@ -590,6 +603,20 @@ export default function Transactions({
             </button>
           );
         })}
+        <div style={{ marginLeft: "auto" }}>
+          <SortDropdown
+            storageKey="sort_transactions"
+            options={[
+              { value: "date_desc",    label: "Terbaru → Terlama" },
+              { value: "date_asc",     label: "Terlama → Terbaru" },
+              { value: "amount_desc",  label: "Amount Terbesar" },
+              { value: "amount_asc",   label: "Amount Terkecil" },
+              { value: "merchant_asc", label: "Merchant A → Z" },
+            ]}
+            value={txSort}
+            onChange={v => setTxSort(v)}
+          />
+        </div>
       </div>
 
       {/* ── SUMMARY STRIP ── */}
