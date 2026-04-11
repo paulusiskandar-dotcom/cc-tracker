@@ -541,105 +541,140 @@ export default function CreditCards({
       )}
 
       {/* ══ INSTALLMENTS ══ */}
-      {subTab === "installments" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
-              CC installments auto-debit monthly. Mark as paid when statement arrives.
+      {subTab === "installments" && (() => {
+        const INST_COLORS = ["#3b5bdb","#059669","#7c3aed","#d97706","#0891b2","#dc2626"];
+        const ordinal = (n) => n + (n % 10 === 1 && n !== 11 ? "st" : n % 10 === 2 && n !== 12 ? "nd" : n % 10 === 3 && n !== 13 ? "rd" : "th");
+
+        const totalMonthly   = ccInstallments.reduce((s, i) => s + Number(i.monthly_amount ?? 0), 0);
+        const totalRemaining = ccInstallments.reduce((s, i) => {
+          const tot = Math.max(1, Number(i.total_months ?? i.months ?? 0) || 1);
+          const pd  = Number(i.paid_months ?? 0);
+          return s + Math.max(0, tot - pd) * Number(i.monthly_amount ?? 0);
+        }, 0);
+        const activeCount = ccInstallments.filter(i => {
+          const tot = Math.max(1, Number(i.total_months ?? i.months ?? 0) || 1);
+          return Number(i.paid_months ?? 0) < tot;
+        }).length;
+
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+            {/* Header row */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+                CC installments auto-debit monthly.
+              </div>
+              <Button size="sm" onClick={() => setModal("inst")}>+ Add Installment</Button>
             </div>
-            <Button size="sm" onClick={() => setModal("inst")}>+ Add Installment</Button>
-          </div>
-          {ccInstallments.length === 0
-            ? <EmptyState icon="📅" title="No installments" message="Track 0% installment plans here." />
-            : ccInstallments.map(inst => {
-                const cc      = creditCards.find(c => c.id === inst.account_id);
-                const total   = Math.max(1, Number(inst.total_months ?? inst.months ?? 0) || 1);
-                const paid    = Number(inst.paid_months ?? 0);
-                const monthly = Number(inst.monthly_amount ?? 0);
-                const remaining = Math.max(0, total - paid);
-                const pct       = Math.min(100, (paid / total) * 100);
-                const isDone    = paid >= total;
-                // Due day from next_payment_date or start_date
-                const dueDateSrc = inst.next_payment_date || inst.start_date;
-                const dueDay     = dueDateSrc ? new Date(dueDateSrc + "T00:00:00").getDate() : null;
-                const ordinal    = (n) => n + (n % 10 === 1 && n !== 11 ? "st" : n % 10 === 2 && n !== 12 ? "nd" : n % 10 === 3 && n !== 13 ? "rd" : "th");
-                return (
-                  <div key={inst.id} style={{
-                    background: "#ffffff", borderRadius: 14,
-                    border: `1px solid ${isDone ? "#bbf7d0" : "#f3f4f6"}`,
-                    padding: "14px 16px",
-                  }}>
-                    {/* Header */}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-                      <div>
-                        <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
-                          {inst.description}
-                        </div>
-                        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 3, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                          <span>{cc?.name || "CC"}</span>
-                          <span>{total} months</span>
-                          <span style={{ fontWeight: 700, color: "#374151" }}>{fmtIDR(monthly)}/mo</span>
-                          {dueDay && !isDone && (
-                            <span style={{ color: "#3b5bdb" }}>Due {ordinal(dueDay)} each month</span>
-                          )}
-                        </div>
-                        {inst.next_payment_date && !isDone && (
-                          <div style={{ fontSize: 10, color: "#3b5bdb", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
-                            Next: {new Date(inst.next_payment_date + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })}
-                          </div>
-                        )}
-                      </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{ fontSize: 15, fontWeight: 800, color: isDone ? "#059669" : "#3b5bdb", fontFamily: "Figtree, sans-serif" }}>
-                          {isDone ? "✓ Done" : fmtIDR(monthly * remaining, true)}
-                        </div>
-                        <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
-                          {isDone ? "Fully paid" : "remaining"}
-                        </div>
-                      </div>
-                    </div>
 
-                    {/* Progress dots */}
-                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 10 }}>
-                      {Array.from({ length: total }).map((_, i) => (
-                        <div key={i} style={{
-                          width: Math.min(16, Math.max(8, Math.floor(240 / total))),
-                          height: 14, borderRadius: 3,
-                          background: i < paid ? "#059669" : "#f3f4f6",
-                          border: `1px solid ${i < paid ? "#059669" : "#e5e7eb"}`,
-                          title: `Month ${i + 1}`,
-                          cursor: "default",
-                          flexShrink: 0,
-                        }} />
-                      ))}
-                    </div>
-
-                    {/* Progress bar + label */}
-                    <BarWithLabel
-                      value={paid}
-                      max={total}
-                      color={isDone ? "#059669" : "#3b5bdb"}
-                      label={`${paid}/${total} months paid`}
-                      labelRight={`${pct.toFixed(0)}%`}
-                    />
-
-                    {/* Actions */}
-                    <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                      {!isDone && (
-                        <Button size="sm" onClick={() => markInstPaid(inst)}>
-                          ✓ Mark Month {paid + 1} Paid
-                        </Button>
-                      )}
-                      <Button size="sm" variant="danger" onClick={() => setDeleteInstId(inst.id)}>
-                        🗑
-                      </Button>
-                    </div>
+            {/* Summary cards */}
+            {ccInstallments.length > 0 && (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+                {[
+                  { label: "Monthly Total",  value: fmtIDR(totalMonthly),   color: "#3b5bdb" },
+                  { label: "Total Remaining",value: fmtIDR(totalRemaining), color: "#dc2626" },
+                  { label: "Active Plans",   value: String(activeCount),    color: "#059669" },
+                ].map(s => (
+                  <div key={s.label} style={{ background: "#fff", borderRadius: 12, border: "0.5px solid #e5e7eb", padding: "10px 12px" }}>
+                    <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: 3 }}>{s.label}</div>
+                    <div style={{ fontSize: 15, fontWeight: 800, color: s.color, fontFamily: "Figtree, sans-serif" }}>{s.value}</div>
                   </div>
-                );
-              })
-          }
-        </div>
-      )}
+                ))}
+              </div>
+            )}
+
+            {/* Cards grid */}
+            {ccInstallments.length === 0
+              ? <EmptyState icon="📅" title="No installments" message="Track 0% installment plans here." />
+              : (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
+                  {ccInstallments.map((inst, idx) => {
+                    const cc        = creditCards.find(c => c.id === inst.account_id);
+                    const total     = Math.max(1, Number(inst.total_months ?? inst.months ?? 0) || 1);
+                    const paid      = Number(inst.paid_months ?? 0);
+                    const monthly   = Number(inst.monthly_amount ?? 0);
+                    const remaining = Math.max(0, total - paid);
+                    const pct       = Math.min(100, (paid / total) * 100);
+                    const isDone    = paid >= total;
+                    const accentColor = isDone ? "#059669" : INST_COLORS[idx % INST_COLORS.length];
+                    const dueDateSrc  = inst.next_payment_date || inst.start_date;
+                    const dueDay      = dueDateSrc ? new Date(dueDateSrc + "T00:00:00").getDate() : null;
+
+                    return (
+                      <div key={inst.id} style={{
+                        background: "#ffffff", borderRadius: 16,
+                        border: "0.5px solid #e5e7eb",
+                        overflow: "hidden",
+                        display: "flex", flexDirection: "column",
+                      }}>
+                        {/* Color bar */}
+                        <div style={{ height: 3, background: accentColor }} />
+
+                        <div style={{ padding: "14px 14px 12px", flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+                          {/* Merchant + done badge */}
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", lineHeight: 1.3, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {inst.description}
+                            </div>
+                            {isDone && (
+                              <span style={{ fontSize: 9, fontWeight: 700, background: "#dcfce7", color: "#059669", padding: "2px 6px", borderRadius: 99, flexShrink: 0, marginLeft: 6 }}>DONE</span>
+                            )}
+                          </div>
+
+                          {/* Subtitle: bank · X/Y months · Rp/mo */}
+                          <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", display: "flex", gap: 6, flexWrap: "wrap" }}>
+                            <span>{cc?.bank_name || cc?.name || "CC"}</span>
+                            <span>·</span>
+                            <span>{paid}/{total} mo</span>
+                            <span>·</span>
+                            <span style={{ color: "#374151", fontWeight: 600 }}>{fmtIDR(monthly)}/mo</span>
+                          </div>
+
+                          {/* Due date */}
+                          {dueDay && !isDone && (
+                            <div style={{ fontSize: 11, color: "#0D9488", fontFamily: "Figtree, sans-serif", fontWeight: 500 }}>
+                              Due: {ordinal(dueDay)} each month
+                            </div>
+                          )}
+
+                          {/* Progress bar */}
+                          <div style={{ marginTop: 2 }}>
+                            <div style={{ height: 5, background: "#f3f4f6", borderRadius: 99, overflow: "hidden" }}>
+                              <div style={{ height: "100%", width: `${pct}%`, background: accentColor, borderRadius: 99, transition: "width 0.3s" }} />
+                            </div>
+                          </div>
+
+                          {/* Stats row */}
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
+                              {paid}/{total} months paid
+                            </span>
+                            <span style={{ fontSize: 11, fontWeight: 700, color: accentColor, fontFamily: "Figtree, sans-serif" }}>
+                              {isDone ? "✓ Paid off" : `${fmtIDR(monthly * remaining)} left · ${pct.toFixed(0)}%`}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Delete button */}
+                        <div style={{ borderTop: "0.5px solid #f3f4f6", padding: "8px 14px", display: "flex", justifyContent: "flex-end" }}>
+                          <button
+                            onClick={() => setDeleteInstId(inst.id)}
+                            style={{ border: "none", background: "none", cursor: "pointer", fontSize: 12, color: "#d1d5db", padding: "2px 4px", fontFamily: "Figtree, sans-serif" }}
+                            onMouseEnter={e => e.currentTarget.style.color = "#ef4444"}
+                            onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}
+                          >
+                            🗑 Delete
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )
+            }
+          </div>
+        );
+      })()}
 
       {/* ══ RECURRING ══ */}
       {subTab === "recurring" && (
