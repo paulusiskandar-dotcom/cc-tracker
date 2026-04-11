@@ -858,8 +858,8 @@ function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, CURRENC
 }
 
 const CASH_SORT_PILLS = [
-  { key: "balance", label: "Balance", defaultDir: "desc" },
-  { key: "name",    label: "Name",    defaultDir: "asc"  },
+  { key: "balance", label: "Amount", defaultDir: "desc" },
+  { key: "name",    label: "Name",   defaultDir: "asc"  },
 ];
 
 // ─── CASH PAGE CONTENT ───────────────────────────────────────
