@@ -61,6 +61,13 @@ export default function CreditCards({
   const [saving,       setSaving]       = useState(false);
   const [deleteInstId, setDeleteInstId] = useState(null);
 
+  // Edit card state
+  const emptyEditCardForm = () => ({ name: "", bank_name: "", last4: "", network: "", card_limit: "", statement_day: "", due_day: "", color: "" });
+  const [editCardModal, setEditCardModal] = useState(false);
+  const [editCardAcc,   setEditCardAcc]   = useState(null);
+  const [editCardForm,  setEditCardForm]  = useState(emptyEditCardForm());
+  const setEC = (k, v) => setEditCardForm(f => ({ ...f, [k]: v }));
+
   // Add CC form
   const emptyCardForm = () => ({ name: "", bank_name: "", last4: "", network: "", card_limit: "", monthly_target: "", statement_day: "", due_day: "" });
   const [addCardForm, setAddCardForm] = useState(emptyCardForm());
@@ -313,6 +320,45 @@ export default function CreditCards({
     } catch (e) { showToast(e.message, "error"); }
   };
 
+  // ── Edit Card ──
+  const openEditCard = (cc) => {
+    setEditCardAcc(cc);
+    setEditCardForm({
+      name:          cc.name          || "",
+      bank_name:     cc.bank_name     || "",
+      last4:         cc.last4         || "",
+      network:       cc.network       || "",
+      card_limit:    cc.card_limit    != null ? String(cc.card_limit)    : "",
+      statement_day: cc.statement_day != null ? String(cc.statement_day) : "",
+      due_day:       cc.due_day       != null ? String(cc.due_day)       : "",
+      color:         cc.color         || "",
+    });
+    setEditCardModal(true);
+  };
+
+  const saveEditCard = async () => {
+    if (!editCardForm.name) { showToast("Card name is required", "error"); return; }
+    setSaving(true);
+    try {
+      const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? null : n; };
+      const data = {
+        name:          editCardForm.name.trim(),
+        bank_name:     editCardForm.bank_name     || null,
+        last4:         editCardForm.last4          || null,
+        network:       editCardForm.network        || null,
+        card_limit:    sn(editCardForm.card_limit),
+        statement_day: sn(editCardForm.statement_day),
+        due_day:       sn(editCardForm.due_day),
+        color:         editCardForm.color          || null,
+      };
+      const updated = await accountsApi.update(editCardAcc.id, data);
+      setAccounts(p => p.map(a => a.id === editCardAcc.id ? { ...a, ...updated } : a));
+      showToast("Card updated");
+      setEditCardModal(false);
+    } catch (e) { showToast(e.message, "error"); }
+    setSaving(false);
+  };
+
   // ── Add Card ──
   const saveAddCard = async () => {
     if (!addCardForm.name) { showToast("Card name is required", "error"); return; }
@@ -470,10 +516,11 @@ export default function CreditCards({
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
                     {sortedCC.map((cc, i) => (
                       <CCCard key={cc.id} cc={cc}
-                        color={CARD_PALETTE[i % CARD_PALETTE.length]}
+                        color={cc.color || CARD_PALETTE[i % CARD_PALETTE.length]}
                         onPay={() => { setPayForm(f => ({ ...f, cardId: cc.id, amount: cc.debt })); setModal("pay"); }}
                         onTransactions={() => { setSelectedCard(cc.id); setSubTab("transactions"); }}
                         onInstallments={() => setSubTab("installments")}
+                        onEdit={() => openEditCard(cc)}
                       />
                     ))}
                   </div>
@@ -836,6 +883,71 @@ export default function CreditCards({
         </div>
       </Modal>
 
+      {/* ══ EDIT CARD MODAL ══ */}
+      <Modal
+        isOpen={editCardModal}
+        onClose={() => setEditCardModal(false)}
+        title="Edit Card"
+        footer={
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <Button variant="secondary" size="md" onClick={() => setEditCardModal(false)}>Cancel</Button>
+            <Button variant="primary" size="md" busy={saving} disabled={!editCardForm.name} onClick={saveEditCard}>Save →</Button>
+          </div>
+        }
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <Field label="Card Name *">
+            <Input value={editCardForm.name} onChange={e => setEC("name", e.target.value)} placeholder="e.g. BCA Everyday" />
+          </Field>
+          <FormRow>
+            <Field label="Bank">
+              <Select value={editCardForm.bank_name} onChange={e => setEC("bank_name", e.target.value)}
+                options={BANKS_L.map(b => ({ value: b, label: b }))} placeholder="Select bank…" />
+            </Field>
+            <Field label="Network">
+              <Select value={editCardForm.network} onChange={e => setEC("network", e.target.value)}
+                options={NETWORKS.map(n => ({ value: n, label: n }))} placeholder="Select network…" />
+            </Field>
+          </FormRow>
+          <FormRow>
+            <Field label="Last 4 Digits">
+              <Input value={editCardForm.last4} onChange={e => setEC("last4", e.target.value)} placeholder="e.g. 1234" maxLength={4} />
+            </Field>
+            <AmountInput label="Credit Limit" value={editCardForm.card_limit} onChange={v => setEC("card_limit", v)} currency="IDR" />
+          </FormRow>
+          <FormRow>
+            <Field label="Statement Day">
+              <input type="number" min={1} max={31} value={editCardForm.statement_day} onChange={e => setEC("statement_day", e.target.value)}
+                placeholder="e.g. 25"
+                style={{ width: "100%", height: 44, padding: "0 12px", border: "1.5px solid #e5e7eb", borderRadius: 10, fontFamily: "Figtree, sans-serif", fontSize: 14, fontWeight: 700, color: "#111827", background: "#fff", outline: "none", boxSizing: "border-box" }} />
+            </Field>
+            <Field label="Due Day">
+              <input type="number" min={1} max={31} value={editCardForm.due_day} onChange={e => setEC("due_day", e.target.value)}
+                placeholder="e.g. 15"
+                style={{ width: "100%", height: 44, padding: "0 12px", border: "1.5px solid #e5e7eb", borderRadius: 10, fontFamily: "Figtree, sans-serif", fontSize: 14, fontWeight: 700, color: "#111827", background: "#fff", outline: "none", boxSizing: "border-box" }} />
+            </Field>
+          </FormRow>
+          <Field label="Card Color">
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", paddingTop: 4 }}>
+              {CARD_PALETTE.map(c => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => setEC("color", editCardForm.color === c ? "" : c)}
+                  style={{
+                    width: 28, height: 28, borderRadius: "50%", background: c, border: "none",
+                    cursor: "pointer", flexShrink: 0,
+                    outline: editCardForm.color === c ? `3px solid ${c}` : "none",
+                    outlineOffset: 2,
+                    boxShadow: editCardForm.color === c ? "0 0 0 2px #fff, 0 0 0 4px " + c : "none",
+                  }}
+                />
+              ))}
+            </div>
+          </Field>
+        </div>
+      </Modal>
+
       {/* ══ ADD CARD MODAL ══ */}
       <Modal
         isOpen={modal === "add_card"}
@@ -961,7 +1073,7 @@ function SharedLimitGroupCard({ group, cardStats, paletteStart = 0, onPay, onTra
 }
 
 // ─── CC CARD (new compact design) ───────────────────────────
-function CCCard({ cc, color, onPay, onTransactions, onInstallments }) {
+function CCCard({ cc, color, onPay, onTransactions, onInstallments, onEdit }) {
   const utilColor = cc.util > 80 ? "#dc2626" : cc.util > 60 ? "#d97706" : "#059669";
   const netw      = NETWORK_STYLE[cc.network];
 
@@ -971,7 +1083,7 @@ function CCCard({ cc, color, onPay, onTransactions, onInstallments }) {
       <div style={{ height: 3, background: color || "#3b5bdb" }} />
 
       <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 11, flex: 1 }}>
-        {/* Card name + last4 + network */}
+        {/* Card name + last4 + network + edit */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -983,11 +1095,20 @@ function CCCard({ cc, color, onPay, onTransactions, onInstallments }) {
               </div>
             ) : null}
           </div>
-          {netw && (
-            <span style={{ fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif", flexShrink: 0, marginLeft: 8, ...netw.style }}>
-              {netw.text}
-            </span>
-          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, marginLeft: 8 }}>
+            {netw && (
+              <span style={{ fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif", ...netw.style }}>
+                {netw.text}
+              </span>
+            )}
+            <button
+              onClick={onEdit}
+              title="Edit card"
+              style={{ border: "none", background: "none", cursor: "pointer", padding: 2, color: "#d1d5db", lineHeight: 1, fontSize: 13 }}
+              onMouseEnter={e => e.currentTarget.style.color = "#6b7280"}
+              onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}
+            >✏️</button>
+          </div>
         </div>
 
         {/* Debt + Available */}

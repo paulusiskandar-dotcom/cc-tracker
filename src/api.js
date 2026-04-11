@@ -844,7 +844,7 @@ export const gmailApi = {
       .from("email_sync")
       .select("*")
       .eq("user_id", userId)
-      .in("status", ["pending", "review"])
+      .eq("status", "pending")
       .not("ai_raw_result", "is", null)
       .gt("extracted_count", 0)
       .order("received_at", { ascending: false })

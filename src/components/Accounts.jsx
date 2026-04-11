@@ -620,7 +620,7 @@ function BankAccountCard({ account: a, ledger, accountCurrencies = [], fxRates =
     <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <div style={{ height: 3, background: color }} />
       <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
-        {/* Icon + Name */}
+        {/* Icon + Name + edit */}
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ width: 36, height: 36, borderRadius: 10, background: "#e8f4fd", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>
             🏦
@@ -633,6 +633,9 @@ function BankAccountCard({ account: a, ledger, accountCurrencies = [], fxRates =
               {a.bank_name || "Bank"}{a.account_no ? ` · ···${String(a.account_no).slice(-4)}` : ""}
             </div>
           </div>
+          <button onClick={onEdit} title="Edit account" style={{ border: "none", background: "none", cursor: "pointer", padding: 2, color: "#d1d5db", lineHeight: 1, fontSize: 13, flexShrink: 0 }}
+            onMouseEnter={e => e.currentTarget.style.color = "#6b7280"}
+            onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}>✏️</button>
         </div>
 
         {/* Balance */}
@@ -690,7 +693,7 @@ function CashAccountCard({ account: a, fxRates = {}, CURRENCIES: C = [], ledger,
     <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <div style={{ height: 3, background: color }} />
       <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
-        {/* Flag + Name */}
+        {/* Flag + Name + edit */}
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ width: 36, height: 36, borderRadius: 10, background: "#f0fdf4", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>
             {cur?.flag || "💵"}
@@ -703,6 +706,9 @@ function CashAccountCard({ account: a, fxRates = {}, CURRENCIES: C = [], ledger,
               {a.currency || "IDR"} Cash
             </div>
           </div>
+          <button onClick={onEdit} title="Edit account" style={{ border: "none", background: "none", cursor: "pointer", padding: 2, color: "#d1d5db", lineHeight: 1, fontSize: 13, flexShrink: 0 }}
+            onMouseEnter={e => e.currentTarget.style.color = "#6b7280"}
+            onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}>✏️</button>
         </div>
 
         {/* Balance */}

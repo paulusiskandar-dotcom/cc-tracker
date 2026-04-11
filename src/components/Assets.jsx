@@ -415,12 +415,14 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
           )}
 
           {/* ── SORT + ASSET GRID ──────────────────────────── */}
-          <SortDropdown
-            storageKey="sort_assets"
-            options={ASSET_SORT_PILLS}
-            value={assetSort}
-            onChange={v => setAssetSort(v)}
-          />
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <SortDropdown
+              storageKey="sort_assets"
+              options={ASSET_SORT_PILLS}
+              value={assetSort}
+              onChange={v => setAssetSort(v)}
+            />
+          </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
             {sorted.map(({ a, i }) => {
               const color = ASSET_COL[a.subtype] || "#9ca3af";

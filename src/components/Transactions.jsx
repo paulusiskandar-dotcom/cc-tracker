@@ -580,31 +580,33 @@ export default function Transactions({
       </div>
 
       {/* ── SUBTABS + SORT ── */}
-      <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
-        {[...SUBTABS, ...(pendingCount > 0 ? [{ id: "pending", label: `Pending (${pendingCount})` }] : [])].map(t => {
-          const active = subTab === t.id;
-          return (
-            <button key={t.id} onClick={() => setSubTab(t.id)} style={{
-              height: 30, padding: "0 12px", borderRadius: 20,
-              border: `1.5px solid ${active ? "#111827" : "#e5e7eb"}`,
-              background: active ? "#111827" : "#fff",
-              color: active ? "#fff" : "#6b7280",
-              fontSize: 12, fontWeight: active ? 700 : 500,
-              cursor: "pointer", fontFamily: "Figtree, sans-serif",
-              display: "flex", alignItems: "center", gap: 5,
-            }}>
-              {t.label}
-              {t.id === "all" && missingTypeCount > 0 && (
-                <span style={{
-                  background: "#C0392B", color: "#fff",
-                  fontSize: 10, fontWeight: 700,
-                  padding: "0 5px", borderRadius: 99, lineHeight: "16px",
-                  minWidth: 16, textAlign: "center",
-                }}>{missingTypeCount}</span>
-              )}
-            </button>
-          );
-        })}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+          {[...SUBTABS, ...(pendingCount > 0 ? [{ id: "pending", label: `Pending (${pendingCount})` }] : [])].map(t => {
+            const active = subTab === t.id;
+            return (
+              <button key={t.id} onClick={() => setSubTab(t.id)} style={{
+                height: 30, padding: "0 12px", borderRadius: 20,
+                border: `1.5px solid ${active ? "#111827" : "#e5e7eb"}`,
+                background: active ? "#111827" : "#fff",
+                color: active ? "#fff" : "#6b7280",
+                fontSize: 12, fontWeight: active ? 700 : 500,
+                cursor: "pointer", fontFamily: "Figtree, sans-serif",
+                display: "flex", alignItems: "center", gap: 5,
+              }}>
+                {t.label}
+                {t.id === "all" && missingTypeCount > 0 && (
+                  <span style={{
+                    background: "#C0392B", color: "#fff",
+                    fontSize: 10, fontWeight: 700,
+                    padding: "0 5px", borderRadius: 99, lineHeight: "16px",
+                    minWidth: 16, textAlign: "center",
+                  }}>{missingTypeCount}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
         <SortDropdown
           storageKey="sort_transactions"
           options={[
