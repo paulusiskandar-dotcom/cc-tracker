@@ -829,6 +829,43 @@ Be concise. Use short field values. Prioritize completing the full JSON array ov
 };
 
 // ─── GMAIL ────────────────────────────────────────────────────
+// Flatten email_sync rows (ai_raw_result arrays) into individual transaction objects
+// with normalized field names expected by EmailPendingTab and PendingTab.
+export function flattenEmailSync(rows) {
+  const flat = [];
+  for (const row of rows) {
+    const txs = Array.isArray(row.ai_raw_result) ? row.ai_raw_result : [];
+    if (txs.length === 0) continue;
+    txs.forEach((tx, i) => {
+      flat.push({
+        id:                      txs.length === 1 ? row.id : `${row.id}_${i}`,
+        email_sync_id:           row.id,
+        tx_index:                i,
+        ai_raw_result:           row.ai_raw_result,
+        subject:                 row.subject,
+        received_at:             row.received_at,
+        raw_body:                row.raw_body,
+        transaction_date:        tx.date,
+        merchant_name:           tx.merchant_name || tx.description,
+        amount:                  tx.amount,
+        currency:                tx.currency || "IDR",
+        amount_idr:              tx.amount_idr || tx.amount,
+        tx_type:                 tx.suggested_tx_type || "expense",
+        matched_account_id:      tx.from_account_id,
+        to_account_id:           tx.to_account_id,
+        suggested_category_label: tx.suggested_category,
+        entity:                  tx.suggested_entity || "Personal",
+        from_bank_name:          tx.from_bank_name,
+        card_last4:              tx.card_last4,
+        is_qris:                 tx.is_qris,
+        is_transfer:             tx.is_transfer,
+        is_cc_payment:           tx.is_cc_payment,
+      });
+    });
+  }
+  return flat;
+}
+
 export const gmailApi = {
   getToken: async (userId) => {
     const { data } = await supabase
@@ -856,6 +893,38 @@ export const gmailApi = {
   updateSync: async (id, updates) => {
     const { error } = await supabase.from("email_sync").update(updates).eq("id", id);
     if (error) throw new Error(error.message);
+  },
+
+  getFailedPending: async (userId) => {
+    const { data, error } = await supabase
+      .from("email_sync")
+      .select("*")
+      .eq("user_id", userId)
+      .in("status", ["pending", "review"])
+      .or("extracted_count.eq.0,ai_raw_result.is.null")
+      .order("received_at", { ascending: false })
+      .limit(50);
+    if (error) throw new Error(error.message);
+    return data || [];
+  },
+
+  reprocess: async (userId, ids) => {
+    const key = process.env.REACT_APP_SUPABASE_ANON_KEY || "";
+    const url = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/gmail-sync`;
+    const r = await fetch(url, {
+      method:  "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey":        key,
+        "Authorization": `Bearer ${key}`,
+      },
+      body: JSON.stringify({ user_id: userId, reprocess_ids: ids }),
+    });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      throw new Error(e.error || `HTTP ${r.status}`);
+    }
+    return r.json();
   },
 
   getHistory: async (userId, limit = 50) => {

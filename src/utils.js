@@ -3,10 +3,10 @@
 // e.g. Rp 1.250.750.000
 
 export const fmt = (n) =>
-  "Rp " + Math.abs(Number(n || 0)).toLocaleString("id-ID");
+  "Rp " + Math.round(Math.abs(Number(n || 0))).toLocaleString("id-ID");
 
 export const fmtIDR = (n, short = false) => {
-  const v = Math.abs(Number(n || 0));
+  const v = Math.round(Math.abs(Number(n || 0)));
   if (short && v >= 1e9) return "Rp " + (v / 1e9).toFixed(1) + "B";
   if (short && v >= 1e6) return "Rp " + (v / 1e6).toFixed(1) + "M";
   if (short && v >= 1e3) return "Rp " + (v / 1e3).toFixed(0) + "K";
@@ -77,7 +77,7 @@ export const fmtDateLabel = (dateStr) => {
   const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
   if (dateStr === today) return "Today";
   if (dateStr === yesterday) return "Yesterday";
-  return new Date(dateStr).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  return new Date(dateStr + "T12:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 };
 
 // ─── AGING LABEL ─────────────────────────────────────────────

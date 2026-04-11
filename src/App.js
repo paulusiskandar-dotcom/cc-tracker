@@ -12,6 +12,7 @@ import {
   installmentsApi, recurringApi, merchantApi, fxApi,
   settingsApi, gmailApi, employeeLoanApi, loanPaymentsApi,
   accountCurrenciesApi, reimburseSettlementsApi,
+  flattenEmailSync,
 } from "./api";
 import { calcNetWorth, fmtIDR, todayStr, ym } from "./utils";
 import { Spinner, ToastContainer, showToast } from "./components/shared/index";
@@ -265,7 +266,7 @@ function Finance({ user, signOut }) {
     setMerchantMaps(merch);
     if (Object.keys(fx).length) setFxRates(fx);
     setIsDark(dark);
-    setPendingSyncs(pending);
+    setPendingSyncs(flattenEmailSync(pending));
     setReimburseSettlements(reimburse);
     setEmployeeLoans(loans);
     setLoanPayments(payments);

@@ -503,6 +503,81 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
   return { processed, new_transactions: newTransactions };
 }
 
+// Re-run AI extraction for specific email_sync rows (by ID).
+// Used by the "Re-Process" button in the Email Pending UI.
+async function reprocessEmails(supabase: any, userId: string, ids: string[], anthropicKey: string) {
+  // Load accounts and merchant mappings
+  const { data: accounts } = await supabase.from("accounts")
+    .select("id,name,type,last4,account_no,bank_name").eq("user_id", userId).eq("is_active", true);
+  const userAccounts = accounts || [];
+
+  const { data: merchantMappings } = await supabase.from("merchant_mappings")
+    .select("merchant_name,canonical_name,category_id,account_id").eq("user_id", userId);
+  const mappingsMap = new Map<string, any>();
+  (merchantMappings || []).forEach((m: any) => {
+    if (m.merchant_name) mappingsMap.set(m.merchant_name.toLowerCase(), m);
+  });
+  const merchantContext = mappingsMap.size > 0
+    ? `Known merchants (use these to auto-assign category_id):\n` +
+      [...mappingsMap.values()].map((m: any) => `- "${m.merchant_name}" → category_id: ${m.category_id}`).join("\n")
+    : "No merchant mappings yet.";
+
+  // Fetch the rows to reprocess
+  const { data: rows } = await supabase.from("email_sync")
+    .select("id,raw_body,subject,sender_email").eq("user_id", userId).in("id", ids);
+
+  let reprocessed = 0;
+
+  for (const row of rows || []) {
+    const plainBody = row.raw_body || "";
+    try {
+      const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": anthropicKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 2048,
+          messages: [{
+            role: "user",
+            content: AI_EXTRACTION_PROMPT(plainBody, userAccounts, merchantContext),
+          }],
+        }),
+      });
+      if (aiRes.ok) {
+        const aiData = await aiRes.json();
+        const text = aiData.content?.[0]?.text || "[]";
+        let parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
+        if (!Array.isArray(parsed) && parsed) parsed = [parsed];
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const resolved = resolveAccountIds(parsed, userAccounts);
+          const aiResult = resolved.map((tx: any) => {
+            const key = (tx.merchant_name || "").toLowerCase();
+            const mapping = mappingsMap.get(key);
+            return mapping
+              ? { ...tx, category_id: mapping.category_id ?? tx.category_id, from_account_id: tx.from_account_id ?? mapping.account_id ?? null }
+              : tx;
+          });
+          await supabase.from("email_sync").update({
+            ai_raw_result:   aiResult,
+            extracted_count: aiResult.length,
+            status:          "pending",
+            error_message:   null,
+          }).eq("id", row.id).eq("user_id", userId);
+          reprocessed++;
+        }
+      }
+    } catch (e) {
+      console.warn("[gmail-sync] reprocess error for", row.id, ":", e);
+    }
+  }
+
+  return { reprocessed };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
@@ -516,12 +591,28 @@ Deno.serve(async (req: Request) => {
   let targetUserId: string | null = null;
   let fromDate: string | undefined;
   let toDate: string | undefined;
+  let reprocessIds: string[] | null = null;
   try {
     const body = await req.json().catch(() => ({}));
     targetUserId = body.user_id || null;
-    fromDate = body.from_date || undefined;
-    toDate   = body.to_date   || undefined;
+    fromDate     = body.from_date || undefined;
+    toDate       = body.to_date   || undefined;
+    reprocessIds = body.reprocess_ids || null;
   } catch { /* cron call with no body */ }
+
+  // Re-process specific emails by ID
+  if (reprocessIds && targetUserId) {
+    try {
+      const result = await reprocessEmails(supabase, targetUserId, reprocessIds, ANTHROPIC_KEY);
+      return new Response(JSON.stringify({ success: true, ...result }), {
+        headers: { ...CORS, "Content-Type": "application/json" },
+      });
+    } catch (e) {
+      return new Response(JSON.stringify({ error: String(e) }), {
+        status: 500, headers: { ...CORS, "Content-Type": "application/json" },
+      });
+    }
+  }
 
   let userIds: string[] = [];
 

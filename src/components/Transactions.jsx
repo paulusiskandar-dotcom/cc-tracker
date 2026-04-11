@@ -1728,7 +1728,7 @@ function PendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, user,
     try {
       const created = await ledgerApi.create(user.id, buildEntry(sync), accounts);
       setLedger(p => [created, ...p]);
-      await gmailApi.updateSync(sync.id, { status: "confirmed" });
+      await gmailApi.updateSync(sync.email_sync_id || sync.id, { status: "confirmed" });
       removeOne(sync.id);
       showToast("Imported");
       onRefresh();
@@ -1737,7 +1737,7 @@ function PendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, user,
 
   const skip = async (sync) => {
     try {
-      await gmailApi.updateSync(sync.id, { status: "skipped" });
+      await gmailApi.updateSync(sync.email_sync_id || sync.id, { status: "skipped" });
       removeOne(sync.id);
       showToast("Skipped");
     } catch (e) { showToast(e.message, "error"); }
@@ -1753,7 +1753,7 @@ function PendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, user,
       try {
         const created = await ledgerApi.create(user.id, buildEntry(sync), accounts);
         setLedger(p => [created, ...p]);
-        await gmailApi.updateSync(sync.id, { status: "confirmed" });
+        await gmailApi.updateSync(sync.email_sync_id || sync.id, { status: "confirmed" });
         setPendingSyncs(p => p.filter(s => s.id !== sync.id));
         setChecked(prev => { const n = new Set(prev); n.delete(sync.id); return n; });
         count++;
