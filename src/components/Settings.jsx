@@ -41,7 +41,7 @@ export default function Settings({
   merchantMaps, setMerchantMaps,
   onRefresh,
   accounts = [], setAccounts, bankAccounts = [], creditCards = [],
-  categories = [],
+  categories = [], incomeSrcs = [],
   ledger = [], installments = [],
   setInstallments,
   initialTab,
@@ -960,11 +960,11 @@ export default function Settings({
                   placeholder="Select bank account…"
                 />
               </Field>
-              <Field label="Category">
+              <Field label="Income Source">
                 <Select
                   value={recurForm.category_id}
                   onChange={e => setRecurForm(f => ({ ...f, category_id: e.target.value }))}
-                  options={categories.map(c => ({ value: c.id, label: c.label || c.name || c.id }))}
+                  options={incomeSrcs.map(s => ({ value: s.id, label: s.name }))}
                   placeholder="None"
                 />
               </Field>
