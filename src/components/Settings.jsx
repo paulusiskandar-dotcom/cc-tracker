@@ -43,10 +43,11 @@ export default function Settings({
   accounts = [], setAccounts, bankAccounts = [], creditCards = [],
   ledger = [], installments = [],
   setInstallments,
+  initialTab,
 }) {
   const T = dark ? DARK : LIGHT;
 
-  const [subTab, setSubTab] = useState("profile");
+  const [subTab, setSubTab] = useState(initialTab || "profile");
   const [saving, setSaving] = useState(false);
 
   // ── Profile ────────────────────────────────────────────────

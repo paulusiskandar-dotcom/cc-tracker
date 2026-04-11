@@ -173,6 +173,8 @@ function Finance({ user, signOut }) {
     const hash = window.location.hash.replace("#", "");
     return TABS.some(t => t.id === hash) ? hash : "dashboard";
   });
+  const [settingsInitialTab, setSettingsInitialTab] = useState(null);
+  const setSettingsTab = (subTabId) => { setSettingsInitialTab(subTabId); setTab("settings"); };
   const [loading, setLoading]   = useState(true);
   const [isDark, setIsDark]     = useState(false);
 
@@ -306,7 +308,7 @@ function Finance({ user, signOut }) {
     receivables, curMonth, pendingSyncs,
     isDark, dark: isDark,         // alias: new components use `dark`, old use `isDark`
     setIsDark, setDark: setIsDark,
-    setTab, setPendingSyncs,
+    setTab, setSettingsTab, setPendingSyncs,
     employeeLoans, setEmployeeLoans, loanPayments, setLoanPayments,
     accountCurrencies, setAccountCurrencies,
     setAccounts, setLedger, setCategories, setIncomeSrcs,
@@ -346,7 +348,7 @@ function Finance({ user, signOut }) {
       case "income":       return <Income       {...shared} />;
       case "reports":      return <Reports      {...shared} />;
       case "calendar":     return <Calendar     {...shared} />;
-      case "settings":     return <Settings     {...shared} signOut={signOut} />;
+      case "settings":     return <Settings     {...shared} signOut={signOut} initialTab={settingsInitialTab} />;
       case "aiimport":     return <AIImport     {...shared} />;
       default:             return <Dashboard    {...shared} />;
     }

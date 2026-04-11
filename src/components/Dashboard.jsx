@@ -11,7 +11,7 @@ export default function Dashboard({
   reminders, recurTemplates, netWorth, bankAccounts,
   creditCards, assets, receivables, liabilities,
   installments = [],
-  curMonth, pendingSyncs, setTab,
+  curMonth, pendingSyncs, setTab, setSettingsTab,
   setLedger, setReminders, onRefresh,
   employeeLoans = [], loanPayments = [],
 }) {
@@ -431,6 +431,43 @@ export default function Dashboard({
           </button>
         </div>
       )}
+
+      {/* ── SHORTCUT BUTTONS ── */}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {[
+          { label: "Email Sync",   onClick: () => setSettingsTab?.("email") },
+          { label: "E-Statement",  onClick: () => setSettingsTab?.("estatement") },
+          { label: "AI Scan",      onClick: () => setTab?.("aiimport"), icon: true },
+        ].map(({ label, onClick, icon }) => (
+          <button key={label} onClick={onClick} style={{
+            display:      "flex",
+            alignItems:   "center",
+            gap:          5,
+            height:       28,
+            padding:      "0 12px",
+            borderRadius: 99,
+            border:       "1px solid #e5e7eb",
+            background:   "#fff",
+            color:        "#374151",
+            fontSize:     12,
+            fontWeight:   500,
+            fontFamily:   "Figtree, sans-serif",
+            cursor:       "pointer",
+            transition:   "background 0.15s, border-color 0.15s",
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = "#f3f4f6"; e.currentTarget.style.borderColor = "#d1d5db"; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "#fff";    e.currentTarget.style.borderColor = "#e5e7eb"; }}
+          >
+            {icon && (
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                <circle cx="12" cy="13" r="4"/>
+              </svg>
+            )}
+            {label}
+          </button>
+        ))}
+      </div>
 
       {/* ── BENTO GRID ── */}
       <div style={{
