@@ -863,6 +863,12 @@ export default function Receivables({
                         </div>
                       )}
 
+                      {/* Paid so far */}
+                      <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+                        Paid: <span style={{ fontWeight: 700, color: "#059669" }}>{fmtIDR(paid, true)}</span>
+                        {" "}of <span style={{ fontWeight: 600, color: "#374151" }}>{fmtIDR(total, true)}</span> total
+                      </div>
+
                       {/* Next due */}
                       {nextDueLabel && (
                         <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
@@ -874,6 +880,32 @@ export default function Receivables({
                       {loan.notes && (
                         <div style={{ fontSize: 11, color: "#9ca3af", fontStyle: "italic", fontFamily: "Figtree, sans-serif" }}>{loan.notes}</div>
                       )}
+
+                      {/* Payment history */}
+                      <div style={{ borderTop: "0.5px solid #f3f4f6", paddingTop: 8 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif", marginBottom: 6 }}>
+                          Payment History
+                        </div>
+                        {loan.payments.length === 0 ? (
+                          <div style={{ fontSize: 11, color: "#d1d5db", fontFamily: "Figtree, sans-serif" }}>No payments recorded yet</div>
+                        ) : (
+                          [...loan.payments].sort((a, b) => (b.pay_date || "").localeCompare(a.pay_date || "")).map(p => {
+                            const dateStr = p.pay_date
+                              ? new Date(p.pay_date + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
+                              : "—";
+                            return (
+                              <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", fontSize: 11, marginBottom: 4, gap: 6 }}>
+                                <div style={{ color: "#6b7280", fontFamily: "Figtree, sans-serif", flex: 1, minWidth: 0 }}>
+                                  {dateStr}{p.notes ? <span style={{ color: "#9ca3af" }}> · {p.notes}</span> : null}
+                                </div>
+                                <div style={{ fontWeight: 700, color: "#059669", flexShrink: 0, fontFamily: "Figtree, sans-serif" }}>
+                                  +{fmtIDR(Number(p.amount || 0), true)}
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
                     </div>
 
                     {/* Bottom action bar */}
