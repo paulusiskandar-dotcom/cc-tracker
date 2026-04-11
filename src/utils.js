@@ -176,3 +176,27 @@ export const parseJSON = (text, fallback) => {
   try { return JSON.parse((text || "").replace(/```json|```/g, "").trim()); }
   catch { return fallback; }
 };
+
+// ─── DUPLICATE CHECK ──────────────────────────────────────────
+// Checks in-memory ledger for a possible duplicate transaction.
+// Returns the first matching entry (description, amount_idr, tx_date) or null.
+// Match criteria: date ±1 day, amount ±1% or ±500 IDR, currency match.
+export const checkDuplicateTransaction = (ledger, { tx_date, amount_idr, currency = "IDR" }) => {
+  if (!tx_date || !amount_idr) return null;
+  const amt = Number(amount_idr);
+  if (!amt) return null;
+  const tolerance = Math.max(500, amt * 0.01);
+  const tCurrency = (currency || "IDR").toUpperCase();
+  for (const e of (ledger || [])) {
+    if (!e.tx_date) continue;
+    const eCurrency = (e.currency || "IDR").toUpperCase();
+    if (eCurrency !== tCurrency) continue;
+    const dayDiff = Math.abs(new Date(e.tx_date) - new Date(tx_date)) / 86400000;
+    if (dayDiff > 1) continue;
+    const eAmt = Number(e.amount_idr || e.amount || 0);
+    if (Math.abs(eAmt - amt) <= tolerance) {
+      return { description: e.description || "", amount_idr: eAmt, tx_date: e.tx_date };
+    }
+  }
+  return null;
+};

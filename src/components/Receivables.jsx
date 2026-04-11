@@ -111,8 +111,10 @@ export default function Receivables({
   const [saving, setSaving] = useState(false);
 
   // ── Reimburse modals ─────────────────────────────────────────
-  const [outModal, setOutModal]     = useState(false);
-  const [selectedRec, setSelectedRec] = useState(null);
+  const [outModal, setOutModal]         = useState(false);
+  const [selectedRec, setSelectedRec]   = useState(null);
+  const [historyModal, setHistoryModal] = useState(false);
+  const [historyEntity, setHistoryEntity] = useState(null);
 
   const [outForm, setOutForm] = useState({
     date: todayStr(), description: "", amount: "",
@@ -580,12 +582,20 @@ export default function Receivables({
                         </div>
                         <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>outstanding</div>
                       </div>
-                      <button
-                        onClick={() => { setOutForm(f => ({ ...f, entity: r.entity })); setOutModal(true); }}
-                        style={{ height: 30, padding: "0 14px", border: "none", borderRadius: 8, cursor: "pointer", background: entBg, color: entCol, fontSize: 12, fontWeight: 700, fontFamily: "Figtree, sans-serif" }}
-                      >
-                        + Expense
-                      </button>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button
+                          onClick={() => { setHistoryEntity(r.entity); setHistoryModal(true); }}
+                          style={{ height: 30, padding: "0 12px", border: `1px solid ${entCol}`, borderRadius: 8, cursor: "pointer", background: "transparent", color: entCol, fontSize: 12, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
+                        >
+                          History
+                        </button>
+                        <button
+                          onClick={() => { setOutForm(f => ({ ...f, entity: r.entity })); setOutModal(true); }}
+                          style={{ height: 30, padding: "0 14px", border: "none", borderRadius: 8, cursor: "pointer", background: entBg, color: entCol, fontSize: 12, fontWeight: 700, fontFamily: "Figtree, sans-serif" }}
+                        >
+                          + Expense
+                        </button>
+                      </div>
                     </div>
 
                     {/* ── Two-column settle UI ── */}
@@ -1118,6 +1128,80 @@ export default function Receivables({
             </Field>
           </div>
         )}
+      </Modal>
+
+      {/* ── REIMBURSE HISTORY MODAL ──────────────────────── */}
+      <Modal
+        isOpen={historyModal && !!historyEntity}
+        onClose={() => setHistoryModal(false)}
+        title={`History — ${historyEntity || ""}`}
+        footer={
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <Button variant="secondary" size="md" onClick={() => setHistoryModal(false)}>Close</Button>
+          </div>
+        }
+      >
+        {historyEntity && (() => {
+          const rows = ledger
+            .filter(e => e.entity === historyEntity && (e.tx_type === "reimburse_out" || e.tx_type === "reimburse_in"))
+            .sort((a, b) => b.tx_date.localeCompare(a.tx_date));
+
+          if (rows.length === 0) {
+            return <div style={{ fontSize: 13, color: "#9ca3af", textAlign: "center", padding: "24px 0" }}>No history yet.</div>;
+          }
+
+          const totalOut = rows.filter(e => e.tx_type === "reimburse_out").reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
+          const totalIn  = rows.filter(e => e.tx_type === "reimburse_in").reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
+          const selisih  = totalOut - totalIn;
+
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+              {/* Table header */}
+              <div style={{ display: "grid", gridTemplateColumns: "80px 1fr 90px 90px", gap: 6, padding: "6px 8px", background: "#f9fafb", borderRadius: 8, marginBottom: 4 }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em" }}>Date</div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em" }}>Description</div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#dc2626", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "right" }}>Out</div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#059669", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "right" }}>In</div>
+              </div>
+
+              {/* Rows */}
+              <div style={{ maxHeight: 400, overflowY: "auto" }}>
+                {rows.map(e => {
+                  const isOut = e.tx_type === "reimburse_out";
+                  const amt   = Number(e.amount_idr || e.amount || 0);
+                  return (
+                    <div key={e.id} style={{ display: "grid", gridTemplateColumns: "80px 1fr 90px 90px", gap: 6, padding: "8px 8px", borderBottom: "0.5px solid #f3f4f6" }}>
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>{e.tx_date}</div>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.description}</div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#dc2626", textAlign: "right" }}>
+                        {isOut ? fmtIDR(amt, true) : "—"}
+                      </div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#059669", textAlign: "right" }}>
+                        {!isOut ? `+${fmtIDR(amt, true)}` : "—"}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Totals */}
+              <div style={{ borderTop: "1.5px solid #e5e7eb", marginTop: 4, padding: "10px 8px 2px", display: "flex", flexDirection: "column", gap: 4 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                  <span style={{ color: "#6b7280" }}>Total Out</span>
+                  <span style={{ fontWeight: 700, color: "#dc2626" }}>{fmtIDR(totalOut)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                  <span style={{ color: "#6b7280" }}>Total In</span>
+                  <span style={{ fontWeight: 700, color: "#059669" }}>+{fmtIDR(totalIn)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 800, borderTop: "0.5px solid #e5e7eb", paddingTop: 6, marginTop: 2 }}>
+                  <span style={{ color: "#374151" }}>Selisih (Outstanding)</span>
+                  <span style={{ color: selisih > 0 ? "#d97706" : "#059669" }}>{selisih > 0 ? "" : "+"}{fmtIDR(Math.abs(selisih))}</span>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </Modal>
 
     </div>

@@ -1,7 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { ledgerApi, recurringApi, reimburseSettlementsApi, settingsApi, loanPaymentsApi, employeeLoanApi } from "../api";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
-import { fmtIDR, ym, mlShort, getGreeting, todayStr, groupByDate } from "../utils";
+import { fmtIDR, ym, mlShort, getGreeting, todayStr, groupByDate, checkDuplicateTransaction } from "../utils";
 import { showToast, EmptyState, Modal, Button, AmountInput, Field, Input, FormRow } from "./shared/index";
 import Select from "./shared/Select";
 import { GroupedTransactionList } from "./shared/TransactionRow";
@@ -32,10 +32,11 @@ export default function Dashboard({
       .catch(() => {});
   }, [user?.id]);
 
-  const [confirmModal,  setConfirmModal]  = useState(false);
-  const [confirmTarget, setConfirmTarget] = useState(null);  // { kind, reminder?, tmpl?, editMode?, settlement? }
-  const [confirmForm,   setConfirmForm]   = useState({ date: todayStr(), amount: "", notes: "", toAccountId: "" });
-  const [confirmSaving, setConfirmSaving] = useState(false);
+  const [confirmModal,    setConfirmModal]    = useState(false);
+  const [confirmTarget,   setConfirmTarget]   = useState(null);  // { kind, reminder?, tmpl?, editMode?, settlement? }
+  const [confirmForm,     setConfirmForm]     = useState({ date: todayStr(), amount: "", notes: "", toAccountId: "" });
+  const [confirmSaving,   setConfirmSaving]   = useState(false);
+  const [confirmDupMatch, setConfirmDupMatch] = useState(null);
   const [dismissed,     setDismissed]     = useState(new Set()); // dismissed upcoming item ids
   const [settleModal,   setSettleModal]   = useState(false);
   const [settleRec,     setSettleRec]     = useState(null);    // receivable account raw
@@ -285,23 +286,17 @@ export default function Dashboard({
   const openConfirmModal = (r, editMode = false) => {
     const tmpl = r.recurring_templates || {};
     setConfirmTarget({ kind: "reminder", reminder: r, tmpl, editMode });
-    setConfirmForm({
-      date:        todayStr(),
-      amount:      String(tmpl.amount || ""),
-      notes:       "",
-      toAccountId: tmpl.to_id || bankAccounts[0]?.id || "",
-    });
+    const amount = String(tmpl.amount || "");
+    setConfirmForm({ date: todayStr(), amount, notes: "", toAccountId: tmpl.to_id || bankAccounts[0]?.id || "" });
+    setConfirmDupMatch(amount ? checkDuplicateTransaction(ledger, { tx_date: todayStr(), amount_idr: amount }) : null);
     setConfirmModal(true);
   };
 
   const openReimburseModal = (s) => {
     setConfirmTarget({ kind: "reimburse", settlement: s });
-    setConfirmForm({
-      date:        todayStr(),
-      amount:      String(s.total_out || ""),
-      notes:       "",
-      toAccountId: bankAccounts[0]?.id || "",
-    });
+    const amount = String(s.total_out || "");
+    setConfirmForm({ date: todayStr(), amount, notes: "", toAccountId: bankAccounts[0]?.id || "" });
+    setConfirmDupMatch(amount ? checkDuplicateTransaction(ledger, { tx_date: todayStr(), amount_idr: amount }) : null);
     setConfirmModal(true);
   };
 
@@ -976,6 +971,11 @@ export default function Dashboard({
             const { settlement } = confirmTarget;
             return (
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                {confirmDupMatch && (
+                  <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 10, padding: "10px 14px", fontSize: 12, color: "#92400e", fontFamily: "Figtree, sans-serif" }}>
+                    ⚠ Possible duplicate — Mirip dengan: <strong>{confirmDupMatch.description || "(no desc)"}</strong> · Rp {Number(confirmDupMatch.amount_idr || 0).toLocaleString("id-ID")} · {confirmDupMatch.tx_date}
+                  </div>
+                )}
                 <div style={{
                   background: "#f0fdf4", border: "1px solid #bbf7d0",
                   borderRadius: 10, padding: "10px 14px",
@@ -1030,6 +1030,11 @@ export default function Dashboard({
           const toAcc   = accounts.find(a => a.id === tmpl.to_id);
           return (
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {confirmDupMatch && (
+                <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 10, padding: "10px 14px", fontSize: 12, color: "#92400e", fontFamily: "Figtree, sans-serif" }}>
+                  ⚠ Possible duplicate — Mirip dengan: <strong>{confirmDupMatch.description || "(no desc)"}</strong> · Rp {Number(confirmDupMatch.amount_idr || 0).toLocaleString("id-ID")} · {confirmDupMatch.tx_date}
+                </div>
+              )}
               {/* Template info banner */}
               <div style={{
                 background: "#f9fafb", borderRadius: 10, padding: "10px 14px",

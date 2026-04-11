@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { ledgerApi, gmailApi, scanApi, merchantApi, getTxFromToTypes } from "../api";
-import { fmtIDR, todayStr } from "../utils";
+import { fmtIDR, todayStr, checkDuplicateTransaction } from "../utils";
 import { LIGHT, DARK } from "../theme";
 import { Button, EmptyState, Spinner, showToast, NativeAccountSelect } from "./shared/index";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
@@ -326,7 +326,8 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
           learned_cat:  learnedCat,
           notes:        r.notes || "",
           flagged,
-          status:       checkDuplicate(txDate, amtIDR, desc) ? "possible_duplicate" : "new",
+          _dupMatch:    checkDuplicateTransaction(ledger, { tx_date: txDate, amount_idr: amtIDR, currency }),
+          status:       checkDuplicateTransaction(ledger, { tx_date: txDate, amount_idr: amtIDR, currency }) ? "possible_duplicate" : "new",
         };
       });
       setResults(items);
@@ -458,7 +459,8 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
           category_name:   tx.suggested_category || null,
           from_id:         tx.from_account_id || null,
           to_id:           resolvedToId,
-          status:          "new",
+          _dupMatch:       checkDuplicateTransaction(ledger, { tx_date: tx.date || es.received_at?.slice(0, 10) || todayStr(), amount_idr: txAmtIDR, currency: txCurrency }),
+          status:          checkDuplicateTransaction(ledger, { tx_date: tx.date || es.received_at?.slice(0, 10) || todayStr(), amount_idr: txAmtIDR, currency: txCurrency }) ? "possible_duplicate" : "new",
           notes:           es.subject || "",
           conf:            Number(tx.confidence || 0) >= 0.85 ? 1 : 0,
           is_qris:         tx.is_qris || false,
@@ -937,8 +939,19 @@ function TxCard({
           ))}
         </select>
 
-        {/* Badge */}
-        {badge && (
+        {/* Duplicate badge */}
+        {isDup && (
+          <span style={{
+            fontSize: 9, fontWeight: 800, background: "#ffedd5", color: "#ea580c",
+            padding: "2px 5px", borderRadius: 4, fontFamily: "Figtree, sans-serif",
+            whiteSpace: "nowrap", flexShrink: 0,
+          }}>
+            ⚠ Possible duplicate
+          </span>
+        )}
+
+        {/* Learned / Suggest badge */}
+        {badge && !isDup && (
           <span style={{
             fontSize: 9, fontWeight: 800, background: badge.bg, color: badge.color,
             padding: "2px 5px", borderRadius: 4, fontFamily: "Figtree, sans-serif",
@@ -1014,6 +1027,19 @@ function TxCard({
           ✏️
         </button>
       </div>
+
+      {/* ── Duplicate match detail row ── */}
+      {isDup && r._dupMatch && (
+        <div style={{
+          borderTop: "1px solid #fed7aa", background: "#fff7ed",
+          padding: "5px 12px 6px 35px",
+          fontSize: 11, color: "#92400e", fontFamily: "Figtree, sans-serif",
+        }}>
+          Mirip dengan: <strong>{r._dupMatch.description || "(no desc)"}</strong>
+          {" · "}Rp {Number(r._dupMatch.amount_idr || 0).toLocaleString("id-ID")}
+          {" · "}{r._dupMatch.tx_date}
+        </div>
+      )}
 
       {/* ── Notes row ── */}
       {isNotes && (
