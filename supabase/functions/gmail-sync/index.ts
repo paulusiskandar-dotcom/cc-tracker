@@ -80,6 +80,30 @@ ${merchantContext}
 Email content:
 ${emailContent.slice(0, 6000)}
 
+SPECIAL EMAIL PATTERNS — apply these before generic extraction:
+
+1. MANDIRI "PEMBAYARAN BERHASIL" (subject contains "Pembayaran Berhasil", sender bankmandiri.co.id):
+   - Extract "Nominal Transaksi" → amount
+   - Extract "Tanggal" → date (format: DD/MM/YYYY or DD Bulan YYYY → convert to YYYY-MM-DD)
+   - Extract "Penerima" → merchant_name and description
+   - Extract "Sumber Dana" → from_account_masked
+   - If "Sumber Dana" contains "Kartu Kredit" or "Credit Card":
+     → suggested_tx_type = "expense", is_cc_payment = false
+     → set from_bank_name = "Mandiri"
+   - If "Sumber Dana" contains "Tabungan" or "TabPlus" or "Giro":
+     → suggested_tx_type = "expense" (or "transfer" if Penerima is own account)
+     → set from_bank_name = "Mandiri"
+   - Set from_account_masked to the raw "Sumber Dana" value (e.g. "Kartu Kredit - ****1234")
+   - confidence = 0.95
+
+2. BCA DEBIT NOTIFICATION (subject contains "Transaksi Kartu Debit" or "Notifikasi Transaksi"):
+   - Extract amount, date, merchant, card number (last4)
+   - suggested_tx_type = "expense"
+
+3. TRANSFER NOTIFICATION (subject contains "Transfer", body has "Transfer ke" or "Berhasil ditransfer"):
+   - Extract amount, date, destination account
+   - suggested_tx_type = "transfer" if to_account matches own account, else "expense"
+
 For each transaction return a JSON array:
 [{
   "date": "YYYY-MM-DD",
@@ -110,12 +134,13 @@ For each transaction return a JSON array:
 }]
 
 Rules:
-- Extract from_account_masked: look in "Source of Fund", "Card number", "Account" fields. Copy the raw masked string exactly as it appears (e.g. "TAHAPAN - 0831****88", "437896******5130").
+- Extract from_account_masked: look in "Source of Fund", "Card number", "Sumber Dana", "Account" fields. Copy the raw masked string exactly as it appears (e.g. "TAHAPAN - 0831****88", "437896******5130", "Kartu Kredit - ****1234").
 - Leave from_account_id and to_account_id as null — account matching is done by post-processing code.
 - If merchant_name matches a known merchant above, use that mapping's category_id exactly.
 - QRIS/QR payment → is_qris=true, suggested_tx_type=qris_debit
 - Transfer to own account → is_transfer=true, suggested_tx_type=transfer
 - CC payment → is_cc_payment=true, suggested_tx_type=pay_cc
+- For Mandiri "Pembayaran Berhasil": ALWAYS extract even if layout is unusual — Penerima = recipient/merchant, Nominal Transaksi = amount (remove "Rp" and dots).
 - Return ONLY valid JSON array, no markdown.
 `;
 
