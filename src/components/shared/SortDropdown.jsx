@@ -64,7 +64,6 @@ export default function SortDropdown({ options = [], value = "", onChange, stora
           whiteSpace: "nowrap", lineHeight: 1,
         }}
       >
-        <span style={{ color: open ? "#9ca3af" : "#9ca3af", fontSize: 11 }}>Sort:</span>
         <span style={{ fontWeight: 700, color: open ? "#fff" : "#111827" }}>
           {activeOpt?.label}
         </span>
