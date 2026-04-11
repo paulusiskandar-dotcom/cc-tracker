@@ -1775,7 +1775,7 @@ function PendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, user,
       }}>
         <span style={{ fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif", flex: 1 }}>
           {importing
-            ? `Importing ${progress.done} of ${progress.total}…`
+            ? `${progress.done} of ${progress.total}…`
             : `${selectedSyncs.length} of ${pendingSyncs.length} selected`}
         </span>
         <button
@@ -1796,7 +1796,7 @@ function PendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, user,
             fontSize: 11, fontWeight: 700, fontFamily: "Figtree, sans-serif",
           }}
         >
-          Import All Selected ▶
+          {importing ? `Importing…` : "Confirm All ✓"}
         </button>
       </div>
 
