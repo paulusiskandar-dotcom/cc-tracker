@@ -1659,38 +1659,50 @@ function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incom
 
 // ─── PENDING TAB ─────────────────────────────────────────────
 function PendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, user, ledger, setLedger, onRefresh }) {
+  const [checked,   setChecked]   = useState(() => new Set((pendingSyncs || []).map(s => s.id)));
+  const [importing, setImporting] = useState(false);
+  const [progress,  setProgress]  = useState({ done: 0, total: 0 });
 
   if (!pendingSyncs?.length) return (
     <EmptyState icon="📧" title="No pending emails" message="Gmail sync will surface transactions here for review." />
   );
 
+  const selectedSyncs = pendingSyncs.filter(s => checked.has(s.id));
+  const allChecked    = selectedSyncs.length === pendingSyncs.length && pendingSyncs.length > 0;
+
+  const buildEntry = (sync) => {
+    const txType = sync.tx_type || "expense";
+    const { from_type, to_type } = getTxFromToTypes(txType);
+    const catMatch = categories.find(c =>
+      c.name?.toLowerCase() === (sync.suggested_category_label || "").toLowerCase()
+    );
+    return {
+      tx_date:       sync.transaction_date || sync.received_at?.slice(0, 10) || todayStr(),
+      description:   sync.merchant_name || sync.subject || "Gmail transaction",
+      amount:        Number(sync.amount || 0),
+      currency:      sync.currency || "IDR",
+      amount_idr:    Number(sync.amount_idr || sync.amount || 0),
+      tx_type:       txType, from_type, to_type,
+      from_id:       sync.matched_account_id || null,
+      to_id:         null,
+      category_id:   catMatch?.id || null,
+      category_name: catMatch?.name || null,
+      entity:        sync.entity || "Personal",
+      notes:         `Imported from Gmail: ${sync.subject || ""}`,
+    };
+  };
+
+  const removeOne = (id) => {
+    setPendingSyncs(p => p.filter(s => s.id !== id));
+    setChecked(prev => { const n = new Set(prev); n.delete(id); return n; });
+  };
+
   const confirm = async (sync) => {
     try {
-      const txType = sync.tx_type || "expense";
-      const { from_type, to_type } = getTxFromToTypes(txType);
-      const catMatch = categories.find(c =>
-        c.name?.toLowerCase() === (sync.suggested_category_label || "").toLowerCase()
-      );
-      const entry = {
-        tx_date:         sync.transaction_date || sync.received_at?.slice(0, 10) || todayStr(),
-        description:     sync.merchant_name || sync.subject || "Gmail transaction",
-        amount:          Number(sync.amount || 0),
-        currency:        sync.currency || "IDR",
-        amount_idr:      Number(sync.amount_idr || sync.amount || 0),
-        tx_type:         txType,
-        from_type,
-        to_type,
-        from_id:         sync.matched_account_id || null,
-        to_id:           null,
-        category_id:     catMatch?.id || null,
-        category_name:   catMatch?.name || null,
-        entity:          sync.entity || "Personal",
-        notes:           `Imported from Gmail: ${sync.subject || ""}`,
-      };
-      const created = await ledgerApi.create(user.id, entry, accounts);
+      const created = await ledgerApi.create(user.id, buildEntry(sync), accounts);
       setLedger(p => [created, ...p]);
       await gmailApi.updateSync(sync.id, { status: "confirmed" });
-      setPendingSyncs(p => p.filter(s => s.id !== sync.id));
+      removeOne(sync.id);
       showToast("Imported");
       onRefresh();
     } catch (e) { showToast(e.message, "error"); }
@@ -1699,22 +1711,82 @@ function PendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, user,
   const skip = async (sync) => {
     try {
       await gmailApi.updateSync(sync.id, { status: "skipped" });
-      setPendingSyncs(p => p.filter(s => s.id !== sync.id));
+      removeOne(sync.id);
       showToast("Skipped");
     } catch (e) { showToast(e.message, "error"); }
   };
 
+  const importAll = async () => {
+    const toImport = [...selectedSyncs];
+    if (!toImport.length) return;
+    setImporting(true);
+    setProgress({ done: 0, total: toImport.length });
+    let count = 0;
+    for (const sync of toImport) {
+      try {
+        const created = await ledgerApi.create(user.id, buildEntry(sync), accounts);
+        setLedger(p => [created, ...p]);
+        await gmailApi.updateSync(sync.id, { status: "confirmed" });
+        setPendingSyncs(p => p.filter(s => s.id !== sync.id));
+        setChecked(prev => { const n = new Set(prev); n.delete(sync.id); return n; });
+        count++;
+        setProgress({ done: count, total: toImport.length });
+      } catch (_) { /* skip failures, continue */ }
+    }
+    setImporting(false);
+    showToast(`${count} transaction${count !== 1 ? "s" : ""} imported`);
+    onRefresh();
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
-        {pendingSyncs.length} transaction{pendingSyncs.length !== 1 ? "s" : ""} from Gmail pending review
+      {/* ── Bulk action bar ── */}
+      <div style={{
+        display: "flex", alignItems: "center", gap: 8,
+        padding: "10px 14px", background: "#ffffff",
+        border: "0.5px solid #e5e7eb", borderRadius: 12,
+      }}>
+        <span style={{ fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif", flex: 1 }}>
+          {importing
+            ? `Importing ${progress.done} of ${progress.total}…`
+            : `${selectedSyncs.length} of ${pendingSyncs.length} selected`}
+        </span>
+        <button
+          onClick={() => setChecked(allChecked ? new Set() : new Set(pendingSyncs.map(s => s.id)))}
+          disabled={importing}
+          style={{ height: 28, padding: "0 10px", border: "1px solid #e5e7eb", borderRadius: 7, cursor: "pointer", background: "#fff", color: "#6b7280", fontSize: 11, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
+        >
+          {allChecked ? "Deselect All" : "Select All"}
+        </button>
+        <button
+          onClick={importAll}
+          disabled={importing || !selectedSyncs.length}
+          style={{
+            height: 28, padding: "0 12px", border: "none", borderRadius: 7,
+            cursor: importing || !selectedSyncs.length ? "not-allowed" : "pointer",
+            background: !importing && selectedSyncs.length ? "#111827" : "#e5e7eb",
+            color:      !importing && selectedSyncs.length ? "#fff"     : "#9ca3af",
+            fontSize: 11, fontWeight: 700, fontFamily: "Figtree, sans-serif",
+          }}
+        >
+          Import All Selected ▶
+        </button>
       </div>
+
+      {/* ── Transaction rows ── */}
       {pendingSyncs.map(s => (
         <div key={s.id} style={{
           background: "#fef9ec", border: "1.5px solid #fde68a",
           borderRadius: 12, padding: "12px 14px",
-          display: "flex", alignItems: "center", gap: 12,
+          display: "flex", alignItems: "center", gap: 10,
         }}>
+          <input
+            type="checkbox"
+            checked={checked.has(s.id)}
+            onChange={() => setChecked(prev => { const n = new Set(prev); n.has(s.id) ? n.delete(s.id) : n.add(s.id); return n; })}
+            disabled={importing}
+            style={{ width: 15, height: 15, cursor: "pointer", accentColor: "#111827", flexShrink: 0 }}
+          />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
               {s.merchant_name || s.subject || "Gmail transaction"}
@@ -1725,8 +1797,8 @@ function PendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, user,
             </div>
           </div>
           <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-            <button onClick={() => confirm(s)} style={BTN_CONFIRM}>✓ Import</button>
-            <button onClick={() => skip(s)} style={BTN_SKIP}>Skip</button>
+            <button onClick={() => confirm(s)} disabled={importing} style={{ ...BTN_CONFIRM, opacity: importing ? 0.5 : 1 }}>✓</button>
+            <button onClick={() => skip(s)}    disabled={importing} style={{ ...BTN_SKIP,    opacity: importing ? 0.5 : 1 }}>Skip</button>
           </div>
         </div>
       ))}
