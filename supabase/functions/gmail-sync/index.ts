@@ -54,15 +54,32 @@ const BANK_DOMAINS = [
   "permatabank.co.id",
   "noreply.jenius.com",
   "info.jenius.com",
+  // Mandiri subdomains (bankmandiri.co.id covers these via Gmail search, but list explicitly)
+  "livin.bankmandiri.co.id",
+  "notifikasi.bankmandiri.co.id",
 ];
 
-// Keywords that indicate non-transactional emails to skip
+// Keywords that indicate non-transactional emails to skip.
+// NOTE: Bracketed subject prefixes like [RAHASIA], [INFO], [WARNING] are intentionally
+// NOT in this list — Indonesian banks use these brackets on real transaction emails
+// (e.g. CIMB "[RAHASIA] Konfirmasi Transaksi").
 const SKIP_KEYWORDS = [
   "promo", "penawaran", "diskon", "newsletter",
   "otp", "password", "aktivasi", "selamat datang",
   "survey", "feedback", "undian", "offer", "discount",
   "kode verifikasi", "verification code", "reset password",
   "activation", "welcome", "registration",
+];
+
+// Known transaction-positive subject patterns — never skip these even if a skip keyword
+// appears elsewhere in the subject.
+const FORCE_INCLUDE_PATTERNS = [
+  /konfirmasi\s+transaksi/i,
+  /transaksi\s+kartu/i,
+  /pembayaran\s+berhasil/i,
+  /notifikasi\s+transaksi/i,
+  /transaction\s+alert/i,
+  /debit\s+alert/i,
 ];
 
 const AI_EXTRACTION_PROMPT = (emailContent: string, accounts: any[], merchantContext: string) => `
@@ -80,27 +97,37 @@ ${merchantContext}
 Email content:
 ${emailContent.slice(0, 6000)}
 
+SUBJECT LINE NOTE: Indonesian bank emails often prefix subjects with brackets like [RAHASIA], [INFO], [WARNING], [PENTING]. Strip this prefix mentally before pattern matching — e.g. "[RAHASIA] Konfirmasi Transaksi" matches the CIMB pattern below.
+
 SPECIAL EMAIL PATTERNS — apply these before generic extraction:
 
-1. MANDIRI "PEMBAYARAN BERHASIL" (subject contains "Pembayaran Berhasil", sender bankmandiri.co.id):
-   - Extract "Nominal Transaksi" → amount
-   - Extract "Tanggal" → date (format: DD/MM/YYYY or DD Bulan YYYY → convert to YYYY-MM-DD)
-   - Extract "Penerima" → merchant_name and description
-   - Extract "Sumber Dana" → from_account_masked
-   - If "Sumber Dana" contains "Kartu Kredit" or "Credit Card":
-     → suggested_tx_type = "expense", is_cc_payment = false
-     → set from_bank_name = "Mandiri"
-   - If "Sumber Dana" contains "Tabungan" or "TabPlus" or "Giro":
-     → suggested_tx_type = "expense" (or "transfer" if Penerima is own account)
-     → set from_bank_name = "Mandiri"
-   - Set from_account_masked to the raw "Sumber Dana" value (e.g. "Kartu Kredit - ****1234")
+1. CIMB NIAGA CC TRANSACTION (subject contains "Konfirmasi Transaksi", sender cimbniaga.co.id):
+   - Extract "No. Kartu Kredit" → card_last4 (take the last 4 visible digits, e.g. "XX87" → "XX87"; use whatever digits are shown)
+   - Extract "Jumlah Transaksi" → amount (remove "Rp", dots, commas → integer IDR)
+   - Extract "Tanggal/Waktu Transaksi" → date (take YYYY-MM-DD portion, ignore time)
+   - Extract "Nama Merchant" → merchant_name and description
+   - suggested_tx_type = "expense"
+   - from_account_masked = raw card number string from email
+   - from_bank_name = "CIMB Niaga"
    - confidence = 0.95
 
-2. BCA DEBIT NOTIFICATION (subject contains "Transaksi Kartu Debit" or "Notifikasi Transaksi"):
+3. MANDIRI "PEMBAYARAN BERHASIL" (subject contains "Pembayaran Berhasil", sender bankmandiri.co.id or livin.bankmandiri.co.id):
+   - Extract "Nominal Transaksi" → amount (remove "Rp", dots → integer IDR)
+   - Extract "Tanggal" → date (DD/MM/YYYY or DD Bulan YYYY → YYYY-MM-DD)
+   - Extract "Penerima" → merchant_name and description
+   - Extract "Sumber Dana" → from_account_masked (copy raw value exactly)
+   - If "Sumber Dana" contains "Kartu Kredit" or "Credit Card":
+     → suggested_tx_type = "expense", from_bank_name = "Mandiri"
+   - If "Sumber Dana" contains "Tabungan" or "TabPlus" or "Giro":
+     → suggested_tx_type = "expense" (or "transfer" if Penerima matches own account)
+     → from_bank_name = "Mandiri"
+   - confidence = 0.95
+
+4. BCA DEBIT NOTIFICATION (subject contains "Transaksi Kartu Debit" or "Notifikasi Transaksi"):
    - Extract amount, date, merchant, card number (last4)
    - suggested_tx_type = "expense"
 
-3. TRANSFER NOTIFICATION (subject contains "Transfer", body has "Transfer ke" or "Berhasil ditransfer"):
+5. TRANSFER NOTIFICATION (subject contains "Transfer", body has "Transfer ke" or "Berhasil ditransfer"):
    - Extract amount, date, destination account
    - suggested_tx_type = "transfer" if to_account matches own account, else "expense"
 
@@ -309,9 +336,12 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
     const senderMatch = from.match(/<(.+)>/);
     const senderEmail = (senderMatch?.[1] || from).toLowerCase().trim();
 
-    // Check skip keywords in subject
-    const lowerSubject = subject.toLowerCase();
-    const shouldSkip = SKIP_KEYWORDS.some(kw => lowerSubject.includes(kw.toLowerCase()));
+    // Check skip keywords in subject.
+    // Strip bracketed prefixes like [RAHASIA], [INFO] before matching — these are used
+    // by Indonesian banks on real transaction emails (e.g. CIMB "[RAHASIA] Konfirmasi Transaksi").
+    const subjectNoBrackets = subject.replace(/^\s*\[[^\]]*\]\s*/g, "").toLowerCase();
+    const forceInclude = FORCE_INCLUDE_PATTERNS.some(p => p.test(subject));
+    const shouldSkip = !forceInclude && SKIP_KEYWORDS.some(kw => subjectNoBrackets.includes(kw.toLowerCase()));
     if (shouldSkip) {
       await supabase.from("email_sync").insert({
         user_id: userId, gmail_message_id: msg.id,
