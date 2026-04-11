@@ -476,8 +476,23 @@ export default function Receivables({
     padding:      "16px 18px",
   });
 
-  const totalReimburse = reimburseAccs.reduce((s, a) => s + Number(a.receivable_outstanding || 0), 0);
+  const totalReimburse  = reimburseAccs.reduce((s, a) => s + Number(a.receivable_outstanding || 0), 0);
   const activeReimburse = reimburseAccs.filter(a => Number(a.receivable_outstanding || 0) > 0).length;
+
+  const activeLoans = loansWithStats.filter(l => l.status !== "settled" && l.remaining > 0);
+  const nextLoanDue = (() => {
+    const dues = activeLoans.flatMap(loan => {
+      if (!loan.start_date || !Number(loan.monthly_installment)) return [];
+      const day = new Date(loan.start_date + "T00:00:00").getDate();
+      const now = new Date();
+      let d = new Date(now.getFullYear(), now.getMonth(), day);
+      if (d <= now) d = new Date(now.getFullYear(), now.getMonth() + 1, day);
+      return [d];
+    });
+    if (!dues.length) return null;
+    dues.sort((a, b) => a - b);
+    return dues[0].toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  })();
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -668,13 +683,27 @@ export default function Receivables({
       {/* ── LOANS TAB ────────────────────────────────── */}
       {/* ══════════════════════════════════════════════════ */}
       {subTab === "loans" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {/* Add loan button */}
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <Button variant="primary" size="sm" onClick={() => {
-              setLoanForm(EMPTY_LOAN);
-              setAddLoanModal(true);
-            }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* ── Summary cards + Add button row ── */}
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, flex: 1 }}>
+              {[
+                { label: "Total Outstanding",  value: fmtIDR(totalLoanOutstanding, true), color: totalLoanOutstanding > 0 ? "#d97706" : "#6b7280" },
+                { label: "Active Employees",   value: String(activeLoans.length),          color: "#3b5bdb" },
+                { label: "Next Payment Due",   value: nextLoanDue || "—",                  color: "#0891b2" },
+              ].map(s => (
+                <div key={s.label} style={{ background: s.color + "14", borderRadius: 14, padding: "14px 14px" }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, color: s.color, textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 5, opacity: 0.8 }}>
+                    {s.label}
+                  </div>
+                  <div style={{ fontSize: 15, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
+                    {s.value}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <Button variant="primary" size="sm" onClick={() => { setLoanForm(EMPTY_LOAN); setAddLoanModal(true); }}
+              style={{ flexShrink: 0, alignSelf: "center" }}>
               + Add Loan
             </Button>
           </div>
@@ -682,117 +711,134 @@ export default function Receivables({
           {loansWithStats.length === 0 ? (
             <EmptyState icon="👤" message="No employee loans yet. Click + Add Loan to create one." />
           ) : (
-            loansWithStats.map(loan => {
-              const total      = Number(loan.total_amount || 0);
-              const paid       = loan.paidSoFar;
-              const remaining  = loan.remaining;
-              const monthly    = Number(loan.monthly_installment || 0);
-              const isSettled  = loan.status === "settled" || remaining <= 0;
-              const totalMo    = total > 0 && monthly > 0 ? Math.ceil(total / monthly) : 0;
-              const paidMo     = monthly > 0 ? Math.floor(paid / monthly) : 0;
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
+              {loansWithStats.map(loan => {
+                const total     = Number(loan.total_amount || 0);
+                const paid      = loan.paidSoFar;
+                const remaining = loan.remaining;
+                const monthly   = Number(loan.monthly_installment || 0);
+                const isSettled = loan.status === "settled" || remaining <= 0;
+                const totalMo   = total > 0 && monthly > 0 ? Math.ceil(total / monthly) : 0;
+                const paidMo    = monthly > 0 ? Math.floor(paid / monthly) : 0;
+                const pct       = totalMo > 0 ? Math.min(100, (paidMo / totalMo) * 100) : 0;
+                const accentColor = isSettled ? "#059669" : "#d97706";
 
-              const startedLabel = loan.start_date
-                ? new Date(loan.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", year: "numeric" })
-                : null;
+                const initials = (loan.employee_name || "?").split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase();
 
-              // Next due: first day of next month after start
-              const nextDueLabel = (() => {
-                if (!loan.start_date || !monthly || isSettled) return null;
-                const day = new Date(loan.start_date + "T00:00:00").getDate();
-                const now = new Date();
-                let d = new Date(now.getFullYear(), now.getMonth(), day);
-                if (d <= now) d = new Date(now.getFullYear(), now.getMonth() + 1, day);
-                return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
-              })();
+                const startedLabel = loan.start_date
+                  ? new Date(loan.start_date + "T00:00:00").toLocaleDateString("en-US", { month: "short", year: "numeric" })
+                  : null;
 
-              return (
-                <div key={loan.id} style={card(isSettled ? "#059669" : "#d97706")}>
+                const nextDueLabel = (() => {
+                  if (!loan.start_date || !monthly || isSettled) return null;
+                  const day = new Date(loan.start_date + "T00:00:00").getDate();
+                  const now = new Date();
+                  let d = new Date(now.getFullYear(), now.getMonth(), day);
+                  if (d <= now) d = new Date(now.getFullYear(), now.getMonth() + 1, day);
+                  return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+                })();
 
-                  {/* ── Header: name + dept + start ── */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-                    <div style={{
-                      width: 40, height: 40, borderRadius: 10, flexShrink: 0,
-                      background: isSettled ? "#dcfce7" : "#fef3c7",
-                      display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18,
-                    }}>
-                      👤
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 14, fontWeight: 700, color: T.text }}>{loan.employee_name}</div>
-                      <div style={{ fontSize: 11, color: T.text3, marginTop: 1 }}>
-                        {[loan.employee_dept, startedLabel ? `Started ${startedLabel}` : null].filter(Boolean).join(" · ")}
+                return (
+                  <div key={loan.id} style={{
+                    background: "#ffffff", borderRadius: 16,
+                    border: "0.5px solid #e5e7eb",
+                    overflow: "hidden",
+                    display: "flex", flexDirection: "column",
+                  }}>
+                    {/* Color bar */}
+                    <div style={{ height: 3, background: accentColor }} />
+
+                    <div style={{ padding: "14px 14px 12px", flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+                      {/* Avatar + name + dept */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <div style={{
+                          width: 36, height: 36, borderRadius: 10, flexShrink: 0,
+                          background: isSettled ? "#dcfce7" : "#fef3c7",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 13, fontWeight: 800, color: accentColor, fontFamily: "Figtree, sans-serif",
+                        }}>
+                          {initials}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {loan.employee_name}
+                          </div>
+                          <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
+                            {[loan.employee_dept, startedLabel ? `Started ${startedLabel}` : null].filter(Boolean).join(" · ")}
+                          </div>
+                        </div>
+                        {isSettled && (
+                          <span style={{ fontSize: 9, fontWeight: 700, background: "#dcfce7", color: "#059669", padding: "2px 6px", borderRadius: 99, flexShrink: 0 }}>SETTLED</span>
+                        )}
                       </div>
-                    </div>
-                    {isSettled && (
-                      <div style={{ fontSize: 12, fontWeight: 800, color: "#059669", flexShrink: 0 }}>🎉 Settled</div>
-                    )}
-                  </div>
 
-                  {/* ── Loan summary ── */}
-                  <div style={{ marginBottom: 12 }}>
-                    <div style={{ fontSize: 15, fontWeight: 800, color: T.text }}>
-                      {fmtIDR(total)} <span style={{ fontWeight: 500, fontSize: 12, color: T.text3 }}>total</span>
-                    </div>
-                    {monthly > 0 && totalMo > 0 && (
-                      <div style={{ fontSize: 12, color: T.text3, marginTop: 3 }}>
-                        {fmtIDR(monthly, true)} / month × {totalMo} months
+                      {/* Total amount */}
+                      <div>
+                        <div style={{ fontSize: 20, fontWeight: 900, color: "#111827", fontFamily: "Figtree, sans-serif", lineHeight: 1.2 }}>
+                          {fmtIDR(total)}
+                        </div>
+                        {monthly > 0 && totalMo > 0 && (
+                          <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
+                            {fmtIDR(monthly, true)}/mo × {totalMo} months
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
 
-                  {/* ── Progress bar (months) ── */}
-                  {totalMo > 0 && (
-                    <>
-                      <ProgressBar value={paidMo} max={totalMo} color="#059669" height={8} />
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: T.text3, marginTop: 5 }}>
-                        <span>{paidMo}/{totalMo} months paid</span>
-                        <span style={{ fontWeight: 700, color: isSettled ? "#059669" : "#d97706" }}>
-                          Remaining: {fmtIDR(remaining, true)}
-                        </span>
-                      </div>
-                    </>
-                  )}
+                      {/* Progress bar */}
+                      {totalMo > 0 && (
+                        <div>
+                          <div style={{ height: 5, background: "#f3f4f6", borderRadius: 99, overflow: "hidden" }}>
+                            <div style={{ height: "100%", width: `${pct}%`, background: accentColor, borderRadius: 99, transition: "width 0.3s" }} />
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 4 }}>
+                            <span>{paidMo}/{totalMo} months paid</span>
+                            <span style={{ fontWeight: 700, color: accentColor }}>Remaining: {fmtIDR(remaining, true)}</span>
+                          </div>
+                        </div>
+                      )}
 
-                  {/* ── Next due ── */}
-                  {nextDueLabel && (
-                    <div style={{ marginTop: 8, fontSize: 11, color: T.text3 }}>
-                      Next due: <strong style={{ color: T.text }}>{nextDueLabel}</strong>
+                      {/* Next due */}
+                      {nextDueLabel && (
+                        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+                          Next due: <span style={{ fontWeight: 700, color: "#111827" }}>{nextDueLabel}</span>
+                        </div>
+                      )}
+
+                      {/* Notes */}
+                      {loan.notes && (
+                        <div style={{ fontSize: 11, color: "#9ca3af", fontStyle: "italic", fontFamily: "Figtree, sans-serif" }}>{loan.notes}</div>
+                      )}
                     </div>
-                  )}
 
-                  {/* ── Notes ── */}
-                  {loan.notes && (
-                    <div style={{ marginTop: 6, fontSize: 11, color: T.text3, fontStyle: "italic" }}>{loan.notes}</div>
-                  )}
-
-                  {/* ── Actions ── */}
-                  <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-                    {!isSettled && (
-                      <Button variant="primary" size="sm" onClick={() => {
-                        setSelectedLoan(loan);
-                        setPayForm({ amount: String(monthly || ""), pay_date: todayStr(), notes: "" });
-                        setPayModal(true);
-                      }}>
-                        + Record Payment
-                      </Button>
-                    )}
-                    <Button variant="secondary" size="sm" onClick={() => {
-                      setSelectedLoan(loan);
-                      setLoanForm({
-                        employee_name:       loan.employee_name,
-                        employee_dept:       loan.employee_dept || "",
-                        total_amount:        String(loan.total_amount || ""),
-                        monthly_installment: String(loan.monthly_installment || ""),
-                        start_date:          loan.start_date || todayStr(),
-                        notes:               loan.notes || "",
-                      });
-                      setEditLoanModal(true);
-                    }}>Edit</Button>
-                    <Button variant="ghost" size="sm" onClick={() => handleDeleteLoan(loan)} style={{ color: "#dc2626" }}>Delete</Button>
+                    {/* Bottom action bar */}
+                    <div style={{ borderTop: "0.5px solid #f3f4f6", padding: "8px 14px", display: "flex", gap: 6 }}>
+                      {!isSettled && (
+                        <button
+                          onClick={() => { setSelectedLoan(loan); setPayForm({ amount: String(monthly || ""), pay_date: todayStr(), notes: "" }); setPayModal(true); }}
+                          style={{ flex: 1, height: 30, border: "none", borderRadius: 8, cursor: "pointer", background: "#fef3c7", color: "#d97706", fontSize: 12, fontWeight: 700, fontFamily: "Figtree, sans-serif" }}
+                        >
+                          + Payment
+                        </button>
+                      )}
+                      <button
+                        onClick={() => { setSelectedLoan(loan); setLoanForm({ employee_name: loan.employee_name, employee_dept: loan.employee_dept || "", total_amount: String(loan.total_amount || ""), monthly_installment: String(loan.monthly_installment || ""), start_date: loan.start_date || todayStr(), notes: loan.notes || "" }); setEditLoanModal(true); }}
+                        style={{ flex: 1, height: 30, border: "0.5px solid #e5e7eb", borderRadius: 8, cursor: "pointer", background: "#ffffff", color: "#374151", fontSize: 12, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleDeleteLoan(loan)}
+                        style={{ height: 30, padding: "0 10px", border: "none", borderRadius: 8, cursor: "pointer", background: "none", color: "#d1d5db", fontSize: 12, fontFamily: "Figtree, sans-serif" }}
+                        onMouseEnter={e => e.currentTarget.style.color = "#ef4444"}
+                        onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}
+                      >
+                        🗑
+                      </button>
+                    </div>
                   </div>
-                </div>
-              );
-            })
+                );
+              })}
+            </div>
           )}
         </div>
       )}
