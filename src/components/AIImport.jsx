@@ -488,10 +488,13 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
     setGmailLoading(false);
   };
 
-  // Auto-load gmail pending when opened directly in gmail mode
+  // Sync mode when initialMode prop changes (e.g. Dashboard shortcut re-navigates)
   useEffect(() => {
-    if (initialMode === "gmail") loadGmailPending();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    if (initialMode === "gmail") {
+      setMode("gmail");
+      loadGmailPending();
+    }
+  }, [initialMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateGmailRow = (id, patch) => {
     setGmailRows(prev => prev.map(r => r._id === id ? { ...r, ...patch } : r));
@@ -558,7 +561,7 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
       <div style={{ display: "flex", gap: 4 }}>
         {[
           { id: "scan",  label: "📷 Scan Document" },
-          { id: "gmail", label: "✉️ Gmail Pending" },
+          { id: "gmail", label: "✉️ Email Pending" },
         ].map(t => (
           <button key={t.id}
             onClick={() => { setMode(t.id); if (t.id === "gmail") loadGmailPending(); }}
@@ -665,7 +668,7 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
               <div style={{ fontSize: 12, color: T.text3, marginTop: 8 }}>Loading Gmail…</div>
             </div>
           ) : gmailRows.length === 0 ? (
-            <EmptyState icon="✉️" message="No pending Gmail transactions. Connect Gmail in Settings → Email Sync." />
+            <EmptyState icon="✉️" message="No pending transactions." />
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {/* Header */}
