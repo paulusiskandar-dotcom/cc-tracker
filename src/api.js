@@ -829,6 +829,25 @@ Be concise. Use short field values. Prioritize completing the full JSON array ov
 };
 
 // ─── GMAIL ────────────────────────────────────────────────────
+// Map AI-generated pseudo tx types to real ledger tx types.
+// AI returns things like "qris_debit", "bank_debit" — normalize to real types.
+const EMAIL_TX_TYPE_NORM = {
+  qris_debit:    "expense",
+  debit:         "expense",
+  bank_debit:    "expense",
+  cc_debit:      "expense",
+  payment:       "expense",
+  bank_charges:  "expense",
+  withdrawal:    "expense",
+  purchase:      "expense",
+};
+const VALID_TX_TYPES = new Set(["expense","income","transfer","pay_cc","reimburse_out","reimburse_in","give_loan","collect_loan","fx_exchange"]);
+const normEmailTxType = (raw) => {
+  if (!raw) return "expense";
+  if (VALID_TX_TYPES.has(raw)) return raw;
+  return EMAIL_TX_TYPE_NORM[raw] || "expense";
+};
+
 // Flatten email_sync rows (ai_raw_result arrays) into individual transaction objects
 // with normalized field names expected by EmailPendingTab and PendingTab.
 export function flattenEmailSync(rows) {
@@ -850,7 +869,7 @@ export function flattenEmailSync(rows) {
         amount:                  tx.amount,
         currency:                tx.currency || "IDR",
         amount_idr:              tx.amount_idr || tx.amount,
-        tx_type:                 tx.suggested_tx_type || "expense",
+        tx_type:                 normEmailTxType(tx.suggested_tx_type),
         matched_account_id:      tx.from_account_id,
         to_account_id:           tx.to_account_id,
         suggested_category_label: tx.suggested_category,

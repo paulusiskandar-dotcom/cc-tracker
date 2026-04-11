@@ -1,19 +1,266 @@
 import { useState, useEffect } from "react";
 import { gmailApi, settingsApi, ledgerApi, getTxFromToTypes, flattenEmailSync } from "../api";
-import { fmtIDR, todayStr } from "../utils";
+import { todayStr } from "../utils";
 import { LIGHT, DARK } from "../theme";
+import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
 import {
   Button, EmptyState, showToast,
   SectionHeader, Field, Input, FormRow,
+  NativeAccountSelect,
 } from "./shared/index";
 
-const TX_TYPE_OPTIONS = [
+// ── TX types (same as AIImport) ──────────────────────────────────
+const IMPORT_TX_TYPES = [
   { value: "expense",       label: "Expense"       },
-  { value: "qris_debit",    label: "QRIS"          },
+  { value: "income",        label: "Income"        },
   { value: "transfer",      label: "Transfer"      },
   { value: "pay_cc",        label: "Pay CC"        },
-  { value: "income",        label: "Income"        },
+  { value: "reimburse_out", label: "Reimburse Out" },
+  { value: "reimburse_in",  label: "Reimburse In"  },
+  { value: "give_loan",     label: "Give Loan"     },
+  { value: "collect_loan",  label: "Collect Loan"  },
+  { value: "fx_exchange",   label: "FX Exchange"   },
 ];
+
+const TYPE_COLOR = {
+  income:       "#3B6D11",
+  collect_loan: "#3B6D11",
+  reimburse_in: "#3B6D11",
+  expense:      "#A32D2D",
+  reimburse_out:"#c05e00",
+  give_loan:    "#6b21a8",
+  transfer:     "#185FA5",
+  pay_cc:       "#185FA5",
+  fx_exchange:  "#185FA5",
+};
+
+const NO_CAT       = new Set(["transfer","pay_cc","reimburse_out","reimburse_in","give_loan","collect_loan","fx_exchange"]);
+const INCOME_TYPES = new Set(["income","collect_loan","reimburse_in"]);
+
+const getCatOptions = (txType) =>
+  INCOME_TYPES.has(txType) ? INCOME_CATEGORIES_LIST : EXPENSE_CATEGORIES;
+
+const amtSign = (type) => {
+  if (INCOME_TYPES.has(type) || type === "fx_exchange") return "+";
+  if (["expense","give_loan","reimburse_out"].includes(type)) return "-";
+  return "";
+};
+
+const fmtAmt = (v) => {
+  const n = Math.round(Number(v) || 0);
+  return "Rp " + n.toLocaleString("id-ID", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+};
+
+const fmtDateShort = (d) => {
+  try { return new Date(d + "T12:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short" }); }
+  catch { return d || ""; }
+};
+
+// Convert a pendingSync item to the local editable row format
+const syncToRow = (s) => ({
+  _id:           s.id,
+  email_sync_id: s.email_sync_id || s.id,
+  tx_index:      s.tx_index ?? 0,
+  ai_raw_result: s.ai_raw_result,
+  subject:       s.subject,
+  received_at:   s.received_at,
+  tx_date:       s.transaction_date || s.received_at?.slice(0, 10) || todayStr(),
+  description:   s.merchant_name || s.subject || "",
+  amount:        String(Number(s.amount || 0)),
+  currency:      s.currency || "IDR",
+  amount_idr:    String(Number(s.amount_idr || s.amount || 0)),
+  tx_type:       s.tx_type || "expense",
+  from_id:       s.matched_account_id || "",
+  to_id:         s.to_account_id || "",
+  category_id:   null,  // will be resolved via suggested_category_label on confirm
+  suggested_category_label: s.suggested_category_label || "",
+  notes:         "",
+});
+
+// ── Inline style helpers (mirrors AIImport) ──────────────────────
+const inSel = (T, extra = {}) => ({
+  fontSize: 11, padding: "3px 4px", border: `1px solid ${T.border}`,
+  borderRadius: 5, background: T.surface, color: T.text,
+  fontFamily: "Figtree, sans-serif", cursor: "pointer",
+  boxSizing: "border-box", ...extra,
+});
+const inInp = (T, extra = {}) => ({
+  fontSize: 11, padding: "3px 5px", border: `1px solid ${T.border}`,
+  borderRadius: 5, background: T.surface, color: T.text,
+  fontFamily: "Figtree, sans-serif", boxSizing: "border-box", ...extra,
+});
+const ACT_BTN = (extra = {}) => ({
+  width: 26, height: 26, borderRadius: 6, border: "1px solid #e5e7eb",
+  background: "#f9fafb", cursor: "pointer", fontSize: 12, fontWeight: 700,
+  display: "flex", alignItems: "center", justifyContent: "center",
+  fontFamily: "Figtree, sans-serif", padding: 0, flexShrink: 0, ...extra,
+});
+
+// ── Account cell — same logic as AIImport CardAccountCell ─────────
+function CardAccountCell({ r, updateRow, T, accounts }) {
+  const t   = r.tx_type;
+  const sel = inSel(T, { width: "100%" });
+  const bankAccs = accounts.filter(a => a.type === "bank");
+  const ccAccs   = accounts.filter(a => a.type === "credit_card");
+
+  if (t === "pay_cc") return (
+    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+      <NativeAccountSelect accounts={bankAccs} style={{ ...sel, flex: 1 }}
+        value={r.from_id} placeholder="From Bank…"
+        onChange={e => updateRow(r._id, { from_id: e.target.value })} />
+      <span style={{ fontSize: 10, color: T.text3, flexShrink: 0 }}>→</span>
+      <select style={{ ...sel, flex: 1 }} value={r.to_id || ""}
+        onChange={e => updateRow(r._id, { to_id: e.target.value })}>
+        <option value="">To CC…</option>
+        {ccAccs.map(a => (
+          <option key={a.id} value={a.id}>
+            {a.name}{a.last4 ? ` ···${a.last4}` : ""}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+  if (t === "transfer") return (
+    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+      <NativeAccountSelect accounts={bankAccs} style={{ ...sel, flex: 1 }}
+        value={r.from_id} placeholder="From…"
+        onChange={e => updateRow(r._id, { from_id: e.target.value })} />
+      <span style={{ fontSize: 10, color: T.text3, flexShrink: 0 }}>→</span>
+      <NativeAccountSelect accounts={bankAccs} style={{ ...sel, flex: 1 }}
+        value={r.to_id} placeholder="To…"
+        onChange={e => updateRow(r._id, { to_id: e.target.value })} />
+    </div>
+  );
+  if (INCOME_TYPES.has(t)) return (
+    <NativeAccountSelect accounts={bankAccs} style={sel}
+      value={r.to_id} placeholder="To Account…"
+      onChange={e => updateRow(r._id, { to_id: e.target.value })} />
+  );
+  return (
+    <NativeAccountSelect accounts={accounts} showCC style={sel}
+      value={r.from_id} placeholder="From Account…"
+      onChange={e => updateRow(r._id, { from_id: e.target.value })} />
+  );
+}
+
+// ── Pending Tx Card — mirrors AIImport TxCard ─────────────────────
+function PendingTxCard({ r, checked, importing, importingId, T, accounts, categories, updateRow, onCheck, onConfirm, onSkip }) {
+  const isSelected = !!checked;
+  const showCat    = !NO_CAT.has(r.tx_type);
+  const cats       = getCatOptions(r.tx_type);
+  const color      = TYPE_COLOR[r.tx_type] || "#111827";
+  const sign       = amtSign(r.tx_type);
+  const amtStr     = `${sign}${fmtAmt(r.amount_idr || r.amount || 0)}`;
+  const sel11      = inSel(T, { fontSize: 11 });
+
+  return (
+    <div style={{
+      background: T.surface, border: `1px solid ${T.border}`,
+      borderRadius: 10, overflow: "hidden",
+      opacity: importing && importingId !== r._id ? 0.7 : 1,
+    }}>
+      {/* ROW 1: ☑ date desc amount ✓ ✕ */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px 5px" }}>
+        <input type="checkbox" checked={isSelected}
+          onChange={onCheck}
+          disabled={importing}
+          style={{ accentColor: "#3b5bdb", width: 15, height: 15, flexShrink: 0, cursor: "pointer" }} />
+
+        {/* Date (editable) */}
+        <input
+          type="date"
+          value={r.tx_date}
+          onChange={e => updateRow(r._id, { tx_date: e.target.value })}
+          style={inInp(T, { width: 106, fontSize: 11, flexShrink: 0 })}
+        />
+
+        {/* Description */}
+        <input
+          style={{
+            flex: 1, minWidth: 0, border: "none", background: "transparent",
+            outline: "none", fontSize: 13, fontWeight: 600, color: T.text,
+            fontFamily: "Figtree, sans-serif",
+          }}
+          value={r.description}
+          onChange={e => updateRow(r._id, { description: e.target.value })}
+          placeholder="Description…"
+        />
+
+        {/* Amount */}
+        <span style={{
+          fontSize: 13, fontWeight: 800, color,
+          fontFamily: "Figtree, sans-serif", flexShrink: 0, whiteSpace: "nowrap", marginLeft: 4,
+        }}>
+          {amtStr}
+        </span>
+
+        {/* ✓ confirm */}
+        <button
+          onClick={() => onConfirm(r)}
+          disabled={importing}
+          style={ACT_BTN({ background: "#dcfce7", color: "#059669", border: "1px solid #bbf7d0" })}
+          title="Confirm & import">
+          {importingId === r._id ? "…" : "✓"}
+        </button>
+
+        {/* ✕ skip */}
+        <button
+          onClick={() => onSkip(r)}
+          disabled={importing}
+          style={ACT_BTN({ color: "#9ca3af" })}
+          title="Skip">
+          ✕
+        </button>
+      </div>
+
+      {/* ROW 2: type [category] account [amount input] */}
+      <div style={{
+        display: "flex", alignItems: "center", flexWrap: "wrap", gap: 5,
+        padding: "2px 12px 9px 35px",
+      }}>
+        {/* Type */}
+        <select
+          style={{ ...sel11, width: 108, color: TYPE_COLOR[r.tx_type] || T.text, fontWeight: 600 }}
+          value={r.tx_type}
+          onChange={e => {
+            const t = e.target.value;
+            updateRow(r._id, { tx_type: t, category_id: NO_CAT.has(t) ? null : r.category_id });
+          }}>
+          {IMPORT_TX_TYPES.map(t => (
+            <option key={t.value} value={t.value}
+              style={{ color: TYPE_COLOR[t.value] || "inherit", fontWeight: 600 }}>
+              {t.label}
+            </option>
+          ))}
+        </select>
+
+        {/* Category */}
+        {showCat && (
+          <select style={{ ...sel11, width: 128 }}
+            value={r.category_id || ""}
+            onChange={e => updateRow(r._id, { category_id: e.target.value })}>
+            <option value="">Category…</option>
+            {cats.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+          </select>
+        )}
+
+        {/* Account */}
+        <div style={{ flex: 1, minWidth: 160 }}>
+          <CardAccountCell r={r} updateRow={updateRow} T={T} accounts={accounts} />
+        </div>
+
+        {/* Amount (editable) */}
+        <input
+          type="number"
+          style={inInp(T, { width: 100, textAlign: "right", fontWeight: 700, fontSize: 11, flexShrink: 0 })}
+          value={r.amount_idr || r.amount || ""}
+          onChange={e => updateRow(r._id, { amount: e.target.value, amount_idr: e.target.value })}
+          placeholder="Amount"
+        />
+      </div>
+    </div>
+  );
+}
 
 const SETUP_STEPS = [
   'Go to console.cloud.google.com → Create project "Paulus Finance"',
@@ -34,12 +281,9 @@ export default function Email({
   const T = dark ? DARK : LIGHT;
   const [tab, setTab] = useState(initialTab);
 
-  // Sync tab when parent navigates here again
-  useEffect(() => {
-    setTab(initialTab);
-  }, [initialTab]);
+  useEffect(() => { setTab(initialTab); }, [initialTab]);
 
-  // ── Email Sync state ────────────────────────────────────────
+  // ── Email Sync state ────────────────────────────────────────────
   const [gmailToken,    setGmailToken]    = useState(null);
   const [gmailLoaded,   setGmailLoaded]   = useState(false);
   const [clientId,      setClientId]      = useState("");
@@ -248,8 +492,7 @@ export default function Email({
               <SectionHeader title="Sync History" />
               <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 0 }}>
                 <div style={{
-                  display: "flex", gap: 8,
-                  padding: "4px 0", borderBottom: `1px solid ${T.border}`,
+                  display: "flex", gap: 8, padding: "4px 0", borderBottom: `1px solid ${T.border}`,
                   fontSize: 10, fontWeight: 700, color: T.text3, textTransform: "uppercase", letterSpacing: "0.05em",
                 }}>
                   <span style={{ flex: 1 }}>Time</span>
@@ -261,11 +504,7 @@ export default function Email({
                   const d = new Date(entry.synced_at);
                   const fmt = `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
                   return (
-                    <div key={i} style={{
-                      display: "flex", gap: 8,
-                      padding: "7px 0", borderBottom: `1px solid ${T.border}`,
-                      fontSize: 11, color: T.text2,
-                    }}>
+                    <div key={i} style={{ display: "flex", gap: 8, padding: "7px 0", borderBottom: `1px solid ${T.border}`, fontSize: 11, color: T.text2 }}>
                       <span style={{ flex: 1 }}>{fmt}</span>
                       <span style={{ width: 52, textAlign: "right", flexShrink: 0, color: T.text3 }}>{entry.emails_processed ?? 0}</span>
                       <span style={{ width: 90, textAlign: "right", flexShrink: 0, color: entry.new_transactions > 0 ? "#059669" : T.text3, fontWeight: entry.new_transactions > 0 ? 600 : 400 }}>{entry.new_transactions ?? 0}</span>
@@ -338,21 +577,30 @@ export default function Email({
   );
 }
 
-// ─── EMAIL PENDING TAB ────────────────────────────────────────
+// ─── EMAIL PENDING TAB ────────────────────────────────────────────
 function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, user, ledger, setLedger, onRefresh, dark, T: theme }) {
   const T = theme || LIGHT;
-  const [checked,       setChecked]       = useState(() => new Set((pendingSyncs || []).map(s => s.id)));
-  const [importing,     setImporting]     = useState(false);
-  const [progress,      setProgress]      = useState({ done: 0, total: 0 });
-  const [editSync,      setEditSync]      = useState(null);
-  const [editForm,      setEditForm]      = useState({});
-  const [savingEdit,    setSavingEdit]    = useState(false);
-  const [failedRows,    setFailedRows]    = useState(null); // null = not loaded
-  const [loadingFailed, setLoadingFailed] = useState(false);
-  const [reprocessing,  setReprocessing]  = useState(new Set());
 
-  // Keep checked in sync when pendingSyncs changes (e.g. after a skip)
+  // Local editable rows (mirrors pendingSyncs but editable)
+  const [rows,         setRows]         = useState(() => (pendingSyncs || []).map(syncToRow));
+  const [checked,      setChecked]      = useState(() => new Set((pendingSyncs || []).map(s => s.id)));
+  const [importing,    setImporting]    = useState(false);
+  const [importingId,  setImportingId]  = useState(null);
+  const [progress,     setProgress]     = useState({ done: 0, total: 0 });
+  const [failedRows,   setFailedRows]   = useState(null);
+  const [loadingFailed,setLoadingFailed]= useState(false);
+  const [reprocessing, setReprocessing] = useState(new Set());
+
+  // Sync rows when pendingSyncs changes from parent (new sync, refresh)
   useEffect(() => {
+    setRows(prev => {
+      const prevMap = new Map(prev.map(r => [r._id, r]));
+      return (pendingSyncs || []).map(s => {
+        // Keep local edits if row already exists
+        const existing = prevMap.get(s.id);
+        return existing || syncToRow(s);
+      });
+    });
     setChecked(prev => {
       const ids = new Set((pendingSyncs || []).map(s => s.id));
       const next = new Set([...prev].filter(id => ids.has(id)));
@@ -361,130 +609,89 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     });
   }, [pendingSyncs]);
 
-  const selectedSyncs = (pendingSyncs || []).filter(s => checked.has(s.id));
-  const allChecked    = selectedSyncs.length === (pendingSyncs?.length || 0) && (pendingSyncs?.length || 0) > 0;
+  const updateRow = (id, patch) =>
+    setRows(prev => prev.map(r => r._id === id ? { ...r, ...patch } : r));
 
-  const buildEntry = (sync) => {
-    const txType = sync.tx_type || "expense";
-    const { from_type, to_type } = getTxFromToTypes(txType);
-    const catMatch = categories.find(c =>
-      c.name?.toLowerCase() === (sync.suggested_category_label || "").toLowerCase()
-    );
+  const removeRow = (id) => {
+    setRows(prev => prev.filter(r => r._id !== id));
+    setChecked(prev => { const n = new Set(prev); n.delete(id); return n; });
+    setPendingSyncs(p => p.filter(s => s.id !== id));
+  };
+
+  const buildEntry = (r) => {
+    const { from_type, to_type } = getTxFromToTypes(r.tx_type);
+    // Resolve category: prefer local edit, fall back to AI suggestion
+    let catId   = r.category_id || null;
+    let catName = catId || null;
+    if (!catId && r.suggested_category_label) {
+      const expCat = EXPENSE_CATEGORIES.find(c => c.label?.toLowerCase() === r.suggested_category_label.toLowerCase());
+      const incCat = INCOME_CATEGORIES_LIST.find(c => c.label?.toLowerCase() === r.suggested_category_label.toLowerCase());
+      catId   = expCat?.id || incCat?.id || null;
+      catName = catId;
+    }
     return {
-      tx_date:       sync.transaction_date || sync.received_at?.slice(0, 10) || todayStr(),
-      description:   sync.merchant_name || sync.subject || "Gmail transaction",
-      amount:        Number(sync.amount || 0),
-      currency:      sync.currency || "IDR",
-      amount_idr:    Number(sync.amount_idr || sync.amount || 0),
-      tx_type:       txType, from_type, to_type,
-      from_id:       sync.matched_account_id || null,
-      to_id:         sync.to_account_id || null,
-      category_id:   catMatch?.id || null,
-      category_name: catMatch?.name || null,
-      entity:        sync.entity || "Personal",
-      notes:         `Imported from Gmail: ${sync.subject || ""}`,
+      tx_date:       r.tx_date,
+      description:   r.description || r.subject || "Gmail transaction",
+      amount:        Number(r.amount || 0),
+      currency:      r.currency || "IDR",
+      amount_idr:    Number(r.amount_idr || r.amount || 0),
+      tx_type:       r.tx_type, from_type, to_type,
+      from_id:       r.from_id || null,
+      to_id:         r.to_id   || null,
+      category_id:   catId,
+      category_name: catName,
+      entity:        "Personal",
+      notes:         r.notes || `Imported from Gmail: ${r.subject || ""}`,
     };
   };
 
-  const removeOne = (id) => {
-    setPendingSyncs(p => p.filter(s => s.id !== id));
-    setChecked(prev => { const n = new Set(prev); n.delete(id); return n; });
-  };
-
-  const confirm = async (sync) => {
+  const confirm = async (r) => {
+    setImportingId(r._id);
     try {
-      const created = await ledgerApi.create(user.id, buildEntry(sync), accounts);
+      const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
       setLedger(p => [created, ...p]);
-      await gmailApi.updateSync(sync.email_sync_id || sync.id, { status: "confirmed" });
-      removeOne(sync.id);
+      await gmailApi.updateSync(r.email_sync_id, { status: "confirmed" });
+      removeRow(r._id);
       showToast("Imported");
       onRefresh?.();
     } catch (e) { showToast(e.message, "error"); }
+    setImportingId(null);
   };
 
-  const skip = async (sync) => {
+  const skip = async (r) => {
     try {
-      await gmailApi.updateSync(sync.email_sync_id || sync.id, { status: "skipped" });
-      removeOne(sync.id);
+      await gmailApi.updateSync(r.email_sync_id, { status: "skipped" });
+      removeRow(r._id);
       showToast("Skipped");
     } catch (e) { showToast(e.message, "error"); }
   };
 
   const importAll = async () => {
-    const toImport = [...selectedSyncs];
+    const toImport = rows.filter(r => checked.has(r._id));
     if (!toImport.length) return;
     setImporting(true);
     setProgress({ done: 0, total: toImport.length });
     let count = 0;
-    for (const sync of toImport) {
+    for (const r of toImport) {
       try {
-        const created = await ledgerApi.create(user.id, buildEntry(sync), accounts);
+        const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
         setLedger(p => [created, ...p]);
-        await gmailApi.updateSync(sync.email_sync_id || sync.id, { status: "confirmed" });
-        setPendingSyncs(p => p.filter(s => s.id !== sync.id));
-        setChecked(prev => { const n = new Set(prev); n.delete(sync.id); return n; });
+        await gmailApi.updateSync(r.email_sync_id, { status: "confirmed" });
+        removeRow(r._id);
         count++;
         setProgress({ done: count, total: toImport.length });
-      } catch (_) { /* skip failures, continue */ }
+      } catch (_) { /* skip failures */ }
     }
     setImporting(false);
     showToast(`${count} transaction${count !== 1 ? "s" : ""} imported`);
     onRefresh?.();
   };
 
-  const openEdit = (s) => {
-    setEditSync(s);
-    setEditForm({
-      transaction_date:         s.transaction_date || s.received_at?.slice(0, 10) || todayStr(),
-      merchant_name:            s.merchant_name || "",
-      amount:                   s.amount || 0,
-      tx_type:                  s.tx_type || "expense",
-      matched_account_id:       s.matched_account_id || "",
-      to_account_id:            s.to_account_id || "",
-      suggested_category_label: s.suggested_category_label || "",
-    });
-  };
-
-  const saveEdit = async () => {
-    if (!editSync) return;
-    setSavingEdit(true);
-    try {
-      // Reconstruct the updated ai_raw_result array
-      const emailSyncId = editSync.email_sync_id || editSync.id;
-      const txIndex     = editSync.tx_index ?? 0;
-      const txs         = Array.isArray(editSync.ai_raw_result) ? [...editSync.ai_raw_result] : [{}];
-      txs[txIndex] = {
-        ...txs[txIndex],
-        date:               editForm.transaction_date,
-        merchant_name:      editForm.merchant_name,
-        description:        editForm.merchant_name,
-        amount:             Number(editForm.amount),
-        amount_idr:         Number(editForm.amount),
-        suggested_tx_type:  editForm.tx_type,
-        from_account_id:    editForm.matched_account_id || null,
-        to_account_id:      editForm.to_account_id || null,
-        suggested_category: editForm.suggested_category_label,
-      };
-
-      await gmailApi.updateSync(emailSyncId, { ai_raw_result: txs });
-
-      // Update local pendingSyncs state
-      setPendingSyncs(prev => prev.map(s =>
-        s.id === editSync.id
-          ? { ...s, ...editForm, ai_raw_result: txs }
-          : s
-      ));
-      setEditSync(null);
-      showToast("Updated");
-    } catch (e) { showToast(e.message, "error"); }
-    setSavingEdit(false);
-  };
-
   const loadFailed = async () => {
     setLoadingFailed(true);
     try {
-      const rows = await gmailApi.getFailedPending(user.id);
-      setFailedRows(rows);
+      const data = await gmailApi.getFailedPending(user.id);
+      setFailedRows(data);
     } catch (e) { showToast(e.message, "error"); }
     setLoadingFailed(false);
   };
@@ -494,10 +701,8 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     try {
       await gmailApi.reprocess(user.id, [row.id]);
       showToast("Re-processed — refreshing…");
-      // Reload data
       const updated = await gmailApi.getFailedPending(user.id);
       setFailedRows(updated);
-      // Also reload pending syncs
       const pending = await gmailApi.getPending(user.id);
       setPendingSyncs(flattenEmailSync(pending));
     } catch (e) { showToast(e.message, "error"); }
@@ -512,38 +717,45 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     } catch (e) { showToast(e.message, "error"); }
   };
 
-  // Account options for select dropdowns
-  const accountOptions = accounts.filter(a => a.is_active !== false);
+  const allChecked  = rows.length > 0 && rows.every(r => checked.has(r._id));
+  const countSel    = rows.filter(r => checked.has(r._id)).length;
+
+  if (!rows.length && failedRows === null) return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <EmptyState icon="📧" title="No pending emails" message="Gmail sync will surface transactions here for review." />
+      <button onClick={loadFailed} disabled={loadingFailed}
+        style={{ fontSize: 11, color: "#9ca3af", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "Figtree, sans-serif", alignSelf: "flex-start" }}>
+        {loadingFailed ? "Loading…" : "Show failed extractions"}
+      </button>
+    </div>
+  );
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {/* ── Bulk action bar ── */}
-      {(pendingSyncs?.length > 0) && (
+      {rows.length > 0 && (
         <div style={{
-          display: "flex", alignItems: "center", gap: 8,
-          padding: "10px 14px", background: "#ffffff",
-          border: "0.5px solid #e5e7eb", borderRadius: 12,
+          display: "flex", alignItems: "center", gap: 8, padding: "10px 14px",
+          background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12,
         }}>
-          <span style={{ fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif", flex: 1 }}>
-            {importing
-              ? `${progress.done} of ${progress.total}…`
-              : `${selectedSyncs.length} of ${pendingSyncs.length} selected`}
+          <span style={{ fontSize: 12, color: T.text3, fontFamily: "Figtree, sans-serif", flex: 1 }}>
+            {importing ? `${progress.done} of ${progress.total}…` : `${countSel} of ${rows.length} selected`}
           </span>
           <button
-            onClick={() => setChecked(allChecked ? new Set() : new Set(pendingSyncs.map(s => s.id)))}
+            onClick={() => setChecked(allChecked ? new Set() : new Set(rows.map(r => r._id)))}
             disabled={importing}
-            style={{ height: 28, padding: "0 10px", border: "1px solid #e5e7eb", borderRadius: 7, cursor: "pointer", background: "#fff", color: "#6b7280", fontSize: 11, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
+            style={{ height: 28, padding: "0 10px", border: `1px solid ${T.border}`, borderRadius: 7, cursor: "pointer", background: T.surface, color: T.text3, fontSize: 11, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
           >
             {allChecked ? "Deselect All" : "Select All"}
           </button>
           <button
             onClick={importAll}
-            disabled={importing || !selectedSyncs.length}
+            disabled={importing || !countSel}
             style={{
               height: 28, padding: "0 12px", border: "none", borderRadius: 7,
-              cursor: importing || !selectedSyncs.length ? "not-allowed" : "pointer",
-              background: !importing && selectedSyncs.length ? "#111827" : "#e5e7eb",
-              color:      !importing && selectedSyncs.length ? "#fff"     : "#9ca3af",
+              cursor: importing || !countSel ? "not-allowed" : "pointer",
+              background: !importing && countSel ? "#111827" : "#e5e7eb",
+              color:      !importing && countSel ? "#fff"     : "#9ca3af",
               fontSize: 11, fontWeight: 700, fontFamily: "Figtree, sans-serif",
             }}
           >
@@ -552,49 +764,28 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
         </div>
       )}
 
-      {/* ── Pending transaction rows ── */}
-      {(!pendingSyncs?.length) && failedRows === null && (
-        <EmptyState icon="📧" title="No pending emails" message="Gmail sync will surface transactions here for review." />
-      )}
-      {(pendingSyncs || []).map(s => (
-        <div key={s.id} style={{
-          background: "#fef9ec", border: "1.5px solid #fde68a",
-          borderRadius: 12, padding: "12px 14px",
-          display: "flex", alignItems: "center", gap: 10,
-        }}>
-          <input
-            type="checkbox"
-            checked={checked.has(s.id)}
-            onChange={() => setChecked(prev => { const n = new Set(prev); n.has(s.id) ? n.delete(s.id) : n.add(s.id); return n; })}
-            disabled={importing}
-            style={{ width: 15, height: 15, cursor: "pointer", accentColor: "#111827", flexShrink: 0 }}
-          />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
-              {s.merchant_name || s.subject || "Gmail transaction"}
-            </div>
-            <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
-              {s.transaction_date || s.received_at?.slice(0, 10)}
-              {s.amount ? ` · ${fmtIDR(s.amount)}` : ""}
-              {s.tx_type ? ` · ${s.tx_type}` : ""}
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-            <button onClick={() => openEdit(s)} disabled={importing} style={{ ...BTN_EDIT, opacity: importing ? 0.5 : 1 }} title="Edit">✏️</button>
-            <button onClick={() => confirm(s)} disabled={importing} style={{ ...BTN_CONFIRM, opacity: importing ? 0.5 : 1 }}>✓</button>
-            <button onClick={() => skip(s)}    disabled={importing} style={{ ...BTN_SKIP,    opacity: importing ? 0.5 : 1 }}>Skip</button>
-          </div>
-        </div>
+      {/* ── Pending rows (inline TxCard style) ── */}
+      {rows.map(r => (
+        <PendingTxCard
+          key={r._id} r={r}
+          checked={checked.has(r._id)}
+          importing={importing}
+          importingId={importingId}
+          T={T}
+          accounts={accounts}
+          categories={categories}
+          updateRow={updateRow}
+          onCheck={() => setChecked(prev => { const n = new Set(prev); n.has(r._id) ? n.delete(r._id) : n.add(r._id); return n; })}
+          onConfirm={confirm}
+          onSkip={skip}
+        />
       ))}
 
       {/* ── Failed extractions section ── */}
       <div style={{ marginTop: 4 }}>
         {failedRows === null ? (
-          <button
-            onClick={loadFailed}
-            disabled={loadingFailed}
-            style={{ fontSize: 11, color: "#9ca3af", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "Figtree, sans-serif" }}
-          >
+          <button onClick={loadFailed} disabled={loadingFailed}
+            style={{ fontSize: 11, color: "#9ca3af", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "Figtree, sans-serif" }}>
             {loadingFailed ? "Loading…" : "Show failed extractions"}
           </button>
         ) : failedRows.length === 0 ? (
@@ -607,7 +798,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
             {failedRows.map(row => (
               <div key={row.id} style={{
                 background: "#fff7ed", border: "1.5px solid #fed7aa",
-                borderRadius: 12, padding: "10px 14px",
+                borderRadius: 10, padding: "10px 14px",
                 display: "flex", alignItems: "center", gap: 10,
               }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -616,186 +807,25 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
                   </div>
                   <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
                     {row.sender_email} · {row.received_at?.slice(0, 10)}
-                    {row.error_message && ` · ${row.error_message}`}
                   </div>
                 </div>
-                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                  <button
-                    onClick={() => reprocessOne(row)}
-                    disabled={reprocessing.has(row.id)}
-                    style={{ ...BTN_REPROCESS, opacity: reprocessing.has(row.id) ? 0.5 : 1 }}
-                    title="Re-process with AI"
-                  >
-                    {reprocessing.has(row.id) ? "…" : "🔄"}
-                  </button>
-                  <button onClick={() => skipFailed(row)} style={BTN_SKIP}>Skip</button>
-                </div>
+                <button
+                  onClick={() => reprocessOne(row)}
+                  disabled={reprocessing.has(row.id)}
+                  style={ACT_BTN({ background: "#fff7ed", border: "1px solid #fed7aa", fontSize: 13, opacity: reprocessing.has(row.id) ? 0.5 : 1 })}
+                  title="Re-process with AI">
+                  {reprocessing.has(row.id) ? "…" : "🔄"}
+                </button>
+                <button onClick={() => skipFailed(row)}
+                  style={ACT_BTN({ color: "#9ca3af" })}
+                  title="Skip">
+                  ✕
+                </button>
               </div>
             ))}
           </div>
         )}
       </div>
-
-      {/* ── Edit Modal ── */}
-      {editSync && (
-        <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          zIndex: 1000, padding: 16,
-        }}
-          onClick={e => { if (e.target === e.currentTarget) setEditSync(null); }}
-        >
-          <div style={{
-            background: "#fff", borderRadius: 20, padding: 24,
-            width: "100%", maxWidth: 460, display: "flex", flexDirection: "column", gap: 14,
-            maxHeight: "90vh", overflowY: "auto",
-          }}>
-            <div style={{ fontSize: 16, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
-              Edit Transaction
-            </div>
-            <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: -8 }}>
-              {editSync.subject}
-            </div>
-
-            <Field label="Date">
-              <Input
-                type="date"
-                value={editForm.transaction_date}
-                onChange={e => setEditForm(f => ({ ...f, transaction_date: e.target.value }))}
-              />
-            </Field>
-
-            <Field label="Description / Merchant">
-              <Input
-                value={editForm.merchant_name}
-                onChange={e => setEditForm(f => ({ ...f, merchant_name: e.target.value }))}
-                placeholder="Merchant or description"
-              />
-            </Field>
-
-            <Field label="Amount (IDR)">
-              <Input
-                type="number"
-                value={editForm.amount}
-                onChange={e => setEditForm(f => ({ ...f, amount: e.target.value }))}
-                placeholder="0"
-              />
-            </Field>
-
-            <Field label="Type">
-              <select
-                value={editForm.tx_type}
-                onChange={e => setEditForm(f => ({ ...f, tx_type: e.target.value }))}
-                style={{
-                  width: "100%", padding: "8px 12px", borderRadius: 10,
-                  border: "1px solid #e5e7eb", fontSize: 13, fontFamily: "Figtree, sans-serif",
-                  background: "#fff", color: "#111827",
-                }}
-              >
-                {TX_TYPE_OPTIONS.map(o => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-            </Field>
-
-            <Field label="From Account">
-              <select
-                value={editForm.matched_account_id}
-                onChange={e => setEditForm(f => ({ ...f, matched_account_id: e.target.value }))}
-                style={{
-                  width: "100%", padding: "8px 12px", borderRadius: 10,
-                  border: "1px solid #e5e7eb", fontSize: 13, fontFamily: "Figtree, sans-serif",
-                  background: "#fff", color: "#111827",
-                }}
-              >
-                <option value="">(none)</option>
-                {accountOptions.map(a => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </select>
-            </Field>
-
-            <Field label="To Account">
-              <select
-                value={editForm.to_account_id}
-                onChange={e => setEditForm(f => ({ ...f, to_account_id: e.target.value }))}
-                style={{
-                  width: "100%", padding: "8px 12px", borderRadius: 10,
-                  border: "1px solid #e5e7eb", fontSize: 13, fontFamily: "Figtree, sans-serif",
-                  background: "#fff", color: "#111827",
-                }}
-              >
-                <option value="">(none)</option>
-                {accountOptions.map(a => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </select>
-            </Field>
-
-            <Field label="Category">
-              <select
-                value={editForm.suggested_category_label}
-                onChange={e => setEditForm(f => ({ ...f, suggested_category_label: e.target.value }))}
-                style={{
-                  width: "100%", padding: "8px 12px", borderRadius: 10,
-                  border: "1px solid #e5e7eb", fontSize: 13, fontFamily: "Figtree, sans-serif",
-                  background: "#fff", color: "#111827",
-                }}
-              >
-                <option value="">(none)</option>
-                {categories.map(c => (
-                  <option key={c.id} value={c.name}>{c.name}</option>
-                ))}
-              </select>
-            </Field>
-
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
-              <button
-                onClick={() => setEditSync(null)}
-                style={{ ...BTN_SKIP, height: 36, padding: "0 16px", fontSize: 13 }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={saveEdit}
-                disabled={savingEdit}
-                style={{
-                  height: 36, padding: "0 20px", border: "none", borderRadius: 10,
-                  cursor: savingEdit ? "not-allowed" : "pointer",
-                  background: savingEdit ? "#e5e7eb" : "#111827",
-                  color: savingEdit ? "#9ca3af" : "#fff",
-                  fontSize: 13, fontWeight: 700, fontFamily: "Figtree, sans-serif",
-                }}
-              >
-                {savingEdit ? "Saving…" : "Save"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
-
-const BTN_CONFIRM = {
-  height: 28, padding: "0 10px", border: "none", borderRadius: 7,
-  cursor: "pointer", background: "#111827", color: "#fff",
-  fontSize: 11, fontWeight: 700, fontFamily: "Figtree, sans-serif",
-};
-const BTN_SKIP = {
-  height: 28, padding: "0 10px", border: "1px solid #e5e7eb", borderRadius: 7,
-  cursor: "pointer", background: "#fff", color: "#6b7280",
-  fontSize: 11, fontWeight: 600, fontFamily: "Figtree, sans-serif",
-};
-const BTN_EDIT = {
-  height: 28, width: 32, border: "1px solid #e5e7eb", borderRadius: 7,
-  cursor: "pointer", background: "#fff",
-  fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center",
-  fontFamily: "Figtree, sans-serif",
-};
-const BTN_REPROCESS = {
-  height: 28, width: 32, border: "1px solid #fed7aa", borderRadius: 7,
-  cursor: "pointer", background: "#fff7ed",
-  fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center",
-  fontFamily: "Figtree, sans-serif",
-};
