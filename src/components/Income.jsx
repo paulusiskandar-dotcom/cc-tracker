@@ -191,10 +191,8 @@ export default function Income({
           <SortDropdown
             storageKey="sort_income"
             options={[
-              { value: "amount_desc",  label: "Amount tertinggi → terendah" },
-              { value: "amount_asc",   label: "Amount terendah → tertinggi" },
-              { value: "created_desc", label: "Terbaru" },
-              { value: "name_asc",     label: "Nama A → Z" },
+              { key: "amount", label: "Amount", defaultDir: "desc" },
+              { key: "name",   label: "Name",   defaultDir: "asc"  },
             ]}
             value={incSort}
             onChange={v => setIncSort(v)}
@@ -283,10 +281,10 @@ export default function Income({
           ) : (
             [...incomeSrcs].sort((a, b) => {
               switch (incSort) {
-                case "amount_asc":   return Number(a.expected_amount || 0) - Number(b.expected_amount || 0);
-                case "created_desc": return (b.created_at || "").localeCompare(a.created_at || "");
-                case "name_asc":     return (a.name || "").localeCompare(b.name || "");
-                default:             return Number(b.expected_amount || 0) - Number(a.expected_amount || 0);
+                case "amount_asc": return Number(a.expected_amount || 0) - Number(b.expected_amount || 0);
+                case "name_asc":   return (a.name || "").localeCompare(b.name || "");
+                case "name_desc":  return (b.name || "").localeCompare(a.name || "");
+                default:           return Number(b.expected_amount || 0) - Number(a.expected_amount || 0);
               }
             }).map(src => (
               <div key={src.id} style={card}>

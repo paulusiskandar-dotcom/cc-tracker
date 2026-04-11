@@ -550,10 +550,8 @@ export default function Receivables({
                 <SortDropdown
                   storageKey="sort_receivables"
                   options={[
-                    { value: "outstanding_desc", label: "Outstanding tertinggi → terendah" },
-                    { value: "outstanding_asc",  label: "Outstanding terendah → tertinggi" },
-                    { value: "oldest",           label: "Terlama belum dibayar" },
-                    { value: "name_asc",         label: "Nama A → Z" },
+                    { key: "outstanding", label: "Outstanding", defaultDir: "desc" },
+                    { key: "name",        label: "Name",        defaultDir: "asc"  },
                   ]}
                   value={reimSort}
                   onChange={v => setReimSort(v)}
@@ -561,14 +559,10 @@ export default function Receivables({
               </div>
               {[...recStats].sort((a, b) => {
                 switch (reimSort) {
-                  case "outstanding_asc":  return Number(a.receivable_outstanding || 0) - Number(b.receivable_outstanding || 0);
-                  case "oldest": {
-                    const oldA = a.entries.length ? a.entries[a.entries.length - 1].tx_date : "9999";
-                    const oldB = b.entries.length ? b.entries[b.entries.length - 1].tx_date : "9999";
-                    return oldA.localeCompare(oldB);
-                  }
-                  case "name_asc":         return (a.entity || a.name || "").localeCompare(b.entity || b.name || "");
-                  default:                 return Number(b.receivable_outstanding || 0) - Number(a.receivable_outstanding || 0);
+                  case "outstanding_asc": return Number(a.receivable_outstanding || 0) - Number(b.receivable_outstanding || 0);
+                  case "name_asc":        return (a.entity || a.name || "").localeCompare(b.entity || b.name || "");
+                  case "name_desc":       return (b.entity || b.name || "").localeCompare(a.entity || a.name || "");
+                  default:                return Number(b.receivable_outstanding || 0) - Number(a.receivable_outstanding || 0);
                 }
               }).map(r => {
               const outstanding = Number(r.receivable_outstanding || 0);

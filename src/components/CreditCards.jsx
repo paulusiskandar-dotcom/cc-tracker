@@ -396,8 +396,28 @@ export default function CreditCards({
               })();
               const overallUtil = totalLimit > 0 ? (totalDebt / totalLimit) * 100 : 0;
               const utilColor   = overallUtil > 80 ? "#dc2626" : overallUtil > 60 ? "#d97706" : "#059669";
-              const standaloneCards = cardStats.filter(cc => !groupedCardIds.has(cc.id));
-              let paletteIdx = 0;
+
+              // Filtered + sorted cards
+                const CC_SORT_PILLS = [
+                  { key: "debt",  label: "Tagihan",   defaultDir: "desc" },
+                  { key: "limit", label: "Limit",     defaultDir: "desc" },
+                  { key: "util",  label: "Utilisasi", defaultDir: "desc" },
+                  { key: "name",  label: "Name",      defaultDir: "asc"  },
+                ];
+                const allBanks   = [...new Set(cardStats.map(c => c.bank_name).filter(Boolean))].sort();
+                const filtered   = cardStats.filter(cc => !ccBankFilter || ccBankFilter === "all" || cc.bank_name === ccBankFilter);
+                const sortedCC   = [...filtered].sort((a, b) => {
+                  switch (ccSort) {
+                    case "debt_asc":   return Number(a.debt  || 0) - Number(b.debt  || 0);
+                    case "limit_desc": return Number(b.limit || 0) - Number(a.limit || 0);
+                    case "limit_asc":  return Number(a.limit || 0) - Number(b.limit || 0);
+                    case "util_desc":  return Number(b.util  || 0) - Number(a.util  || 0);
+                    case "util_asc":   return Number(a.util  || 0) - Number(b.util  || 0);
+                    case "name_asc":   return (a.name || "").localeCompare(b.name || "");
+                    case "name_desc":  return (b.name || "").localeCompare(a.name || "");
+                    default:           return Number(b.debt  || 0) - Number(a.debt  || 0);
+                  }
+                });
 
               return (
                 <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -417,97 +437,46 @@ export default function CreditCards({
                     </div>
                   </div>
 
-                  {/* Shared-limit groups (full width) */}
-                  {Object.values(groupMap).map(g => (
-                    <SharedLimitGroupCard
-                      key={g.id}
-                      group={g}
-                      cardStats={cardStats}
-                      paletteStart={(() => { const s = paletteIdx; paletteIdx += g.members.length; return s; })()}
-                      onPay={(cardId) => {
-                        const s = cardStats.find(c => c.id === cardId);
-                        setPayForm(f => ({ ...f, cardId, amount: s?.debt || "" }));
-                        setModal("pay");
-                      }}
-                      onTransactions={(cardId) => { setSelectedCard(cardId); setSubTab("transactions"); }}
-                      onInstallments={() => setSubTab("installments")}
-                    />
-                  ))}
-
-                  {/* Bank filter pills */}
-                  {(() => {
-                    const allBanks = [...new Set(cardStats.map(c => c.bank_name).filter(Boolean))].sort();
-                    if (allBanks.length < 2) return null;
-                    return (
+                  {/* Filter + sort row */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                    {allBanks.length >= 2 ? (
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                         {["all", ...allBanks].map(b => {
                           const active = (ccBankFilter || "all") === b;
                           return (
                             <button key={b} onClick={() => setCcBankFilter(b)} style={{
-                              height: 28, padding: "0 12px", borderRadius: 20, cursor: "pointer",
+                              height: 30, padding: "0 12px", borderRadius: 20, cursor: "pointer",
                               border: `1.5px solid ${active ? "#111827" : "#e5e7eb"}`,
                               background: active ? "#111827" : "#fff",
                               color: active ? "#fff" : "#6b7280",
                               fontSize: 12, fontWeight: active ? 700 : 500,
-                              fontFamily: "Figtree, sans-serif", transition: "all 0.15s",
+                              fontFamily: "Figtree, sans-serif",
                             }}>
                               {b === "all" ? "All" : b}
                             </button>
                           );
                         })}
                       </div>
-                    );
-                  })()}
+                    ) : <div />}
+                    <SortDropdown
+                      storageKey="sort_cc"
+                      options={CC_SORT_PILLS}
+                      value={ccSort}
+                      onChange={v => setCcSort(v)}
+                    />
+                  </div>
 
-                  {/* Sort + standalone cards */}
-                  {(() => {
-                    const filtered = standaloneCards.filter(cc => !ccBankFilter || ccBankFilter === "all" || cc.bank_name === ccBankFilter);
-                    const CC_SORT_OPTS = [
-                      { value: "debt_desc",  label: "Tagihan tertinggi → terendah" },
-                      { value: "limit_desc", label: "Limit tertinggi → terendah" },
-                      { value: "util_desc",  label: "Utilisasi tertinggi" },
-                      { value: "due_asc",    label: "Jatuh tempo terdekat" },
-                      { value: "name_asc",   label: "Nama A → Z" },
-                    ];
-                    const sortedCC = [...filtered].sort((a, b) => {
-                      switch (ccSort) {
-                        case "limit_desc": return Number(b.limit || 0) - Number(a.limit || 0);
-                        case "util_desc":  return Number(b.util  || 0) - Number(a.util  || 0);
-                        case "due_asc": {
-                          const da = a.due_day ?? 999;
-                          const db = b.due_day ?? 999;
-                          const dueA = da === 999 ? da : (a.dueIn != null ? a.dueIn : da);
-                          const dueB = db === 999 ? db : (b.dueIn != null ? b.dueIn : db);
-                          return dueA - dueB;
-                        }
-                        case "name_asc":   return (a.name || "").localeCompare(b.name || "");
-                        default:           return Number(b.debt  || 0) - Number(a.debt  || 0);
-                      }
-                    });
-                    if (!filtered.length) return null;
-                    return (
-                      <>
-                        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                          <SortDropdown
-                            storageKey="sort_cc"
-                            options={CC_SORT_OPTS}
-                            value={ccSort}
-                            onChange={v => setCcSort(v)}
-                          />
-                        </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
-                          {sortedCC.map((cc, i) => (
-                            <CCCard key={cc.id} cc={cc}
-                              color={CARD_PALETTE[(paletteIdx + i) % CARD_PALETTE.length]}
-                              onPay={() => { setPayForm(f => ({ ...f, cardId: cc.id, amount: cc.debt })); setModal("pay"); }}
-                              onTransactions={() => { setSelectedCard(cc.id); setSubTab("transactions"); }}
-                              onInstallments={() => setSubTab("installments")}
-                            />
-                          ))}
-                        </div>
-                      </>
-                    );
-                  })()}
+                  {/* All cards grid */}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
+                    {sortedCC.map((cc, i) => (
+                      <CCCard key={cc.id} cc={cc}
+                        color={CARD_PALETTE[i % CARD_PALETTE.length]}
+                        onPay={() => { setPayForm(f => ({ ...f, cardId: cc.id, amount: cc.debt })); setModal("pay"); }}
+                        onTransactions={() => { setSelectedCard(cc.id); setSubTab("transactions"); }}
+                        onInstallments={() => setSubTab("installments")}
+                      />
+                    ))}
+                  </div>
                 </div>
               );
             })()
