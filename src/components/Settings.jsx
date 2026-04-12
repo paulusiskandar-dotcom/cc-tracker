@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import PILogo from "./PILogo";
 import { fxApi, merchantApi, settingsApi, recurringApi, gmailApi, accountsApi, installmentsApi, ledgerApi, getTxFromToTypes } from "../api";
-import { fmtIDR } from "../utils";
+import { fmtIDR, resolveCategoryIds } from "../utils";
 import { CURRENCIES, EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST, TX_TYPES, APP_VERSION, APP_BUILD } from "../constants";
 import { LIGHT, DARK } from "../theme";
 import {
@@ -602,7 +602,7 @@ export default function Settings({
       {subTab === "estatement" && (
         <EStatementTab
           T={T} card={card} user={user}
-          accounts={accounts} ledger={ledger}
+          accounts={accounts} categories={categories} ledger={ledger}
           installments={installments} setInstallments={setInstallments}
         />
       )}
@@ -1444,7 +1444,7 @@ const ESTMT_NO_CAT = new Set([
 // ─── E-STATEMENT TAB ─────────────────────────────────────────
 function EStatementTab({
   T, card, user,
-  accounts, ledger, installments = [], setInstallments,
+  accounts, categories = [], ledger, installments = [], setInstallments,
 }) {
   const [queue,       setQueue]       = useState([]);
   const [history,     setHistory]     = useState([]);
@@ -1817,9 +1817,7 @@ function EStatementTab({
       from_type,
       to_id:         isUUID(r.to_id) ? r.to_id : null,
       to_type,
-      // category_id is a text slug (e.g. "food"), NOT a UUID — pass directly
-      category_id:   r.category_id || null,
-      category_name: r.category_id || null,   // ledger reads category_name for display
+      ...resolveCategoryIds(r.category_id, categories),
       entity:        isReimburseType ? (r.entity || "Personal") : (r.entity || "Personal"),
       is_reimburse:  isReimburseType && !!r.entity,
       notes,

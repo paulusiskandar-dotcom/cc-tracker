@@ -692,6 +692,7 @@ export default function Transactions({
                       key={e.id}
                       entry={e}
                       accounts={accounts}
+                      categories={categories}
                       onEdit={() => openEdit(e)}
                       onDelete={() => setDeleteEntry(e)}
                     />
@@ -800,7 +801,7 @@ function getTxExpandedContent(e, fromAcc, toAcc) {
 }
 
 // ─── TRANSACTION ROW ─────────────────────────────────────────
-function TxRow({ entry: e, accounts, onEdit, onDelete }) {
+function TxRow({ entry: e, accounts, categories = [], onEdit, onDelete }) {
   const [expanded, setExpanded] = useState(false);
   const isTwoDir = TWO_DIR_TYPES.has(e.tx_type);
 
@@ -812,7 +813,9 @@ function TxRow({ entry: e, accounts, onEdit, onDelete }) {
   const isIn     = ["income","sell_asset","reimburse_in","collect_loan"].includes(e.tx_type);
   const isMove   = ["transfer","fx_exchange"].includes(e.tx_type);
 
-  const catDef   = EXPENSE_CATEGORIES.find(c => c.id === e.category_id || c.id === e.category);
+  // Lookup: try slug match (EXPENSE_CATEGORIES) first, then DB category (UUID match)
+  const catDef   = EXPENSE_CATEGORIES.find(c => c.id === e.category_id || c.id === e.category)
+                || categories?.find(c => c.id === e.category_id);
   const amtColor = isOut ? "#dc2626" : isIn ? "#059669" : "#3b5bdb";
   const prefix   = isOut ? "−" : isIn ? "+" : "";
 
@@ -824,7 +827,7 @@ function TxRow({ entry: e, accounts, onEdit, onDelete }) {
   // indent = icon (36) + gap (12)
   const expandedIndent = 48;
 
-  const catLabel = e.category_name || catDef?.label || null;
+  const catLabel = e.category_name || catDef?.label || catDef?.name || null;
 
   // ── Type badge / missing-type warning ────────────────────────
   const TX_BADGE = {

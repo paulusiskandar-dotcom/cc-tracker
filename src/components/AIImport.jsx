@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import { ledgerApi, scanApi, merchantApi, getTxFromToTypes } from "../api";
-import { fmtIDR, todayStr, checkDuplicateTransaction } from "../utils";
+import { fmtIDR, todayStr, checkDuplicateTransaction, resolveCategoryIds } from "../utils";
 import { LIGHT, DARK } from "../theme";
 import { Button, EmptyState, Spinner, showToast, TransactionReviewList } from "./shared/index";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
@@ -56,7 +56,7 @@ const fmtDateShort = (d) => {
 };
 
 // ─────────────────────────────────────────────────────────────────
-export default function AIImport({ user, accounts, ledger, onRefresh, setLedger, dark, merchantMaps = [], fxRates = {}, CURRENCIES = [], setPendingSyncs }) {
+export default function AIImport({ user, accounts, categories = [], ledger, onRefresh, setLedger, dark, merchantMaps = [], fxRates = {}, CURRENCIES = [], setPendingSyncs }) {
   const T = dark ? DARK : LIGHT;
   const fileRef = useRef();
 
@@ -305,8 +305,7 @@ export default function AIImport({ user, accounts, ledger, onRefresh, setLedger,
       from_id:        r.from_id || null,
       to_id:          r.to_id   || null,
       entity:         REIMBURSE_TYPES.has(r.tx_type) ? (r.entity || "Hamasa") : "Personal",
-      category_id:    r.category_id || null,
-      category_name:  r.category_id || null,
+      ...resolveCategoryIds(r.category_id, categories),
       notes:          r.notes || "",
       source:         "ai_scan",
       scan_batch_id:  batchId || null,

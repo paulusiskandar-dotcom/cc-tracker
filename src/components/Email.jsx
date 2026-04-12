@@ -1,8 +1,7 @@
 import { useState, useEffect } from "react";
 import { gmailApi, settingsApi, ledgerApi, getTxFromToTypes, flattenEmailSync } from "../api";
-import { todayStr } from "../utils";
+import { todayStr, resolveCategoryIds } from "../utils";
 import { LIGHT, DARK } from "../theme";
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
 import {
   Button, EmptyState, showToast,
   SectionHeader, Field, Input, FormRow,
@@ -390,14 +389,9 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
 
   const buildEntry = (r) => {
     const { from_type, to_type } = getTxFromToTypes(r.tx_type);
-    let catId   = r.category_id || null;
-    let catName = catId || null;
-    if (!catId && r.suggested_category_label) {
-      const expCat = EXPENSE_CATEGORIES.find(c => c.label?.toLowerCase() === r.suggested_category_label.toLowerCase());
-      const incCat = INCOME_CATEGORIES_LIST.find(c => c.label?.toLowerCase() === r.suggested_category_label.toLowerCase());
-      catId   = expCat?.id || incCat?.id || null;
-      catName = catId;
-    }
+    // Resolve category slug (from user selection or AI suggestion) to DB UUID + label
+    const catSlug = r.category_id || r.suggested_category_label || null;
+    const { category_id, category_name } = resolveCategoryIds(catSlug, categories);
     return {
       tx_date:       r.tx_date,
       description:   r.description || r.subject || "Gmail transaction",
@@ -407,8 +401,8 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       tx_type:       r.tx_type, from_type, to_type,
       from_id:       r.from_id || null,
       to_id:         r.to_id   || null,
-      category_id:   catId,
-      category_name: catName,
+      category_id,
+      category_name,
       entity:        "Personal",
       notes:         r.notes || `Imported from Gmail: ${r.subject || ""}`,
       source:        "gmail",

@@ -200,3 +200,38 @@ export const checkDuplicateTransaction = (ledger, { tx_date, amount_idr, currenc
   }
   return null;
 };
+
+// ─── CATEGORY RESOLUTION ─────────────────────────────────────
+// Converts a slug (e.g. "food") or label to a DB UUID + display name.
+// dbCategories: array of { id: uuid, name: string } from expense_categories table.
+// Falls back to constants EXPENSE_CATEGORIES / INCOME_CATEGORIES_LIST by label match.
+export const resolveCategoryIds = (slugOrLabel, dbCategories = []) => {
+  if (!slugOrLabel) return { category_id: null, category_name: null };
+
+  // Direct DB match by name (case-insensitive)
+  const byName = dbCategories.find(
+    c => c.name?.toLowerCase() === slugOrLabel.toLowerCase()
+  );
+  if (byName) return { category_id: byName.id, category_name: byName.name };
+
+  // Slug → label via constants, then DB match
+  const SLUG_TO_LABEL = {
+    food: "Food & Drinks", home: "Home & Utilities", transport: "Transport",
+    health: "Health", shopping: "Shopping", education: "Education",
+    entertainment: "Entertainment", business: "Business & Ops", finance: "Finance",
+    family: "Family", social: "Social & Gifts", cash_advance_fee: "Cash Advance Fee",
+    bank_charges: "Bank Charges", materai: "Stamp Duty", tax: "Tax", other: "Other",
+    salary: "Salary", rental_income: "Rental Income", dividend: "Dividend",
+    freelance: "Freelance", loan_collection: "Loan Collection",
+    bank_interest: "Bank Interest", cashback: "Cashback", other_income: "Other Income",
+    // personal_shopping maps to shopping
+    personal_shopping: "Personal Shopping",
+  };
+  const label = SLUG_TO_LABEL[slugOrLabel] || slugOrLabel;
+  const byLabel = dbCategories.find(
+    c => c.name?.toLowerCase() === label.toLowerCase()
+  );
+  if (byLabel) return { category_id: byLabel.id, category_name: byLabel.name };
+
+  return { category_id: null, category_name: label };
+};
