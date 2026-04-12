@@ -60,7 +60,7 @@ export default function Transactions({
     reimburse_out: [...bankAccounts, ...creditCards],
     reimburse_in:  [...receivables],
     give_loan:     [...bankAccounts],
-    collect_loan:  [...receivables],
+    collect_loan:  [...receivables.filter(r => Number(r.current_balance || 0) > 0)],
     fx_exchange:   [...bankAccounts],
   })[form.tx_type] || accounts, [form.tx_type, bankAccounts, creditCards, assets, liabilities, receivables, accounts]);
 
@@ -282,6 +282,8 @@ export default function Transactions({
           status:              "active",
         });
         setEmployeeLoans?.(prev => [loan, ...prev]);
+        // If a receivable account is selected, link to it so balance tracking works
+        const hasRecv = !!uuid(form.to_id);
         const loanEntry = {
           tx_date:        form.tx_date,
           description:    `Employee Loan — ${loan.employee_name}`,
@@ -290,9 +292,9 @@ export default function Transactions({
           amount_idr:     sn(form.amount),
           tx_type:        "give_loan",
           from_type:      "account",
-          to_type:        "employee_loan",
+          to_type:        hasRecv ? "account" : "employee_loan",
           from_id:        uuid(form.from_id),
-          to_id:          loan.id,
+          to_id:          hasRecv ? uuid(form.to_id) : loan.id,
           entity:         "Personal",
           is_reimburse:   false,
           merchant_name:  null,
@@ -307,6 +309,11 @@ export default function Transactions({
         };
         const created = await ledgerApi.create(user.id, loanEntry, accounts);
         setLedger(p => [created, ...p]);
+        // Sync balances for both accounts
+        const giveFromId = uuid(form.from_id);
+        const giveToId   = hasRecv ? uuid(form.to_id) : null;
+        if (giveFromId) await recalculateBalance(giveFromId, user.id);
+        if (giveToId)   await recalculateBalance(giveToId,   user.id);
         showToast(`Loan of ${fmtIDR(sn(form.amount), true)} created for ${loan.employee_name}`);
         await onRefresh();
         setModal(null);

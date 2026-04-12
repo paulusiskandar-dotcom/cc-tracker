@@ -366,17 +366,31 @@ export function TxForm({ form, set, fromOptions, toOptions, accounts, categories
   const fromOpts = fromOptions
     .filter(a => a.id && a.id.length === 36)
     .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
-    .map(a => ({ value: a.id, label: accLabel(a) }));
+    .map(a => {
+      // collect_loan: show outstanding balance in label
+      if (type === "collect_loan") {
+        const bal = Number(a.current_balance || 0);
+        return { value: a.id, label: bal > 0 ? `${a.name} · ${fmtIDR(bal)} outstanding` : a.name };
+      }
+      return { value: a.id, label: accLabel(a) };
+    });
 
   const toOpts = toOptions
     .filter(a => a.id && a.id.length === 36)
     .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
-    .map(a => ({
-      value: a.id,
-      label: a.type === "credit_card"
-        ? `${a.name}${(a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}`
-        : accLabel(a),
-    }));
+    .map(a => {
+      // give_loan: show current outstanding so user knows if they're adding to existing
+      if (type === "give_loan") {
+        const bal = Number(a.current_balance || 0);
+        return { value: a.id, label: bal > 0 ? `${a.name} · ${fmtIDR(bal)} outstanding` : a.name };
+      }
+      return {
+        value: a.id,
+        label: a.type === "credit_card"
+          ? `${a.name}${(a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}`
+          : accLabel(a),
+      };
+    });
 
   const incOpts = (incomeSrcs || [])
     .filter(s => s.id && s.id.length === 36)
@@ -388,7 +402,7 @@ export function TxForm({ form, set, fromOptions, toOptions, accounts, categories
     EXPENSE_CATEGORIES.forEach(c => catOptions.push({ value: c.id, label: `${c.icon} ${c.label}` }));
   }
 
-  const needsTo     = toOptions.length > 0 && !["reimburse_out", "give_loan"].includes(type);
+  const needsTo     = toOptions.length > 0 && !["reimburse_out"].includes(type);
   const needsCat    = ["expense", "reimburse_out", "reimburse_in"].includes(type);
   const needsEntity = ["reimburse_out", "reimburse_in"].includes(type);
 
@@ -594,11 +608,11 @@ export function TxForm({ form, set, fromOptions, toOptions, accounts, categories
       {/* TO ACCOUNT */}
       {needsTo && !["buy_asset","sell_asset","fx_exchange"].includes(type) && (
         <Select
-          label={type === "give_loan" ? "Receivable" : type === "pay_cc" ? "Credit Card" : type === "pay_liability" ? "Liability" : "To Account"}
+          label={type === "give_loan" ? "Receivable Account (optional)" : type === "pay_cc" ? "Credit Card" : type === "pay_liability" ? "Liability" : "To Account"}
           value={form.to_id || ""}
           onChange={e => set("to_id", e.target.value.length === 36 ? e.target.value : null)}
           options={toOpts}
-          placeholder="Select…"
+          placeholder={type === "give_loan" ? "Select receivable to track balance…" : "Select…"}
         />
       )}
 

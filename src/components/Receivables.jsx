@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { ledgerApi, employeeLoanApi, loanPaymentsApi } from "../api";
+import { ledgerApi, employeeLoanApi, loanPaymentsApi, recalculateBalance } from "../api";
 import { supabase } from "../lib/supabase";
 import { fmtIDR, todayStr, agingLabel } from "../utils";
 import SortDropdown from "./shared/SortDropdown";
@@ -22,9 +22,10 @@ function ProgressBar({ value, max, color = "#059669", height = 6 }) {
 }
 
 const SUBTABS = [
-  { id: "reimburse", label: "Reimburse"      },
-  { id: "loans",     label: "Employee Loans" },
-  { id: "history",   label: "History"        },
+  { id: "reimburse",      label: "Reimburse"      },
+  { id: "personal_loans", label: "Personal Loans" },
+  { id: "loans",          label: "Employee Loans" },
+  { id: "history",        label: "History"        },
 ];
 
 const ENTITY_CHOICES = ["Hamasa", "SDC", "Travelio"];
@@ -132,6 +133,12 @@ export default function Receivables({
   const [settling,      setSettling]     = useState(false);
   const [expandedSett,  setExpandedSett] = useState(new Set());
 
+  // ── Personal Loan collect modal ───────────────────────────────
+  const [collectModal,  setCollectModal]  = useState(false);
+  const [collectRec,    setCollectRec]    = useState(null);
+  const [collectForm,   setCollectForm]   = useState({ amount: "", pay_date: todayStr(), to_id: "", notes: "" });
+  const [collectSaving, setCollectSaving] = useState(false);
+
   // ── Employee Loan modals ──────────────────────────────────────
   const [addLoanModal,  setAddLoanModal]  = useState(false);
   const [editLoanModal, setEditLoanModal] = useState(false);
@@ -155,6 +162,24 @@ export default function Receivables({
     const aging = firstEntry ? agingLabel(firstEntry.tx_date) : null;
     return { ...r, entries, aging };
   }), [receivables, ledger]);
+
+  // Personal loan receivables: type=receivable, subtype not 'reimburse'
+  const loanReceivables = useMemo(() =>
+    receivables.filter(r => r.subtype !== "reimburse")
+  , [receivables]);
+
+  // For each loan receivable: collect_loan history + running balance
+  const loanRecStats = useMemo(() => loanReceivables.map(r => {
+    const giveEntries    = ledger
+      .filter(e => e.tx_type === "give_loan" && e.to_id === r.id)
+      .sort((a, b) => a.tx_date.localeCompare(b.tx_date));
+    const collectEntries = ledger
+      .filter(e => e.tx_type === "collect_loan" && e.from_id === r.id)
+      .sort((a, b) => a.tx_date.localeCompare(b.tx_date));
+    const totalGiven     = giveEntries.reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
+    const totalCollected = collectEntries.reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
+    return { ...r, giveEntries, collectEntries, totalGiven, totalCollected };
+  }), [loanReceivables, ledger]);
 
   const settledEntries = useMemo(() =>
     ledger.filter(e => e.tx_type === "reimburse_in")
@@ -340,6 +365,60 @@ export default function Receivables({
       showToast(`${entity} settled${reimbursable > 0 ? ` · RE: ${fmtIDR(reimbursable, true)}` : ""}`);
     } catch (e) { showToast(e.message, "error"); }
     setSettling(false);
+  };
+
+  // ── PERSONAL LOAN COLLECT ─────────────────────────────────
+  const openCollect = (rec) => {
+    setCollectRec(rec);
+    setCollectForm({
+      amount:   String(rec.monthly_installment || rec.current_balance || ""),
+      pay_date: todayStr(),
+      to_id:    bankAccounts[0]?.id || "",
+      notes:    "",
+    });
+    setCollectModal(true);
+  };
+
+  const handleCollect = async () => {
+    if (!collectRec || !collectForm.amount || !collectForm.to_id)
+      return showToast("Fill amount and destination account", "error");
+    setCollectSaving(true);
+    try {
+      const amt = Number(collectForm.amount) || 0;
+      const entry = {
+        tx_date:      collectForm.pay_date || todayStr(),
+        description:  `Loan repayment — ${collectRec.name}`,
+        amount:       amt,
+        currency:     "IDR",
+        amount_idr:   amt,
+        tx_type:      "collect_loan",
+        from_type:    "account",
+        from_id:      collectRec.id,
+        to_type:      "account",
+        to_id:        collectForm.to_id,
+        entity:       "Personal",
+        category_id:  null,
+        category_name: null,
+        notes:        collectForm.notes || null,
+        is_reimburse: false,
+        merchant_name: null,
+        attachment_url: null,
+        ai_categorized: false,
+        ai_confidence: null,
+        installment_id: null,
+        scan_batch_id: null,
+      };
+      const created = await ledgerApi.create(user.id, entry, accounts);
+      if (created) setLedger(prev => [created, ...prev]);
+      await Promise.all([
+        recalculateBalance(collectRec.id, user.id),
+        recalculateBalance(collectForm.to_id, user.id),
+      ]);
+      showToast(`Collected ${fmtIDR(amt, true)} from ${collectRec.name}`);
+      setCollectModal(false);
+      await onRefresh();
+    } catch (e) { showToast(e.message, "error"); }
+    setCollectSaving(false);
   };
 
   // ── EMPLOYEE LOAN ACTIONS ──────────────────────────────────
@@ -780,6 +859,93 @@ export default function Receivables({
       )}
 
       {/* ══════════════════════════════════════════════════ */}
+      {/* ── PERSONAL LOANS TAB ──────────────────────── */}
+      {/* ══════════════════════════════════════════════════ */}
+      {subTab === "personal_loans" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {loanRecStats.length === 0 ? (
+            <EmptyState icon="💰" message='No personal loan accounts. Create a Receivable account (type: Receivable, subtype: any except Reimburse) in Accounts to track personal loans.' />
+          ) : (
+            loanRecStats.map(r => {
+              const outstanding = Number(r.current_balance || 0);
+              const collectRows = [...r.collectEntries].reverse(); // newest first
+              return (
+                <div key={r.id} style={{ background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 16, overflow: "hidden" }}>
+                  <div style={{ height: 3, background: "#059669" }} />
+                  <div style={{ padding: "14px 16px" }}>
+
+                    {/* Header */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+                      <div>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: outstanding > 0 ? "#111827" : "#059669", fontFamily: "Figtree, sans-serif" }}>
+                          {r.name}
+                        </div>
+                        <div style={{ display: "flex", gap: 16, marginTop: 6, flexWrap: "wrap" }}>
+                          <div>
+                            <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif" }}>Total Given</div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#374151", fontFamily: "Figtree, sans-serif" }}>{fmtIDR(r.totalGiven)}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif" }}>Collected</div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#059669", fontFamily: "Figtree, sans-serif" }}>{fmtIDR(r.totalCollected)}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif" }}>Outstanding</div>
+                            <div style={{ fontSize: 14, fontWeight: 800, color: outstanding > 0 ? "#d97706" : "#059669", fontFamily: "Figtree, sans-serif" }}>{fmtIDR(outstanding)}</div>
+                          </div>
+                        </div>
+                      </div>
+                      <Button
+                        variant="primary" size="sm"
+                        onClick={() => openCollect(r)}
+                        disabled={outstanding <= 0}
+                        style={{ flexShrink: 0 }}
+                      >
+                        + Collect
+                      </Button>
+                    </div>
+
+                    {/* Payment history */}
+                    <div>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif", marginBottom: 6 }}>
+                        Payment History
+                      </div>
+                      {collectRows.length === 0 ? (
+                        <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif", padding: "6px 0" }}>
+                          No payments recorded yet.
+                        </div>
+                      ) : (
+                        <div style={{ border: "0.5px solid #f3f4f6", borderRadius: 10, overflow: "hidden" }}>
+                          {collectRows.map((e, i) => {
+                            const toAcc = accounts.find(a => a.id === e.to_id);
+                            return (
+                              <div key={e.id} style={{
+                                display: "grid", gridTemplateColumns: "80px 1fr 100px",
+                                padding: "8px 12px", borderBottom: i < collectRows.length - 1 ? "0.5px solid #f3f4f6" : "none",
+                                background: i % 2 === 0 ? "#fafafa" : "#fff",
+                              }}>
+                                <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>{e.tx_date}</div>
+                                <div style={{ fontSize: 11, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
+                                  {toAcc?.name || "—"}{e.notes ? ` · ${e.notes}` : ""}
+                                </div>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: "#059669", fontFamily: "Figtree, sans-serif", textAlign: "right" }}>
+                                  +{fmtIDR(Number(e.amount_idr || e.amount || 0), true)}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════ */}
       {/* ── LOANS TAB ────────────────────────────────── */}
       {/* ══════════════════════════════════════════════════ */}
       {subTab === "loans" && (
@@ -1005,6 +1171,51 @@ export default function Receivables({
           )}
         </div>
       )}
+
+      {/* ── COLLECT LOAN MODAL ──────────────────────────── */}
+      <Modal
+        isOpen={collectModal && !!collectRec}
+        onClose={() => setCollectModal(false)}
+        title={`Collect Loan — ${collectRec?.name || ""}`}
+        footer={
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <Button variant="secondary" size="md" onClick={() => setCollectModal(false)}>Cancel</Button>
+            <Button
+              variant="primary" size="md" busy={collectSaving}
+              disabled={!collectForm.amount || !collectForm.to_id}
+              onClick={handleCollect}
+            >
+              ✓ Record Collection
+            </Button>
+          </div>
+        }
+      >
+        {collectRec && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "10px 14px", display: "flex", justifyContent: "space-between" }}>
+              <span style={{ fontSize: 12, color: "#374151" }}>Outstanding</span>
+              <span style={{ fontSize: 15, fontWeight: 800, color: "#d97706" }}>{fmtIDR(Number(collectRec.current_balance || 0))}</span>
+            </div>
+            <FormRow>
+              <AmountInput label="Amount Collected *" value={collectForm.amount} onChange={v => setCollectForm(f => ({ ...f, amount: v }))} currency="IDR" />
+              <Field label="Date">
+                <Input type="date" value={collectForm.pay_date} onChange={e => setCollectForm(f => ({ ...f, pay_date: e.target.value }))} />
+              </Field>
+            </FormRow>
+            <Field label="To Account *">
+              <Select
+                value={collectForm.to_id}
+                onChange={e => setCollectForm(f => ({ ...f, to_id: e.target.value }))}
+                options={bankAccounts.map(a => ({ value: a.id, label: a.name }))}
+                placeholder="Select bank account…"
+              />
+            </Field>
+            <Field label="Notes">
+              <Input value={collectForm.notes} onChange={e => setCollectForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional" />
+            </Field>
+          </div>
+        )}
+      </Modal>
 
       {/* ══════════════════════════════════════════════════ */}
       {/* ── RECORD EXPENSE MODAL (reimburse_out) ──────── */}
