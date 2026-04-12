@@ -1435,15 +1435,37 @@ function BackupSection({ user, T, card, ledger }) {
 
 // ── Constants shared by E-Statement preview ───────────────────
 const ESTMT_TX_TYPES = [
-  { value: "expense",       label: "Expense",       color: "#A32D2D" },
-  { value: "income",        label: "Income",        color: "#3B6D11" },
-  { value: "cc_installment",label: "CC Installment",color: "#185FA5" },
-  { value: "transfer",      label: "Transfer",      color: "#185FA5" },
+  { value: "expense",        label: "Expense",        color: "#dc2626" },
+  { value: "income",         label: "Income",         color: "#059669" },
+  { value: "transfer",       label: "Transfer",       color: "#3b5bdb" },
+  { value: "pay_cc",         label: "Pay CC",         color: "#7c3aed" },
+  { value: "buy_asset",      label: "Buy Asset",      color: "#0891b2" },
+  { value: "sell_asset",     label: "Sell Asset",     color: "#059669" },
+  { value: "reimburse_out",  label: "Reimburse Out",  color: "#d97706" },
+  { value: "reimburse_in",   label: "Reimburse In",   color: "#059669" },
+  { value: "give_loan",      label: "Give Loan",      color: "#d97706" },
+  { value: "collect_loan",   label: "Collect Loan",   color: "#059669" },
+  { value: "pay_liability",  label: "Pay Liability",  color: "#d97706" },
+  { value: "fx_exchange",    label: "FX Exchange",    color: "#0891b2" },
+  { value: "cc_installment", label: "CC Installment", color: "#3b5bdb" },
 ];
-const ESTMT_NO_CAT    = new Set(["transfer","pay_cc","give_loan","collect_loan","fx_exchange"]);
-const ESTMT_AMT_COLOR = { expense: "#A32D2D", income: "#3B6D11", cc_installment: "#185FA5", transfer: "#185FA5" };
+const ESTMT_NO_CAT = new Set([
+  "transfer","pay_cc","give_loan","collect_loan","fx_exchange",
+  "reimburse_out","reimburse_in","buy_asset","sell_asset","pay_liability","cc_installment",
+]);
+const ESTMT_INCOME_TYPES  = new Set(["income","collect_loan","sell_asset","reimburse_in"]);
+const ESTMT_NEUTRAL_TYPES = new Set(["transfer","fx_exchange"]);
+const ESTMT_AMT_COLOR = {
+  expense: "#dc2626", income: "#059669", cc_installment: "#3b5bdb",
+  transfer: "#3b5bdb", pay_cc: "#7c3aed",
+  buy_asset: "#0891b2", sell_asset: "#059669",
+  reimburse_out: "#d97706", reimburse_in: "#059669",
+  give_loan: "#d97706", collect_loan: "#059669",
+  pay_liability: "#d97706", fx_exchange: "#0891b2",
+};
+const ESTMT_REIMBURSE_TYPES = new Set(["reimburse_in","reimburse_out"]);
 const ESTMT_CAT_FOR_TYPE = (t) =>
-  t === "income" ? INCOME_CATEGORIES_LIST : EXPENSE_CATEGORIES;
+  ESTMT_INCOME_TYPES.has(t) ? INCOME_CATEGORIES_LIST : EXPENSE_CATEGORIES;
 
 const fmtDateShort = (d) => {
   try { return new Date(d + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short" }); }
@@ -1808,12 +1830,11 @@ function EStatementTab({
   const isUUID = (v) => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 
   const buildPayload = (r) => {
-    const isReimburse = r.is_reimburse && r.reimburse_entity;
-    const txType  = isReimburse ? "reimburse_in"
-      : r.tx_type === "cc_installment" ? "expense"
-      : (r.tx_type || "expense");
-    const isDebit = ["expense","transfer","pay_cc","buy_asset","pay_liability","reimburse_out","reimburse_in","give_loan","fx_exchange"].includes(txType);
-    const notes   = r._isInstallment && r._instNo
+    const txType         = r.tx_type === "cc_installment" ? "expense" : (r.tx_type || "expense");
+    const isReimburseType = txType === "reimburse_in" || txType === "reimburse_out";
+    const isDebit        = ["expense","transfer","pay_cc","buy_asset","pay_liability",
+                            "reimburse_out","reimburse_in","give_loan","fx_exchange","cc_installment"].includes(txType);
+    const notes          = r._isInstallment && r._instNo
       ? `Cicilan ${r._instNo}${r._instTotal ? `/${r._instTotal}` : ""}${r.notes ? ` — ${r.notes}` : ""}`
       : (r.notes || null);
     return {
@@ -1831,8 +1852,8 @@ function EStatementTab({
       to_type:       isUUID(r.to_id) ? "account" : txType,
       category_id:   isUUID(r.category_id) ? r.category_id : null,
       category_name: r.category_name || null,
-      entity:        isReimburse ? r.reimburse_entity : (r.entity || "Personal"),
-      is_reimburse:  !!isReimburse,
+      entity:        isReimburseType ? (r.reimburse_entity || "Personal") : (r.entity || "Personal"),
+      is_reimburse:  isReimburseType && !!r.reimburse_entity,
       notes,
     };
   };
@@ -1845,7 +1866,7 @@ function EStatementTab({
       showToast(`Error: ${insErr.message}`, "error");
       return;
     }
-    if (row.is_reimburse && row.reimburse_entity && inserted?.id) {
+    if ((row.tx_type === "reimburse_in" || row.tx_type === "reimburse_out") && row.reimburse_entity && inserted?.id) {
       supabase.from("reimburse_settlements").insert({
         user_id:              user.id,
         entity:               row.reimburse_entity,
@@ -1875,7 +1896,7 @@ function EStatementTab({
       if (insErr) { console.error("ledger insert error", insErr); showToast(`Error: ${insErr.message}`, "error"); continue; }
       savedIds.push(r._id);
       count++;
-      if (r.is_reimburse && r.reimburse_entity && inserted?.id) {
+      if ((r.tx_type === "reimburse_in" || r.tx_type === "reimburse_out") && r.reimburse_entity && inserted?.id) {
         supabase.from("reimburse_settlements").insert({
           user_id:              user.id,
           entity:               r.reimburse_entity,
@@ -2296,16 +2317,17 @@ function EStmtTxCard({
   const dupLevel   = r.status === "duplicate" ? 3 : r.status === "possible_duplicate" ? 2 : r.status === "review" ? 1 : 0;
   const cardBg     = isSkipped ? T.sur2 : dupLevel === 3 ? "#fff1f2" : dupLevel === 2 ? "#fff7ed" : dupLevel === 1 ? "#fefce8" : T.surface;
   const cardBorder = dupLevel === 3 ? "1.5px solid #dc2626" : dupLevel === 2 ? "1.5px solid #ea580c" : dupLevel === 1 ? "1.5px solid #ca8a04" : `1px solid ${T.border}`;
-  const color      = ESTMT_AMT_COLOR[r.tx_type] || "#A32D2D";
+  const color      = ESTMT_AMT_COLOR[r.tx_type] || "#dc2626";
   const showCat    = !ESTMT_NO_CAT.has(r.tx_type);
   const cats       = ESTMT_CAT_FOR_TYPE(r.tx_type);
 
-  const sign = ["income"].includes(r.tx_type) ? "+" : ["transfer"].includes(r.tx_type) ? "" : "-";
+  const sign   = ESTMT_INCOME_TYPES.has(r.tx_type) ? "+" : ESTMT_NEUTRAL_TYPES.has(r.tx_type) ? "" : "-";
   const amtStr = `${sign}Rp ${Number(r.amount_idr || r.amount || 0).toLocaleString("id-ID")}`;
 
-  const bankAccounts = accounts.filter(a => a.type === "bank");
-  const ccAccounts   = accounts.filter(a => a.type === "credit_card");
+  const bankAccounts  = accounts.filter(a => a.type === "bank");
+  const ccAccounts    = accounts.filter(a => a.type === "credit_card");
   const spendAccounts = [...ccAccounts, ...bankAccounts];
+  const allAccounts   = accounts;
   const sel = estmtInSel(T);
 
   return (
@@ -2360,9 +2382,16 @@ function EStmtTxCard({
       {/* ── ROW 2: type [badges] [category] account [✏️] ── */}
       <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 5, padding: "2px 12px 9px 35px" }}>
         <select
-          style={{ ...sel, width: 120, color: ESTMT_AMT_COLOR[r.tx_type] || T.text, fontWeight: 600 }}
+          style={{ ...sel, width: 126, color: ESTMT_AMT_COLOR[r.tx_type] || "#111827", fontWeight: 600 }}
           value={r.tx_type}
-          onChange={e => onUpdate({ tx_type: e.target.value, category_id: ESTMT_NO_CAT.has(e.target.value) ? null : r.category_id })}>
+          onChange={e => {
+            const t = e.target.value;
+            onUpdate({
+              tx_type:          t,
+              category_id:      ESTMT_NO_CAT.has(t) ? null : r.category_id,
+              reimburse_entity: ESTMT_REIMBURSE_TYPES.has(t) ? r.reimburse_entity : "",
+            });
+          }}>
           {ESTMT_TX_TYPES.map(t => (
             <option key={t.value} value={t.value} style={{ color: t.color, fontWeight: 600 }}>{t.label}</option>
           ))}
@@ -2401,9 +2430,67 @@ function EStmtTxCard({
           </select>
         )}
 
-        {/* Account */}
-        <div style={{ flex: 1, minWidth: 140 }}>
-          {["expense","cc_installment"].includes(r.tx_type) ? (
+        {/* Account — varies by tx_type */}
+        <div style={{ flex: 1, minWidth: 120 }}>
+          {/* Income-only types: to_id */}
+          {["income","collect_loan","sell_asset"].includes(r.tx_type) ? (
+            <select style={{ ...sel, width: "100%" }}
+              value={r.to_id || ""}
+              onChange={e => onUpdate({ to_id: e.target.value })}>
+              <option value="">To Account…</option>
+              {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+
+          /* Transfer: from bank → to bank */
+          ) : r.tx_type === "transfer" ? (
+            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+              <select style={{ ...sel, flex: 1 }} value={r.from_id || ""}
+                onChange={e => onUpdate({ from_id: e.target.value })}>
+                <option value="">From…</option>
+                {allAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              <span style={{ fontSize: 10, color: T.text3, flexShrink: 0 }}>→</span>
+              <select style={{ ...sel, flex: 1 }} value={r.to_id || ""}
+                onChange={e => onUpdate({ to_id: e.target.value })}>
+                <option value="">To…</option>
+                {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+
+          /* Pay CC: from bank → to CC */
+          ) : r.tx_type === "pay_cc" ? (
+            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+              <select style={{ ...sel, flex: 1 }} value={r.from_id || ""}
+                onChange={e => onUpdate({ from_id: e.target.value })}>
+                <option value="">From…</option>
+                {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              <span style={{ fontSize: 10, color: T.text3, flexShrink: 0 }}>→</span>
+              <select style={{ ...sel, flex: 1 }} value={r.to_id || ""}
+                onChange={e => onUpdate({ to_id: e.target.value })}>
+                <option value="">To CC…</option>
+                {ccAccounts.map(a => <option key={a.id} value={a.id}>{a.name}{a.last4 ? ` ···${a.last4}` : ""}</option>)}
+              </select>
+            </div>
+
+          /* Give Loan: from bank → to bank */
+          ) : r.tx_type === "give_loan" ? (
+            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+              <select style={{ ...sel, flex: 1 }} value={r.from_id || ""}
+                onChange={e => onUpdate({ from_id: e.target.value })}>
+                <option value="">From…</option>
+                {allAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              <span style={{ fontSize: 10, color: T.text3, flexShrink: 0 }}>→</span>
+              <select style={{ ...sel, flex: 1 }} value={r.to_id || ""}
+                onChange={e => onUpdate({ to_id: e.target.value })}>
+                <option value="">To…</option>
+                {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+            </div>
+
+          /* All other debit types (expense, cc_installment, buy_asset, pay_liability, fx_exchange, reimburse_in, reimburse_out): from_id */
+          ) : (
             <select style={{ ...sel, width: "100%" }}
               value={r.from_id || ""}
               onChange={e => onUpdate({ from_id: e.target.value })}>
@@ -2414,27 +2501,6 @@ function EStmtTxCard({
                 </option>
               ))}
             </select>
-          ) : r.tx_type === "income" ? (
-            <select style={{ ...sel, width: "100%" }}
-              value={r.to_id || ""}
-              onChange={e => onUpdate({ to_id: e.target.value })}>
-              <option value="">To Account…</option>
-              {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </select>
-          ) : (
-            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-              <select style={{ ...sel, flex: 1 }} value={r.from_id || ""}
-                onChange={e => onUpdate({ from_id: e.target.value })}>
-                <option value="">From…</option>
-                {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </select>
-              <span style={{ fontSize: 10, color: T.text3, flexShrink: 0 }}>→</span>
-              <select style={{ ...sel, flex: 1 }} value={r.to_id || ""}
-                onChange={e => onUpdate({ to_id: e.target.value })}>
-                <option value="">To…</option>
-                {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </select>
-            </div>
           )}
         </div>
 
@@ -2448,28 +2514,16 @@ function EStmtTxCard({
           title="Notes">
           ✏️
         </button>
-
-        {/* ↩ reimburse toggle */}
-        <button
-          onClick={() => onUpdate({ is_reimburse: !r.is_reimburse, reimburse_entity: r.is_reimburse ? "" : r.reimburse_entity })}
-          style={estmtACT({
-            background: r.is_reimburse ? "#dcfce7" : T.sur2,
-            color: r.is_reimburse ? "#059669" : T.text3,
-            width: 24, height: 24, fontSize: 11,
-          })}
-          title="Mark as Reimburse In">
-          ↩
-        </button>
       </div>
 
-      {/* ── Reimburse row ── */}
-      {r.is_reimburse && (
-        <div style={{ borderTop: `1px solid #bbf7d0`, background: "#f0fdf4", padding: "6px 12px 8px 35px", display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 10, fontWeight: 700, color: "#059669", textTransform: "uppercase", letterSpacing: "0.04em", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
-            Reimburse In
+      {/* ── Reimburse entity row (shown when tx_type is reimburse_in or reimburse_out) ── */}
+      {ESTMT_REIMBURSE_TYPES.has(r.tx_type) && (
+        <div style={{ borderTop: `1px solid #fde68a`, background: "#fffbeb", padding: "6px 12px 8px 35px", display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: "#92400e", textTransform: "uppercase", letterSpacing: "0.04em", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
+            Entity
           </span>
           <select
-            style={{ ...estmtInSel(T), flex: 1, border: "1px solid #bbf7d0", background: "#f0fdf4", fontWeight: 600, color: r.reimburse_entity ? "#059669" : "#6b7280" }}
+            style={{ ...estmtInSel(T), flex: 1, border: "1px solid #fcd34d", fontWeight: 600, color: r.reimburse_entity ? "#92400e" : "#6b7280" }}
             value={r.reimburse_entity || ""}
             onChange={e => onUpdate({ reimburse_entity: e.target.value })}>
             <option value="">Select entity…</option>
