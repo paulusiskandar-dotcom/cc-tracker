@@ -354,7 +354,6 @@ function FxExchangeForm({ form, set, accounts, accountCurrencies = [], allCurren
 // ─── TRANSACTION FORM ────────────────────────────────────────
 export function TxForm({ form, set, fromOptions, toOptions, accounts, categories, incomeSrcs = [], allCurrencies = [], amtIDR, receivables = [], assets = [], accountCurrencies = [], onChangeType }) {
   const type = form.tx_type;
-  const [fromSource, setFromSource] = useState("bank");
 
   const accLabel = a => a.name + (a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : "");
 
@@ -364,11 +363,7 @@ export function TxForm({ form, set, fromOptions, toOptions, accounts, categories
   const TWO_STEP_FROM = ["expense", "reimburse_out", "transfer", "pay_cc", "buy_asset", "give_loan"];
   const hasTwoStep    = TWO_STEP_FROM.includes(type);
 
-  const fromList = hasTwoStep
-    ? (fromSource === "bank" ? bankAccs : ccAccs)
-    : fromOptions;
-
-  const fromOpts = fromList
+  const fromOpts = fromOptions
     .filter(a => a.id && a.id.length === 36)
     .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
     .map(a => ({ value: a.id, label: accLabel(a) }));
@@ -393,20 +388,11 @@ export function TxForm({ form, set, fromOptions, toOptions, accounts, categories
     EXPENSE_CATEGORIES.forEach(c => catOptions.push({ value: c.id, label: `${c.icon} ${c.label}` }));
   }
 
-  const needsTo  = toOptions.length > 0 && !["reimburse_out", "give_loan"].includes(type);
-  const needsCat = type === "expense";
-
-  const switchFromSource = (src) => {
-    setFromSource(src);
-    set("from_id", null);
-  };
+  const needsTo     = toOptions.length > 0 && !["reimburse_out", "give_loan"].includes(type);
+  const needsCat    = ["expense", "reimburse_out", "reimburse_in"].includes(type);
+  const needsEntity = ["reimburse_out", "reimburse_in"].includes(type);
 
   const ENTITY_OPTS = ["Hamasa", "SDC", "Travelio"];
-  const pickEntity = (ent) => {
-    set("entity", ent);
-    const rec = receivables.find(r => r.entity === ent);
-    set("to_id", rec?.id || null);
-  };
 
   const pillStyle = (active, activeColor = "#111827") => ({
     flex: 1, height: 36, borderRadius: 8, border: "1.5px solid",
@@ -430,29 +416,18 @@ export function TxForm({ form, set, fromOptions, toOptions, accounts, categories
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
-      {/* Type badge — clickable to change type */}
-      <button
-        type="button"
-        onClick={onChangeType}
-        style={{
-          display: "inline-flex", alignItems: "center", gap: 6,
-          padding: "4px 10px", borderRadius: 20,
-          background: (TYPE_CHOICES.find(t => t.id === type)?.color || "#9ca3af") + "18",
-          border: `1.5px solid ${(TYPE_CHOICES.find(t => t.id === type)?.color || "#9ca3af")}33`,
-          cursor: onChangeType ? "pointer" : "default",
-          width: "fit-content",
-        }}
-      >
-        <span style={{ fontSize: 14 }}>{TYPE_CHOICES.find(t => t.id === type)?.icon}</span>
-        <span style={{ fontSize: 11, fontWeight: 700, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
-          {TYPE_CHOICES.find(t => t.id === type)?.label}
-        </span>
-        {onChangeType && (
-          <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginLeft: 2 }}>
-            ✎
-          </span>
-        )}
-      </button>
+      {/* Type — inline select */}
+      <Field label="Type">
+        <select
+          value={type}
+          onChange={e => set("tx_type", e.target.value)}
+          style={SEL_STYLE}
+        >
+          {TYPE_CHOICES.map(t => (
+            <option key={t.id} value={t.id}>{t.icon} {t.label}</option>
+          ))}
+        </select>
+      </Field>
 
       {/* Date — hidden for fx_exchange */}
       {type !== "fx_exchange" && (
@@ -595,12 +570,20 @@ export function TxForm({ form, set, fromOptions, toOptions, accounts, categories
         />
       )}
 
-      {/* ENTITY toggle for reimburse_out */}
-      {type === "reimburse_out" && (
+      {/* ENTITY — for reimburse_out and reimburse_in */}
+      {needsEntity && (
         <Field label="Entity">
           <div style={{ display: "flex", gap: 6 }}>
             {ENTITY_OPTS.map(ent => (
-              <button key={ent} type="button" onClick={() => pickEntity(ent)} style={pillStyle(form.entity === ent, "#d97706")}>
+              <button key={ent} type="button"
+                onClick={() => {
+                  set("entity", ent);
+                  if (type === "reimburse_out") {
+                    const rec = receivables.find(r => r.entity === ent);
+                    set("to_id", rec?.id || null);
+                  }
+                }}
+                style={pillStyle(form.entity === ent, type === "reimburse_out" ? "#d97706" : "#059669")}>
                 {ent}
               </button>
             ))}
@@ -630,7 +613,7 @@ export function TxForm({ form, set, fromOptions, toOptions, accounts, categories
         />
       )}
 
-      {/* Category — expense only */}
+      {/* Category — expense / reimburse */}
       {needsCat && (
         <Select
           label="Category"

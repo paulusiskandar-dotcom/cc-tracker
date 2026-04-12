@@ -1,12 +1,11 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../lib/supabase";
-import { ledgerApi, getTxFromToTypes } from "../api";
-import { toIDR as toIDRFn } from "../utils";
-import { fmtIDR } from "../utils";
+import { ledgerApi, getTxFromToTypes, categoriesApi } from "../api";
+import { toIDR as toIDRFn, fmtIDR } from "../utils";
 import { TX_TYPE_MAP } from "../constants";
 import Modal from "./shared/Modal";
 import { showToast } from "./shared/Card";
-import { TxForm, TypePickerGrid, TYPE_CHOICES, EMPTY } from "./shared/TxForm";
+import { TxForm, EMPTY } from "./shared/TxForm";
 import * as XLSX from "xlsx";
 
 const FF = "Figtree, sans-serif";
@@ -105,10 +104,10 @@ export default function BankStatement({
   const [loading,   setLoading]   = useState(false);
   const [data,      setData]      = useState(null);
   // Edit modal state
-  const [editEntry, setEditEntry] = useState(null);   // the original ledger row
-  const [editForm,  setEditForm]  = useState({});     // current form state
-  const [editStep,  setEditStep]  = useState(2);      // 1=type picker, 2=form
-  const [editSaving, setEditSaving] = useState(false);
+  const [editEntry,      setEditEntry]      = useState(null);  // the original ledger row
+  const [editForm,       setEditForm]       = useState({});    // current form state
+  const [editSaving,     setEditSaving]     = useState(false);
+  const [modalCategories, setModalCategories] = useState([]);  // fetched fresh on open
   const printRef = useRef(null);
 
   const setF = (k, v) => setEditForm(f => ({ ...f, [k]: v }));
@@ -154,7 +153,6 @@ export default function BankStatement({
 
   // ── Open edit modal ────────────────────────────────────────
   const openEdit = (tx) => {
-    const missingType = !tx.tx_type;
     setEditForm({
       ...EMPTY,
       tx_date:       tx.tx_date       || "",
@@ -173,7 +171,10 @@ export default function BankStatement({
       is_reimburse:  tx.is_reimburse  || false,
     });
     setEditEntry(tx);
-    setEditStep(missingType ? 1 : 2);
+    // Fetch fresh categories for this user on modal open
+    categoriesApi.getAll(user.id)
+      .then(cats => setModalCategories(cats || []))
+      .catch(() => setModalCategories(categories));
   };
 
   // ── Save edit ──────────────────────────────────────────────
@@ -612,50 +613,34 @@ export default function BankStatement({
       <Modal
         isOpen={!!editEntry}
         onClose={() => setEditEntry(null)}
-        title={editStep === 1 ? "Change Type" : "Edit Transaction"}
+        title="Edit Transaction"
         footer={
-          editStep === 2 && (
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                onClick={() => setEditStep(1)}
-                style={{ height: 44, padding: "0 16px", borderRadius: 10, border: "1.5px solid #e5e7eb", background: "#fff", color: "#374151", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: FF, flexShrink: 0 }}
-              >
-                ← Back
-              </button>
-              <button
-                onClick={saveEdit}
-                disabled={editSaving}
-                style={{ flex: 1, height: 44, borderRadius: 10, border: "none", background: "#111827", color: "#fff", fontSize: 14, fontWeight: 700, cursor: editSaving ? "default" : "pointer", fontFamily: FF, opacity: editSaving ? 0.6 : 1 }}
-              >
-                {editSaving ? "Saving…" : "Save Changes"}
-              </button>
-            </div>
-          )
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={saveEdit}
+              disabled={editSaving}
+              style={{ flex: 1, height: 44, borderRadius: 10, border: "none", background: "#111827", color: "#fff", fontSize: 14, fontWeight: 700, cursor: editSaving ? "default" : "pointer", fontFamily: FF, opacity: editSaving ? 0.6 : 1 }}
+            >
+              {editSaving ? "Saving…" : "Save Changes"}
+            </button>
+          </div>
         }
       >
         {editEntry && (
-          editStep === 1 ? (
-            <TypePickerGrid
-              types={TYPE_CHOICES}
-              onSelect={type => { setF("tx_type", type); setEditStep(2); }}
-            />
-          ) : (
-            <TxForm
-              form={editForm}
-              set={setF}
-              fromOptions={editFromOptions}
-              toOptions={editToOptions}
-              accounts={accounts}
-              categories={categories}
-              incomeSrcs={incomeSrcs}
-              allCurrencies={allCurrencies}
-              amtIDR={editAmtIDR}
-              receivables={receivables}
-              assets={assets}
-              accountCurrencies={accountCurrencies}
-              onChangeType={() => setEditStep(1)}
-            />
-          )
+          <TxForm
+            form={editForm}
+            set={setF}
+            fromOptions={editFromOptions}
+            toOptions={editToOptions}
+            accounts={accounts}
+            categories={modalCategories.length > 0 ? modalCategories : categories}
+            incomeSrcs={incomeSrcs}
+            allCurrencies={allCurrencies}
+            amtIDR={editAmtIDR}
+            receivables={receivables}
+            assets={assets}
+            accountCurrencies={accountCurrencies}
+          />
         )}
       </Modal>
     </div>
