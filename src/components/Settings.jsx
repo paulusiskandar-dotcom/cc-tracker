@@ -1653,7 +1653,7 @@ function EStatementTab({
         toId   = !isDebit ? (defaultBank?.id || "") : "";
       }
 
-      // duplicate check — three levels
+      // duplicate check — exact criteria
       const amt = Number(t.amount || 0);
       const descSim = (a, b) => {
         const wordsA = new Set((a || "").toLowerCase().split(/\s+/).filter(w => w.length > 2));
@@ -1666,14 +1666,35 @@ function EStatementTab({
 
       let dupStatus = "new";
       let dupEntry  = null;
+      let dupReasons = [];
       for (const e of ledger) {
-        if (Math.abs(Number(e.amount_idr || e.amount || 0) - amt) > 1) continue;
+        const eAmt = Number(e.amount_idr || e.amount || 0);
+        if (Math.abs(eAmt - amt) > 0.01) continue;           // exact amount
         if (!e.tx_date || !t.date) continue;
-        const dayDiff = Math.abs(new Date(e.tx_date) - new Date(t.date)) / 86400000;
-        const sim = descSim(e.description || e.merchant_name, t.merchant || t.description);
-        if (dayDiff === 0 && sim >= 0.7) { dupStatus = "duplicate"; dupEntry = e; break; }
-        if (dayDiff <= 1 && sim >= 0.7) { dupStatus = "possible_duplicate"; dupEntry = e; break; }
-        if (dayDiff <= 1 && dupStatus === "new") { dupStatus = "review"; dupEntry = e; }
+        if (e.tx_date !== t.date) continue;                   // exact date
+        const eCurrency = (e.currency || "IDR").toUpperCase();
+        const tCurrency = (t.currency || "IDR").toUpperCase();
+        if (eCurrency !== tCurrency) continue;                // same currency
+
+        // Check description similarity or exact merchant match
+        const tDesc = (t.merchant || t.description || "").toLowerCase().trim();
+        const eDesc = (e.description || e.merchant_name || "").toLowerCase().trim();
+        const sim = descSim(eDesc, tDesc);
+        const merchantExact = tDesc && eDesc && tDesc === eDesc;
+        if (sim < 0.8 && !merchantExact) continue;           // desc sim > 80% OR exact merchant
+
+        const reasons = ["same date", "same amount", "same currency"];
+        if (sim >= 0.8) reasons.push(`${Math.round(sim * 100)}% desc match`);
+        if (merchantExact) reasons.push("exact merchant");
+        // Check account match (from_account_id)
+        if (fromId && e.from_account_id && fromId === e.from_account_id) {
+          reasons.push("same account");
+        }
+
+        dupStatus = "duplicate";
+        dupEntry  = e;
+        dupReasons = reasons;
+        break;
       }
 
       // installment cross-check
@@ -1711,6 +1732,7 @@ function EStatementTab({
         entity:           "",
         status:           dupStatus,
         _dupEntry:        dupEntry,
+        _dupReasons:      dupReasons,
         _isInstallment:   isInstallment,
         _instMatch:       instMatch,
         _instNo:          inst_no,

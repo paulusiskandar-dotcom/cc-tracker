@@ -196,9 +196,11 @@ function TxReviewCard({
   onCreateInstallment, confirmingId,
 }) {
   const [validErr, setValidErr] = useState(null);
-  const dupLevel = r.status === "duplicate" ? 3
-                 : r.status === "possible_duplicate" ? 2
-                 : r.status === "review" ? 1 : 0;
+  const [dupDismissed, setDupDismissed] = useState(false);
+  const rawDupLevel = r.status === "duplicate" ? 3
+                    : r.status === "possible_duplicate" ? 2
+                    : r.status === "review" ? 1 : 0;
+  const dupLevel = dupDismissed ? 0 : rawDupLevel;
 
   const cardBg = isSkipped ? T.sur2
                : dupLevel === 3 ? "#fff1f2"
@@ -376,13 +378,28 @@ function TxReviewCard({
       )}
 
       {/* ── Duplicate info ── */}
-      {dupLevel > 0 && r._dupEntry && (
-        <div style={{ borderTop: "1px solid #fde68a", background: "#fffbeb", padding: "5px 12px 6px 35px" }}>
-          <span style={{ fontSize: 10, color: "#92400e", fontFamily: "Figtree, sans-serif" }}>
-            Mirip: <strong>{r._dupEntry.description || r._dupEntry.merchant_name || "(no desc)"}</strong>
+      {rawDupLevel > 0 && !dupDismissed && r._dupEntry && (
+        <div style={{ borderTop: "1px solid #fde68a", background: "#fffbeb", padding: "5px 12px 6px 35px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 10, color: "#92400e", fontFamily: "Figtree, sans-serif", flex: 1, minWidth: 0 }}>
+            <span style={{ fontWeight: 600 }}>Similar to:</span>{" "}
+            <strong>{r._dupEntry.description || r._dupEntry.merchant_name || "(no desc)"}</strong>
             {" · "}{r._dupEntry.tx_date}
             {" · Rp "}{Number(r._dupEntry.amount_idr || 0).toLocaleString("id-ID")}
+            {r._dupReasons?.length > 0 && (
+              <span style={{ marginLeft: 6 }}>
+                {r._dupReasons.map(reason => (
+                  <span key={reason} style={{ display: "inline-block", background: "#fde68a", color: "#78350f", borderRadius: 3, padding: "1px 5px", fontSize: 9, fontWeight: 700, marginLeft: 3 }}>
+                    {reason}
+                  </span>
+                ))}
+              </span>
+            )}
           </span>
+          <button
+            onClick={() => setDupDismissed(true)}
+            style={{ fontSize: 10, fontWeight: 700, color: "#059669", background: "none", border: "1px solid #6ee7b7", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", flexShrink: 0 }}>
+            It's different
+          </button>
         </div>
       )}
 
