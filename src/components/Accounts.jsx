@@ -52,7 +52,7 @@ const CARD_PALETTE = [
 ];
 
 export default function Accounts({
-  user, accounts, ledger, onRefresh,
+  user, accounts, ledger, onRefresh, categories = [],
   setAccounts, setAccountCurrencies, accountCurrencies = [], CURRENCIES = [], fxRates = {},
   initialSubTab = "all",
 }) {
@@ -332,6 +332,8 @@ export default function Accounts({
         initialAccount={statementAcc}
         accounts={accounts.filter(a => a.type === "bank")}
         user={user}
+        categories={categories}
+        onRefresh={onRefresh}
         onBack={() => setStatementAcc(null)}
       />
     );

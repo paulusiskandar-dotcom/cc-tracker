@@ -1,7 +1,10 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../lib/supabase";
+import { ledgerApi } from "../api";
 import { fmtIDR } from "../utils";
-import { TX_TYPE_MAP } from "../constants";
+import { TX_TYPE_MAP, ENTITIES } from "../constants";
+import Modal from "./shared/Modal";
+import { showToast } from "./shared/Card";
 import * as XLSX from "xlsx";
 
 const FF = "Figtree, sans-serif";
@@ -88,13 +91,67 @@ function SummaryCard({ label, value, color, bg }) {
 }
 
 // ─── MAIN EXPORT ─────────────────────────────────────────────
-export default function BankStatement({ initialAccount, accounts, user, onBack }) {
+export default function BankStatement({ initialAccount, accounts, user, categories = [], onRefresh, onBack }) {
   const [accountId, setAccountId] = useState(initialAccount?.id || "");
   const [fromDate,  setFromDate]  = useState(firstOfMonthStr());
   const [toDate,    setToDate]    = useState(todayStr());
   const [loading,   setLoading]   = useState(false);
   const [data,      setData]      = useState(null);
+  const [hoveredId, setHoveredId] = useState(null);
+  const [editTx,    setEditTx]    = useState(null);
+  const [editForm,  setEditForm]  = useState({});
+  const [editSaving, setEditSaving] = useState(false);
   const printRef = useRef(null);
+
+  const setF = (k, v) => setEditForm(f => ({ ...f, [k]: v }));
+
+  // ── Open edit modal ────────────────────────────────────────
+  const openEdit = (tx) => {
+    setEditForm({
+      tx_date:       tx.tx_date       || "",
+      description:   tx.description   || tx.merchant_name || "",
+      amount:        tx.amount        || "",
+      currency:      tx.currency      || "IDR",
+      from_id:       tx.from_id       || "",
+      to_id:         tx.to_id         || "",
+      category_id:   tx.category_id   || "",
+      category_name: tx.category_name || "",
+      entity:        tx.entity        || "Personal",
+      notes:         tx.notes         || "",
+    });
+    setEditTx(tx);
+  };
+
+  // ── Save edit ──────────────────────────────────────────────
+  const saveEdit = async () => {
+    if (!editTx) return;
+    setEditSaving(true);
+    try {
+      const cat = categories.find(c => c.id === editForm.category_id);
+      const payload = {
+        tx_date:       editForm.tx_date,
+        description:   editForm.description || editTx.description || "",
+        merchant_name: editForm.description || editTx.merchant_name || null,
+        amount:        Number(editForm.amount) || 0,
+        currency:      editForm.currency || "IDR",
+        amount_idr:    Number(editForm.amount) || 0,
+        from_id:       editForm.from_id   || null,
+        to_id:         editForm.to_id     || null,
+        category_id:   editForm.category_id   || null,
+        category_name: cat?.name || editForm.category_name || null,
+        entity:        editForm.entity    || "Personal",
+        notes:         editForm.notes     || null,
+      };
+      await ledgerApi.update(editTx.id, payload);
+      showToast("Transaction updated");
+      setEditTx(null);
+      await load();
+      if (onRefresh) onRefresh();
+    } catch (e) {
+      showToast(e.message, "error");
+    }
+    setEditSaving(false);
+  };
 
   const selectedAccount = accounts.find(a => a.id === accountId) || null;
 
@@ -378,11 +435,12 @@ export default function BankStatement({ initialAccount, accounts, user, onBack }
                   const typeInfo = TX_TYPE_MAP[tx.tx_type];
                   const amt      = Number(tx.amount_idr || 0);
                   const subLine  = [tx.category_name, tx.entity && tx.entity !== "Personal" ? tx.entity : ""].filter(Boolean).join(" · ");
+                  const isHovered = hoveredId === tx.id;
                   return (
                     <div key={tx.id}
-                      style={{ display: "grid", gridTemplateColumns: COLS, borderBottom: "0.5px solid #f3f4f6", padding: ROW_PAD, alignItems: "center" }}
-                      onMouseEnter={e => e.currentTarget.style.background = "#fafafa"}
-                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                      style={{ position: "relative", display: "grid", gridTemplateColumns: COLS, borderBottom: "0.5px solid #f3f4f6", padding: ROW_PAD, alignItems: "center", background: isHovered ? "#fafafa" : "transparent" }}
+                      onMouseEnter={() => setHoveredId(tx.id)}
+                      onMouseLeave={() => setHoveredId(null)}
                     >
                       {/* Tanggal */}
                       <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, padding: "8px 6px", whiteSpace: "nowrap" }}>
@@ -424,6 +482,24 @@ export default function BankStatement({ initialAccount, accounts, user, onBack }
                       <div style={{ fontSize: 12, fontWeight: 700, color: "#111827", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
                         {fmtIDR(tx._runBal)}
                       </div>
+
+                      {/* Edit button — overlay, visible on row hover */}
+                      {isHovered && (
+                        <button
+                          className="no-print"
+                          onClick={() => openEdit(tx)}
+                          style={{
+                            position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+                            width: 26, height: 26, borderRadius: 6,
+                            border: "1px solid #e5e7eb", background: "#fff",
+                            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                            fontSize: 12, color: "#6b7280", boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
+                          }}
+                          title="Edit transaction"
+                        >
+                          ✎
+                        </button>
+                      )}
                     </div>
                   );
                 })}
@@ -454,6 +530,142 @@ export default function BankStatement({ initialAccount, accounts, user, onBack }
           </span>
         </div>
       )}
+
+      {/* ── Edit Transaction Modal ── */}
+      <Modal
+        isOpen={!!editTx}
+        onClose={() => setEditTx(null)}
+        title="Edit Transaction"
+        footer={
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={() => setEditTx(null)}
+              style={{ flex: 1, height: 44, borderRadius: 10, border: "1.5px solid #e5e7eb", background: "#fff", color: "#374151", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: FF }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={saveEdit}
+              disabled={editSaving}
+              style={{ flex: 2, height: 44, borderRadius: 10, border: "none", background: "#111827", color: "#fff", fontSize: 14, fontWeight: 700, cursor: editSaving ? "default" : "pointer", fontFamily: FF, opacity: editSaving ? 0.6 : 1 }}
+            >
+              {editSaving ? "Saving…" : "Save Changes"}
+            </button>
+          </div>
+        }
+      >
+        {editTx && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+            {/* Tx type badge (read-only) */}
+            {editTx.tx_type && TX_TYPE_MAP[editTx.tx_type] && (() => {
+              const ti = TX_TYPE_MAP[editTx.tx_type];
+              return (
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 20, background: ti.color + "18", border: `1.5px solid ${ti.color}33`, width: "fit-content" }}>
+                  <span style={{ fontSize: 14 }}>{ti.icon}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#374151", fontFamily: FF }}>{ti.label}</span>
+                </div>
+              );
+            })()}
+
+            {/* Date */}
+            <EditField label="Date">
+              <input type="date" value={editForm.tx_date} onChange={e => setF("tx_date", e.target.value)} style={EDIT_INPUT} />
+            </EditField>
+
+            {/* Description */}
+            <EditField label="Description">
+              <input type="text" value={editForm.description} onChange={e => setF("description", e.target.value)} placeholder="Description" style={EDIT_INPUT} />
+            </EditField>
+
+            {/* Amount + Currency */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 90px", gap: 8 }}>
+              <EditField label="Amount">
+                <input type="number" min="0" value={editForm.amount} onChange={e => setF("amount", e.target.value)} placeholder="0" style={EDIT_INPUT} />
+              </EditField>
+              <EditField label="Currency">
+                <select value={editForm.currency} onChange={e => setF("currency", e.target.value)} style={EDIT_INPUT}>
+                  {["IDR","USD","SGD","EUR","GBP","AUD","JPY","MYR"].map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </EditField>
+            </div>
+
+            {/* From Account */}
+            <EditField label="From Account">
+              <select value={editForm.from_id || ""} onChange={e => setF("from_id", e.target.value)} style={EDIT_INPUT}>
+                <option value="">— None —</option>
+                {accounts.filter(a => a.id).map(a => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </select>
+            </EditField>
+
+            {/* To Account */}
+            <EditField label="To Account">
+              <select value={editForm.to_id || ""} onChange={e => setF("to_id", e.target.value)} style={EDIT_INPUT}>
+                <option value="">— None —</option>
+                {accounts.filter(a => a.id).map(a => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </select>
+            </EditField>
+
+            {/* Category */}
+            <EditField label="Category">
+              <select
+                value={editForm.category_id || ""}
+                onChange={e => setF("category_id", e.target.value)}
+                style={EDIT_INPUT}
+              >
+                <option value="">— None —</option>
+                {categories.filter(c => c.is_active !== false).map(c => (
+                  <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ` : ""}{c.name || c.label}</option>
+                ))}
+              </select>
+            </EditField>
+
+            {/* Entity */}
+            <EditField label="Entity">
+              <select value={editForm.entity || "Personal"} onChange={e => setF("entity", e.target.value)} style={EDIT_INPUT}>
+                {ENTITIES.map(en => <option key={en} value={en}>{en}</option>)}
+              </select>
+            </EditField>
+
+            {/* Notes */}
+            <EditField label="Notes">
+              <textarea
+                value={editForm.notes || ""}
+                onChange={e => setF("notes", e.target.value)}
+                placeholder="Optional notes"
+                rows={2}
+                style={{ ...EDIT_INPUT, height: "auto", resize: "vertical", padding: "10px 14px" }}
+              />
+            </EditField>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
+
+// ── Edit modal helpers ────────────────────────────────────────
+function EditField({ label, children }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+      <label style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif" }}>
+        {label}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+const EDIT_INPUT = {
+  width: "100%", height: 44, padding: "0 14px",
+  border: "1.5px solid #e5e7eb", borderRadius: 10,
+  fontFamily: "Figtree, sans-serif", fontSize: 14, fontWeight: 500,
+  color: "#111827", background: "#fff", outline: "none",
+  boxSizing: "border-box",
+};
