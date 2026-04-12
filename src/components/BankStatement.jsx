@@ -3,12 +3,22 @@ import { supabase } from "../lib/supabase";
 import { ledgerApi, getTxFromToTypes, categoriesApi, recalculateBalance } from "../api";
 import { toIDR as toIDRFn, fmtIDR } from "../utils";
 import { TX_TYPE_MAP } from "../constants";
-import Modal from "./shared/Modal";
+import Modal, { ConfirmModal } from "./shared/Modal";
 import { showToast } from "./shared/Card";
 import { TxForm, EMPTY } from "./shared/TxForm";
 import * as XLSX from "xlsx";
 
 const FF = "Figtree, sans-serif";
+
+// Format a running/closing balance with red color when negative
+const fmtBal = (v) => {
+  const n = Number(v || 0);
+  return {
+    text:  fmtIDR(Math.abs(n)),
+    color: n < 0 ? "#A32D2D" : "#111827",
+    sign:  n < 0 ? "-" : "",
+  };
+};
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const firstOfMonthStr = () => {
@@ -86,7 +96,7 @@ function SummaryCard({ label, value, color, bg }) {
         {label}
       </div>
       <div style={{ fontSize: 16, fontWeight: 800, color, fontFamily: FF, lineHeight: 1.2 }}>
-        {fmtIDR(value)}
+        {value < 0 ? "-" : ""}{fmtIDR(value)}
       </div>
     </div>
   );
@@ -105,10 +115,12 @@ export default function BankStatement({
   const [loading,   setLoading]   = useState(false);
   const [data,      setData]      = useState(null);
   // Edit modal state
-  const [editEntry,      setEditEntry]      = useState(null);  // the original ledger row
-  const [editForm,       setEditForm]       = useState({});    // current form state
-  const [editSaving,     setEditSaving]     = useState(false);
-  const [modalCategories, setModalCategories] = useState([]);  // fetched fresh on open
+  const [editEntry,        setEditEntry]        = useState(null);  // the original ledger row
+  const [editForm,         setEditForm]         = useState({});    // current form state
+  const [editSaving,       setEditSaving]       = useState(false);
+  const [editConfirmDelete, setEditConfirmDelete] = useState(false); // confirm dialog
+  const [editDeleting,     setEditDeleting]     = useState(false);
+  const [modalCategories,  setModalCategories]  = useState([]);    // fetched fresh on open
   const printRef = useRef(null);
 
   const setF = (k, v) => setEditForm(f => ({ ...f, [k]: v }));
@@ -240,6 +252,28 @@ export default function BankStatement({
       showToast(e.message, "error");
     }
     setEditSaving(false);
+  };
+
+  // ── Delete from edit modal ─────────────────────────────────
+  const deleteFromEdit = async () => {
+    if (!editEntry) return;
+    setEditDeleting(true);
+    try {
+      const affectedIds = [
+        ...(editEntry.from_type === "account" && editEntry.from_id ? [editEntry.from_id] : []),
+        ...(editEntry.to_type   === "account" && editEntry.to_id   ? [editEntry.to_id]   : []),
+      ];
+      await ledgerApi.delete(editEntry.id, editEntry, accounts);
+      await Promise.all([...new Set(affectedIds)].map(id => recalculateBalance(id, user.id)));
+      showToast("Transaction deleted");
+      setEditConfirmDelete(false);
+      setEditEntry(null);
+      await load();
+      if (onRefresh) onRefresh();
+    } catch (e) {
+      showToast(e.message, "error");
+    }
+    setEditDeleting(false);
   };
 
   const selectedAccount = accounts.find(a => a.id === accountId) || null;
@@ -455,10 +489,10 @@ export default function BankStatement({
       {/* ── Summary cards ── */}
       {data && (
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <SummaryCard label="Opening Balance"  value={data.openingBal}  color="#1d4ed8" bg="#eff6ff" />
+          <SummaryCard label="Opening Balance"  value={data.openingBal}  color={data.openingBal  < 0 ? "#A32D2D" : "#1d4ed8"} bg={data.openingBal  < 0 ? "#fff1f2" : "#eff6ff"} />
           <SummaryCard label="Total Debit (Out)" value={data.totalDebit}  color="#A32D2D" bg="#fff1f2" />
           <SummaryCard label="Total Kredit (In)" value={data.totalCredit} color="#3B6D11" bg="#f0fdf4" />
-          <SummaryCard label="Closing Balance"  value={data.closingBal}  color="#111827" bg="#f9fafb" />
+          <SummaryCard label="Closing Balance"  value={data.closingBal}  color={data.closingBal < 0 ? "#A32D2D" : "#111827"} bg={data.closingBal < 0 ? "#fff1f2" : "#f9fafb"} />
         </div>
       )}
 
@@ -512,14 +546,16 @@ export default function BankStatement({
             </div>
 
             {/* Opening balance row */}
+            {(() => { const b = fmtBal(data.openingBal); const c = b.color === "#A32D2D" ? "#A32D2D" : "#1d4ed8"; return (
             <div style={{ display: "grid", gridTemplateColumns: COLS, background: "#eff6ff", borderBottom: "0.5px solid #dbeafe", padding: ROW_PAD }}>
-              <div style={{ fontSize: 11, color: "#1d4ed8", fontFamily: FF, padding: "7px 6px", whiteSpace: "nowrap" }}>{fmtDateShort(fromDate)}</div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#1d4ed8", fontFamily: FF, padding: "7px 6px" }}>Opening Balance</div>
+              <div style={{ fontSize: 11, color: c, fontFamily: FF, padding: "7px 6px", whiteSpace: "nowrap" }}>{fmtDateShort(fromDate)}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: c, fontFamily: FF, padding: "7px 6px" }}>Opening Balance</div>
               <div />{/* Jenis */}
               <div />{/* Debit */}
               <div />{/* Kredit */}
-              <div style={{ fontSize: 11, fontWeight: 800, color: "#1d4ed8", fontFamily: FF, padding: "7px 6px", textAlign: "right" }}>{fmtIDR(data.openingBal)}</div>
+              <div style={{ fontSize: 11, fontWeight: 800, color: c, fontFamily: FF, padding: "7px 6px", textAlign: "right" }}>{b.sign}{b.text}</div>
             </div>
+            ); })()}
 
             {/* Grouped transaction rows */}
             {grouped.map(([date, txs]) => (
@@ -576,9 +612,11 @@ export default function BankStatement({
                       </div>
 
                       {/* Saldo */}
-                      <div style={{ fontSize: 12, fontWeight: 700, color: "#111827", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
-                        {fmtIDR(tx._runBal)}
-                      </div>
+                      {(() => { const b = fmtBal(tx._runBal); return (
+                        <div style={{ fontSize: 12, fontWeight: 700, color: b.color, fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
+                          {b.sign}{b.text}
+                        </div>
+                      ); })()}
 
                       {/* Edit button — overlay, opacity 0→1 on row hover */}
                       <button
@@ -604,14 +642,16 @@ export default function BankStatement({
             ))}
 
             {/* Closing balance row */}
+            {(() => { const b = fmtBal(data.closingBal); return (
             <div style={{ display: "grid", gridTemplateColumns: COLS, background: "#f9fafb", borderTop: "1.5px solid #e5e7eb", padding: ROW_PAD }}>
               <div style={{ fontSize: 11, color: "#374151", fontFamily: FF, padding: "9px 6px", whiteSpace: "nowrap" }}>{fmtDateShort(toDate)}</div>
-              <div style={{ fontSize: 11, fontWeight: 800, color: "#111827", fontFamily: FF, padding: "9px 6px" }}>Closing Balance</div>
+              <div style={{ fontSize: 11, fontWeight: 800, color: b.color, fontFamily: FF, padding: "9px 6px" }}>Closing Balance</div>
               <div />{/* Jenis */}
               <div />{/* Debit */}
               <div />{/* Kredit */}
-              <div style={{ fontSize: 13, fontWeight: 800, color: "#111827", fontFamily: FF, padding: "9px 6px", textAlign: "right" }}>{fmtIDR(data.closingBal)}</div>
+              <div style={{ fontSize: 13, fontWeight: 800, color: b.color, fontFamily: FF, padding: "9px 6px", textAlign: "right" }}>{b.sign}{b.text}</div>
             </div>
+            ); })()}
           </div>
         );
       })()}
@@ -622,9 +662,11 @@ export default function BankStatement({
           <span style={{ fontSize: 12, color: "#9ca3af", fontFamily: FF }}>
             {rowsWithBalance.length} transaction{rowsWithBalance.length !== 1 ? "s" : ""} · {periodLabel}
           </span>
-          <span style={{ fontSize: 12, fontWeight: 700, color: "#111827", fontFamily: FF }}>
-            Closing balance: {fmtIDR(data.closingBal)}
-          </span>
+          {(() => { const b = fmtBal(data.closingBal); return (
+            <span style={{ fontSize: 12, fontWeight: 700, color: b.color, fontFamily: FF }}>
+              Closing balance: {b.sign}{b.text}
+            </span>
+          ); })()}
         </div>
       )}
 
@@ -635,6 +677,13 @@ export default function BankStatement({
         title="Edit Transaction"
         footer={
           <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={() => setEditConfirmDelete(true)}
+              disabled={editSaving}
+              style={{ height: 44, padding: "0 16px", borderRadius: 10, border: "1px solid #fca5a5", background: "#fff1f2", color: "#b91c1c", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: FF, flexShrink: 0 }}
+            >
+              Delete
+            </button>
             <button
               onClick={saveEdit}
               disabled={editSaving}
@@ -662,6 +711,17 @@ export default function BankStatement({
           />
         )}
       </Modal>
+
+      {/* ── Delete confirm ── */}
+      <ConfirmModal
+        isOpen={editConfirmDelete}
+        onClose={() => setEditConfirmDelete(false)}
+        onConfirm={deleteFromEdit}
+        title="Hapus Transaksi"
+        message="Hapus transaksi ini? Tindakan ini tidak bisa dibatalkan."
+        danger
+        busy={editDeleting}
+      />
     </div>
   );
 }

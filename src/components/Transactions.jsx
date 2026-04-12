@@ -704,9 +704,20 @@ export default function Transactions({
         footer={
           step === 2 && (
             <div style={{ display: "flex", gap: 8 }}>
-              <Button variant="secondary" onClick={() => setStep(1)} style={{ flexShrink: 0 }}>
-                ← Back
-              </Button>
+              {modal === "edit" && (
+                <Button
+                  variant="danger"
+                  style={{ flexShrink: 0 }}
+                  onClick={() => { setDeleteEntry(editEntry); setModal(null); }}
+                >
+                  Delete
+                </Button>
+              )}
+              {modal !== "edit" && (
+                <Button variant="secondary" onClick={() => setStep(1)} style={{ flexShrink: 0 }}>
+                  ← Back
+                </Button>
+              )}
               <Button fullWidth onClick={save} busy={saving}>
                 {modal === "edit" ? "Save Changes" : "Add Transaction"}
               </Button>
