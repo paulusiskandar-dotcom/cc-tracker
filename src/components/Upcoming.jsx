@@ -6,11 +6,15 @@ import Select from "./shared/Select";
 import { LIGHT, DARK } from "../theme";
 
 const TYPE_META = {
-  reminder:      { icon: "🔄", color: "#3b5bdb", bg: "#dbeafe" },
-  loan:          { icon: "👤", color: "#d97706", bg: "#fef3c7" },
-  receivable:    { icon: "📋", color: "#d97706", bg: "#fef9ec" },
-  loan_recv:     { icon: "💰", color: "#059669", bg: "#f0fdf4" },
-  installment:   { icon: "📅", color: "#9ca3af", bg: "#f3f4f6" },
+  reminder:         { icon: "🔄", color: "#3b5bdb", bg: "#dbeafe" },
+  loan:             { icon: "👤", color: "#d97706", bg: "#fef3c7" },
+  receivable:       { icon: "📋", color: "#d97706", bg: "#fef9ec" },
+  loan_recv:        { icon: "💰", color: "#059669", bg: "#f0fdf4" },
+  installment:      { icon: "📅", color: "#9ca3af", bg: "#f3f4f6" },
+  cc_due:           { icon: "💳", color: "#dc2626", bg: "#fde8e8" },
+  income_recur:     { icon: "↓",  color: "#059669", bg: "#f0fdf4" },
+  expense_recur:    { icon: "↑",  color: "#dc2626", bg: "#fee2e2" },
+  reimburse_pend:   { icon: "↙",  color: "#d97706", bg: "#fef9ec" },
 };
 
 export default function Upcoming({
@@ -38,6 +42,21 @@ export default function Upcoming({
   const [collectAmount, setCollectAmount] = useState("");
   const [collectBankId, setCollectBankId] = useState("");
   const [collectSaving, setCollectSaving] = useState(false);
+  // CC Pay modal
+  const [ccPayModal,  setCcPayModal]  = useState(false);
+  const [ccPayCard,   setCcPayCard]   = useState(null);
+  const [ccPayForm,   setCcPayForm]   = useState({ bankId: "", amount: "", date: todayStr() });
+  const [ccPaySaving, setCcPaySaving] = useState(false);
+  // Recurring confirm modal
+  const [recurModal,  setRecurModal]  = useState(false);
+  const [recurItem,   setRecurItem]   = useState(null);
+  const [recurForm,   setRecurForm]   = useState({ date: todayStr(), amount: "", from_id: "", to_id: "", notes: "" });
+  const [recurSaving, setRecurSaving] = useState(false);
+  // Reimburse pending settle
+  const [reimModal,   setReimModal]   = useState(false);
+  const [reimPend,    setReimPend]    = useState(null);
+  const [reimForm,    setReimForm]    = useState({ amount: "", date: todayStr(), to_id: "" });
+  const [reimSaving,  setReimSaving]  = useState(false);
 
   // ── Loan stats ──────────────────────────────────────────────
   const loansWithStats = useMemo(() => {
@@ -144,8 +163,77 @@ export default function Upcoming({
         });
       });
 
+    const cutoff = new Date(today.getTime() + 7 * 86400000);
+
+    // 6. CC Jatuh Tempo — due within next 7 days
+    creditCards.filter(cc => cc.due_day).forEach(cc => {
+      const dueDay = Number(cc.due_day);
+      let dueDate = new Date(today.getFullYear(), today.getMonth(), dueDay);
+      if (dueDate < today) dueDate = new Date(today.getFullYear(), today.getMonth() + 1, dueDay);
+      if (dueDate > cutoff) return;
+      all.push({
+        id: `cc-due-${cc.id}`,
+        type: "cc_due",
+        raw: cc,
+        date: dueDate.toISOString().slice(0, 10),
+        title: `${cc.name} — Jatuh Tempo`,
+        amount: Math.max(0, Number(cc.current_balance || 0)),
+        sub: `Balance: ${fmtIDR(Math.abs(Number(cc.current_balance || 0)))}`,
+        actionable: true,
+      });
+    });
+
+    // 7 & 8. Recurring income / expense — day_of_month within next 7 days, not already in reminders
+    const reminderTplIds = new Set(reminders.map(r => r.template_id || r.recurring_template_id).filter(Boolean));
+    recurTemplates
+      .filter(t => t.active && (t.tx_type === "income" || t.tx_type === "expense") && t.day_of_month)
+      .forEach(t => {
+        if (reminderTplIds.has(t.id)) return;
+        const dueDay = Number(t.day_of_month);
+        let dueDate = new Date(today.getFullYear(), today.getMonth(), dueDay);
+        if (dueDate < today) dueDate = new Date(today.getFullYear(), today.getMonth() + 1, dueDay);
+        if (dueDate > cutoff) return;
+        all.push({
+          id: `recur-${t.id}`,
+          type: t.tx_type === "income" ? "income_recur" : "expense_recur",
+          raw: t,
+          date: dueDate.toISOString().slice(0, 10),
+          title: `${t.name || (t.tx_type === "income" ? "Income" : "Expense")} — Recurring`,
+          amount: Number(t.amount || 0),
+          sub: t.entity || "",
+          actionable: true,
+        });
+      });
+
+    // 9. Reimburse Out Pending — net reimburse_out minus reimburse_in per entity > 0
+    const reimMap = {};
+    ledger.forEach(e => {
+      if (!e.entity) return;
+      if (e.tx_type === "reimburse_out") {
+        if (!reimMap[e.entity]) reimMap[e.entity] = { entity: e.entity, out: 0, in: 0, from_id: e.from_id };
+        reimMap[e.entity].out += Number(e.amount_idr || 0);
+      } else if (e.tx_type === "reimburse_in") {
+        if (!reimMap[e.entity]) reimMap[e.entity] = { entity: e.entity, out: 0, in: 0, from_id: null };
+        reimMap[e.entity].in += Number(e.amount_idr || 0);
+      }
+    });
+    Object.values(reimMap).forEach(v => {
+      const net = v.out - v.in;
+      if (net <= 0) return;
+      all.push({
+        id: `reim-pend-${v.entity}`,
+        type: "reimburse_pend",
+        raw: { ...v, net },
+        date: todayStr(),
+        title: `${v.entity} — Reimburse Pending`,
+        amount: net,
+        sub: `Pending: ${fmtIDR(net)}`,
+        actionable: true,
+      });
+    });
+
     return all.sort((a, b) => a.date.localeCompare(b.date));
-  }, [reminders, loansWithStats, receivables, installments, creditCards, bankAccounts]);
+  }, [reminders, loansWithStats, receivables, installments, creditCards, bankAccounts, recurTemplates, ledger]);
 
   // ── Actions ─────────────────────────────────────────────────
   const confirmReminder = async (r) => {
@@ -271,6 +359,107 @@ export default function Upcoming({
     setSaving(false);
   };
 
+  // ── CC Pay ──────────────────────────────────────────────────
+  const openCCPay = (cc) => {
+    setCcPayCard(cc);
+    setCcPayForm({ bankId: bankAccounts[0]?.id || "", amount: String(Math.max(0, Number(cc.current_balance || 0))), date: todayStr() });
+    setCcPayModal(true);
+  };
+
+  const doCCPay = async () => {
+    if (!ccPayCard || !ccPayForm.bankId || !ccPayForm.amount) return showToast("Fill required fields", "error");
+    setCcPaySaving(true);
+    try {
+      const amt = Number(ccPayForm.amount) || 0;
+      const created = await ledgerApi.create(user.id, {
+        tx_date:     ccPayForm.date || todayStr(),
+        description: `Pay ${ccPayCard.name} bill`,
+        amount:      amt, currency: "IDR", amount_idr: amt,
+        tx_type:     "pay_cc",
+        from_type:   "account", to_type: "account",
+        from_id:     ccPayForm.bankId,
+        to_id:       ccPayCard.id,
+        entity:      "Personal", notes: "",
+      }, accounts);
+      if (created) setLedger?.(p => [created, ...p]);
+      await Promise.all([recalculateBalance(ccPayForm.bankId, user.id), recalculateBalance(ccPayCard.id, user.id)]);
+      showToast(`Paid ${fmtIDR(amt)} to ${ccPayCard.name}`);
+      setCcPayModal(false);
+      await onRefresh?.();
+    } catch (e) { showToast(e.message, "error"); }
+    setCcPaySaving(false);
+  };
+
+  // ── Recurring Confirm ────────────────────────────────────────
+  const openRecurConfirm = (tmpl) => {
+    setRecurItem(tmpl);
+    setRecurForm({ date: todayStr(), amount: String(tmpl.amount || ""), from_id: tmpl.from_id || "", to_id: tmpl.to_id || "", notes: "" });
+    setRecurModal(true);
+  };
+
+  const doRecurConfirm = async () => {
+    if (!recurItem || !recurForm.amount) return showToast("Amount required", "error");
+    setRecurSaving(true);
+    try {
+      const amt = Number(recurForm.amount) || 0;
+      const created = await ledgerApi.create(user.id, {
+        tx_date:     recurForm.date || todayStr(),
+        description: recurItem.name || "Recurring",
+        amount: amt, currency: recurItem.currency || "IDR", amount_idr: amt,
+        tx_type:     recurItem.tx_type,
+        from_type:   "account", to_type: "account",
+        from_id:     recurForm.from_id || recurItem.from_id || null,
+        to_id:       recurForm.to_id   || recurItem.to_id   || null,
+        entity:      recurItem.entity || "",
+        category_id: recurItem.category_id || null,
+        notes:       recurForm.notes || "",
+      }, accounts);
+      if (created) setLedger?.(p => [created, ...p]);
+      const fromId = recurForm.from_id || recurItem.from_id;
+      const toId   = recurForm.to_id   || recurItem.to_id;
+      await Promise.all([
+        fromId ? recalculateBalance(fromId, user.id) : Promise.resolve(),
+        toId   ? recalculateBalance(toId,   user.id) : Promise.resolve(),
+      ]);
+      showToast(`${recurItem.name || "Recurring"} recorded`);
+      setRecurModal(false);
+      await onRefresh?.();
+    } catch (e) { showToast(e.message, "error"); }
+    setRecurSaving(false);
+  };
+
+  // ── Reimburse Pending Settle ─────────────────────────────────
+  const openReimSettle = (pend) => {
+    setReimPend(pend);
+    setReimForm({ amount: String(pend.net || ""), date: todayStr(), to_id: bankAccounts[0]?.id || "" });
+    setReimModal(true);
+  };
+
+  const doReimSettle = async () => {
+    if (!reimPend || !reimForm.to_id) return showToast("Select bank account", "error");
+    setReimSaving(true);
+    try {
+      const amt = Number(reimForm.amount) || reimPend.net;
+      const created = await ledgerApi.create(user.id, {
+        tx_date:     reimForm.date || todayStr(),
+        description: `${reimPend.entity} reimburse received`,
+        amount: amt, currency: "IDR", amount_idr: amt,
+        tx_type:     "reimburse_in",
+        from_type:   "account", to_type: "account",
+        from_id:     reimPend.from_id || reimForm.to_id,
+        to_id:       reimForm.to_id,
+        entity:      reimPend.entity || "",
+        category_id: null, notes: "",
+      }, accounts);
+      if (created) setLedger?.(p => [created, ...p]);
+      await recalculateBalance(reimForm.to_id, user.id);
+      showToast("Reimburse recorded");
+      setReimModal(false);
+      await onRefresh?.();
+    } catch (e) { showToast(e.message, "error"); }
+    setReimSaving(false);
+  };
+
   // ── Helpers ─────────────────────────────────────────────────
   const daysLabel = (dateStr) => {
     const diff = Math.ceil((new Date(dateStr) - new Date()) / 86400000);
@@ -305,11 +494,15 @@ export default function Upcoming({
         items.map(item => {
           const meta = TYPE_META[item.type] || TYPE_META.reminder;
           const dl   = daysLabel(item.date);
-          const isReminder   = item.type === "reminder";
-          const isLoan       = item.type === "loan";
-          const isReceivable = item.type === "receivable";
-          const isLoanRecv   = item.type === "loan_recv";
-          const isInstall    = item.type === "installment";
+          const isReminder    = item.type === "reminder";
+          const isLoan        = item.type === "loan";
+          const isReceivable  = item.type === "receivable";
+          const isLoanRecv    = item.type === "loan_recv";
+          const isInstall     = item.type === "installment";
+          const isCCDue       = item.type === "cc_due";
+          const isIncomeRecur = item.type === "income_recur";
+          const isExpenseRecur = item.type === "expense_recur";
+          const isReimPend    = item.type === "reimburse_pend";
 
           return (
             <div key={item.id} style={{
@@ -408,6 +601,30 @@ export default function Upcoming({
                   }}>
                     Info
                   </span>
+                )}
+                {isCCDue && (
+                  <button
+                    onClick={e => { e.stopPropagation(); e.preventDefault(); openCCPay(item.raw); }}
+                    style={{ ...BTN_BASE, background: "#ede9fe", color: "#7c3aed" }}
+                  >
+                    Pay
+                  </button>
+                )}
+                {(isIncomeRecur || isExpenseRecur) && (
+                  <button
+                    onClick={e => { e.stopPropagation(); e.preventDefault(); openRecurConfirm(item.raw); }}
+                    style={isIncomeRecur ? BTN_GREEN : { ...BTN_BASE, background: "#fee2e2", color: "#dc2626" }}
+                  >
+                    ✓ Record
+                  </button>
+                )}
+                {isReimPend && (
+                  <button
+                    onClick={e => { e.stopPropagation(); e.preventDefault(); openReimSettle(item.raw); }}
+                    style={BTN_AMBER}
+                  >
+                    Settle
+                  </button>
                 )}
               </div>
             </div>
@@ -519,6 +736,138 @@ export default function Upcoming({
                 placeholder="Select bank…"
               />
             </Field>
+          </div>
+        )}
+      </Modal>
+
+      {/* Pay CC Modal */}
+      <Modal
+        isOpen={ccPayModal && !!ccPayCard}
+        onClose={() => setCcPayModal(false)}
+        title={`Pay CC — ${ccPayCard?.name || ""}`}
+        footer={
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <Button variant="secondary" size="md" onClick={() => setCcPayModal(false)}>Cancel</Button>
+            <Button variant="primary" size="md" busy={ccPaySaving} disabled={!ccPayForm.bankId || !ccPayForm.amount} onClick={doCCPay}>
+              Pay
+            </Button>
+          </div>
+        }
+      >
+        {ccPayCard && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ background: "#f9fafb", borderRadius: 10, padding: "10px 14px", fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
+              Balance: <strong style={{ color: "#7c3aed" }}>{fmtIDR(Math.abs(Number(ccPayCard.current_balance || 0)))}</strong>
+            </div>
+            <FormRow>
+              <AmountInput label="Amount *" value={ccPayForm.amount} onChange={v => setCcPayForm(f => ({ ...f, amount: v }))} currency="IDR" />
+              <Field label="Date">
+                <Input type="date" value={ccPayForm.date} onChange={e => setCcPayForm(f => ({ ...f, date: e.target.value }))} />
+              </Field>
+            </FormRow>
+            <Field label="From Bank Account">
+              <Select
+                value={ccPayForm.bankId}
+                onChange={e => setCcPayForm(f => ({ ...f, bankId: e.target.value }))}
+                options={bankAccounts.map(a => ({ value: a.id, label: a.name }))}
+                placeholder="Select bank…"
+              />
+            </Field>
+          </div>
+        )}
+      </Modal>
+
+      {/* Recurring Confirm Modal */}
+      <Modal
+        isOpen={recurModal && !!recurItem}
+        onClose={() => setRecurModal(false)}
+        title={`Record — ${recurItem?.name || "Recurring"}`}
+        footer={
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <Button variant="secondary" size="md" onClick={() => setRecurModal(false)}>Cancel</Button>
+            <Button variant="primary" size="md" busy={recurSaving} disabled={!recurForm.amount} onClick={doRecurConfirm}>
+              ✓ Record
+            </Button>
+          </div>
+        }
+      >
+        {recurItem && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ background: "#f9fafb", borderRadius: 10, padding: "10px 14px", fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
+              {recurItem.entity && <span>Entity: <strong style={{ color: "#111827" }}>{recurItem.entity}</strong> · </span>}
+              Type: <strong style={{ color: recurItem.tx_type === "income" ? "#059669" : "#dc2626" }}>{recurItem.tx_type === "income" ? "Income" : "Expense"}</strong>
+            </div>
+            <FormRow>
+              <AmountInput label="Amount *" value={recurForm.amount} onChange={v => setRecurForm(f => ({ ...f, amount: v }))} currency={recurItem.currency || "IDR"} />
+              <Field label="Date">
+                <Input type="date" value={recurForm.date} onChange={e => setRecurForm(f => ({ ...f, date: e.target.value }))} />
+              </Field>
+            </FormRow>
+            {recurItem.tx_type === "income" && (
+              <Field label="To Account">
+                <Select
+                  value={recurForm.to_id}
+                  onChange={e => setRecurForm(f => ({ ...f, to_id: e.target.value }))}
+                  options={bankAccounts.map(a => ({ value: a.id, label: a.name }))}
+                  placeholder="Select account…"
+                />
+              </Field>
+            )}
+            {recurItem.tx_type === "expense" && (
+              <Field label="From Account">
+                <Select
+                  value={recurForm.from_id}
+                  onChange={e => setRecurForm(f => ({ ...f, from_id: e.target.value }))}
+                  options={bankAccounts.map(a => ({ value: a.id, label: a.name }))}
+                  placeholder="Select account…"
+                />
+              </Field>
+            )}
+            <Field label="Notes">
+              <Input value={recurForm.notes} onChange={e => setRecurForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional" />
+            </Field>
+          </div>
+        )}
+      </Modal>
+
+      {/* Reimburse Pending Settle Modal */}
+      <Modal
+        isOpen={reimModal && !!reimPend}
+        onClose={() => setReimModal(false)}
+        title={`Settle Reimburse — ${reimPend?.entity || ""}`}
+        footer={
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <Button variant="secondary" size="md" onClick={() => setReimModal(false)}>Cancel</Button>
+            <Button variant="primary" size="md" busy={reimSaving} disabled={!reimForm.to_id} onClick={doReimSettle}>
+              ✓ Record
+            </Button>
+          </div>
+        }
+      >
+        {reimPend && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ background: "#fef9ec", borderRadius: 10, padding: "10px 14px", fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
+              Pending: <strong style={{ color: "#d97706" }}>{fmtIDR(reimPend.net)}</strong>
+            </div>
+            <AmountInput
+              label="Amount Received"
+              value={reimForm.amount}
+              onChange={v => setReimForm(f => ({ ...f, amount: v }))}
+              currency="IDR"
+            />
+            <FormRow>
+              <Field label="To Bank Account">
+                <Select
+                  value={reimForm.to_id}
+                  onChange={e => setReimForm(f => ({ ...f, to_id: e.target.value }))}
+                  options={bankAccounts.map(a => ({ value: a.id, label: a.name }))}
+                  placeholder="Select bank…"
+                />
+              </Field>
+              <Field label="Date">
+                <Input type="date" value={reimForm.date} onChange={e => setReimForm(f => ({ ...f, date: e.target.value }))} />
+              </Field>
+            </FormRow>
           </div>
         )}
       </Modal>
