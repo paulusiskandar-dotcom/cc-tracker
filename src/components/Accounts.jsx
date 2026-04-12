@@ -54,6 +54,8 @@ const CARD_PALETTE = [
 export default function Accounts({
   user, accounts, ledger, onRefresh, categories = [],
   setAccounts, setAccountCurrencies, accountCurrencies = [], CURRENCIES = [], fxRates = {},
+  bankAccounts: bankAccountsProp = [], creditCards = [], assets = [], liabilities = [], receivables = [],
+  incomeSrcs = [],
   initialSubTab = "all",
 }) {
   // When initialSubTab != "all" the page is "locked" to that type — hide subtab bar
@@ -330,11 +332,20 @@ export default function Accounts({
     return (
       <BankStatement
         initialAccount={statementAcc}
-        accounts={accounts.filter(a => a.type === "bank")}
+        accounts={accounts}
         user={user}
         categories={categories}
         onRefresh={onRefresh}
         onBack={() => setStatementAcc(null)}
+        bankAccounts={bankAccounts}
+        creditCards={creditCards}
+        assets={assets}
+        liabilities={liabilities}
+        receivables={receivables}
+        accountCurrencies={accountCurrencies}
+        allCurrencies={CURRENCIES}
+        fxRates={fxRates}
+        incomeSrcs={incomeSrcs}
       />
     );
   }

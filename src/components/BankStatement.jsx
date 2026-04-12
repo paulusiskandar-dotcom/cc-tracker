@@ -1,10 +1,12 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../lib/supabase";
-import { ledgerApi } from "../api";
+import { ledgerApi, getTxFromToTypes } from "../api";
+import { toIDR as toIDRFn } from "../utils";
 import { fmtIDR } from "../utils";
-import { TX_TYPE_MAP, ENTITIES } from "../constants";
+import { TX_TYPE_MAP } from "../constants";
 import Modal from "./shared/Modal";
 import { showToast } from "./shared/Card";
+import { TxForm, TypePickerGrid, TYPE_CHOICES, EMPTY } from "./shared/TxForm";
 import * as XLSX from "xlsx";
 
 const FF = "Figtree, sans-serif";
@@ -91,60 +93,136 @@ function SummaryCard({ label, value, color, bg }) {
 }
 
 // ─── MAIN EXPORT ─────────────────────────────────────────────
-export default function BankStatement({ initialAccount, accounts, user, categories = [], onRefresh, onBack }) {
+export default function BankStatement({
+  initialAccount, accounts, user, categories = [], onRefresh, onBack,
+  bankAccounts: bankAccsProp = [], creditCards = [], assets = [], liabilities = [],
+  receivables = [], accountCurrencies = [], allCurrencies = [], fxRates = {},
+  incomeSrcs = [],
+}) {
   const [accountId, setAccountId] = useState(initialAccount?.id || "");
   const [fromDate,  setFromDate]  = useState(firstOfMonthStr());
   const [toDate,    setToDate]    = useState(todayStr());
   const [loading,   setLoading]   = useState(false);
   const [data,      setData]      = useState(null);
-  const [hoveredId, setHoveredId] = useState(null);
-  const [editTx,    setEditTx]    = useState(null);
-  const [editForm,  setEditForm]  = useState({});
+  // Edit modal state
+  const [editEntry, setEditEntry] = useState(null);   // the original ledger row
+  const [editForm,  setEditForm]  = useState({});     // current form state
+  const [editStep,  setEditStep]  = useState(2);      // 1=type picker, 2=form
   const [editSaving, setEditSaving] = useState(false);
   const printRef = useRef(null);
 
   const setF = (k, v) => setEditForm(f => ({ ...f, [k]: v }));
 
+  // Derive bank accounts from all accounts if not passed separately
+  const bankAccs = bankAccsProp.length > 0
+    ? bankAccsProp
+    : accounts.filter(a => a.type === "bank");
+
+  // Derive fromOptions / toOptions based on current edit tx type
+  const editType       = editForm.tx_type || "expense";
+  const editFromOptions = useMemo(() => ({
+    expense:       [...bankAccs, ...creditCards],
+    income:        [],
+    transfer:      [...bankAccs],
+    pay_cc:        [...bankAccs],
+    buy_asset:     [...bankAccs, ...creditCards],
+    sell_asset:    [...assets],
+    pay_liability: [...bankAccs],
+    reimburse_out: [...bankAccs, ...creditCards],
+    reimburse_in:  [...receivables],
+    give_loan:     [...bankAccs],
+    collect_loan:  [...receivables],
+    fx_exchange:   [...bankAccs],
+  })[editType] || accounts, [editType, bankAccs, creditCards, assets, receivables, accounts]);
+
+  const editToOptions = useMemo(() => ({
+    expense:       [],
+    income:        [...bankAccs],
+    transfer:      [...bankAccs],
+    pay_cc:        [...creditCards],
+    buy_asset:     [...assets],
+    sell_asset:    [...bankAccs],
+    pay_liability: [...liabilities],
+    reimburse_out: [...receivables],
+    reimburse_in:  [...bankAccs],
+    give_loan:     [...receivables],
+    collect_loan:  [...bankAccs],
+    fx_exchange:   [...bankAccs],
+  })[editType] || [], [editType, bankAccs, creditCards, assets, liabilities, receivables]);
+
+  const editAmtIDR = toIDRFn(Number(editForm.amount || 0), editForm.currency || "IDR", fxRates, allCurrencies);
+
   // ── Open edit modal ────────────────────────────────────────
   const openEdit = (tx) => {
+    const missingType = !tx.tx_type;
     setEditForm({
+      ...EMPTY,
       tx_date:       tx.tx_date       || "",
       description:   tx.description   || tx.merchant_name || "",
       amount:        tx.amount        || "",
       currency:      tx.currency      || "IDR",
-      from_id:       tx.from_id       || "",
-      to_id:         tx.to_id         || "",
-      category_id:   tx.category_id   || "",
-      category_name: tx.category_name || "",
+      tx_type:       tx.tx_type       || "expense",
+      from_id:       tx.from_id       || null,
+      to_id:         tx.to_id         || null,
+      from_type:     tx.from_type     || getTxFromToTypes(tx.tx_type || "expense").from_type,
+      to_type:       tx.to_type       || getTxFromToTypes(tx.tx_type || "expense").to_type,
+      category_id:   tx.category_id   || null,
+      category_name: tx.category_name || null,
       entity:        tx.entity        || "Personal",
       notes:         tx.notes         || "",
+      is_reimburse:  tx.is_reimburse  || false,
     });
-    setEditTx(tx);
+    setEditEntry(tx);
+    setEditStep(missingType ? 1 : 2);
   };
 
   // ── Save edit ──────────────────────────────────────────────
   const saveEdit = async () => {
-    if (!editTx) return;
+    if (!editEntry) return;
+    if (!editForm.amount || Number(editForm.amount) <= 0) {
+      showToast("Amount is required", "error"); return;
+    }
     setEditSaving(true);
     try {
-      const cat = categories.find(c => c.id === editForm.category_id);
-      const payload = {
-        tx_date:       editForm.tx_date,
-        description:   editForm.description || editTx.description || "",
-        merchant_name: editForm.description || editTx.merchant_name || null,
-        amount:        Number(editForm.amount) || 0,
-        currency:      editForm.currency || "IDR",
-        amount_idr:    Number(editForm.amount) || 0,
-        from_id:       editForm.from_id   || null,
-        to_id:         editForm.to_id     || null,
-        category_id:   editForm.category_id   || null,
-        category_name: cat?.name || editForm.category_name || null,
-        entity:        editForm.entity    || "Personal",
-        notes:         editForm.notes     || null,
+      const uuid = (v) => (v && typeof v === "string" && v.length === 36) ? v : null;
+      const sn   = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
+      const type = editForm.tx_type;
+      const cat  = categories.find(c => c.id === editForm.category_id);
+      const { from_type, to_type } = getTxFromToTypes(type);
+      const AUTO_DESC = {
+        transfer: "Transfer", pay_cc: "CC Payment", buy_asset: "Asset Purchase",
+        sell_asset: "Asset Sale", give_loan: "Employee Loan", collect_loan: "Loan Collection",
+        reimburse_in: "Reimburse Received", pay_liability: "Liability Payment", fx_exchange: "FX Exchange",
       };
-      await ledgerApi.update(editTx.id, payload);
+      const description = editForm.description?.trim() || AUTO_DESC[type] || "Transaction";
+      let computedAmtIDR = sn(editAmtIDR);
+      let computedFxRate = null;
+      if (type === "fx_exchange") {
+        const rate = sn(editForm.fx_rate_used);
+        computedFxRate = rate || null;
+        if (rate > 0) computedAmtIDR = Math.round(sn(editForm.amount) * rate);
+      }
+      const entry = {
+        tx_date:       editForm.tx_date || todayStr(),
+        description,
+        amount:        sn(editForm.amount),
+        currency:      editForm.currency || "IDR",
+        amount_idr:    computedAmtIDR,
+        fx_rate_used:  computedFxRate,
+        tx_type:       type,
+        from_type,  to_type,
+        from_id:       uuid(editForm.from_id),
+        to_id:         uuid(editForm.to_id),
+        category_id:   uuid(editForm.category_id),
+        category_name: cat?.name || editForm.category_name || null,
+        entity:        type === "reimburse_out" ? (editForm.entity || "Hamasa") : (editForm.entity || "Personal"),
+        is_reimburse:  editForm.is_reimburse || false,
+        merchant_name: null,
+        notes:         editForm.notes || null,
+      };
+      await ledgerApi.update(editEntry.id, entry);
       showToast("Transaction updated");
-      setEditTx(null);
+      setEditEntry(null);
       await load();
       if (onRefresh) onRefresh();
     } catch (e) {
@@ -435,12 +513,11 @@ export default function BankStatement({ initialAccount, accounts, user, categori
                   const typeInfo = TX_TYPE_MAP[tx.tx_type];
                   const amt      = Number(tx.amount_idr || 0);
                   const subLine  = [tx.category_name, tx.entity && tx.entity !== "Personal" ? tx.entity : ""].filter(Boolean).join(" · ");
-                  const isHovered = hoveredId === tx.id;
                   return (
                     <div key={tx.id}
-                      style={{ position: "relative", display: "grid", gridTemplateColumns: COLS, borderBottom: "0.5px solid #f3f4f6", padding: ROW_PAD, alignItems: "center", background: isHovered ? "#fafafa" : "transparent" }}
-                      onMouseEnter={() => setHoveredId(tx.id)}
-                      onMouseLeave={() => setHoveredId(null)}
+                      style={{ position: "relative", display: "grid", gridTemplateColumns: COLS, borderBottom: "0.5px solid #f3f4f6", padding: ROW_PAD, alignItems: "center" }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "#fafafa"; e.currentTarget.querySelector(".edit-btn")?.style && (e.currentTarget.querySelector(".edit-btn").style.opacity = "1"); }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.querySelector(".edit-btn")?.style && (e.currentTarget.querySelector(".edit-btn").style.opacity = "0"); }}
                     >
                       {/* Tanggal */}
                       <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, padding: "8px 6px", whiteSpace: "nowrap" }}>
@@ -483,23 +560,23 @@ export default function BankStatement({ initialAccount, accounts, user, categori
                         {fmtIDR(tx._runBal)}
                       </div>
 
-                      {/* Edit button — overlay, visible on row hover */}
-                      {isHovered && (
-                        <button
-                          className="no-print"
-                          onClick={() => openEdit(tx)}
-                          style={{
-                            position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
-                            width: 26, height: 26, borderRadius: 6,
-                            border: "1px solid #e5e7eb", background: "#fff",
-                            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-                            fontSize: 12, color: "#6b7280", boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
-                          }}
-                          title="Edit transaction"
-                        >
-                          ✎
-                        </button>
-                      )}
+                      {/* Edit button — overlay, opacity 0→1 on row hover */}
+                      <button
+                        className="edit-btn no-print"
+                        onClick={e => { e.stopPropagation(); openEdit(tx); }}
+                        style={{
+                          position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+                          width: 26, height: 26, borderRadius: 6,
+                          border: "1px solid #e5e7eb", background: "#fff",
+                          cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 14, color: "#9ca3af",
+                          opacity: 0, transition: "opacity 0.15s",
+                          padding: "4px 8px", boxSizing: "border-box",
+                        }}
+                        title="Edit transaction"
+                      >
+                        ✎
+                      </button>
                     </div>
                   );
                 })}
@@ -533,139 +610,54 @@ export default function BankStatement({ initialAccount, accounts, user, categori
 
       {/* ── Edit Transaction Modal ── */}
       <Modal
-        isOpen={!!editTx}
-        onClose={() => setEditTx(null)}
-        title="Edit Transaction"
+        isOpen={!!editEntry}
+        onClose={() => setEditEntry(null)}
+        title={editStep === 1 ? "Change Type" : "Edit Transaction"}
         footer={
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              onClick={() => setEditTx(null)}
-              style={{ flex: 1, height: 44, borderRadius: 10, border: "1.5px solid #e5e7eb", background: "#fff", color: "#374151", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: FF }}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={saveEdit}
-              disabled={editSaving}
-              style={{ flex: 2, height: 44, borderRadius: 10, border: "none", background: "#111827", color: "#fff", fontSize: 14, fontWeight: 700, cursor: editSaving ? "default" : "pointer", fontFamily: FF, opacity: editSaving ? 0.6 : 1 }}
-            >
-              {editSaving ? "Saving…" : "Save Changes"}
-            </button>
-          </div>
+          editStep === 2 && (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={() => setEditStep(1)}
+                style={{ height: 44, padding: "0 16px", borderRadius: 10, border: "1.5px solid #e5e7eb", background: "#fff", color: "#374151", fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: FF, flexShrink: 0 }}
+              >
+                ← Back
+              </button>
+              <button
+                onClick={saveEdit}
+                disabled={editSaving}
+                style={{ flex: 1, height: 44, borderRadius: 10, border: "none", background: "#111827", color: "#fff", fontSize: 14, fontWeight: 700, cursor: editSaving ? "default" : "pointer", fontFamily: FF, opacity: editSaving ? 0.6 : 1 }}
+              >
+                {editSaving ? "Saving…" : "Save Changes"}
+              </button>
+            </div>
+          )
         }
       >
-        {editTx && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-
-            {/* Tx type badge (read-only) */}
-            {editTx.tx_type && TX_TYPE_MAP[editTx.tx_type] && (() => {
-              const ti = TX_TYPE_MAP[editTx.tx_type];
-              return (
-                <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", borderRadius: 20, background: ti.color + "18", border: `1.5px solid ${ti.color}33`, width: "fit-content" }}>
-                  <span style={{ fontSize: 14 }}>{ti.icon}</span>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: "#374151", fontFamily: FF }}>{ti.label}</span>
-                </div>
-              );
-            })()}
-
-            {/* Date */}
-            <EditField label="Date">
-              <input type="date" value={editForm.tx_date} onChange={e => setF("tx_date", e.target.value)} style={EDIT_INPUT} />
-            </EditField>
-
-            {/* Description */}
-            <EditField label="Description">
-              <input type="text" value={editForm.description} onChange={e => setF("description", e.target.value)} placeholder="Description" style={EDIT_INPUT} />
-            </EditField>
-
-            {/* Amount + Currency */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 90px", gap: 8 }}>
-              <EditField label="Amount">
-                <input type="number" min="0" value={editForm.amount} onChange={e => setF("amount", e.target.value)} placeholder="0" style={EDIT_INPUT} />
-              </EditField>
-              <EditField label="Currency">
-                <select value={editForm.currency} onChange={e => setF("currency", e.target.value)} style={EDIT_INPUT}>
-                  {["IDR","USD","SGD","EUR","GBP","AUD","JPY","MYR"].map(c => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-              </EditField>
-            </div>
-
-            {/* From Account */}
-            <EditField label="From Account">
-              <select value={editForm.from_id || ""} onChange={e => setF("from_id", e.target.value)} style={EDIT_INPUT}>
-                <option value="">— None —</option>
-                {accounts.filter(a => a.id).map(a => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </select>
-            </EditField>
-
-            {/* To Account */}
-            <EditField label="To Account">
-              <select value={editForm.to_id || ""} onChange={e => setF("to_id", e.target.value)} style={EDIT_INPUT}>
-                <option value="">— None —</option>
-                {accounts.filter(a => a.id).map(a => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </select>
-            </EditField>
-
-            {/* Category */}
-            <EditField label="Category">
-              <select
-                value={editForm.category_id || ""}
-                onChange={e => setF("category_id", e.target.value)}
-                style={EDIT_INPUT}
-              >
-                <option value="">— None —</option>
-                {categories.filter(c => c.is_active !== false).map(c => (
-                  <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ` : ""}{c.name || c.label}</option>
-                ))}
-              </select>
-            </EditField>
-
-            {/* Entity */}
-            <EditField label="Entity">
-              <select value={editForm.entity || "Personal"} onChange={e => setF("entity", e.target.value)} style={EDIT_INPUT}>
-                {ENTITIES.map(en => <option key={en} value={en}>{en}</option>)}
-              </select>
-            </EditField>
-
-            {/* Notes */}
-            <EditField label="Notes">
-              <textarea
-                value={editForm.notes || ""}
-                onChange={e => setF("notes", e.target.value)}
-                placeholder="Optional notes"
-                rows={2}
-                style={{ ...EDIT_INPUT, height: "auto", resize: "vertical", padding: "10px 14px" }}
-              />
-            </EditField>
-          </div>
+        {editEntry && (
+          editStep === 1 ? (
+            <TypePickerGrid
+              types={TYPE_CHOICES}
+              onSelect={type => { setF("tx_type", type); setEditStep(2); }}
+            />
+          ) : (
+            <TxForm
+              form={editForm}
+              set={setF}
+              fromOptions={editFromOptions}
+              toOptions={editToOptions}
+              accounts={accounts}
+              categories={categories}
+              incomeSrcs={incomeSrcs}
+              allCurrencies={allCurrencies}
+              amtIDR={editAmtIDR}
+              receivables={receivables}
+              assets={assets}
+              accountCurrencies={accountCurrencies}
+              onChangeType={() => setEditStep(1)}
+            />
+          )
         )}
       </Modal>
     </div>
   );
 }
-
-// ── Edit modal helpers ────────────────────────────────────────
-function EditField({ label, children }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-      <label style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif" }}>
-        {label}
-      </label>
-      {children}
-    </div>
-  );
-}
-
-const EDIT_INPUT = {
-  width: "100%", height: 44, padding: "0 14px",
-  border: "1.5px solid #e5e7eb", borderRadius: 10,
-  fontFamily: "Figtree, sans-serif", fontSize: 14, fontWeight: 500,
-  color: "#111827", background: "#fff", outline: "none",
-  boxSizing: "border-box",
-};
