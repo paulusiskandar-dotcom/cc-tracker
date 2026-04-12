@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { ledgerApi, installmentsApi, recurringApi, getTxFromToTypes, accountsApi } from "../api";
+import CCStatement from "./CCStatement";
 import { ENTITIES, BANKS_L, NETWORKS } from "../constants";
 import { fmtIDR, todayStr, ym, daysUntil } from "../utils";
 import Modal, { ConfirmModal } from "./shared/Modal";
@@ -52,8 +53,9 @@ export default function CreditCards({
   setAccounts, setLedger, setInstallments, setRecurTemplates,
   onRefresh, bankAccounts: propBankAccounts,
 }) {
-  const [subTab,       setSubTab]       = useState("overview");
-  const [selectedCard, setSelectedCard] = useState(null);
+  const [subTab,           setSubTab]           = useState("overview");
+  const [selectedCard,     setSelectedCard]     = useState(null);
+  const [ccStatementAcc,   setCcStatementAcc]   = useState(null);
   const [ccBankFilter, setCcBankFilter] = useState("all");
   const [ccSort,       setCcSort]       = useState(() => localStorage.getItem("sort_cc") || "debt_desc");
   const [filterMonth,  setFilterMonth]  = useState("");
@@ -390,6 +392,28 @@ export default function CreditCards({
   };
 
   // ─── RENDER ────────────────────────────────────────────────
+  if (ccStatementAcc) {
+    return (
+      <CCStatement
+        initialAccount={ccStatementAcc}
+        accounts={accounts}
+        user={user}
+        categories={[]}
+        onRefresh={onRefresh}
+        onBack={() => setCcStatementAcc(null)}
+        bankAccounts={bankAccounts}
+        creditCards={creditCards}
+        assets={[]}
+        liabilities={[]}
+        receivables={[]}
+        accountCurrencies={[]}
+        allCurrencies={[]}
+        fxRates={{}}
+        incomeSrcs={[]}
+      />
+    );
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
@@ -520,6 +544,7 @@ export default function CreditCards({
                         onPay={() => { setPayForm(f => ({ ...f, cardId: cc.id, amount: cc.debt })); setModal("pay"); }}
                         onTransactions={() => { setSelectedCard(cc.id); setSubTab("transactions"); }}
                         onInstallments={() => setSubTab("installments")}
+                        onStatement={() => setCcStatementAcc(cc)}
                         onEdit={() => openEditCard(cc)}
                       />
                     ))}
@@ -1073,7 +1098,7 @@ function SharedLimitGroupCard({ group, cardStats, paletteStart = 0, onPay, onTra
 }
 
 // ─── CC CARD (new compact design) ───────────────────────────
-function CCCard({ cc, color, onPay, onTransactions, onInstallments, onEdit }) {
+function CCCard({ cc, color, onPay, onTransactions, onInstallments, onStatement, onEdit }) {
   const utilColor = cc.util > 80 ? "#dc2626" : cc.util > 60 ? "#d97706" : "#059669";
   const netw      = NETWORK_STYLE[cc.network];
 
@@ -1163,10 +1188,11 @@ function CCCard({ cc, color, onPay, onTransactions, onInstallments, onEdit }) {
         )}
 
         {/* Action buttons */}
-        <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
+        <div style={{ display: "flex", gap: 6, marginTop: "auto", flexWrap: "wrap" }}>
           <button onClick={onPay}          style={CC_BTN("#fde8e8", "#dc2626", "#fecaca")}>💳 Pay</button>
           <button onClick={onTransactions} style={CC_BTN("#f3f4f6", "#374151", "#e5e7eb")}>Txns</button>
           <button onClick={onInstallments} style={CC_BTN("#f3f4f6", "#374151", "#e5e7eb")}>Install.</button>
+          <button onClick={onStatement}    style={CC_BTN("#f0f9ff", "#0369a1", "#bae6fd")}>Statement</button>
         </div>
       </div>
     </div>

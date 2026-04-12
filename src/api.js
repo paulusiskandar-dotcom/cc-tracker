@@ -278,21 +278,31 @@ export const ledgerApi = {
 };
 
 // ─── RECALCULATE BALANCE ──────────────────────────────────────
-// Recomputes current_balance = initial_balance + all credits - all debits.
-// Call after every ledger mutation for each affected account.
+// Recomputes current_balance from scratch.
+// Bank/cash: to_id=account → credit (+), from_id=account → debit (-)
+// Credit card: from_id=cc → charge/debt (+), to_id=cc → payment/debt (-)
 export const recalculateBalance = async (accountId, userId) => {
   if (!accountId || !userId) return null;
   const { data: acc } = await supabase
-    .from("accounts").select("initial_balance").eq("id", accountId).single();
+    .from("accounts").select("initial_balance, type").eq("id", accountId).single();
   const { data: txns } = await supabase
     .from("ledger")
     .select("amount_idr, from_id, from_type, to_id, to_type")
     .eq("user_id", userId)
     .or(`from_id.eq.${accountId},to_id.eq.${accountId}`);
   let balance = Number(acc?.initial_balance || 0);
+  const isCC  = acc?.type === "credit_card";
   for (const tx of (txns || [])) {
-    if (tx.to_id === accountId && tx.to_type === "account")   balance += Number(tx.amount_idr || 0);
-    if (tx.from_id === accountId && tx.from_type === "account") balance -= Number(tx.amount_idr || 0);
+    const amt = Number(tx.amount_idr || 0);
+    if (isCC) {
+      // CC: spending charges add to debt; payments reduce it
+      if (tx.from_id === accountId && tx.from_type === "account") balance += amt;
+      if (tx.to_id   === accountId && tx.to_type   === "account") balance -= amt;
+    } else {
+      // Bank/cash/receivable: incoming credits add; outgoing debits subtract
+      if (tx.to_id   === accountId && tx.to_type   === "account") balance += amt;
+      if (tx.from_id === accountId && tx.from_type === "account") balance -= amt;
+    }
   }
   await supabase.from("accounts").update({ current_balance: balance }).eq("id", accountId);
   return balance;

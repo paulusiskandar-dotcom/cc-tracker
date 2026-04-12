@@ -403,7 +403,7 @@ export function TxForm({ form, set, fromOptions, toOptions, accounts, categories
   }
 
   const needsTo     = toOptions.length > 0 && !["reimburse_out"].includes(type);
-  const needsCat    = ["expense", "reimburse_out", "reimburse_in"].includes(type);
+  const needsCat    = ["expense"].includes(type);
   const needsEntity = ["reimburse_out", "reimburse_in"].includes(type);
 
   const ENTITY_OPTS = ["Hamasa", "SDC", "Travelio"];
@@ -573,10 +573,10 @@ export function TxForm({ form, set, fromOptions, toOptions, accounts, categories
         );
       })()}
 
-      {/* FROM ACCOUNT — regular select for non-two-step types */}
-      {!hasTwoStep && fromOptions.length > 0 && !["buy_asset","sell_asset","fx_exchange"].includes(type) && (
+      {/* FROM ACCOUNT — regular select for non-two-step types (hide receivable for reimburse_in) */}
+      {!hasTwoStep && fromOptions.length > 0 && !["buy_asset","sell_asset","fx_exchange","reimburse_in"].includes(type) && (
         <Select
-          label={(type === "collect_loan" || type === "reimburse_in") ? "Receivable" : "From Account"}
+          label={type === "collect_loan" ? "Receivable" : "From Account"}
           value={form.from_id || ""}
           onChange={e => set("from_id", e.target.value.length === 36 ? e.target.value : null)}
           options={fromOpts}
@@ -584,17 +584,31 @@ export function TxForm({ form, set, fromOptions, toOptions, accounts, categories
         />
       )}
 
-      {/* ENTITY — for reimburse_out and reimburse_in */}
+      {/* ENTITY — for reimburse_out and reimburse_in (auto-fills category + to_id/receivable) */}
       {needsEntity && (
-        <Field label="Entity">
+        <Field label="Entity *">
           <div style={{ display: "flex", gap: 6 }}>
             {ENTITY_OPTS.map(ent => (
               <button key={ent} type="button"
                 onClick={() => {
                   set("entity", ent);
+                  // Auto-set receivable to_id for reimburse_out
                   if (type === "reimburse_out") {
                     const rec = receivables.find(r => r.entity === ent);
                     set("to_id", rec?.id || null);
+                  }
+                  // Auto-fill category for both reimburse types
+                  const entLower = ent.toLowerCase();
+                  const matchedCat = categories.find(c => {
+                    const name = (c.name || c.label || "").toLowerCase();
+                    return name.includes("re ") && name.includes(entLower);
+                  }) || categories.find(c => {
+                    const name = (c.name || c.label || "").toLowerCase();
+                    return name.includes(entLower);
+                  });
+                  if (matchedCat) {
+                    set("category_id",   matchedCat.id);
+                    set("category_name", matchedCat.name || matchedCat.label || null);
                   }
                 }}
                 style={pillStyle(form.entity === ent, type === "reimburse_out" ? "#d97706" : "#059669")}>

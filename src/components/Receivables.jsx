@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { ledgerApi, employeeLoanApi, loanPaymentsApi, recalculateBalance } from "../api";
+import EmployeeLoanStatement from "./EmployeeLoanStatement";
 import { supabase } from "../lib/supabase";
 import { fmtIDR, todayStr, agingLabel } from "../utils";
 import SortDropdown from "./shared/SortDropdown";
@@ -132,6 +133,9 @@ export default function Receivables({
   const [selectedIn,    setSelectedIn]   = useState({}); // { accId: Set<ledgerId> }
   const [settling,      setSettling]     = useState(false);
   const [expandedSett,  setExpandedSett] = useState(new Set());
+
+  // ── Loan statement state ─────────────────────────────────────
+  const [loanStatementRec, setLoanStatementRec] = useState(null);
 
   // ── Personal Loan collect modal ───────────────────────────────
   const [collectModal,  setCollectModal]  = useState(false);
@@ -552,6 +556,21 @@ export default function Receivables({
     return dues[0].toLocaleDateString("en-US", { month: "short", day: "numeric" });
   })();
 
+  // ── Loan Statement full-page render ─────────────────────────
+  if (loanStatementRec) {
+    return (
+      <EmployeeLoanStatement
+        receivable={loanStatementRec}
+        ledger={ledger}
+        accounts={accounts}
+        user={user}
+        onBack={() => setLoanStatementRec(null)}
+        onCollect={() => openCollect(loanStatementRec)}
+        onGiveLoan={null}
+      />
+    );
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
@@ -895,14 +914,21 @@ export default function Receivables({
                           </div>
                         </div>
                       </div>
-                      <Button
-                        variant="primary" size="sm"
-                        onClick={() => openCollect(r)}
-                        disabled={outstanding <= 0}
-                        style={{ flexShrink: 0 }}
-                      >
-                        + Collect
-                      </Button>
+                      <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                        <Button
+                          variant="secondary" size="sm"
+                          onClick={() => setLoanStatementRec(r)}
+                        >
+                          Statement
+                        </Button>
+                        <Button
+                          variant="primary" size="sm"
+                          onClick={() => openCollect(r)}
+                          disabled={outstanding <= 0}
+                        >
+                          + Collect
+                        </Button>
+                      </div>
                     </div>
 
                     {/* Payment history */}

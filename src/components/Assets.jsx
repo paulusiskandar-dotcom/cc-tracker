@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
-import { accountsApi } from "../api";
+import { accountsApi, ledgerApi, getTxFromToTypes } from "../api";
 import { supabase } from "../lib/supabase";
+import AssetTimeline from "./AssetTimeline";
 import { fmtIDR, todayStr } from "../utils";
 import { ASSET_SUBTYPES, ASSET_ICON, ASSET_COL } from "../constants";
 import { LIGHT, DARK } from "../theme";
@@ -151,12 +152,11 @@ function AssetHistory({ asset, ledger, accounts }) {
 }
 
 // ─── ASSET CARD ───────────────────────────────────────────────
-function AssetCard({ asset: a, ledger, valueHistoryCount = 0, color, onUpdate, onHistory }) {
+function AssetCard({ asset: a, ledger, valueHistoryCount = 0, color, onUpdate, onTimeline }) {
   const cur      = Number(a.current_value || 0);
   const bought   = Number(a.purchase_price || 0);
   const gain     = cur - bought;
   const gainPct  = bought > 0 ? (gain / bought) * 100 : 0;
-  const txCount  = ledger.filter(e => e.from_id === a.id || e.to_id === a.id).length + valueHistoryCount;
   const icon     = ASSET_ICON[a.subtype] || "📦";
 
   return (
@@ -200,8 +200,8 @@ function AssetCard({ asset: a, ledger, valueHistoryCount = 0, color, onUpdate, o
 
         {/* Actions */}
         <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
-          <button onClick={onHistory} style={ACCT_BTN}>📋 {txCount}</button>
-          <button onClick={onUpdate} style={{ ...ACCT_BTN, flex: 1 }}>✏️ Update Value</button>
+          <button onClick={onUpdate}   style={ACCT_BTN}>Update Value</button>
+          <button onClick={onTimeline} style={{ ...ACCT_BTN, flex: 1 }}>📋 Timeline</button>
         </div>
       </div>
     </div>
@@ -219,8 +219,8 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [updateForm,    setUpdateForm]    = useState({ value: "", date: todayStr(), notes: "" });
 
-  // History modal
-  const [histAsset, setHistAsset] = useState(null);
+  // Timeline state
+  const [timelineAsset, setTimelineAsset] = useState(null);
 
   // asset_value_history counts per account_id
   const [valueHistoryCounts, setValueHistoryCounts] = useState({});
@@ -365,6 +365,20 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
     setSaving(false);
   };
 
+  if (timelineAsset) {
+    return (
+      <AssetTimeline
+        asset={timelineAsset}
+        user={user}
+        accounts={accounts}
+        ledger={ledger}
+        onBack={() => setTimelineAsset(null)}
+        onRefresh={() => { /* parent handles refresh */ }}
+        setAccounts={setAccounts}
+      />
+    );
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
@@ -434,25 +448,13 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
                   valueHistoryCount={valueHistoryCounts[a.id] || 0}
                   color={color}
                   onUpdate={() => openUpdateModal(a)}
-                  onHistory={() => setHistAsset(a)}
+                  onTimeline={() => setTimelineAsset(a)}
                 />
               );
             })}
           </div>
         </>
       )}
-
-      {/* ── HISTORY MODAL ────────────────────────────────── */}
-      <Modal
-        isOpen={!!histAsset}
-        onClose={() => setHistAsset(null)}
-        title={histAsset ? `${histAsset.name} — History` : "History"}
-        width={520}
-      >
-        {histAsset && (
-          <AssetHistory asset={histAsset} ledger={ledger} accounts={accounts} />
-        )}
-      </Modal>
 
       {/* ── UPDATE VALUE MODAL ───────────────────────────── */}
       <Modal

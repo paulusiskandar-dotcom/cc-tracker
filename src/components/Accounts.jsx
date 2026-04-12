@@ -705,9 +705,8 @@ function BankAccountCard({ account: a, ledger, accountCurrencies = [], fxRates =
 
         {/* Actions */}
         <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
-          <button onClick={onHistory}                        style={ACCT_BTN}>📋 {txCount}</button>
           <button onClick={() => onStatement && onStatement(a)} style={ACCT_BTN}>📄 Statement</button>
-          <button onClick={onEdit}                           style={{ ...ACCT_BTN, flex: 1 }}>✏️ Edit</button>
+          <button onClick={onEdit}                              style={{ ...ACCT_BTN, flex: 1 }}>✏️ Edit</button>
         </div>
       </div>
     </div>
@@ -769,7 +768,6 @@ function CashAccountCard({ account: a, fxRates = {}, CURRENCIES: C = [], ledger,
 
         {/* Actions */}
         <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
-          <button onClick={onHistory}                           style={ACCT_BTN}>📋 {txCount}</button>
           <button onClick={() => onStatement && onStatement(a)} style={ACCT_BTN}>📄 Statement</button>
           <button onClick={onEdit}                              style={{ ...ACCT_BTN, flex: 1 }}>✏️ Edit</button>
         </div>
@@ -1271,9 +1269,6 @@ function AccountCard({ account: a, ledger, accounts, accountCurrencies = [], fxR
 
       {/* Action buttons */}
       <div style={{ display: "flex", gap: 6 }}>
-        <button onClick={onHistory} style={ACTION_BTN}>
-          📋 History ({txCount})
-        </button>
         {a.type === "asset" && a.subtype === "PT Investment" && (
           <button onClick={onUpdateNilai} style={{ ...ACTION_BTN, background: "#e8f4fd", color: "#3b5bdb", border: "1px solid #bfdbfe" }}>
             📊 Update Nilai
