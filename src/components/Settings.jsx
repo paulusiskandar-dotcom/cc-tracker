@@ -1500,7 +1500,8 @@ function EStatementTab({
   // ── Set account for a queue item (persisted to DB) ─────────
   const setItemAccount = (itemId, accountId) => {
     setQueue(prev => prev.map(i => i.id === itemId ? { ...i, account_id: accountId } : i));
-    supabase.from("estatement_pdfs").update({ account_id: accountId || null }).eq("id", itemId).catch(() => {});
+    supabase.from("estatement_pdfs").update({ account_id: accountId || null }).eq("id", itemId)
+      .then(null, (e) => console.error("[setItemAccount]", e));
   };
 
   const readFileAsBase64 = (file) => new Promise((resolve, reject) => {
@@ -1830,7 +1831,7 @@ function EStatementTab({
       const payload = buildPayload(row);
       const inserted = await ledgerApi.create(user.id, payload, accounts);
       if ((row.tx_type === "reimburse_in" || row.tx_type === "reimburse_out") && row.entity && inserted?.id) {
-        supabase.from("reimburse_settlements").insert({
+        const { error: rsErr } = await supabase.from("reimburse_settlements").insert({
           user_id:              user.id,
           entity:               row.entity,
           status:               "pending",
@@ -1840,7 +1841,8 @@ function EStatementTab({
           in_ledger_ids:        [],
           total_in:             0,
           reimbursable_expense: Number(row.amount_idr || row.amount || 0),
-        }).catch(() => {}); // fire-and-forget
+        });
+        if (rsErr) console.error("[reimburse_settlements saveRow]", rsErr);
       }
       removeRow(itemId, row._id);
       showToast(`Saved: ${row.description || "transaction"}`);
@@ -1851,10 +1853,19 @@ function EStatementTab({
   };
 
   // ── Save all checked rows (bulk import) ────────────────────
-  const saveFile = async (itemId) => {
+  // preFiltered: rows already validated by TransactionReviewList (optional)
+  const saveFile = async (itemId, preFiltered) => {
     const item = queue.find(i => i.id === itemId);
     if (!item?.rows) return;
-    const toSave = item.rows.filter(r => item.selected[r._id] && !item.skipped.has(r._id));
+    const candidates = preFiltered || item.rows.filter(r => item.selected[r._id] && !item.skipped.has(r._id));
+    // Validate: reject reimburse rows without entity
+    const REIMBURSE = new Set(["reimburse_in","reimburse_out"]);
+    const missing = candidates.filter(r => REIMBURSE.has(r.tx_type) && !r.entity);
+    if (missing.length) {
+      showToast(`${missing.length} reimburse row${missing.length > 1 ? "s" : ""} missing entity — please fill in before importing`, "error");
+      return;
+    }
+    const toSave = candidates;
     if (toSave.length === 0) { showToast("Nothing selected", "error"); return; }
     let count = 0;
     const savedIds = [];
@@ -1864,7 +1875,7 @@ function EStatementTab({
         savedIds.push(r._id);
         count++;
         if ((r.tx_type === "reimburse_in" || r.tx_type === "reimburse_out") && r.entity && inserted?.id) {
-          supabase.from("reimburse_settlements").insert({
+          const { error: rsErr } = await supabase.from("reimburse_settlements").insert({
             user_id:              user.id,
             entity:               r.entity,
             status:               "pending",
@@ -1874,7 +1885,8 @@ function EStatementTab({
             in_ledger_ids:        [],
             total_in:             0,
             reimbursable_expense: Number(r.amount_idr || r.amount || 0),
-          }).catch(() => {}); // fire-and-forget
+          });
+          if (rsErr) console.error("[reimburse_settlements saveFile]", rsErr);
         }
       } catch (e) {
         console.error("[saveFile] row error", e);
@@ -2048,7 +2060,7 @@ function EStatementTab({
                 item.rows?.forEach(r => { ns[r._id] = !allSel; });
                 setQueue(prev => prev.map(i => i.id === item.id ? { ...i, selected: ns } : i));
               }}
-              onSave={() => saveFile(item.id)}
+              onSave={(rows) => saveFile(item.id, rows)}
               onSaveRow={(row) => saveRow(item.id, row)}
               onSkipRow={(id) => removeRow(item.id, id)}
               onCreateInstallment={(row) => createInstallment(item.id, row)}
@@ -2234,7 +2246,7 @@ function EStmtQueueItem({
               onUpdateRow={(id, patch) => onUpdateRow(id, patch)}
               onConfirmRow={(row) => onSaveRow(row)}
               onSkipRow={(id) => onSkipRow(id)}
-              onConfirmAll={() => onSave()}
+              onConfirmAll={(selectedRows) => onSave(selectedRows)}
               onToggleSelect={(id) => onToggleSel(id)}
               onToggleAll={onToggleAll}
               source="estatement"

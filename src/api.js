@@ -241,7 +241,7 @@ export const ledgerApi = {
         in_ledger_ids:        [],
         total_in:             0,
         reimbursable_expense: amount,
-      }]).catch(() => {}); // fire-and-forget — don't block the main tx
+      }]).then(null, (e) => console.error("[reimburse_settlements]", e)); // fire-and-forget
     }
 
     return data;
