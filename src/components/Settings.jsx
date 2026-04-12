@@ -1821,55 +1821,106 @@ function EStatementTab({
 
   const buildPayload = (r) => {
     const txType          = r.tx_type === "cc_installment" ? "expense" : (r.tx_type || "expense");
-    const isReimburseType = txType === "reimburse_in" || txType === "reimburse_out";
-    const isDebit         = ["expense","transfer","pay_cc","buy_asset","pay_liability",
-                             "reimburse_out","reimburse_in","give_loan","fx_exchange","cc_installment"].includes(txType);
-    const { from_type, to_type } = getTxFromToTypes(txType);
-    const notes           = r._isInstallment && r._instNo
+    const isReimburseIn   = txType === "reimburse_in";
+    const isReimburseOut  = txType === "reimburse_out";
+    const isReimburseType = isReimburseIn || isReimburseOut;
+
+    // For reimburse_in: from_type is "expense", from_id is the RE category for the entity
+    // e.g. entity "Hamasa" → look up category named "Hamasa RE"
+    let from_type, to_type, from_id;
+    if (isReimburseIn) {
+      from_type = "expense";
+      to_type   = "account";
+      const reCategory = r.entity
+        ? categories.find(c => c.name?.toLowerCase() === (r.entity + " re").toLowerCase())
+        : null;
+      from_id = reCategory?.id || null;
+    } else {
+      const ft  = getTxFromToTypes(txType);
+      from_type = ft.from_type;
+      to_type   = ft.to_type;
+      const isDebit = ["expense","transfer","pay_cc","buy_asset","pay_liability",
+                       "reimburse_out","give_loan","fx_exchange","cc_installment"].includes(txType);
+      from_id = isDebit && isUUID(r.from_id) ? r.from_id : null;
+    }
+
+    const notes = r._isInstallment && r._instNo
       ? `Cicilan ${r._instNo}${r._instTotal ? `/${r._instTotal}` : ""}${r.notes ? ` — ${r.notes}` : ""}`
       : (r.notes || null);
-    return {
+
+    // Amount is always stored as positive; sign is implied by tx_type
+    const amount     = Math.abs(Number(r.amount || 0));
+    const amount_idr = Math.abs(Number(r.amount_idr || r.amount || 0));
+
+    const catResolved = resolveCategoryIds(r.category_id, categories);
+
+    const payload = {
       tx_date:       r.tx_date,
       description:   r.description || "E-Statement import",
       merchant_name: r.description || null,
-      amount:        Number(r.amount || 0),
-      amount_idr:    Number(r.amount_idr || r.amount || 0),
+      amount,
+      amount_idr,
       currency:      r.currency || "IDR",
       tx_type:       txType,
-      from_id:       isDebit && isUUID(r.from_id) ? r.from_id : null,
+      from_id:       isUUID(from_id) ? from_id : null,
       from_type,
       to_id:         isUUID(r.to_id) ? r.to_id : null,
       to_type,
-      ...resolveCategoryIds(r.category_id, categories),
-      entity:        isReimburseType ? (r.entity || "Personal") : (r.entity || "Personal"),
+      category_id:   catResolved.category_id,
+      category_name: catResolved.category_name,
+      entity:        r.entity || "Personal",
       is_reimburse:  isReimburseType && !!r.entity,
       notes,
     };
+
+    console.log("[estatement] Saving row:", {
+      tx_date:      payload.tx_date,
+      tx_type:      payload.tx_type,
+      amount:       payload.amount,
+      description:  payload.description,
+      from_id:      payload.from_id,
+      from_type:    payload.from_type,
+      to_id:        payload.to_id,
+      to_type:      payload.to_type,
+      category_id:  payload.category_id,
+      category_name:payload.category_name,
+      entity:       payload.entity,
+      is_reimburse: payload.is_reimburse,
+      currency:     payload.currency,
+      _raw: { category_id: r.category_id, entity: r.entity, amount: r.amount, tx_type: r.tx_type },
+    });
+
+    return payload;
   };
 
   // ── Save ONE row immediately, remove from preview ──────────
-  const saveRow = async (itemId, row) => {
+  const saveRow = async (itemId, staleRow) => {
+    // Re-read from current queue state to guard against stale closure
+    // (user may have edited fields after the confirm closure was captured)
+    const currentItem = queue.find(i => i.id === itemId);
+    const row = (currentItem?.rows.find(r => r._id === staleRow._id)) || staleRow;
     try {
       const payload = buildPayload(row);
       const inserted = await ledgerApi.create(user.id, payload, accounts);
+      console.log("[estatement] Saved result:", { data: inserted, error: null });
       if ((row.tx_type === "reimburse_in" || row.tx_type === "reimburse_out") && row.entity && inserted?.id) {
         const { error: rsErr } = await supabase.from("reimburse_settlements").insert({
           user_id:              user.id,
           entity:               row.entity,
           status:               "pending",
-          total_out:            Number(row.amount_idr || row.amount || 0),
+          total_out:            Math.abs(Number(row.amount_idr || row.amount || 0)),
           linked_ledger_id:     inserted.id,
           out_ledger_ids:       [inserted.id],
           in_ledger_ids:        [],
           total_in:             0,
-          reimbursable_expense: Number(row.amount_idr || row.amount || 0),
+          reimbursable_expense: Math.abs(Number(row.amount_idr || row.amount || 0)),
         });
         if (rsErr) console.error("[reimburse_settlements saveRow]", rsErr);
       }
       removeRow(itemId, row._id);
       showToast(`Saved: ${row.description || "transaction"}`);
     } catch (e) {
-      console.error("[saveRow]", e);
+      console.error("[estatement] Saved result:", { data: null, error: e.message });
       showToast(`Error: ${e.message}`, "error");
     }
   };
@@ -1879,7 +1930,12 @@ function EStatementTab({
   const saveFile = async (itemId, preFiltered) => {
     const item = queue.find(i => i.id === itemId);
     if (!item?.rows) return;
-    const candidates = preFiltered || item.rows.filter(r => item.selected[r._id] && !item.skipped.has(r._id));
+    // Re-read each row from current queue state to get freshest field values
+    // (guards against stale closures from TransactionReviewList)
+    const freshRow = (r) => item.rows.find(q => q._id === r._id) || r;
+    const candidates = preFiltered
+      ? preFiltered.map(freshRow)
+      : item.rows.filter(r => item.selected[r._id] && !item.skipped.has(r._id));
     // Validate: reject reimburse rows without entity
     const REIMBURSE = new Set(["reimburse_in","reimburse_out"]);
     const missing = candidates.filter(r => REIMBURSE.has(r.tx_type) && !r.entity);
