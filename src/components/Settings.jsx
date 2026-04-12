@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import PILogo from "./PILogo";
-import { fxApi, merchantApi, settingsApi, recurringApi, gmailApi, accountsApi, installmentsApi } from "../api";
+import { fxApi, merchantApi, settingsApi, recurringApi, gmailApi, accountsApi, installmentsApi, ledgerApi, getTxFromToTypes } from "../api";
 import { fmtIDR } from "../utils";
 import { CURRENCIES, EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST, TX_TYPES, APP_VERSION, APP_BUILD } from "../constants";
 import { LIGHT, DARK } from "../theme";
@@ -1830,15 +1830,15 @@ function EStatementTab({
   const isUUID = (v) => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 
   const buildPayload = (r) => {
-    const txType         = r.tx_type === "cc_installment" ? "expense" : (r.tx_type || "expense");
+    const txType          = r.tx_type === "cc_installment" ? "expense" : (r.tx_type || "expense");
     const isReimburseType = txType === "reimburse_in" || txType === "reimburse_out";
-    const isDebit        = ["expense","transfer","pay_cc","buy_asset","pay_liability",
-                            "reimburse_out","reimburse_in","give_loan","fx_exchange","cc_installment"].includes(txType);
-    const notes          = r._isInstallment && r._instNo
+    const isDebit         = ["expense","transfer","pay_cc","buy_asset","pay_liability",
+                             "reimburse_out","reimburse_in","give_loan","fx_exchange","cc_installment"].includes(txType);
+    const { from_type, to_type } = getTxFromToTypes(txType);
+    const notes           = r._isInstallment && r._instNo
       ? `Cicilan ${r._instNo}${r._instTotal ? `/${r._instTotal}` : ""}${r.notes ? ` — ${r.notes}` : ""}`
       : (r.notes || null);
     return {
-      user_id:       user.id,
       tx_date:       r.tx_date,
       description:   r.description || "E-Statement import",
       merchant_name: r.description || null,
@@ -1847,11 +1847,12 @@ function EStatementTab({
       currency:      r.currency || "IDR",
       tx_type:       txType,
       from_id:       isDebit && isUUID(r.from_id) ? r.from_id : null,
-      from_type:     "account",
+      from_type,
       to_id:         isUUID(r.to_id) ? r.to_id : null,
-      to_type:       isUUID(r.to_id) ? "account" : txType,
-      category_id:   isUUID(r.category_id) ? r.category_id : null,
-      category_name: r.category_name || null,
+      to_type,
+      // category_id is a text slug (e.g. "food"), NOT a UUID — pass directly
+      category_id:   r.category_id || null,
+      category_name: r.category_id || null,   // ledger reads category_name for display
       entity:        isReimburseType ? (r.reimburse_entity || "Personal") : (r.entity || "Personal"),
       is_reimburse:  isReimburseType && !!r.reimburse_entity,
       notes,
@@ -1860,27 +1861,28 @@ function EStatementTab({
 
   // ── Save ONE row immediately, remove from preview ──────────
   const saveRow = async (itemId, row) => {
-    const { data: inserted, error: insErr } = await supabase.from("ledger").insert(buildPayload(row)).select("id").single();
-    if (insErr) {
-      console.error("ledger insert error", insErr);
-      showToast(`Error: ${insErr.message}`, "error");
-      return;
+    try {
+      const payload = buildPayload(row);
+      const inserted = await ledgerApi.create(user.id, payload, accounts);
+      if ((row.tx_type === "reimburse_in" || row.tx_type === "reimburse_out") && row.reimburse_entity && inserted?.id) {
+        supabase.from("reimburse_settlements").insert({
+          user_id:              user.id,
+          entity:               row.reimburse_entity,
+          status:               "pending",
+          total_out:            Number(row.amount_idr || row.amount || 0),
+          linked_ledger_id:     inserted.id,
+          out_ledger_ids:       [inserted.id],
+          in_ledger_ids:        [],
+          total_in:             0,
+          reimbursable_expense: Number(row.amount_idr || row.amount || 0),
+        }).catch(() => {}); // fire-and-forget
+      }
+      removeRow(itemId, row._id);
+      showToast(`Saved: ${row.description || "transaction"}`);
+    } catch (e) {
+      console.error("[saveRow]", e);
+      showToast(`Error: ${e.message}`, "error");
     }
-    if ((row.tx_type === "reimburse_in" || row.tx_type === "reimburse_out") && row.reimburse_entity && inserted?.id) {
-      supabase.from("reimburse_settlements").insert({
-        user_id:              user.id,
-        entity:               row.reimburse_entity,
-        status:               "pending",
-        total_out:            Number(row.amount_idr || row.amount || 0),
-        linked_ledger_id:     inserted.id,
-        out_ledger_ids:       [inserted.id],
-        in_ledger_ids:        [],
-        total_in:             0,
-        reimbursable_expense: Number(row.amount_idr || row.amount || 0),
-      }).catch(() => {}); // fire-and-forget
-    }
-    removeRow(itemId, row._id);
-    showToast(`Saved: ${row.description || "transaction"}`);
   };
 
   // ── Save all checked rows (bulk import) ────────────────────
@@ -1892,22 +1894,26 @@ function EStatementTab({
     let count = 0;
     const savedIds = [];
     for (const r of toSave) {
-      const { data: inserted, error: insErr } = await supabase.from("ledger").insert(buildPayload(r)).select("id").single();
-      if (insErr) { console.error("ledger insert error", insErr); showToast(`Error: ${insErr.message}`, "error"); continue; }
-      savedIds.push(r._id);
-      count++;
-      if ((r.tx_type === "reimburse_in" || r.tx_type === "reimburse_out") && r.reimburse_entity && inserted?.id) {
-        supabase.from("reimburse_settlements").insert({
-          user_id:              user.id,
-          entity:               r.reimburse_entity,
-          status:               "pending",
-          total_out:            Number(r.amount_idr || r.amount || 0),
-          linked_ledger_id:     inserted.id,
-          out_ledger_ids:       [inserted.id],
-          in_ledger_ids:        [],
-          total_in:             0,
-          reimbursable_expense: Number(r.amount_idr || r.amount || 0),
-        }).catch(() => {}); // fire-and-forget
+      try {
+        const inserted = await ledgerApi.create(user.id, buildPayload(r), accounts);
+        savedIds.push(r._id);
+        count++;
+        if ((r.tx_type === "reimburse_in" || r.tx_type === "reimburse_out") && r.reimburse_entity && inserted?.id) {
+          supabase.from("reimburse_settlements").insert({
+            user_id:              user.id,
+            entity:               r.reimburse_entity,
+            status:               "pending",
+            total_out:            Number(r.amount_idr || r.amount || 0),
+            linked_ledger_id:     inserted.id,
+            out_ledger_ids:       [inserted.id],
+            in_ledger_ids:        [],
+            total_in:             0,
+            reimbursable_expense: Number(r.amount_idr || r.amount || 0),
+          }).catch(() => {}); // fire-and-forget
+        }
+      } catch (e) {
+        console.error("[saveFile] row error", e);
+        showToast(`Error on "${r.description}": ${e.message}`, "error");
       }
     }
     if (savedIds.length === 0) return;
