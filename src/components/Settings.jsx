@@ -1498,8 +1498,24 @@ function EStatementTab({
   }, [user.id]);
 
   // ── Set account for a queue item (persisted to DB) ─────────
+  // Types where the statement account is the DESTINATION (money comes IN)
+  const INCOME_LIKE_TYPES = new Set(["income","collect_loan","reimburse_in","sell_asset"]);
+
+  const applyDefaultAccount = (row, accountId) => {
+    if (!accountId) return row;
+    // For income-like types, statement account is "to"; for all others it's "from"
+    return INCOME_LIKE_TYPES.has(row.tx_type)
+      ? { ...row, to_id: accountId }
+      : { ...row, from_id: accountId };
+  };
+
   const setItemAccount = (itemId, accountId) => {
-    setQueue(prev => prev.map(i => i.id === itemId ? { ...i, account_id: accountId } : i));
+    setQueue(prev => prev.map(i => {
+      if (i.id !== itemId) return i;
+      // If rows already built, update their default from/to accounts too
+      const rows = i.rows ? i.rows.map(r => applyDefaultAccount(r, accountId)) : null;
+      return { ...i, account_id: accountId, rows };
+    }));
     supabase.from("estatement_pdfs").update({ account_id: accountId || null }).eq("id", itemId)
       .then(null, (e) => console.error("[setItemAccount]", e));
   };
@@ -2258,34 +2274,33 @@ function EStmtQueueItem({
         </div>
       </div>
 
-      {/* ── Account selector (queued / failed) ── */}
-      {["queued","failed"].includes(item.status) && !item._uploading && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8,
-          padding: "8px 14px", borderBottom: `1px solid ${T.border}`,
-          background: item.account_id ? "#f0fdf4" : "#fefce8",
-        }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: item.account_id ? "#059669" : "#92400e", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
-            {item.account_id ? "📂 Statement account" : "⚠️ Select account"}
-          </span>
+      {/* ── Account selector (queued / failed: full picker; reviewed: default banner) ── */}
+      {!item._uploading && ["queued","failed","reviewed"].includes(item.status) && (() => {
+        const isReviewed = item.status === "reviewed";
+        const selectedAcct = accounts.find(a => a.id === item.account_id);
+        const acctLabel = selectedAcct
+          ? `${selectedAcct.name}${selectedAcct.last4 || selectedAcct.card_last4 ? ` ···${selectedAcct.last4 || selectedAcct.card_last4}` : ""}`
+          : null;
+        const AccountSelect = () => (
           <select
             value={item.account_id || ""}
             onChange={e => onSetAccount(e.target.value)}
             style={{
-              flex: 1, fontSize: 12, padding: "4px 6px", borderRadius: 6,
-              border: `1px solid ${item.account_id ? "#bbf7d0" : "#fcd34d"}`,
+              fontSize: isReviewed ? 11 : 12,
+              padding: isReviewed ? "3px 5px" : "4px 6px",
+              borderRadius: 6,
+              border: `1px solid ${item.account_id ? (isReviewed ? "#bae6fd" : "#bbf7d0") : "#fcd34d"}`,
               background: "white", color: "#111827",
               fontFamily: "Figtree, sans-serif", cursor: "pointer",
+              ...(isReviewed && acctLabel ? { width: "auto" } : { flex: 1 }),
             }}>
-            <option value="">— pick an account —</option>
+            <option value="">{isReviewed && acctLabel ? "Change…" : "— pick an account —"}</option>
             {[
-              { type: "bank",        label: "🏦 Bank"         },
-              { type: "cash",        label: "💵 Cash"         },
-              { type: "credit_card", label: "💳 Credit Cards"  },
-              { type: "asset",       label: "📈 Assets"       },
-              { type: "receivable",  label: "📋 Receivables"  },
+              { type: "bank",        label: "🏦 Bank"        },
+              { type: "cash",        label: "💵 Cash"        },
+              { type: "credit_card", label: "💳 Credit Cards" },
             ].map(g => {
-              const grp = accounts.filter(a => a.type === g.type).sort((a, b) => (a.name||"").localeCompare(b.name||""));
+              const grp = accounts.filter(a => a.type === g.type).sort((a,b) => (a.name||"").localeCompare(b.name||""));
               if (!grp.length) return null;
               return (
                 <optgroup key={g.type} label={g.label}>
@@ -2298,8 +2313,39 @@ function EStmtQueueItem({
               );
             })}
           </select>
-        </div>
-      )}
+        );
+        if (isReviewed) return (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+            padding: "7px 14px", borderBottom: `1px solid ${T.border}`,
+            background: item.account_id ? "#f0f9ff" : "#fefce8",
+          }}>
+            <span style={{ fontSize: 11, color: item.account_id ? "#0369a1" : "#92400e", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
+              All transactions default to:
+            </span>
+            {acctLabel
+              ? <span style={{ fontSize: 11, fontWeight: 700, color: "#0c4a6e", fontFamily: "Figtree, sans-serif", flex: 1 }}>{acctLabel}</span>
+              : <span style={{ fontSize: 11, color: "#92400e", fontFamily: "Figtree, sans-serif", flex: 1 }}>⚠ No account selected</span>
+            }
+            <AccountSelect />
+            <span style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
+              (applies to all rows)
+            </span>
+          </div>
+        );
+        return (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 8,
+            padding: "8px 14px", borderBottom: `1px solid ${T.border}`,
+            background: item.account_id ? "#f0fdf4" : "#fefce8",
+          }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: item.account_id ? "#059669" : "#92400e", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
+              {item.account_id ? "📂 Statement account" : "⚠️ Select account"}
+            </span>
+            <AccountSelect />
+          </div>
+        );
+      })()}
 
       {/* ── Error ── */}
       {item.error && (
