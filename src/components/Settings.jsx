@@ -1467,6 +1467,37 @@ const ESTMT_REIMBURSE_TYPES = new Set(["reimburse_in","reimburse_out"]);
 const ESTMT_CAT_FOR_TYPE = (t) =>
   ESTMT_INCOME_TYPES.has(t) ? INCOME_CATEGORIES_LIST : EXPENSE_CATEGORIES;
 
+// Render grouped <optgroup> options for an account list
+const ACCT_GROUPS = [
+  { type: "bank",        label: "🏦 Bank"        },
+  { type: "cash",        label: "💵 Cash"        },
+  { type: "credit_card", label: "💳 Credit Cards" },
+  { type: "asset",       label: "📈 Assets"      },
+  { type: "receivable",  label: "📋 Receivables" },
+];
+function GroupedAccountOptions({ accounts, placeholder = "— select —", showLast4 = false }) {
+  return (
+    <>
+      <option value="">{placeholder}</option>
+      {ACCT_GROUPS.map(g => {
+        const grp = [...accounts]
+          .filter(a => a.type === g.type)
+          .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+        if (!grp.length) return null;
+        return (
+          <optgroup key={g.type} label={g.label}>
+            {grp.map(a => (
+              <option key={a.id} value={a.id}>
+                {a.name}{showLast4 && (a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
+              </option>
+            ))}
+          </optgroup>
+        );
+      })}
+    </>
+  );
+}
+
 const fmtDateShort = (d) => {
   try { return new Date(d + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short" }); }
   catch { return d || ""; }
@@ -2230,12 +2261,7 @@ function EStmtQueueItem({
               background: "white", color: "#111827",
               fontFamily: "Figtree, sans-serif", cursor: "pointer",
             }}>
-            <option value="">— pick an account —</option>
-            {accounts.map(a => (
-              <option key={a.id} value={a.id}>
-                {a.name}{a.last4 || a.card_last4 ? ` ···${a.last4 || a.card_last4}` : ""}
-              </option>
-            ))}
+            <GroupedAccountOptions accounts={accounts} placeholder="— pick an account —" showLast4 />
           </select>
         </div>
       )}
@@ -2443,69 +2469,43 @@ function EStmtTxCard({
             <select style={{ ...sel, width: "100%" }}
               value={r.to_id || ""}
               onChange={e => onUpdate({ to_id: e.target.value })}>
-              <option value="">To Account…</option>
-              {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+              <GroupedAccountOptions accounts={allAccounts} placeholder="To Account…" showLast4 />
             </select>
 
-          /* Transfer: from bank → to bank */
-          ) : r.tx_type === "transfer" ? (
+          /* Transfer / Give Loan: from → to (all accounts) */
+          ) : ["transfer","give_loan"].includes(r.tx_type) ? (
             <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
               <select style={{ ...sel, flex: 1 }} value={r.from_id || ""}
                 onChange={e => onUpdate({ from_id: e.target.value })}>
-                <option value="">From…</option>
-                {allAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                <GroupedAccountOptions accounts={allAccounts} placeholder="From…" showLast4 />
               </select>
               <span style={{ fontSize: 10, color: T.text3, flexShrink: 0 }}>→</span>
               <select style={{ ...sel, flex: 1 }} value={r.to_id || ""}
                 onChange={e => onUpdate({ to_id: e.target.value })}>
-                <option value="">To…</option>
-                {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                <GroupedAccountOptions accounts={allAccounts} placeholder="To…" showLast4 />
               </select>
             </div>
 
-          /* Pay CC: from bank → to CC */
+          /* Pay CC: from any → to CC only */
           ) : r.tx_type === "pay_cc" ? (
             <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
               <select style={{ ...sel, flex: 1 }} value={r.from_id || ""}
                 onChange={e => onUpdate({ from_id: e.target.value })}>
-                <option value="">From…</option>
-                {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                <GroupedAccountOptions accounts={allAccounts} placeholder="From…" showLast4 />
               </select>
               <span style={{ fontSize: 10, color: T.text3, flexShrink: 0 }}>→</span>
               <select style={{ ...sel, flex: 1 }} value={r.to_id || ""}
                 onChange={e => onUpdate({ to_id: e.target.value })}>
-                <option value="">To CC…</option>
-                {ccAccounts.map(a => <option key={a.id} value={a.id}>{a.name}{a.last4 ? ` ···${a.last4}` : ""}</option>)}
+                <GroupedAccountOptions accounts={ccAccounts} placeholder="To CC…" showLast4 />
               </select>
             </div>
 
-          /* Give Loan: from bank → to bank */
-          ) : r.tx_type === "give_loan" ? (
-            <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-              <select style={{ ...sel, flex: 1 }} value={r.from_id || ""}
-                onChange={e => onUpdate({ from_id: e.target.value })}>
-                <option value="">From…</option>
-                {allAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </select>
-              <span style={{ fontSize: 10, color: T.text3, flexShrink: 0 }}>→</span>
-              <select style={{ ...sel, flex: 1 }} value={r.to_id || ""}
-                onChange={e => onUpdate({ to_id: e.target.value })}>
-                <option value="">To…</option>
-                {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </select>
-            </div>
-
-          /* All other debit types (expense, cc_installment, buy_asset, pay_liability, fx_exchange, reimburse_in, reimburse_out): from_id */
+          /* All other debit types: from_id */
           ) : (
             <select style={{ ...sel, width: "100%" }}
               value={r.from_id || ""}
               onChange={e => onUpdate({ from_id: e.target.value })}>
-              <option value="">From Account…</option>
-              {spendAccounts.map(a => (
-                <option key={a.id} value={a.id}>
-                  {a.name}{(a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
-                </option>
-              ))}
+              <GroupedAccountOptions accounts={allAccounts} placeholder="From Account…" showLast4 />
             </select>
           )}
         </div>
