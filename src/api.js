@@ -826,6 +826,17 @@ Be concise. Use short field values. Prioritize completing the full JSON array ov
     const { error } = await supabase.from("scan_batches").update(d).eq("id", id);
     if (error) throw new Error(error.message);
   },
+
+  loadBatches: async (userId) => {
+    const { data, error } = await supabase
+      .from("scan_batches")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("status", "extracted")
+      .order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return data || [];
+  },
 };
 
 // ─── GMAIL ────────────────────────────────────────────────────

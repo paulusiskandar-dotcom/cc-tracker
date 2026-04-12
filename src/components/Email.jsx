@@ -6,55 +6,8 @@ import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
 import {
   Button, EmptyState, showToast,
   SectionHeader, Field, Input, FormRow,
-  NativeAccountSelect,
+  TransactionReviewList,
 } from "./shared/index";
-
-// ── TX types (same as AIImport) ──────────────────────────────────
-const IMPORT_TX_TYPES = [
-  { value: "expense",       label: "Expense"       },
-  { value: "income",        label: "Income"        },
-  { value: "transfer",      label: "Transfer"      },
-  { value: "pay_cc",        label: "Pay CC"        },
-  { value: "reimburse_out", label: "Reimburse Out" },
-  { value: "reimburse_in",  label: "Reimburse In"  },
-  { value: "give_loan",     label: "Give Loan"     },
-  { value: "collect_loan",  label: "Collect Loan"  },
-  { value: "fx_exchange",   label: "FX Exchange"   },
-];
-
-const TYPE_COLOR = {
-  income:       "#3B6D11",
-  collect_loan: "#3B6D11",
-  reimburse_in: "#3B6D11",
-  expense:      "#A32D2D",
-  reimburse_out:"#c05e00",
-  give_loan:    "#6b21a8",
-  transfer:     "#185FA5",
-  pay_cc:       "#185FA5",
-  fx_exchange:  "#185FA5",
-};
-
-const NO_CAT       = new Set(["transfer","pay_cc","reimburse_out","reimburse_in","give_loan","collect_loan","fx_exchange"]);
-const INCOME_TYPES = new Set(["income","collect_loan","reimburse_in"]);
-
-const getCatOptions = (txType) =>
-  INCOME_TYPES.has(txType) ? INCOME_CATEGORIES_LIST : EXPENSE_CATEGORIES;
-
-const amtSign = (type) => {
-  if (INCOME_TYPES.has(type) || type === "fx_exchange") return "+";
-  if (["expense","give_loan","reimburse_out"].includes(type)) return "-";
-  return "";
-};
-
-const fmtAmt = (v) => {
-  const n = Math.round(Number(v) || 0);
-  return "Rp " + n.toLocaleString("id-ID", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-};
-
-const fmtDateShort = (d) => {
-  try { return new Date(d + "T12:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short" }); }
-  catch { return d || ""; }
-};
 
 // Convert a pendingSync item to the local editable row format
 const syncToRow = (s) => ({
@@ -72,195 +25,19 @@ const syncToRow = (s) => ({
   tx_type:       s.tx_type || "expense",
   from_id:       s.matched_account_id || "",
   to_id:         s.to_account_id || "",
-  category_id:   null,  // will be resolved via suggested_category_label on confirm
+  entity:        s.entity || "",
+  category_id:   null,
   suggested_category_label: s.suggested_category_label || "",
   notes:         "",
+  status:        "new",
 });
 
-// ── Inline style helpers (mirrors AIImport) ──────────────────────
-const inSel = (T, extra = {}) => ({
-  fontSize: 11, padding: "3px 4px", border: `1px solid ${T.border}`,
-  borderRadius: 5, background: T.surface, color: T.text,
-  fontFamily: "Figtree, sans-serif", cursor: "pointer",
-  boxSizing: "border-box", ...extra,
-});
-const inInp = (T, extra = {}) => ({
-  fontSize: 11, padding: "3px 5px", border: `1px solid ${T.border}`,
-  borderRadius: 5, background: T.surface, color: T.text,
-  fontFamily: "Figtree, sans-serif", boxSizing: "border-box", ...extra,
-});
 const ACT_BTN = (extra = {}) => ({
   width: 26, height: 26, borderRadius: 6, border: "1px solid #e5e7eb",
   background: "#f9fafb", cursor: "pointer", fontSize: 12, fontWeight: 700,
   display: "flex", alignItems: "center", justifyContent: "center",
   fontFamily: "Figtree, sans-serif", padding: 0, flexShrink: 0, ...extra,
 });
-
-// ── Account cell — same logic as AIImport CardAccountCell ─────────
-function CardAccountCell({ r, updateRow, T, accounts }) {
-  const t   = r.tx_type;
-  const sel = inSel(T, { width: "100%" });
-  const bankAccs = accounts.filter(a => a.type === "bank");
-  const ccAccs   = accounts.filter(a => a.type === "credit_card");
-
-  if (t === "pay_cc") return (
-    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-      <NativeAccountSelect accounts={bankAccs} style={{ ...sel, flex: 1 }}
-        value={r.from_id} placeholder="From Bank…"
-        onChange={e => updateRow(r._id, { from_id: e.target.value })} />
-      <span style={{ fontSize: 10, color: T.text3, flexShrink: 0 }}>→</span>
-      <select style={{ ...sel, flex: 1 }} value={r.to_id || ""}
-        onChange={e => updateRow(r._id, { to_id: e.target.value })}>
-        <option value="">To CC…</option>
-        {ccAccs.map(a => (
-          <option key={a.id} value={a.id}>
-            {a.name}{a.last4 ? ` ···${a.last4}` : ""}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-  if (t === "transfer") return (
-    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-      <NativeAccountSelect accounts={bankAccs} style={{ ...sel, flex: 1 }}
-        value={r.from_id} placeholder="From…"
-        onChange={e => updateRow(r._id, { from_id: e.target.value })} />
-      <span style={{ fontSize: 10, color: T.text3, flexShrink: 0 }}>→</span>
-      <NativeAccountSelect accounts={bankAccs} style={{ ...sel, flex: 1 }}
-        value={r.to_id} placeholder="To…"
-        onChange={e => updateRow(r._id, { to_id: e.target.value })} />
-    </div>
-  );
-  if (INCOME_TYPES.has(t)) return (
-    <NativeAccountSelect accounts={bankAccs} style={sel}
-      value={r.to_id} placeholder="To Account…"
-      onChange={e => updateRow(r._id, { to_id: e.target.value })} />
-  );
-  return (
-    <NativeAccountSelect accounts={accounts} showCC style={sel}
-      value={r.from_id} placeholder="From Account…"
-      onChange={e => updateRow(r._id, { from_id: e.target.value })} />
-  );
-}
-
-// ── Pending Tx Card — mirrors AIImport TxCard ─────────────────────
-function PendingTxCard({ r, checked, importing, importingId, T, accounts, categories, updateRow, onCheck, onConfirm, onSkip }) {
-  const isSelected = !!checked;
-  const showCat    = !NO_CAT.has(r.tx_type);
-  const cats       = getCatOptions(r.tx_type);
-  const color      = TYPE_COLOR[r.tx_type] || "#111827";
-  const sign       = amtSign(r.tx_type);
-  const amtStr     = `${sign}${fmtAmt(r.amount_idr || r.amount || 0)}`;
-  const sel11      = inSel(T, { fontSize: 11 });
-
-  return (
-    <div style={{
-      background: T.surface, border: `1px solid ${T.border}`,
-      borderRadius: 10, overflow: "hidden",
-      opacity: importing && importingId !== r._id ? 0.7 : 1,
-    }}>
-      {/* ROW 1: ☑ date desc amount ✓ ✕ */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px 5px" }}>
-        <input type="checkbox" checked={isSelected}
-          onChange={onCheck}
-          disabled={importing}
-          style={{ accentColor: "#3b5bdb", width: 15, height: 15, flexShrink: 0, cursor: "pointer" }} />
-
-        {/* Date (editable) */}
-        <input
-          type="date"
-          value={r.tx_date}
-          onChange={e => updateRow(r._id, { tx_date: e.target.value })}
-          style={inInp(T, { width: 106, fontSize: 11, flexShrink: 0 })}
-        />
-
-        {/* Description */}
-        <input
-          style={{
-            flex: 1, minWidth: 0, border: "none", background: "transparent",
-            outline: "none", fontSize: 13, fontWeight: 600, color: T.text,
-            fontFamily: "Figtree, sans-serif",
-          }}
-          value={r.description}
-          onChange={e => updateRow(r._id, { description: e.target.value })}
-          placeholder="Description…"
-        />
-
-        {/* Amount */}
-        <span style={{
-          fontSize: 13, fontWeight: 800, color,
-          fontFamily: "Figtree, sans-serif", flexShrink: 0, whiteSpace: "nowrap", marginLeft: 4,
-        }}>
-          {amtStr}
-        </span>
-
-        {/* ✓ confirm */}
-        <button
-          onClick={() => onConfirm(r)}
-          disabled={importing}
-          style={ACT_BTN({ background: "#dcfce7", color: "#059669", border: "1px solid #bbf7d0" })}
-          title="Confirm & import">
-          {importingId === r._id ? "…" : "✓"}
-        </button>
-
-        {/* ✕ skip */}
-        <button
-          onClick={() => onSkip(r)}
-          disabled={importing}
-          style={ACT_BTN({ color: "#9ca3af" })}
-          title="Skip">
-          ✕
-        </button>
-      </div>
-
-      {/* ROW 2: type [category] account [amount input] */}
-      <div style={{
-        display: "flex", alignItems: "center", flexWrap: "wrap", gap: 5,
-        padding: "2px 12px 9px 35px",
-      }}>
-        {/* Type */}
-        <select
-          style={{ ...sel11, width: 108, color: TYPE_COLOR[r.tx_type] || T.text, fontWeight: 600 }}
-          value={r.tx_type}
-          onChange={e => {
-            const t = e.target.value;
-            updateRow(r._id, { tx_type: t, category_id: NO_CAT.has(t) ? null : r.category_id });
-          }}>
-          {IMPORT_TX_TYPES.map(t => (
-            <option key={t.value} value={t.value}
-              style={{ color: TYPE_COLOR[t.value] || "inherit", fontWeight: 600 }}>
-              {t.label}
-            </option>
-          ))}
-        </select>
-
-        {/* Category */}
-        {showCat && (
-          <select style={{ ...sel11, width: 128 }}
-            value={r.category_id || ""}
-            onChange={e => updateRow(r._id, { category_id: e.target.value })}>
-            <option value="">Category…</option>
-            {cats.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-          </select>
-        )}
-
-        {/* Account */}
-        <div style={{ flex: 1, minWidth: 160 }}>
-          <CardAccountCell r={r} updateRow={updateRow} T={T} accounts={accounts} />
-        </div>
-
-        {/* Amount (editable) */}
-        <input
-          type="number"
-          style={inInp(T, { width: 100, textAlign: "right", fontWeight: 700, fontSize: 11, flexShrink: 0 })}
-          value={r.amount_idr || r.amount || ""}
-          onChange={e => updateRow(r._id, { amount: e.target.value, amount_idr: e.target.value })}
-          placeholder="Amount"
-        />
-      </div>
-    </div>
-  );
-}
 
 const SETUP_STEPS = [
   'Go to console.cloud.google.com → Create project "Paulus Finance"',
@@ -583,10 +360,8 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
 
   // Local editable rows (mirrors pendingSyncs but editable)
   const [rows,         setRows]         = useState(() => (pendingSyncs || []).map(syncToRow));
-  const [checked,      setChecked]      = useState(() => new Set((pendingSyncs || []).map(s => s.id)));
+  const [selected,     setSelected]     = useState(() => Object.fromEntries((pendingSyncs || []).map(s => [s.id, true])));
   const [importing,    setImporting]    = useState(false);
-  const [importingId,  setImportingId]  = useState(null);
-  const [progress,     setProgress]     = useState({ done: 0, total: 0 });
   const [failedRows,   setFailedRows]   = useState(null);
   const [loadingFailed,setLoadingFailed]= useState(false);
   const [reprocessing, setReprocessing] = useState(new Set());
@@ -595,16 +370,11 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
   useEffect(() => {
     setRows(prev => {
       const prevMap = new Map(prev.map(r => [r._id, r]));
-      return (pendingSyncs || []).map(s => {
-        // Keep local edits if row already exists
-        const existing = prevMap.get(s.id);
-        return existing || syncToRow(s);
-      });
+      return (pendingSyncs || []).map(s => prevMap.get(s.id) || syncToRow(s));
     });
-    setChecked(prev => {
-      const ids = new Set((pendingSyncs || []).map(s => s.id));
-      const next = new Set([...prev].filter(id => ids.has(id)));
-      (pendingSyncs || []).forEach(s => { if (!prev.has(s.id)) next.add(s.id); });
+    setSelected(prev => {
+      const next = {};
+      (pendingSyncs || []).forEach(s => { next[s.id] = s.id in prev ? prev[s.id] : true; });
       return next;
     });
   }, [pendingSyncs]);
@@ -614,13 +384,12 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
 
   const removeRow = (id) => {
     setRows(prev => prev.filter(r => r._id !== id));
-    setChecked(prev => { const n = new Set(prev); n.delete(id); return n; });
+    setSelected(prev => { const n = { ...prev }; delete n[id]; return n; });
     setPendingSyncs(p => p.filter(s => s.id !== id));
   };
 
   const buildEntry = (r) => {
     const { from_type, to_type } = getTxFromToTypes(r.tx_type);
-    // Resolve category: prefer local edit, fall back to AI suggestion
     let catId   = r.category_id || null;
     let catName = catId || null;
     if (!catId && r.suggested_category_label) {
@@ -642,11 +411,12 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       category_name: catName,
       entity:        "Personal",
       notes:         r.notes || `Imported from Gmail: ${r.subject || ""}`,
+      source:        "gmail",
+      email_sync_id: r.email_sync_id || r._id,
     };
   };
 
   const confirm = async (r) => {
-    setImportingId(r._id);
     try {
       const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
       setLedger(p => [created, ...p]);
@@ -655,31 +425,29 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       showToast("Imported");
       onRefresh?.();
     } catch (e) { showToast(e.message, "error"); }
-    setImportingId(null);
   };
 
-  const skip = async (r) => {
+  const skipById = async (id) => {
+    const r = rows.find(x => x._id === id);
+    if (!r) return;
     try {
       await gmailApi.updateSync(r.email_sync_id, { status: "skipped" });
-      removeRow(r._id);
+      removeRow(id);
       showToast("Skipped");
     } catch (e) { showToast(e.message, "error"); }
   };
 
-  const importAll = async () => {
-    const toImport = rows.filter(r => checked.has(r._id));
-    if (!toImport.length) return;
+  const importAll = async (selectedRows) => {
+    if (!selectedRows.length) return;
     setImporting(true);
-    setProgress({ done: 0, total: toImport.length });
     let count = 0;
-    for (const r of toImport) {
+    for (const r of selectedRows) {
       try {
         const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
         setLedger(p => [created, ...p]);
         await gmailApi.updateSync(r.email_sync_id, { status: "confirmed" });
         removeRow(r._id);
         count++;
-        setProgress({ done: count, total: toImport.length });
       } catch (_) { /* skip failures */ }
     }
     setImporting(false);
@@ -717,9 +485,6 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     } catch (e) { showToast(e.message, "error"); }
   };
 
-  const allChecked  = rows.length > 0 && rows.every(r => checked.has(r._id));
-  const countSel    = rows.filter(r => checked.has(r._id)).length;
-
   if (!rows.length && failedRows === null) return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <EmptyState icon="📧" title="No pending emails" message="Gmail sync will surface transactions here for review." />
@@ -732,54 +497,28 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      {/* ── Bulk action bar ── */}
-      {rows.length > 0 && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8, padding: "10px 14px",
-          background: T.surface, border: `1px solid ${T.border}`, borderRadius: 12,
-        }}>
-          <span style={{ fontSize: 12, color: T.text3, fontFamily: "Figtree, sans-serif", flex: 1 }}>
-            {importing ? `${progress.done} of ${progress.total}…` : `${countSel} of ${rows.length} selected`}
-          </span>
-          <button
-            onClick={() => setChecked(allChecked ? new Set() : new Set(rows.map(r => r._id)))}
-            disabled={importing}
-            style={{ height: 28, padding: "0 10px", border: `1px solid ${T.border}`, borderRadius: 7, cursor: "pointer", background: T.surface, color: T.text3, fontSize: 11, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
-          >
-            {allChecked ? "Deselect All" : "Select All"}
-          </button>
-          <button
-            onClick={importAll}
-            disabled={importing || !countSel}
-            style={{
-              height: 28, padding: "0 12px", border: "none", borderRadius: 7,
-              cursor: importing || !countSel ? "not-allowed" : "pointer",
-              background: !importing && countSel ? "#111827" : "#e5e7eb",
-              color:      !importing && countSel ? "#fff"     : "#9ca3af",
-              fontSize: 11, fontWeight: 700, fontFamily: "Figtree, sans-serif",
-            }}
-          >
-            {importing ? "Importing…" : "Confirm All ✓"}
-          </button>
-        </div>
-      )}
 
-      {/* ── Pending rows (inline TxCard style) ── */}
-      {rows.map(r => (
-        <PendingTxCard
-          key={r._id} r={r}
-          checked={checked.has(r._id)}
-          importing={importing}
-          importingId={importingId}
-          T={T}
+      {/* ── Pending rows via shared component ── */}
+      {rows.length > 0 && (
+        <TransactionReviewList
+          rows={rows}
+          selected={selected}
+          onUpdateRow={updateRow}
+          onConfirmRow={confirm}
+          onSkipRow={skipById}
+          onConfirmAll={importAll}
+          onToggleSelect={(id) => setSelected(s => ({ ...s, [id]: !s[id] }))}
+          onToggleAll={() => setSelected(
+            rows.length > 0 && rows.every(r => selected[r._id])
+              ? {}
+              : Object.fromEntries(rows.map(r => [r._id, true]))
+          )}
+          source="gmail"
           accounts={accounts}
-          categories={categories}
-          updateRow={updateRow}
-          onCheck={() => setChecked(prev => { const n = new Set(prev); n.has(r._id) ? n.delete(r._id) : n.add(r._id); return n; })}
-          onConfirm={confirm}
-          onSkip={skip}
+          T={T}
+          busy={importing}
         />
-      ))}
+      )}
 
       {/* ── Failed extractions section ── */}
       <div style={{ marginTop: 4 }}>

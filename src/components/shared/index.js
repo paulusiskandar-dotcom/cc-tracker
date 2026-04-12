@@ -17,3 +17,6 @@ export { default as TransactionRow }  from "./TransactionRow";
 export { DateGroupHeader, GroupedTransactionList } from "./TransactionRow";
 
 export { default as SortDropdown } from "./SortDropdown";
+
+export { default as TransactionReviewList } from "./TransactionReviewList";
+export { TX_REVIEW_TYPES } from "./TransactionReviewList";
