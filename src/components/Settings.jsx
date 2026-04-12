@@ -1489,17 +1489,18 @@ function EStatementTab({
       ]);
       if (pending) {
         setQueue(pending.map(r => ({
-          id:        r.id,
-          file:      null,
-          file_path: r.file_path || null,
-          name:      r.filename,
-          size:      r.file_size || 0,
-          status:    r.status,
-          rows:      null,
-          selected:  {},
-          notesOpen: new Set(),
-          skipped:   new Set(),
-          error:     null,
+          id:         r.id,
+          file:       null,
+          file_path:  r.file_path || null,
+          name:       r.filename,
+          size:       r.file_size || 0,
+          account_id: r.account_id || "",
+          status:     r.status,
+          rows:       null,
+          selected:   {},
+          notesOpen:  new Set(),
+          skipped:    new Set(),
+          error:      null,
           savedCount: null,
         })));
       }
@@ -1507,6 +1508,12 @@ function EStatementTab({
       setDbLoading(false);
     })();
   }, [user.id]);
+
+  // ── Set account for a queue item (persisted to DB) ─────────
+  const setItemAccount = (itemId, accountId) => {
+    setQueue(prev => prev.map(i => i.id === itemId ? { ...i, account_id: accountId } : i));
+    supabase.from("estatement_pdfs").update({ account_id: accountId || null }).eq("id", itemId).catch(() => {});
+  };
 
   const readFileAsBase64 = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -1542,6 +1549,7 @@ function EStatementTab({
       setQueue(prev => [...prev, {
         id, file: f, file_path: filePath,
         name: f.name, size: f.size, status: "queued",
+        account_id: "",
         rows: null, selected: {}, notesOpen: new Set(), skipped: new Set(),
         error: null, savedCount: null, _uploading: true,
       }]);
@@ -1573,7 +1581,9 @@ function EStatementTab({
   };
 
   // ── Categorize AI output → internal shape ─────────────────
-  const buildRows = (transactions) => {
+  // statementAccountId: the user-selected account for this statement — overrides
+  // any AI-guessed account. Debit txs use it as from_id; credit txs as to_id.
+  const buildRows = (transactions, statementAccountId = "") => {
     return transactions.map((t, idx) => {
       // direction
       const isDebit = t.direction ? t.direction === "out"
@@ -1633,18 +1643,26 @@ function EStatementTab({
         }
       }
 
-      // account matching via card_last4
+      // Account assignment — use the user-selected statement account when available,
+      // otherwise fall back to AI card_last4 matching.
       const last4 = t.card_last4 || null;
-      const matchedAcc = last4
-        ? accounts.find(a => a.last4 === last4 || a.card_last4 === last4)
-        : null;
-      const ccAccounts = accounts.filter(a => a.type === "credit_card");
-      const defaultCC  = matchedAcc || ccAccounts[0] || null;
+      const ccAccounts   = accounts.filter(a => a.type === "credit_card");
       const bankAccounts = accounts.filter(a => a.type === "bank");
-      const defaultBank = bankAccounts[0] || null;
-
-      const fromId = isDebit ? (defaultCC?.id || defaultBank?.id || "") : "";
-      const toId   = !isDebit ? (defaultBank?.id || "") : "";
+      let fromId, toId;
+      if (statementAccountId) {
+        // Override: debit → from selected account; credit → to selected account
+        fromId = isDebit ? statementAccountId : "";
+        toId   = !isDebit ? statementAccountId : "";
+      } else {
+        // Fallback: try card_last4 matching then first CC/bank
+        const matchedAcc = last4
+          ? accounts.find(a => a.last4 === last4 || a.card_last4 === last4)
+          : null;
+        const defaultCC   = matchedAcc || ccAccounts[0] || null;
+        const defaultBank = bankAccounts[0] || null;
+        fromId = isDebit ? (defaultCC?.id || defaultBank?.id || "") : "";
+        toId   = !isDebit ? (defaultBank?.id || "") : "";
+      }
 
       // duplicate check — three levels
       const amt = Number(t.amount || 0);
@@ -1753,7 +1771,7 @@ function EStatementTab({
         await supabase.storage.from("estatement-pdfs").remove([item.file_path]);
       }
 
-      const rows = buildRows(result.transactions || []);
+      const rows = buildRows(result.transactions || [], item.account_id || "");
       const sel = {};
       rows.forEach(r => { sel[r._id] = r.status !== "duplicate" && r.status !== "possible_duplicate"; });
       setQueue(prev => prev.map(i => i.id === itemId
@@ -2027,6 +2045,7 @@ function EStatementTab({
               T={T} card={card}
               accounts={accounts}
               onProcess={() => processFile(item.id)}
+              onSetAccount={(accountId) => setItemAccount(item.id, accountId)}
               onUpdateRow={(rowId, patch) => updateRow(item.id, rowId, patch)}
               onToggleSel={(rowId) => setQueue(prev => prev.map(i => i.id === item.id
                 ? { ...i, selected: { ...i.selected, [rowId]: !i.selected[rowId] } } : i))}
@@ -2104,7 +2123,7 @@ function EStatementTab({
 // ─── QUEUE FILE ITEM (card wrapper + preview) ─────────────────
 function EStmtQueueItem({
   item, T, card, accounts,
-  onProcess,
+  onProcess, onSetAccount,
   onUpdateRow, onToggleSel, onToggleSkip, onToggleNotes, onToggleAll,
   onSave, onSaveRow, onRemoveRow, onCreateInstallment, onRemove,
   statusBadge, fmtSize,
@@ -2145,7 +2164,11 @@ function EStmtQueueItem({
         {statusBadge(item.status)}
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
           {item.status === "queued" && !item._uploading && (
-            <Button variant="primary" size="sm" onClick={onProcess}>▶ Process</Button>
+            <Button variant="primary" size="sm"
+              onClick={() => {
+                if (!item.account_id) { showToast("Select an account first", "error"); return; }
+                onProcess();
+              }}>▶ Process</Button>
           )}
           {item.status === "failed" && (
             <Button variant="secondary" size="sm" onClick={onProcess}>Retry</Button>
@@ -2160,6 +2183,35 @@ function EStmtQueueItem({
           )}
         </div>
       </div>
+
+      {/* ── Account selector (queued / failed) ── */}
+      {["queued","failed"].includes(item.status) && !item._uploading && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8,
+          padding: "8px 14px", borderBottom: `1px solid ${T.border}`,
+          background: item.account_id ? "#f0fdf4" : "#fefce8",
+        }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: item.account_id ? "#059669" : "#92400e", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
+            {item.account_id ? "📂 Statement account" : "⚠️ Select account"}
+          </span>
+          <select
+            value={item.account_id || ""}
+            onChange={e => onSetAccount(e.target.value)}
+            style={{
+              flex: 1, fontSize: 12, padding: "4px 6px", borderRadius: 6,
+              border: `1px solid ${item.account_id ? "#bbf7d0" : "#fcd34d"}`,
+              background: "white", color: "#111827",
+              fontFamily: "Figtree, sans-serif", cursor: "pointer",
+            }}>
+            <option value="">— pick an account —</option>
+            {accounts.map(a => (
+              <option key={a.id} value={a.id}>
+                {a.name}{a.last4 || a.card_last4 ? ` ···${a.last4 || a.card_last4}` : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* ── Error ── */}
       {item.error && (
