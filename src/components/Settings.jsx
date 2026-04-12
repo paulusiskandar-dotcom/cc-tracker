@@ -1682,25 +1682,33 @@ function EStatementTab({
           : null;
       }
 
+      // Auto-detect reimburse: "SETORAN TUNAI" deposits to BCA 0830267743
+      const isBCAReimburse = accounts.find(a => a.account_no && String(a.account_no).replace(/\s/g, "") === "0830267743");
+      const autoReimburse = /SETORAN\s+TUNAI/i.test(t.merchant || t.description || "")
+        && isBCAReimburse
+        && (fromId === isBCAReimburse.id || toId === isBCAReimburse.id);
+
       return {
-        _id:             idx,
-        tx_date:         t.date,
-        description:     t.merchant || t.description || "",
-        amount:          String(amt),
-        amount_idr:      String(amt),
-        currency:        "IDR",
-        tx_type:         txType,
-        from_id:         fromId,
-        to_id:           toId,
-        category_id:     catId,
-        notes:           "",
-        status:          dupStatus,
-        _dupEntry:       dupEntry,
-        _isInstallment:  isInstallment,
-        _instMatch:      instMatch,
-        _instNo:         inst_no,
-        _instTotal:      inst_total,
-        _card_last4:     last4,
+        _id:              idx,
+        tx_date:          t.date,
+        description:      t.merchant || t.description || "",
+        amount:           String(amt),
+        amount_idr:       String(amt),
+        currency:         "IDR",
+        tx_type:          autoReimburse ? "reimburse_in" : txType,
+        from_id:          fromId,
+        to_id:            toId,
+        category_id:      catId,
+        notes:            "",
+        is_reimburse:     autoReimburse,
+        reimburse_entity: "",
+        status:           dupStatus,
+        _dupEntry:        dupEntry,
+        _isInstallment:   isInstallment,
+        _instMatch:       instMatch,
+        _instNo:          inst_no,
+        _instTotal:       inst_total,
+        _card_last4:      last4,
       };
     }).filter(Boolean);
   };
@@ -1782,8 +1790,11 @@ function EStatementTab({
   const isUUID = (v) => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 
   const buildPayload = (r) => {
-    const txType  = r.tx_type === "cc_installment" ? "expense" : (r.tx_type || "expense");
-    const isDebit = ["expense","transfer","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan","fx_exchange"].includes(txType);
+    const isReimburse = r.is_reimburse && r.reimburse_entity;
+    const txType  = isReimburse ? "reimburse_in"
+      : r.tx_type === "cc_installment" ? "expense"
+      : (r.tx_type || "expense");
+    const isDebit = ["expense","transfer","pay_cc","buy_asset","pay_liability","reimburse_out","reimburse_in","give_loan","fx_exchange"].includes(txType);
     const notes   = r._isInstallment && r._instNo
       ? `Cicilan ${r._instNo}${r._instTotal ? `/${r._instTotal}` : ""}${r.notes ? ` — ${r.notes}` : ""}`
       : (r.notes || null);
@@ -1802,19 +1813,32 @@ function EStatementTab({
       to_type:       isUUID(r.to_id) ? "account" : txType,
       category_id:   isUUID(r.category_id) ? r.category_id : null,
       category_name: r.category_name || null,
-      entity:        r.entity || "Personal",
-      is_reimburse:  false,
+      entity:        isReimburse ? r.reimburse_entity : (r.entity || "Personal"),
+      is_reimburse:  !!isReimburse,
       notes,
     };
   };
 
   // ── Save ONE row immediately, remove from preview ──────────
   const saveRow = async (itemId, row) => {
-    const { error: insErr } = await supabase.from("ledger").insert(buildPayload(row));
+    const { data: inserted, error: insErr } = await supabase.from("ledger").insert(buildPayload(row)).select("id").single();
     if (insErr) {
       console.error("ledger insert error", insErr);
       showToast(`Error: ${insErr.message}`, "error");
       return;
+    }
+    if (row.is_reimburse && row.reimburse_entity && inserted?.id) {
+      supabase.from("reimburse_settlements").insert({
+        user_id:              user.id,
+        entity:               row.reimburse_entity,
+        status:               "pending",
+        total_out:            Number(row.amount_idr || row.amount || 0),
+        linked_ledger_id:     inserted.id,
+        out_ledger_ids:       [inserted.id],
+        in_ledger_ids:        [],
+        total_in:             0,
+        reimbursable_expense: Number(row.amount_idr || row.amount || 0),
+      }).catch(() => {}); // fire-and-forget
     }
     removeRow(itemId, row._id);
     showToast(`Saved: ${row.description || "transaction"}`);
@@ -1829,10 +1853,23 @@ function EStatementTab({
     let count = 0;
     const savedIds = [];
     for (const r of toSave) {
-      const { error: insErr } = await supabase.from("ledger").insert(buildPayload(r));
+      const { data: inserted, error: insErr } = await supabase.from("ledger").insert(buildPayload(r)).select("id").single();
       if (insErr) { console.error("ledger insert error", insErr); showToast(`Error: ${insErr.message}`, "error"); continue; }
       savedIds.push(r._id);
       count++;
+      if (r.is_reimburse && r.reimburse_entity && inserted?.id) {
+        supabase.from("reimburse_settlements").insert({
+          user_id:              user.id,
+          entity:               r.reimburse_entity,
+          status:               "pending",
+          total_out:            Number(r.amount_idr || r.amount || 0),
+          linked_ledger_id:     inserted.id,
+          out_ledger_ids:       [inserted.id],
+          in_ledger_ids:        [],
+          total_in:             0,
+          reimbursable_expense: Number(r.amount_idr || r.amount || 0),
+        }).catch(() => {}); // fire-and-forget
+      }
     }
     if (savedIds.length === 0) return;
     // Remove saved rows; if all gone move item to history
@@ -2359,7 +2396,37 @@ function EStmtTxCard({
           title="Notes">
           ✏️
         </button>
+
+        {/* ↩ reimburse toggle */}
+        <button
+          onClick={() => onUpdate({ is_reimburse: !r.is_reimburse, reimburse_entity: r.is_reimburse ? "" : r.reimburse_entity })}
+          style={estmtACT({
+            background: r.is_reimburse ? "#dcfce7" : T.sur2,
+            color: r.is_reimburse ? "#059669" : T.text3,
+            width: 24, height: 24, fontSize: 11,
+          })}
+          title="Mark as Reimburse In">
+          ↩
+        </button>
       </div>
+
+      {/* ── Reimburse row ── */}
+      {r.is_reimburse && (
+        <div style={{ borderTop: `1px solid #bbf7d0`, background: "#f0fdf4", padding: "6px 12px 8px 35px", display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: "#059669", textTransform: "uppercase", letterSpacing: "0.04em", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
+            Reimburse In
+          </span>
+          <select
+            style={{ ...estmtInSel(T), flex: 1, border: "1px solid #bbf7d0", background: "#f0fdf4", fontWeight: 600, color: r.reimburse_entity ? "#059669" : "#6b7280" }}
+            value={r.reimburse_entity || ""}
+            onChange={e => onUpdate({ reimburse_entity: e.target.value })}>
+            <option value="">Select entity…</option>
+            {["Hamasa", "SDC", "Travelio"].map(e => (
+              <option key={e} value={e}>{e}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* ── Notes row ── */}
       {isNotesOpen && (
