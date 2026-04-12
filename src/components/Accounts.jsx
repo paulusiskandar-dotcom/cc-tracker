@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { accountsApi, accountCurrenciesApi, ledgerApi, getTxFromToTypes } from "../api";
+import { accountsApi, accountCurrenciesApi, ledgerApi, getTxFromToTypes, recalculateBalance } from "../api";
 import BankStatement from "./BankStatement";
 import {
   BANKS_L, NETWORKS, ASSET_SUBTYPES, LIAB_SUBTYPES,
@@ -202,6 +202,10 @@ export default function Accounts({
         }
         savedAccount = await accountsApi.update(editAcc.id, updateData);
         setAccounts(p => p.map(a => a.id === editAcc.id ? savedAccount : a));
+        // If initial_balance changed for a bank/cash account, recompute current_balance
+        if ((formType === "bank" || formType === "cash") && "initial_balance" in updateData) {
+          await recalculateBalance(editAcc.id, user.id);
+        }
         showToast("Account updated");
       } else {
         let insertData;

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../lib/supabase";
-import { ledgerApi, getTxFromToTypes, categoriesApi } from "../api";
+import { ledgerApi, getTxFromToTypes, categoriesApi, recalculateBalance } from "../api";
 import { toIDR as toIDRFn, fmtIDR } from "../utils";
 import { TX_TYPE_MAP } from "../constants";
 import Modal from "./shared/Modal";
@@ -33,14 +33,15 @@ const fmtDateShort = (d) => {
 };
 
 // ─── DEBIT/CREDIT DETERMINATION ──────────────────────────────
-// Returns whether this tx is debit (out from account) or credit (in to account)
-// A tx can only be one or the other relative to the account (not both)
+// Returns whether this tx is debit (out from account) or credit (in to account).
+// Must check both the ID and the _type to correctly handle non-account sides
+// (e.g. expense to_type is "expense" — should not be counted as a credit).
 function txDirection(tx, accountId) {
-  const out = tx.from_id === accountId;
-  const ins = tx.to_id   === accountId;
-  if (out && !ins) return "debit";
-  if (ins && !out) return "credit";
-  return null; // internal / same account (skip balance change)
+  const isDebit  = tx.from_id === accountId && tx.from_type === "account";
+  const isCredit = tx.to_id   === accountId && tx.to_type   === "account";
+  if (isDebit && !isCredit) return "debit";
+  if (isCredit && !isDebit) return "credit";
+  return null;
 }
 
 // ─── GROUPED ACCOUNT OPTIONS ─────────────────────────────────
@@ -222,6 +223,15 @@ export default function BankStatement({
         notes:         editForm.notes || null,
       };
       await ledgerApi.update(editEntry.id, entry);
+      // Sync current_balance for all affected bank accounts
+      const affectedIds = [
+        ...(entry.from_type === "account" && entry.from_id ? [entry.from_id] : []),
+        ...(entry.to_type   === "account" && entry.to_id   ? [entry.to_id]   : []),
+        // Also recalculate original account IDs in case from/to changed
+        ...(editEntry.from_type === "account" && editEntry.from_id ? [editEntry.from_id] : []),
+        ...(editEntry.to_type   === "account" && editEntry.to_id   ? [editEntry.to_id]   : []),
+      ];
+      await Promise.all([...new Set(affectedIds)].map(id => recalculateBalance(id, user.id)));
       showToast("Transaction updated");
       setEditEntry(null);
       await load();
@@ -239,7 +249,7 @@ export default function BankStatement({
     if (!accountId) return;
     setLoading(true);
     try {
-      const [{ data: inRange, error: e1 }, { data: afterRange, error: e2 }] = await Promise.all([
+      const [{ data: inRange, error: e1 }, { data: beforeRange, error: e2 }] = await Promise.all([
         supabase.from("ledger")
           .select("*")
           .eq("user_id", user.id)
@@ -249,25 +259,34 @@ export default function BankStatement({
           .order("tx_date",    { ascending: true })
           .order("created_at", { ascending: true }),
         supabase.from("ledger")
-          .select("amount_idr, from_id, to_id")
+          .select("amount_idr, from_id, from_type, to_id, to_type")
           .eq("user_id", user.id)
           .or(`from_id.eq.${accountId},to_id.eq.${accountId}`)
-          .gt("tx_date", toDate),
+          .lt("tx_date", fromDate),
       ]);
       if (e1) throw e1;
       if (e2) throw e2;
 
-      // Compute closing balance at end of toDate
-      const afterTxs    = afterRange || [];
-      const creditAfter = afterTxs.filter(t => t.to_id   === accountId).reduce((s, t) => s + Number(t.amount_idr || 0), 0);
-      const debitAfter  = afterTxs.filter(t => t.from_id === accountId).reduce((s, t) => s + Number(t.amount_idr || 0), 0);
-      const currentBal  = Number(selectedAccount?.current_balance || 0);
-      const closingBal  = currentBal + debitAfter - creditAfter;
+      // Opening balance = initial_balance + all txns BEFORE range start date
+      const initialBal    = Number(selectedAccount?.initial_balance || 0);
+      const preTxs        = beforeRange || [];
+      const beforeCredit  = preTxs
+        .filter(t => t.to_id   === accountId && t.to_type   === "account")
+        .reduce((s, t) => s + Number(t.amount_idr || 0), 0);
+      const beforeDebit   = preTxs
+        .filter(t => t.from_id === accountId && t.from_type === "account")
+        .reduce((s, t) => s + Number(t.amount_idr || 0), 0);
+      const openingBal    = initialBal + beforeCredit - beforeDebit;
 
+      // In-range totals (using same from_type/to_type checks)
       const txs         = inRange || [];
-      const totalCredit = txs.filter(t => t.to_id   === accountId).reduce((s, t) => s + Number(t.amount_idr || 0), 0);
-      const totalDebit  = txs.filter(t => t.from_id === accountId).reduce((s, t) => s + Number(t.amount_idr || 0), 0);
-      const openingBal  = closingBal - totalCredit + totalDebit;
+      const totalCredit = txs
+        .filter(t => t.to_id   === accountId && t.to_type   === "account")
+        .reduce((s, t) => s + Number(t.amount_idr || 0), 0);
+      const totalDebit  = txs
+        .filter(t => t.from_id === accountId && t.from_type === "account")
+        .reduce((s, t) => s + Number(t.amount_idr || 0), 0);
+      const closingBal  = openingBal + totalCredit - totalDebit;
 
       setData({ txs, openingBal, totalCredit, totalDebit, closingBal });
     } catch (e) {

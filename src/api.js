@@ -277,6 +277,27 @@ export const ledgerApi = {
   },
 };
 
+// ─── RECALCULATE BALANCE ──────────────────────────────────────
+// Recomputes current_balance = initial_balance + all credits - all debits.
+// Call after every ledger mutation for each affected account.
+export const recalculateBalance = async (accountId, userId) => {
+  if (!accountId || !userId) return null;
+  const { data: acc } = await supabase
+    .from("accounts").select("initial_balance").eq("id", accountId).single();
+  const { data: txns } = await supabase
+    .from("ledger")
+    .select("amount_idr, from_id, from_type, to_id, to_type")
+    .eq("user_id", userId)
+    .or(`from_id.eq.${accountId},to_id.eq.${accountId}`);
+  let balance = Number(acc?.initial_balance || 0);
+  for (const tx of (txns || [])) {
+    if (tx.to_id === accountId && tx.to_type === "account")   balance += Number(tx.amount_idr || 0);
+    if (tx.from_id === accountId && tx.from_type === "account") balance -= Number(tx.amount_idr || 0);
+  }
+  await supabase.from("accounts").update({ current_balance: balance }).eq("id", accountId);
+  return balance;
+};
+
 // ─── EXPENSE CATEGORIES ───────────────────────────────────────
 export const categoriesApi = {
   getAll: async (userId) => {

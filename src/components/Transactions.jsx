@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { ledgerApi, merchantApi, gmailApi, getTxFromToTypes, employeeLoanApi, accountCurrenciesApi, assetsApi } from "../api";
+import { ledgerApi, merchantApi, gmailApi, getTxFromToTypes, employeeLoanApi, accountCurrenciesApi, assetsApi, recalculateBalance } from "../api";
 import { EXPENSE_CATEGORIES, ENTITIES, TX_TYPES, TX_TYPE_MAP } from "../constants";
 import { fmtIDR, fmtCur, todayStr, ym, toIDR, groupByDate, fmtDateLabel } from "../utils";
 import Modal, { ConfirmModal } from "./shared/Modal";
@@ -463,11 +463,23 @@ export default function Transactions({
       if (editEntry) {
         const updated = await ledgerApi.update(editEntry.id, entry);
         setLedger(p => p.map(e => e.id === editEntry.id ? updated : e));
+        // Sync current_balance for all affected bank accounts (new + old from/to)
+        const affectedIds = [
+          ...(entry.from_type === "account" && entry.from_id ? [entry.from_id] : []),
+          ...(entry.to_type   === "account" && entry.to_id   ? [entry.to_id]   : []),
+          ...(editEntry.from_type === "account" && editEntry.from_id ? [editEntry.from_id] : []),
+          ...(editEntry.to_type   === "account" && editEntry.to_id   ? [editEntry.to_id]   : []),
+        ];
+        await Promise.all([...new Set(affectedIds)].map(id => recalculateBalance(id, user.id)));
         showToast("Transaction updated");
       } else {
         const created = await ledgerApi.create(user.id, entry, accounts);
         setLedger(p => [created, ...p]);
-
+        const affectedIds = [
+          ...(entry.from_type === "account" && entry.from_id ? [entry.from_id] : []),
+          ...(entry.to_type   === "account" && entry.to_id   ? [entry.to_id]   : []),
+        ];
+        await Promise.all([...new Set(affectedIds)].map(id => recalculateBalance(id, user.id)));
         showToast("Transaction added");
         await onRefresh();
       }
@@ -488,6 +500,12 @@ export default function Transactions({
     try {
       await ledgerApi.delete(deleteEntry.id, deleteEntry, accounts);
       setLedger(p => p.filter(e => e.id !== deleteEntry.id));
+      // Sync current_balance for all affected bank accounts
+      const affectedIds = [
+        ...(deleteEntry.from_type === "account" && deleteEntry.from_id ? [deleteEntry.from_id] : []),
+        ...(deleteEntry.to_type   === "account" && deleteEntry.to_id   ? [deleteEntry.to_id]   : []),
+      ];
+      await Promise.all([...new Set(affectedIds)].map(id => recalculateBalance(id, user.id)));
       showToast("Deleted");
       await onRefresh();
     } catch (e) { showToast(e.message, "error"); }
