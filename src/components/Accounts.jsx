@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { accountsApi, accountCurrenciesApi, ledgerApi, getTxFromToTypes } from "../api";
+import BankStatement from "./BankStatement";
 import {
   BANKS_L, NETWORKS, ASSET_SUBTYPES, LIAB_SUBTYPES,
   ACC_TYPE_LABEL, ACC_TYPE_ICON,
@@ -70,6 +71,7 @@ export default function Accounts({
   const [nilaiAcc,  setNilaiAcc]  = useState(null);
   const [nilaiForm, setNilaiForm] = useState({ value: "", date: "", notes: "" });
   const [nilaiSaving, setNilaiSaving] = useState(false);
+  const [statementAcc, setStatementAcc] = useState(null);
 
   // ─── FILTERED ACCOUNTS ──────────────────────────────────────
   const filtered = useMemo(() => {
@@ -323,6 +325,18 @@ export default function Accounts({
   };
 
   // ─── RENDER ──────────────────────────────────────────────────
+  // Statement view replaces page content when an account is selected
+  if (statementAcc) {
+    return (
+      <BankStatement
+        initialAccount={statementAcc}
+        accounts={accounts.filter(a => a.type === "bank")}
+        user={user}
+        onBack={() => setStatementAcc(null)}
+      />
+    );
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
@@ -345,6 +359,7 @@ export default function Accounts({
               onEdit={openEdit}
               onDelete={(a) => setDeleteAcc(a)}
               onHistory={(a) => { setHistAcc(a); setModal("history"); }}
+              onStatement={(a) => setStatementAcc(a)}
             />
       )}
 
@@ -360,6 +375,7 @@ export default function Accounts({
               onEdit={openEdit}
               onDelete={(a) => setDeleteAcc(a)}
               onHistory={(a) => { setHistAcc(a); setModal("history"); }}
+              onStatement={(a) => setStatementAcc(a)}
             />
       )}
 
@@ -607,7 +623,7 @@ function DistributionBar({ accounts, total }) {
 }
 
 // ─── BANK ACCOUNT CARD ───────────────────────────────────────
-function BankAccountCard({ account: a, ledger, accountCurrencies = [], fxRates = {}, CURRENCIES: C = [], color, onEdit, onHistory }) {
+function BankAccountCard({ account: a, ledger, accountCurrencies = [], fxRates = {}, CURRENCIES: C = [], color, onEdit, onHistory, onStatement }) {
   const txCount   = ledger.filter(e => e.from_id === a.id || e.to_id === a.id).length;
   const bal       = Number(a.current_balance || 0);
   const cur       = C.find(c => c.code === (a.currency || "IDR"));
@@ -672,8 +688,9 @@ function BankAccountCard({ account: a, ledger, accountCurrencies = [], fxRates =
 
         {/* Actions */}
         <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
-          <button onClick={onHistory} style={ACCT_BTN}>📋 {txCount}</button>
-          <button onClick={onEdit}    style={{ ...ACCT_BTN, flex: 1 }}>✏️ Edit</button>
+          <button onClick={onHistory}                        style={ACCT_BTN}>📋 {txCount}</button>
+          <button onClick={() => onStatement && onStatement(a)} style={ACCT_BTN}>📄 Statement</button>
+          <button onClick={onEdit}                           style={{ ...ACCT_BTN, flex: 1 }}>✏️ Edit</button>
         </div>
       </div>
     </div>
@@ -681,7 +698,7 @@ function BankAccountCard({ account: a, ledger, accountCurrencies = [], fxRates =
 }
 
 // ─── CASH ACCOUNT CARD ───────────────────────────────────────
-function CashAccountCard({ account: a, fxRates = {}, CURRENCIES: C = [], ledger, color, onEdit, onHistory }) {
+function CashAccountCard({ account: a, fxRates = {}, CURRENCIES: C = [], ledger, color, onEdit, onHistory, onStatement }) {
   const txCount = ledger.filter(e => e.from_id === a.id || e.to_id === a.id).length;
   const bal = Number(a.current_balance || 0);
   const cur = C.find(c => c.code === (a.currency || "IDR"));
@@ -735,8 +752,9 @@ function CashAccountCard({ account: a, fxRates = {}, CURRENCIES: C = [], ledger,
 
         {/* Actions */}
         <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
-          <button onClick={onHistory} style={ACCT_BTN}>📋 {txCount}</button>
-          <button onClick={onEdit} style={{ ...ACCT_BTN, flex: 1 }}>✏️ Edit</button>
+          <button onClick={onHistory}                           style={ACCT_BTN}>📋 {txCount}</button>
+          <button onClick={() => onStatement && onStatement(a)} style={ACCT_BTN}>📄 Statement</button>
+          <button onClick={onEdit}                              style={{ ...ACCT_BTN, flex: 1 }}>✏️ Edit</button>
         </div>
       </div>
     </div>
@@ -750,7 +768,7 @@ const BANK_SORT_PILLS = [
   { key: "bank",    label: "Bank",    defaultDir: "asc"  },
 ];
 
-function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, CURRENCIES: C = [], onEdit, onDelete, onHistory }) {
+function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, CURRENCIES: C = [], onEdit, onDelete, onHistory, onStatement }) {
   const [bankFilter, setBankFilter] = useState("all");
   const [sort, setSort] = useState(() => localStorage.getItem("sort_bank") || "balance_desc");
 
@@ -855,6 +873,7 @@ function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, CURRENC
             onEdit={() => onEdit(a)}
             onDelete={() => onDelete(a)}
             onHistory={() => onHistory(a)}
+            onStatement={onStatement}
           />
         ))}
       </div>
@@ -869,7 +888,7 @@ const CASH_SORT_PILLS = [
 ];
 
 // ─── CASH PAGE CONTENT ───────────────────────────────────────
-function CashPageContent({ accounts, fxRates, CURRENCIES: C = [], ledger, onEdit, onDelete, onHistory }) {
+function CashPageContent({ accounts, fxRates, CURRENCIES: C = [], ledger, onEdit, onDelete, onHistory, onStatement }) {
   const [sort, setSort] = useState(() => localStorage.getItem("sort_cash") || "balance_desc");
 
   const idrAccts    = accounts.filter(a => !a.currency || a.currency === "IDR");
@@ -931,6 +950,7 @@ function CashPageContent({ accounts, fxRates, CURRENCIES: C = [], ledger, onEdit
             onEdit={() => onEdit(a)}
             onDelete={() => onDelete(a)}
             onHistory={() => onHistory(a)}
+            onStatement={onStatement}
           />
         ))}
       </div>

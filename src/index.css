@@ -118,3 +118,14 @@ html, body {
     padding-bottom: calc(80px + env(safe-area-inset-bottom)) !important;
   }
 }
+
+/* ─── BANK STATEMENT PRINT STYLES ─────────────────────────── */
+@media print {
+  /* Hide nav, sidebars, buttons — show only statement content */
+  aside, header, nav, .mobile-nav { display: none !important; }
+  .no-print { display: none !important; }
+  .print-only { display: block !important; }
+  main.page-content { padding: 0 !important; max-width: 100% !important; margin: 0 !important; }
+  @page { margin: 15mm 12mm; size: A4 landscape; }
+  body { background: #fff !important; color: #000 !important; }
+}
