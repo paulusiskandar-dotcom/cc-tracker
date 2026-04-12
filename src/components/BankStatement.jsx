@@ -332,151 +332,116 @@ export default function BankStatement({ initialAccount, accounts, user, onBack }
       )}
 
       {/* ── Transaction table ── */}
-      {!loading && data && rowsWithBalance.length > 0 && (
-        <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden" }}>
+      {!loading && data && rowsWithBalance.length > 0 && (() => {
+        // 6-column grid: Tanggal | Keterangan | Jenis | Debit | Kredit | Saldo
+        const COLS = "80px 1fr 110px 120px 120px 130px";
+        const HDR_CELLS = [
+          { label: "Tanggal",    align: "left"  },
+          { label: "Keterangan", align: "left"  },
+          { label: "Jenis",      align: "left"  },
+          { label: "Debit",      align: "right" },
+          { label: "Kredit",     align: "right" },
+          { label: "Saldo",      align: "right" },
+        ];
+        const ROW_PAD = "0 14px";
+        return (
+          <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden" }}>
 
-          {/* Table header */}
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "90px 1fr 100px 110px 90px 110px 110px 110px",
-            gap: 0,
-            background: "#f9fafb",
-            borderBottom: "0.5px solid #e5e7eb",
-            padding: "0 12px",
-          }}>
-            {["Tanggal","Keterangan","Jenis","Kategori","Entiti","Debit","Kredit","Saldo"].map((h, i) => (
-              <div key={h} style={{
-                fontSize: 9, fontWeight: 700, color: "#9ca3af",
-                textTransform: "uppercase", letterSpacing: "0.5px",
-                fontFamily: FF, padding: "9px 6px",
-                textAlign: i >= 5 ? "right" : "left",
-              }}>
-                {h}
-              </div>
-            ))}
-          </div>
-
-          {/* Opening balance row */}
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "90px 1fr 100px 110px 90px 110px 110px 110px",
-            background: "#eff6ff",
-            borderBottom: "0.5px solid #dbeafe",
-            padding: "0 12px",
-          }}>
-            <div style={{ fontSize: 11, color: "#1d4ed8", fontFamily: FF, padding: "7px 6px" }}>{fmtDateShort(fromDate)}</div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#1d4ed8", fontFamily: FF, padding: "7px 6px" }}>Opening Balance</div>
-            <div style={{ padding: "7px 6px" }} /><div style={{ padding: "7px 6px" }} /><div style={{ padding: "7px 6px" }} />
-            <div style={{ padding: "7px 6px" }} /><div style={{ padding: "7px 6px" }} />
-            <div style={{ fontSize: 11, fontWeight: 800, color: "#1d4ed8", fontFamily: FF, padding: "7px 6px", textAlign: "right" }}>
-              {fmtIDR(data.openingBal)}
+            {/* Header */}
+            <div style={{ display: "grid", gridTemplateColumns: COLS, background: "#f9fafb", borderBottom: "0.5px solid #e5e7eb", padding: ROW_PAD }}>
+              {HDR_CELLS.map(({ label, align }) => (
+                <div key={label} style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF, padding: "9px 6px", textAlign: align }}>
+                  {label}
+                </div>
+              ))}
             </div>
-          </div>
 
-          {/* Transaction rows, grouped by date */}
-          {grouped.map(([date, txs]) => (
-            <div key={date}>
-              {/* Date separator */}
-              <div style={{
-                background: "#f3f4f6",
-                borderBottom: "0.5px solid #e5e7eb",
-                padding: "5px 18px",
-                fontSize: 10, fontWeight: 700, color: "#6b7280",
-                textTransform: "uppercase", letterSpacing: "0.5px",
-                fontFamily: FF,
-              }}>
-                {fmtDateLabel(date)}
-              </div>
+            {/* Opening balance row */}
+            <div style={{ display: "grid", gridTemplateColumns: COLS, background: "#eff6ff", borderBottom: "0.5px solid #dbeafe", padding: ROW_PAD }}>
+              <div style={{ fontSize: 11, color: "#1d4ed8", fontFamily: FF, padding: "7px 6px", whiteSpace: "nowrap" }}>{fmtDateShort(fromDate)}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#1d4ed8", fontFamily: FF, padding: "7px 6px" }}>Opening Balance</div>
+              <div />{/* Jenis */}
+              <div />{/* Debit */}
+              <div />{/* Kredit */}
+              <div style={{ fontSize: 11, fontWeight: 800, color: "#1d4ed8", fontFamily: FF, padding: "7px 6px", textAlign: "right" }}>{fmtIDR(data.openingBal)}</div>
+            </div>
 
-              {txs.map(tx => {
-                const typeInfo = TX_TYPE_MAP[tx.tx_type];
-                const amt = Number(tx.amount_idr || 0);
-                return (
-                  <div key={tx.id} style={{
-                    display: "grid",
-                    gridTemplateColumns: "90px 1fr 100px 110px 90px 110px 110px 110px",
-                    borderBottom: "0.5px solid #f3f4f6",
-                    padding: "0 12px",
-                    alignItems: "center",
-                  }}
-                    onMouseEnter={e => e.currentTarget.style.background = "#fafafa"}
-                    onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                  >
-                    {/* Tanggal */}
-                    <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, padding: "8px 6px", whiteSpace: "nowrap" }}>
-                      {fmtDateShort(tx.tx_date)}
-                    </div>
+            {/* Grouped transaction rows */}
+            {grouped.map(([date, txs]) => (
+              <div key={date}>
+                {/* Date separator */}
+                <div style={{ background: "#f3f4f6", borderBottom: "0.5px solid #e5e7eb", padding: "5px 20px", fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF }}>
+                  {fmtDateLabel(date)}
+                </div>
 
-                    {/* Keterangan */}
-                    <div style={{ padding: "8px 6px", minWidth: 0 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", fontFamily: FF, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {tx.description || tx.merchant_name || "—"}
+                {txs.map(tx => {
+                  const typeInfo = TX_TYPE_MAP[tx.tx_type];
+                  const amt      = Number(tx.amount_idr || 0);
+                  const subLine  = [tx.category_name, tx.entity && tx.entity !== "Personal" ? tx.entity : ""].filter(Boolean).join(" · ");
+                  return (
+                    <div key={tx.id}
+                      style={{ display: "grid", gridTemplateColumns: COLS, borderBottom: "0.5px solid #f3f4f6", padding: ROW_PAD, alignItems: "center" }}
+                      onMouseEnter={e => e.currentTarget.style.background = "#fafafa"}
+                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                    >
+                      {/* Tanggal */}
+                      <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, padding: "8px 6px", whiteSpace: "nowrap" }}>
+                        {fmtDateShort(tx.tx_date)}
+                      </div>
+
+                      {/* Keterangan (desc + sub-line) */}
+                      <div style={{ padding: "8px 6px", minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 500, color: "#111827", fontFamily: FF, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {tx.description || tx.merchant_name || "—"}
+                        </div>
+                        {subLine && (
+                          <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {subLine}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Jenis badge */}
+                      <div style={{ padding: "8px 6px" }}>
+                        {typeInfo && (
+                          <span style={{ fontSize: 9, fontWeight: 700, fontFamily: FF, background: typeInfo.color + "18", color: typeInfo.color, borderRadius: 4, padding: "2px 6px", whiteSpace: "nowrap" }}>
+                            {typeInfo.icon} {typeInfo.label}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Debit */}
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#A32D2D", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
+                        {tx._dir === "debit" ? fmtIDR(amt) : <span style={{ color: "#d1d5db" }}>—</span>}
+                      </div>
+
+                      {/* Kredit */}
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#3B6D11", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
+                        {tx._dir === "credit" ? fmtIDR(amt) : <span style={{ color: "#d1d5db" }}>—</span>}
+                      </div>
+
+                      {/* Saldo */}
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#111827", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
+                        {fmtIDR(tx._runBal)}
                       </div>
                     </div>
+                  );
+                })}
+              </div>
+            ))}
 
-                    {/* Jenis badge */}
-                    <div style={{ padding: "8px 6px" }}>
-                      {typeInfo && (
-                        <span style={{
-                          fontSize: 9, fontWeight: 700, fontFamily: FF,
-                          background: typeInfo.color + "18",
-                          color: typeInfo.color,
-                          borderRadius: 4, padding: "2px 6px",
-                          whiteSpace: "nowrap",
-                        }}>
-                          {typeInfo.icon} {typeInfo.label}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Kategori */}
-                    <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, padding: "8px 6px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {tx.category_name || ""}
-                    </div>
-
-                    {/* Entiti */}
-                    <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, padding: "8px 6px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {tx.entity && tx.entity !== "Personal" ? tx.entity : ""}
-                    </div>
-
-                    {/* Debit */}
-                    <div style={{ fontSize: 12, fontWeight: 600, color: "#A32D2D", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
-                      {tx._dir === "debit" ? fmtIDR(amt) : ""}
-                    </div>
-
-                    {/* Kredit */}
-                    <div style={{ fontSize: 12, fontWeight: 600, color: "#3B6D11", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
-                      {tx._dir === "credit" ? fmtIDR(amt) : ""}
-                    </div>
-
-                    {/* Saldo */}
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "#111827", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
-                      {fmtIDR(tx._runBal)}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ))}
-
-          {/* Closing balance row */}
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "90px 1fr 100px 110px 90px 110px 110px 110px",
-            background: "#f9fafb",
-            borderTop: "1.5px solid #e5e7eb",
-            padding: "0 12px",
-          }}>
-            <div style={{ fontSize: 11, color: "#374151", fontFamily: FF, padding: "9px 6px" }}>{fmtDateShort(toDate)}</div>
-            <div style={{ fontSize: 11, fontWeight: 800, color: "#111827", fontFamily: FF, padding: "9px 6px" }}>Closing Balance</div>
-            <div style={{ padding: "9px 6px" }} /><div style={{ padding: "9px 6px" }} /><div style={{ padding: "9px 6px" }} />
-            <div style={{ padding: "9px 6px" }} /><div style={{ padding: "9px 6px" }} />
-            <div style={{ fontSize: 13, fontWeight: 800, color: "#111827", fontFamily: FF, padding: "9px 6px", textAlign: "right" }}>
-              {fmtIDR(data.closingBal)}
+            {/* Closing balance row */}
+            <div style={{ display: "grid", gridTemplateColumns: COLS, background: "#f9fafb", borderTop: "1.5px solid #e5e7eb", padding: ROW_PAD }}>
+              <div style={{ fontSize: 11, color: "#374151", fontFamily: FF, padding: "9px 6px", whiteSpace: "nowrap" }}>{fmtDateShort(toDate)}</div>
+              <div style={{ fontSize: 11, fontWeight: 800, color: "#111827", fontFamily: FF, padding: "9px 6px" }}>Closing Balance</div>
+              <div />{/* Jenis */}
+              <div />{/* Debit */}
+              <div />{/* Kredit */}
+              <div style={{ fontSize: 13, fontWeight: 800, color: "#111827", fontFamily: FF, padding: "9px 6px", textAlign: "right" }}>{fmtIDR(data.closingBal)}</div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── Footer ── */}
       {data && rowsWithBalance.length > 0 && (
