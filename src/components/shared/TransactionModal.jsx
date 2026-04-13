@@ -763,7 +763,31 @@ export default function TransactionModal({
 
   // ── Field rendering by type ───────────────────────────────────
   const renderFields = () => {
-    // FX Exchange
+    // Shared sub-renders used across all type branches
+    const DIVIDER = <hr style={{ border: "none", borderTop: "0.5px solid #e5e7eb", margin: "2px 0" }} />;
+
+    const notesField = (
+      <Field label="Notes (optional)">
+        <textarea value={form.notes || ""} onChange={e => set("notes", e.target.value)} placeholder="Any extra details…" rows={2}
+          style={{ width: "100%", padding: "10px 14px", border: "1.5px solid #e5e7eb", borderRadius: 10, fontFamily: FF, fontSize: 14, fontWeight: 500, color: "#111827", background: "#fff", outline: "none", resize: "vertical", boxSizing: "border-box", lineHeight: 1.5 }} />
+      </Field>
+    );
+
+    const dateCurrencyRow = (
+      <div style={{ display: "flex", gap: 8 }}>
+        <Input label="Date" type="date" value={form.tx_date} onChange={e => set("tx_date", e.target.value)} style={{ flex: 1 }} />
+        <Field label="Currency" style={{ width: 90, flexShrink: 0 }}>
+          <select value={form.currency || "IDR"} onChange={e => set("currency", e.target.value)} style={{ ...SEL, padding: "0 8px", fontSize: 13, fontWeight: 600 }}>
+            {allCurrencies.length > 0
+              ? allCurrencies.map(c => <option key={c.code} value={c.code}>{c.flag ? `${c.flag} ` : ""}{c.code}</option>)
+              : ["IDR","USD","SGD","EUR","GBP","AUD","JPY","MYR"].map(c => <option key={c} value={c}>{c}</option>)
+            }
+          </select>
+        </Field>
+      </div>
+    );
+
+    // ── FX Exchange ──────────────────────────────────────────────
     if (type === "fx_exchange") {
       const fxFromAccs = fxDir === "sell" && fxCurrency
         ? accounts.filter(a => a.is_active !== false && accsWithCurrency.includes(a.id))
@@ -773,6 +797,8 @@ export default function TransactionModal({
         : [...bankAccs, ...cashAccs];
       return (
         <>
+          {DIVIDER}
+          {/* Direction toggle — above FROM since it determines FROM/TO options */}
           <div style={{ display: "flex", gap: 8 }}>
             {["buy","sell"].map(d => (
               <button key={d} type="button"
@@ -788,19 +814,7 @@ export default function TransactionModal({
               </button>
             ))}
           </div>
-          <Input label="Date" type="date" value={form.tx_date} onChange={e => set("tx_date", e.target.value)} />
-          <Field label="Currency *">
-            <select value={form.currency || ""} onChange={e => { set("currency", e.target.value); set("from_id", null); set("to_id", null); }} style={SEL}>
-              <option value="">Select currency…</option>
-              {fxCurrencies.map(c => {
-                const meta = allCurrencies.find(x => x.code === c);
-                return <option key={c} value={c}>{meta?.flag ? `${meta.flag} ` : ""}{c}</option>;
-              })}
-              {allCurrencies.filter(c => c.code !== "IDR" && !fxCurrencies.includes(c.code)).map(c => (
-                <option key={c.code} value={c.code}>{c.flag ? `${c.flag} ` : ""}{c.code}</option>
-              ))}
-            </select>
-          </Field>
+          {/* 3. FROM */}
           <Field label={fxDir === "buy" ? "From Account (IDR) *" : "From Account (foreign) *"}>
             <select value={form.from_id || ""} onChange={e => set("from_id", e.target.value || null)} style={SEL}>
               <option value="">Select account…</option>
@@ -813,6 +827,7 @@ export default function TransactionModal({
               })}
             </select>
           </Field>
+          {/* 4. TO */}
           <Field label={fxDir === "buy" ? "To Account (receives foreign) *" : "To Account (receives IDR) *"}>
             <select value={form.to_id || ""} onChange={e => set("to_id", e.target.value || null)} style={SEL}>
               <option value="">Select account…</option>
@@ -824,6 +839,23 @@ export default function TransactionModal({
               }
             </select>
           </Field>
+          {/* 5. Date + Currency (foreign) side by side */}
+          <div style={{ display: "flex", gap: 8 }}>
+            <Input label="Date" type="date" value={form.tx_date} onChange={e => set("tx_date", e.target.value)} style={{ flex: 1 }} />
+            <Field label="Currency *" style={{ width: 110, flexShrink: 0 }}>
+              <select value={form.currency || ""} onChange={e => { set("currency", e.target.value); set("from_id", null); set("to_id", null); }} style={{ ...SEL, padding: "0 8px", fontSize: 13, fontWeight: 600 }}>
+                <option value="">— Select —</option>
+                {fxCurrencies.map(c => {
+                  const meta = allCurrencies.find(x => x.code === c);
+                  return <option key={c} value={c}>{meta?.flag ? `${meta.flag} ` : ""}{c}</option>;
+                })}
+                {allCurrencies.filter(c => c.code !== "IDR" && !fxCurrencies.includes(c.code)).map(c => (
+                  <option key={c.code} value={c.code}>{c.flag ? `${c.flag} ` : ""}{c.code}</option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          {/* 6. Rate + Amount + IDR equiv */}
           <Input label={`Rate: 1 ${fxCurrency || "foreign"} = ? IDR *`} type="number" min="0" step="any"
             value={form.fx_rate_used || ""} onChange={e => set("fx_rate_used", e.target.value)} placeholder="e.g. 107.5" />
           <Input label={`Amount (${fxCurrency || "foreign units"}) *`} type="number" min="0" step="any"
@@ -833,20 +865,22 @@ export default function TransactionModal({
               IDR equivalent: {fmtIDR(idrEquiv)}
             </div>
           )}
-          <Field label="Notes (optional)">
-            <textarea value={form.notes || ""} onChange={e => set("notes", e.target.value)} placeholder="Any details…" rows={2}
-              style={{ width: "100%", padding: "10px 14px", border: "1.5px solid #e5e7eb", borderRadius: 10, fontFamily: FF, fontSize: 14, fontWeight: 500, color: "#111827", background: "#fff", outline: "none", resize: "vertical", boxSizing: "border-box" }} />
-          </Field>
+          {/* 11. Notes */}
+          {notesField}
         </>
       );
     }
 
-    // Buy Asset
+    // ── Buy Asset ────────────────────────────────────────────────
     if (type === "buy_asset") {
       const modeVal = form.asset_mode || "existing";
       const selectedAsset = assetAccs.find(a => a.id === form.asset_id);
       return (
         <>
+          {DIVIDER}
+          {/* 3. FROM */}
+          {renderFromSelect("From Account")}
+          {/* Asset mode toggle — above TO since it determines what TO shows */}
           <div style={{ display: "flex", gap: 8 }}>
             {["existing","new"].map(m => (
               <button key={m} type="button"
@@ -862,7 +896,7 @@ export default function TransactionModal({
               </button>
             ))}
           </div>
-          {renderFromSelect("From Account")}
+          {/* 4. TO (asset selector) */}
           {modeVal === "existing" ? (
             <>
               <Field label="Asset *">
@@ -892,28 +926,33 @@ export default function TransactionModal({
               </Field>
             </>
           )}
-          <AmountInput label={modeVal === "existing" ? "Amount to Add (IDR)" : "Purchase Price (IDR)"} value={form.amount} onChange={v => set("amount", v)} />
+          {/* 5. Date (assets are always IDR — no currency picker) */}
           <Input label="Date" type="date" value={form.tx_date} onChange={e => set("tx_date", e.target.value)} />
-          <Field label="Notes (optional)">
-            <textarea value={form.notes || ""} onChange={e => set("notes", e.target.value)} placeholder="Any details…" rows={2}
-              style={{ width: "100%", padding: "10px 14px", border: "1.5px solid #e5e7eb", borderRadius: 10, fontFamily: FF, fontSize: 14, fontWeight: 500, color: "#111827", background: "#fff", outline: "none", resize: "vertical", boxSizing: "border-box" }} />
-          </Field>
+          {/* 6. Amount */}
+          <AmountInput label={modeVal === "existing" ? "Amount to Add (IDR)" : "Purchase Price (IDR)"} value={form.amount} onChange={v => set("amount", v)} />
+          {/* 11. Notes */}
+          {notesField}
         </>
       );
     }
 
-    // Sell Asset
+    // ── Sell Asset ────────────────────────────────────────────────
     if (type === "sell_asset") {
-      const selAss = assetAccs.find(a => a.id === form.from_id);
-      const sp     = sn(form.amount);
-      const pp     = Number(selAss?.purchase_price || selAss?.current_value || 0);
-      const pl     = pp > 0 && sp > 0 ? sp - pp : null;
+      const selAss  = assetAccs.find(a => a.id === form.from_id);
+      const sp      = sn(form.amount);
+      const pp      = Number(selAss?.purchase_price || selAss?.current_value || 0);
+      const pl      = pp > 0 && sp > 0 ? sp - pp : null;
       const plColor = pl === null ? "#9ca3af" : pl >= 0 ? "#059669" : "#dc2626";
       return (
         <>
-          <Input label="Date" type="date" value={form.tx_date} onChange={e => set("tx_date", e.target.value)} />
+          {DIVIDER}
+          {/* 3. FROM (asset) */}
           {renderFromSelect("Asset")}
+          {/* 4. TO (bank) */}
           {renderToSelect("To Account (receive funds)")}
+          {/* 5. Date */}
+          <Input label="Date" type="date" value={form.tx_date} onChange={e => set("tx_date", e.target.value)} />
+          {/* 6. Amount + P&L preview */}
           <AmountInput label="Sell Price (IDR)" value={form.amount} onChange={v => set("amount", v)} />
           {selAss && sp > 0 && (
             <div style={{ background: pl !== null && pl >= 0 ? "#f0fdf4" : "#fff5f5", border: `1px solid ${plColor}33`, borderRadius: 10, padding: "10px 14px", display: "flex", gap: 20, flexWrap: "wrap" }}>
@@ -933,15 +972,13 @@ export default function TransactionModal({
               )}
             </div>
           )}
-          <Field label="Notes (optional)">
-            <textarea value={form.notes || ""} onChange={e => set("notes", e.target.value)} placeholder="Any details…" rows={2}
-              style={{ width: "100%", padding: "10px 14px", border: "1.5px solid #e5e7eb", borderRadius: 10, fontFamily: FF, fontSize: 14, fontWeight: 500, color: "#111827", background: "#fff", outline: "none", resize: "vertical", boxSizing: "border-box" }} />
-          </Field>
+          {/* 11. Notes */}
+          {notesField}
         </>
       );
     }
 
-    // Give Loan
+    // ── Give Loan ────────────────────────────────────────────────
     if (type === "give_loan") {
       const total   = sn(form.amount);
       const monthly = sn(form.monthly_installment);
@@ -951,10 +988,14 @@ export default function TransactionModal({
         : null;
       return (
         <>
-          <Input label="Date" type="date" value={form.tx_date} onChange={e => set("tx_date", e.target.value)} />
-          <Input label="Employee Name *" value={form.employee_name || ""} onChange={e => set("employee_name", e.target.value)} placeholder="Full name" />
+          {DIVIDER}
+          {/* 3. FROM */}
           {renderFromSelect("From Bank Account")}
+          {/* 4. TO */}
           {renderToSelect("Receivable Account (optional)")}
+          {/* 5. Date + Currency */}
+          {dateCurrencyRow}
+          {/* 6. Amount + loan schedule fields */}
           <AmountInput label="Loan Amount *" value={form.amount} onChange={v => set("amount", v)} />
           <AmountInput label="Monthly Installment" value={form.monthly_installment || ""} onChange={v => set("monthly_installment", v)} />
           <Input label="Start Date" type="date" value={form.loan_start_date || form.tx_date || todayStr()} onChange={e => set("loan_start_date", e.target.value)} />
@@ -965,80 +1006,46 @@ export default function TransactionModal({
               {endDate && <div><div style={{ fontSize: 9, color: "#059669", fontWeight: 700, textTransform: "uppercase", fontFamily: FF }}>Ends</div><div style={{ fontSize: 13, fontWeight: 700, color: "#111827", fontFamily: FF }}>{endDate}</div></div>}
             </div>
           )}
-          <Field label="Notes (optional)">
-            <textarea value={form.notes || ""} onChange={e => set("notes", e.target.value)} placeholder="Any details…" rows={2}
-              style={{ width: "100%", padding: "10px 14px", border: "1.5px solid #e5e7eb", borderRadius: 10, fontFamily: FF, fontSize: 14, fontWeight: 500, color: "#111827", background: "#fff", outline: "none", resize: "vertical", boxSizing: "border-box" }} />
-          </Field>
+          {/* 9. Description = Employee Name */}
+          <Input label="Employee Name *" value={form.employee_name || ""} onChange={e => set("employee_name", e.target.value)} placeholder="Full name" />
+          {/* 11. Notes */}
+          {notesField}
         </>
       );
     }
 
-    // General types (expense, income, transfer, pay_cc, pay_liability, reimburse_out, reimburse_in, collect_loan)
+    // ── General (expense, income, transfer, pay_cc, pay_liability, reimburse_out, reimburse_in, collect_loan) ──
+    const showFrom       = !["income"].includes(type);
+    const showTo         = ["income","transfer","pay_cc","pay_liability","collect_loan","reimburse_in"].includes(type);
+    const showCat        = ["expense","reimburse_out"].includes(type);
+    const showEntity     = ["reimburse_out","reimburse_in"].includes(type);
     const showDesc       = !["transfer","pay_cc","collect_loan","pay_liability"].includes(type);
     const showDescAsNote = ["transfer","pay_cc"].includes(type);
-    const showAmount     = true;
-    const showFrom       = !["income"].includes(type);
-    const showTo         = ["income","transfer","pay_cc","pay_liability","collect_loan"].includes(type) || type === "give_loan";
-    const showEntity     = ["reimburse_out","reimburse_in"].includes(type);
-    const showCat        = type === "expense";
     const showIncSrc     = type === "income" && incSrcOpts.length > 0;
     const showCicilan    = type === "expense";
 
     return (
       <>
-        <Input label="Date" type="date" value={form.tx_date} onChange={e => set("tx_date", e.target.value)} />
-
-        {showDesc && (
-          <Input
-            label="Description"
-            value={form.description || ""}
-            onChange={e => set("description", e.target.value)}
-            placeholder={type === "income" ? "e.g. Monthly salary" : type === "reimburse_out" ? "e.g. Lunch SDC team" : "e.g. Lunch at Warung"}
-          />
-        )}
-        {showDescAsNote && (
-          <Input label="Notes / Reference (optional)" value={form.description || ""} onChange={e => set("description", e.target.value)} placeholder="Optional" />
-        )}
-
-        {showAmount && (
-          <>
-            <div style={{ display: "flex", gap: 8 }}>
-              <AmountInput label="Amount" value={form.amount} onChange={v => set("amount", v)} currency={form.currency} style={{ flex: 1 }} />
-              <Field label="Currency" style={{ width: 90, flexShrink: 0 }}>
-                <select value={form.currency || "IDR"} onChange={e => set("currency", e.target.value)} style={{ ...SEL, padding: "0 8px", fontSize: 13, fontWeight: 600 }}>
-                  {allCurrencies.length > 0
-                    ? allCurrencies.map(c => <option key={c.code} value={c.code}>{c.flag ? `${c.flag} ` : ""}{c.code}</option>)
-                    : ["IDR","USD","SGD","EUR","GBP","AUD","JPY","MYR"].map(c => <option key={c} value={c}>{c}</option>)
-                  }
-                </select>
-              </Field>
-            </div>
-            {(form.currency || "IDR") !== "IDR" && form.amount && (
-              <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, marginTop: -8 }}>
-                ≈ {fmtIDR(amtIDR)} IDR
-              </div>
-            )}
-          </>
-        )}
-
-        {showEntity && renderEntityPills()}
-        {showFrom   && renderFromSelect(type === "collect_loan" ? "Receivable" : "From Account")}
-        {showTo     && renderToSelect(
-          type === "pay_cc" ? "Credit Card" :
-          type === "pay_liability" ? "Liability" :
-          type === "collect_loan" ? "To Account" :
+        {DIVIDER}
+        {/* 3. FROM */}
+        {showFrom && renderFromSelect(type === "collect_loan" ? "Receivable" : "From Account")}
+        {/* 4. TO */}
+        {showTo && renderToSelect(
+          type === "pay_cc"        ? "Credit Card" :
+          type === "pay_liability" ? "Liability"   :
+          type === "collect_loan"  ? "To Account"  :
           "To Account"
         )}
-
-        {showIncSrc && (
-          <Field label="Income Source (optional)">
-            <select value={form.income_source_id || ""} onChange={e => set("income_source_id", e.target.value || null)} style={SEL}>
-              <option value="">Select source…</option>
-              {incSrcOpts.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-            </select>
-          </Field>
+        {/* 5. Date + Currency */}
+        {dateCurrencyRow}
+        {(form.currency || "IDR") !== "IDR" && form.amount && (
+          <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, marginTop: -8 }}>
+            ≈ {fmtIDR(amtIDR)} IDR
+          </div>
         )}
-
+        {/* 6. Amount */}
+        <AmountInput label="Amount" value={form.amount} onChange={v => set("amount", v)} currency={form.currency} />
+        {/* 7. Category */}
         {showCat && (
           <Field label="Category">
             <select value={form.category_id || ""} onChange={e => {
@@ -1051,15 +1058,39 @@ export default function TransactionModal({
             </select>
           </Field>
         )}
-
-        <Field label="Notes (optional)">
-          <textarea value={form.notes || ""} onChange={e => set("notes", e.target.value)} placeholder="Any extra details…" rows={2}
-            style={{ width: "100%", padding: "10px 14px", border: "1.5px solid #e5e7eb", borderRadius: 10, fontFamily: FF, fontSize: 14, fontWeight: 500, color: "#111827", background: "#fff", outline: "none", resize: "vertical", boxSizing: "border-box", lineHeight: 1.5 }} />
-        </Field>
-
+        {/* 8. Entity */}
+        {showEntity && renderEntityPills()}
+        {/* Income source (income only) */}
+        {showIncSrc && (
+          <Field label="Income Source (optional)">
+            <select value={form.income_source_id || ""} onChange={e => set("income_source_id", e.target.value || null)} style={SEL}>
+              <option value="">Select source…</option>
+              {incSrcOpts.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+            </select>
+          </Field>
+        )}
+        {/* 9. Description / Merchant */}
+        {showDesc && (
+          <Input
+            label="Description"
+            value={form.description || ""}
+            onChange={e => set("description", e.target.value)}
+            placeholder={
+              type === "income"        ? "e.g. Monthly salary"  :
+              type === "reimburse_out" ? "e.g. Lunch SDC team"  :
+              "e.g. Lunch at Warung"
+            }
+          />
+        )}
+        {showDescAsNote && (
+          <Input label="Notes / Reference (optional)" value={form.description || ""} onChange={e => set("description", e.target.value)} placeholder="Optional" />
+        )}
+        {/* 10. Cicilan (Expense only) */}
         {showCicilan && (
           <CicilanSection enabled={cicilan} onToggle={() => setCicilan(v => !v)} form={form} set={set} />
         )}
+        {/* 11. Notes */}
+        {notesField}
       </>
     );
   };
