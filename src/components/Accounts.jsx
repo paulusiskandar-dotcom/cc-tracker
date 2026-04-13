@@ -1160,8 +1160,8 @@ function AccountCard({ account: a, ledger, accounts, accountCurrencies = [], fxR
         </div>
       )}
 
-      {/* Asset gain/loss (non-Deposit, non-PT Investment) */}
-      {a.type === "asset" && a.subtype !== "Deposit" && a.subtype !== "PT Investment" && bal.gain !== null && (
+      {/* Asset gain/loss (non-Deposit/Deposito, non-PT Investment) */}
+      {a.type === "asset" && a.subtype !== "Deposit" && a.subtype !== "Deposito" && a.subtype !== "PT Investment" && bal.gain !== null && (
         <div style={{
           fontSize: 11, fontWeight: 600,
           color:    bal.gain >= 0 ? "#059669" : "#dc2626",
@@ -1209,8 +1209,8 @@ function AccountCard({ account: a, ledger, accounts, accountCurrencies = [], fxR
         );
       })()}
 
-      {/* Deposit card detail */}
-      {a.type === "asset" && a.subtype === "Deposit" && (() => {
+      {/* Deposit / Deposito card detail */}
+      {a.type === "asset" && (a.subtype === "Deposit" || a.subtype === "Deposito") && (() => {
         const rate = Number(a.interest_rate || 0);
         const principal = Number(a.current_value || 0);
         const netRate = rate * 0.8;
@@ -1502,7 +1502,7 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
     return d.toISOString().slice(0, 10);
   };
 
-  const isDeposit = type === "asset" && form.subtype === "Deposit";
+  const isDeposit = type === "asset" && (form.subtype === "Deposit" || form.subtype === "Deposito");
   const depositRate = Number(form.interest_rate || 0);
   const depositPrincipal = Number(form.current_value || 0);
   const depositGrossMonthly = depositPrincipal * (depositRate / 100) / 12;

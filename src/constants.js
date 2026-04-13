@@ -49,7 +49,7 @@ export const ACC_TYPE_ICON = {
 // ─── ASSET SUBTYPES ───────────────────────────────────────────
 export const ASSET_SUBTYPES = [
   "Property", "Vehicle", "Stock", "Mutual Fund",
-  "Crypto", "Gold", "Deposit", "Deposito", "Valuables", "FX/Cash", "PT Investment",
+  "Crypto", "Gold", "Deposito", "Valuables", "FX/Cash", "PT Investment",
 ];
 
 export const ASSET_ICON = {
