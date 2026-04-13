@@ -1,77 +1,69 @@
-import { useMemo, useRef } from "react";
+import { useState, useMemo, useRef } from "react";
+import { ledgerApi, recalculateBalance } from "../api";
 import { fmtIDR } from "../utils";
 import { showToast } from "./shared/Card";
+import TransactionModal from "./shared/TransactionModal";
 import * as XLSX from "xlsx";
 
 const FF = "Figtree, sans-serif";
 
 const fmtDateShort = (d) => {
-  try {
-    return new Date(d + "T00:00:00").toLocaleDateString("id-ID", {
-      day: "2-digit", month: "short", year: "numeric",
-    });
-  } catch { return d; }
+  try { return new Date(d + "T00:00:00").toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }); }
+  catch { return d; }
 };
-
 const fmtDateLabel = (d) => {
-  try {
-    return new Date(d + "T00:00:00").toLocaleDateString("id-ID", {
-      weekday: "long", day: "2-digit", month: "long", year: "numeric",
-    });
-  } catch { return d; }
+  try { return new Date(d + "T00:00:00").toLocaleDateString("id-ID", { weekday: "long", day: "2-digit", month: "long", year: "numeric" }); }
+  catch { return d; }
 };
-
-const ym = (d) => (d || "").slice(0, 7);
-
-// For loans: positive saldo = owes (black), zero/negative = fully paid (green)
 const fmtSaldo = (v) => {
   const n = Number(v || 0);
-  return {
-    text:  fmtIDR(Math.abs(n)),
-    color: n <= 0 ? "#059669" : "#111827",
-    sign:  n < 0 ? "-" : "",
-  };
+  return { text: fmtIDR(Math.abs(n)), color: n <= 0 ? "#059669" : "#111827", sign: n < 0 ? "-" : "" };
 };
 
 function SummaryCard({ label, value, color, bg }) {
   return (
-    <div style={{
-      background: bg, borderRadius: 12, padding: "14px 16px",
-      border: "0.5px solid #e5e7eb", flex: 1, minWidth: 0,
-    }}>
-      <div style={{ fontSize: 9, fontWeight: 700, color, textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF, marginBottom: 6, opacity: 0.8 }}>
-        {label}
-      </div>
-      <div style={{ fontSize: 16, fontWeight: 800, color, fontFamily: FF, lineHeight: 1.2 }}>
-        {value}
-      </div>
+    <div style={{ background: bg, borderRadius: 12, padding: "14px 16px", border: "0.5px solid #e5e7eb", flex: 1, minWidth: 0 }}>
+      <div style={{ fontSize: 9, fontWeight: 700, color, textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF, marginBottom: 6, opacity: 0.8 }}>{label}</div>
+      <div style={{ fontSize: 16, fontWeight: 800, color, fontFamily: FF, lineHeight: 1.2 }}>{value}</div>
     </div>
   );
 }
 
-// receivable = accounts row (type=receivable, subtype != 'reimburse')
-// ledger = all ledger rows for this user
+// receivable = accounts row (type=receivable)
 export default function EmployeeLoanStatement({
   receivable, ledger, accounts, user, onBack,
-  onCollect, onGiveLoan,
+  setLedger, onRefresh,
+  allCurrencies = [], fxRates = {}, categories = [],
+  receivables = [], bankAccounts = [],
 }) {
   const printRef = useRef(null);
+
+  // TransactionModal state
+  const [txOpen,    setTxOpen]    = useState(false);
+  const [txMode,    setTxMode]    = useState("add");
+  const [txType,    setTxType]    = useState("collect_loan");
+  const [txInitial, setTxInitial] = useState(null);
+  const [txDefault, setTxDefault] = useState(null);
+
+  // Delete confirm
+  const [delEntry,  setDelEntry]  = useState(null);
+  const [delConfirm, setDelConfirm] = useState(false);
+  const [delSaving,  setDelSaving]  = useState(false);
 
   // All transactions involving this receivable account
   const rows = useMemo(() => {
     return ledger
       .filter(e =>
         (e.tx_type === "give_loan"    && e.to_id   === receivable.id) ||
-        (e.tx_type === "collect_loan" && e.from_id  === receivable.id)
+        (e.tx_type === "collect_loan" && e.from_id === receivable.id)
       )
       .sort((a, b) => {
         const d = a.tx_date.localeCompare(b.tx_date);
-        if (d !== 0) return d;
-        return (a.created_at || "").localeCompare(b.created_at || "");
+        return d !== 0 ? d : (a.created_at || "").localeCompare(b.created_at || "");
       });
   }, [ledger, receivable.id]);
 
-  // Running balance (sisa hutang), ascending
+  // Running balance
   const rowsWithBal = useMemo(() => {
     let bal = Number(receivable.initial_balance || 0);
     return rows.map(tx => {
@@ -83,7 +75,6 @@ export default function EmployeeLoanStatement({
     });
   }, [rows, receivable]);
 
-  // Grouped by date
   const grouped = useMemo(() => {
     const map = {};
     rowsWithBal.forEach(r => {
@@ -93,53 +84,85 @@ export default function EmployeeLoanStatement({
     return Object.entries(map).sort(([a], [b]) => a.localeCompare(b));
   }, [rowsWithBal]);
 
-  // Metrics
   const totalLoaned  = rows.filter(e => e.tx_type === "give_loan")   .reduce((s, e) => s + Number(e.amount_idr || 0), 0);
   const totalRepaid  = rows.filter(e => e.tx_type === "collect_loan").reduce((s, e) => s + Number(e.amount_idr || 0), 0);
   const outstanding  = totalLoaned - totalRepaid;
   const lastPayment  = rows.filter(e => e.tx_type === "collect_loan").sort((a, b) => b.tx_date.localeCompare(a.tx_date))[0];
+  const periodLabel  = rows.length > 0 ? `${fmtDateShort(rows[0].tx_date)} – ${fmtDateShort(rows[rows.length - 1].tx_date)}` : "—";
 
-  const periodLabel = rows.length > 0
-    ? `${fmtDateShort(rows[0].tx_date)} – ${fmtDateShort(rows[rows.length - 1].tx_date)}`
-    : "—";
+  // ── Delete ─────────────────────────────────────────────────
+  const handleDelete = async () => {
+    if (!delEntry) return;
+    setDelSaving(true);
+    try {
+      await ledgerApi.delete(delEntry.id, delEntry, accounts);
+      setLedger?.(p => p.filter(e => e.id !== delEntry.id));
+      await recalculateBalance(receivable.id, user.id);
+      showToast("Transaction deleted");
+      setDelConfirm(false);
+      setDelEntry(null);
+      onRefresh?.();
+    } catch (e) { showToast(e.message, "error"); }
+    setDelSaving(false);
+  };
 
-  const BTN = (extra = {}) => ({
-    fontSize: 12, padding: "6px 14px", borderRadius: 8,
-    border: "1px solid #e5e7eb", background: "#f9fafb", color: "#374151",
-    fontFamily: FF, cursor: "pointer", fontWeight: 600, ...extra,
-  });
+  // ── Open TransactionModal helpers ─────────────────────────
+  const openRecordPayment = () => {
+    setTxMode("add");
+    setTxType("collect_loan");
+    setTxInitial(null);
+    setTxDefault({ from_id: receivable.id });
+    setTxOpen(true);
+  };
 
-  // ── Excel export ───────────────────────────────────────────
+  const openNewLoan = () => {
+    setTxMode("add");
+    setTxType("give_loan");
+    setTxInitial(null);
+    setTxDefault({ to_id: receivable.id });
+    setTxOpen(true);
+  };
+
+  const openEdit = (tx) => {
+    setTxMode("edit");
+    setTxType(tx.tx_type);
+    setTxInitial(tx);
+    setTxDefault(null);
+    setTxOpen(true);
+  };
+
+  // ── Export ─────────────────────────────────────────────────
+  const exportPDF = () => window.print();
+
   const exportExcel = () => {
     const wb   = XLSX.utils.book_new();
     const name = (receivable.name || "LoanStatement").replace(/[^a-zA-Z0-9]/g, "_");
-
-    const summaryRows = [
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
       ["Loan Statement — Paulus Finance"],
-      ["Person",        receivable.name],
+      ["Person",       receivable.name],
       [],
-      ["Total Loaned",  totalLoaned],
-      ["Total Repaid",  totalRepaid],
-      ["Outstanding",   outstanding],
-      ["Last Payment",  lastPayment ? lastPayment.tx_date : "—"],
-    ];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), "Summary");
-
+      ["Total Loaned", totalLoaned],
+      ["Total Repaid", totalRepaid],
+      ["Outstanding",  outstanding],
+      ["Last Payment", lastPayment ? lastPayment.tx_date : "—"],
+    ]), "Summary");
     const hdr = ["Tanggal", "Keterangan", "Jenis", "Pinjam", "Bayar", "Sisa Hutang"];
     const txRows = rowsWithBal.map(r => [
-      r.tx_date,
-      r.description || "",
+      r.tx_date, r.description || "",
       r._dir === "pinjam" ? "Give Loan" : "Collect Loan",
       r._dir === "pinjam" ? Number(r.amount_idr || 0) : "",
       r._dir === "bayar"  ? Number(r.amount_idr || 0) : "",
       r._runBal,
     ]);
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([hdr, ...txRows]), "Transactions");
-
     XLSX.writeFile(wb, `${name}_LoanStatement_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
-  const exportPDF = () => window.print();
+  const BTN = (extra = {}) => ({
+    fontSize: 12, padding: "6px 14px", borderRadius: 8,
+    border: "1px solid #e5e7eb", background: "#f9fafb", color: "#374151",
+    fontFamily: FF, cursor: "pointer", fontWeight: 600, ...extra,
+  });
 
   const COLS    = "80px 1fr 110px 120px 120px 120px";
   const ROW_PAD = "0 14px";
@@ -152,13 +175,18 @@ export default function EmployeeLoanStatement({
     { label: "Sisa Hutang", align: "right" },
   ];
 
+  // Derived account lists for TransactionModal
+  const bankAccs  = accounts.filter(a => a.type === "bank" && a.subtype !== "cash" && a.is_active !== false);
+  const cashAccs  = accounts.filter(a => a.is_active !== false && a.subtype === "cash");
+  const ccAccs    = accounts.filter(a => a.is_active !== false && a.type === "credit_card");
+
   return (
     <div ref={printRef} style={{ display: "flex", flexDirection: "column", gap: 16, fontFamily: FF }}>
 
       {/* ── Header ── */}
       <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <button onClick={onBack} style={BTN()}>← Back</button>
-        <div>
+        <div style={{ flex: 1 }}>
           <div style={{ fontSize: 16, fontWeight: 800, color: "#111827" }}>
             {receivable.name} — Loan Statement
           </div>
@@ -166,17 +194,13 @@ export default function EmployeeLoanStatement({
             Outstanding: <strong style={{ color: outstanding > 0 ? "#111827" : "#059669" }}>{fmtIDR(outstanding)}</strong>
           </div>
         </div>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-          {onCollect && (
-            <button onClick={onCollect} style={BTN({ background: "#f0fdf4", color: "#059669", border: "1px solid #bbf7d0" })}>
-              ✓ Record Payment
-            </button>
-          )}
-          {onGiveLoan && (
-            <button onClick={onGiveLoan} style={BTN({ background: "#eff6ff", color: "#3b5bdb", border: "1px solid #bfdbfe" })}>
-              + New Loan
-            </button>
-          )}
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <button onClick={openRecordPayment} style={BTN({ background: "#f0fdf4", color: "#059669", border: "1px solid #bbf7d0" })}>
+            ✓ Record Payment
+          </button>
+          <button onClick={openNewLoan} style={BTN({ background: "#eff6ff", color: "#3b5bdb", border: "1px solid #bfdbfe" })}>
+            + New Loan
+          </button>
           <button onClick={exportPDF}   style={BTN()}>🖨 PDF</button>
           <button onClick={exportExcel} style={BTN()}>📊 Excel</button>
         </div>
@@ -185,9 +209,7 @@ export default function EmployeeLoanStatement({
       {/* ── Print header ── */}
       <div className="print-only" style={{ display: "none" }}>
         <div style={{ fontSize: 18, fontWeight: 800, color: "#111827", fontFamily: FF }}>Paulus Finance — Loan Statement</div>
-        <div style={{ fontSize: 13, color: "#374151", fontFamily: FF, marginTop: 4 }}>
-          {receivable.name} · {periodLabel}
-        </div>
+        <div style={{ fontSize: 13, color: "#374151", fontFamily: FF, marginTop: 4 }}>{receivable.name} · {periodLabel}</div>
         <hr style={{ margin: "10px 0", borderColor: "#e5e7eb" }} />
       </div>
 
@@ -201,18 +223,15 @@ export default function EmployeeLoanStatement({
 
       {/* ── Empty ── */}
       {rows.length === 0 && (
-        <div style={{
-          background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb",
-          padding: "40px 20px", textAlign: "center", color: "#9ca3af", fontSize: 13,
-        }}>
-          No transactions found for this person.
+        <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", padding: "40px 20px", textAlign: "center", color: "#9ca3af", fontSize: 13 }}>
+          No transactions yet. Use "New Loan" to record the first loan.
         </div>
       )}
 
       {/* ── Statement table ── */}
       {rows.length > 0 && (
         <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden" }}>
-          {/* Header */}
+          {/* Header row */}
           <div style={{ display: "grid", gridTemplateColumns: COLS, background: "#f9fafb", borderBottom: "0.5px solid #e5e7eb", padding: ROW_PAD }}>
             {HDR_CELLS.map(({ label, align }) => (
               <div key={label} style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF, padding: "9px 6px", textAlign: align }}>
@@ -221,7 +240,6 @@ export default function EmployeeLoanStatement({
             ))}
           </div>
 
-          {/* Grouped rows */}
           {grouped.map(([date, txs]) => (
             <div key={date}>
               <div style={{ background: "#f3f4f6", borderBottom: "0.5px solid #e5e7eb", padding: "5px 20px", fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF }}>
@@ -229,11 +247,11 @@ export default function EmployeeLoanStatement({
               </div>
 
               {txs.map(tx => {
-                const amt = Number(tx.amount_idr || 0);
+                const amt      = Number(tx.amount_idr || 0);
                 const isPinjam = tx._dir === "pinjam";
-                const fromAcc = accounts.find(a => a.id === tx.from_id);
-                const toAcc   = accounts.find(a => a.id === tx.to_id);
-                const sub     = isPinjam
+                const fromAcc  = accounts.find(a => a.id === tx.from_id);
+                const toAcc    = accounts.find(a => a.id === tx.to_id);
+                const sub      = isPinjam
                   ? (fromAcc ? `← ${fromAcc.name}` : "")
                   : (toAcc   ? `→ ${toAcc.name}`   : "");
                 const b = fmtSaldo(tx._runBal);
@@ -244,24 +262,27 @@ export default function EmployeeLoanStatement({
                       {fmtDateShort(tx.tx_date)}
                     </div>
 
-                    {/* Keterangan */}
+                    {/* Keterangan + Edit/Delete */}
                     <div style={{ padding: "8px 6px", minWidth: 0 }}>
                       <div style={{ fontSize: 12, fontWeight: 500, color: "#111827", fontFamily: FF, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {tx.description || (isPinjam ? "Loan Given" : "Loan Collected")}
                       </div>
-                      {sub && (
-                        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, marginTop: 2 }}>{sub}</div>
-                      )}
+                      {sub && <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, marginTop: 2 }}>{sub}</div>}
+                      <div style={{ display: "flex", gap: 5, marginTop: 3 }}>
+                        <button onClick={() => openEdit(tx)}
+                          style={{ fontSize: 9, padding: "1px 7px", borderRadius: 5, border: "1px solid #e5e7eb", background: "#f9fafb", color: "#374151", cursor: "pointer", fontFamily: FF, fontWeight: 600 }}>
+                          Edit
+                        </button>
+                        <button onClick={() => { setDelEntry(tx); setDelConfirm(true); }}
+                          style={{ fontSize: 9, padding: "1px 7px", borderRadius: 5, border: "1px solid #fee2e2", background: "#fff5f5", color: "#dc2626", cursor: "pointer", fontFamily: FF, fontWeight: 600 }}>
+                          Delete
+                        </button>
+                      </div>
                     </div>
 
-                    {/* Jenis badge */}
+                    {/* Jenis */}
                     <div style={{ padding: "8px 6px" }}>
-                      <span style={{
-                        fontSize: 9, fontWeight: 700, fontFamily: FF,
-                        background: isPinjam ? "#fef9c3" : "#f0fdf4",
-                        color: isPinjam ? "#92400e" : "#059669",
-                        borderRadius: 4, padding: "2px 6px", whiteSpace: "nowrap",
-                      }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, fontFamily: FF, background: isPinjam ? "#fef9c3" : "#f0fdf4", color: isPinjam ? "#92400e" : "#059669", borderRadius: 4, padding: "2px 6px", whiteSpace: "nowrap" }}>
                         {isPinjam ? "Give Loan" : "Collect"}
                       </span>
                     </div>
@@ -293,9 +314,7 @@ export default function EmployeeLoanStatement({
               <div style={{ display: "grid", gridTemplateColumns: COLS, background: "#f9fafb", borderTop: "1.5px solid #e5e7eb", padding: ROW_PAD }}>
                 <div style={{ fontSize: 11, color: "#374151", fontFamily: FF, padding: "9px 6px" }} />
                 <div style={{ fontSize: 11, fontWeight: 800, color: b.color, fontFamily: FF, padding: "9px 6px" }}>Outstanding</div>
-                <div />{/* Jenis */}
-                <div />{/* Pinjam */}
-                <div />{/* Bayar */}
+                <div /><div /><div />
                 <div style={{ fontSize: 13, fontWeight: 800, color: b.color, fontFamily: FF, padding: "9px 6px", textAlign: "right" }}>{b.sign}{b.text}</div>
               </div>
             );
@@ -311,12 +330,55 @@ export default function EmployeeLoanStatement({
           </span>
           {(() => {
             const b = fmtSaldo(outstanding);
-            return (
-              <span style={{ fontSize: 12, fontWeight: 700, color: b.color, fontFamily: FF }}>
-                Outstanding: {b.sign}{b.text}
-              </span>
-            );
+            return <span style={{ fontSize: 12, fontWeight: 700, color: b.color, fontFamily: FF }}>Outstanding: {b.sign}{b.text}</span>;
           })()}
+        </div>
+      )}
+
+      {/* ── TransactionModal ── */}
+      <TransactionModal
+        open={txOpen}
+        mode={txMode}
+        initialData={txInitial}
+        defaultGroup="loan"
+        defaultTxType={txType}
+        defaultAccount={txDefault}
+        onSave={() => { setTxOpen(false); onRefresh?.(); }}
+        onDelete={() => { setTxOpen(false); onRefresh?.(); }}
+        onClose={() => setTxOpen(false)}
+        user={user}
+        accounts={accounts}
+        setLedger={setLedger}
+        categories={categories}
+        fxRates={fxRates}
+        allCurrencies={allCurrencies}
+        bankAccounts={bankAccs}
+        creditCards={ccAccs}
+        assets={[]}
+        liabilities={[]}
+        receivables={receivables}
+        incomeSrcs={[]}
+        onRefresh={onRefresh}
+      />
+
+      {/* ── Delete confirm ── */}
+      {delConfirm && (
+        <div onClick={e => { if (e.target === e.currentTarget) { setDelConfirm(false); setDelEntry(null); } }}
+          style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: 24, maxWidth: 360, width: "100%", fontFamily: FF }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#111827", marginBottom: 8 }}>Delete transaction?</div>
+            <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 20 }}>This will reverse the balance impact.</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => { setDelConfirm(false); setDelEntry(null); }}
+                style={{ flex: 1, height: 40, borderRadius: 8, border: "1.5px solid #e5e7eb", background: "#fff", color: "#374151", fontFamily: FF, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                Cancel
+              </button>
+              <button onClick={handleDelete} disabled={delSaving}
+                style={{ flex: 1, height: 40, borderRadius: 8, border: "none", background: "#fee2e2", color: "#dc2626", fontFamily: FF, fontSize: 13, fontWeight: 700, cursor: delSaving ? "default" : "pointer", opacity: delSaving ? 0.6 : 1 }}>
+                {delSaving ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

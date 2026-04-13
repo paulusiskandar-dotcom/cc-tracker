@@ -291,7 +291,7 @@ function DepositoCard({ asset: a, color, onUpdate, onEdit }) {
 }
 
 // ─── MAIN ─────────────────────────────────────────────────────
-export default function Assets({ user, accounts, setAccounts, dark, ledger = [] }) {
+export default function Assets({ user, accounts, setAccounts, dark, ledger = [], setLedger, categories = [], fxRates = {}, CURRENCIES = [], onRefresh }) {
   const T = dark ? DARK : LIGHT;
 
   const [saving, setSaving] = useState(false);
@@ -501,9 +501,13 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
         user={user}
         accounts={accounts}
         ledger={ledger}
+        setLedger={setLedger}
         onBack={() => setTimelineAsset(null)}
-        onRefresh={() => { /* parent handles refresh */ }}
+        onRefresh={onRefresh}
         setAccounts={setAccounts}
+        categories={categories}
+        fxRates={fxRates}
+        allCurrencies={CURRENCIES}
       />
     );
   }

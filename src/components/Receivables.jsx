@@ -107,6 +107,7 @@ export default function Receivables({
   employeeLoans, setEmployeeLoans,
   loanPayments,  setLoanPayments,
   onRefresh, setAccounts, setLedger, dark,
+  fxRates = {}, CURRENCIES = [],
 }) {
   const T = dark ? DARK : LIGHT;
 
@@ -683,8 +684,13 @@ export default function Receivables({
         accounts={accounts}
         user={user}
         onBack={() => setLoanStatementRec(null)}
-        onCollect={() => openCollect(loanStatementRec)}
-        onGiveLoan={null}
+        setLedger={setLedger}
+        onRefresh={onRefresh}
+        allCurrencies={CURRENCIES}
+        fxRates={fxRates}
+        categories={categories}
+        receivables={accounts.filter(a => a.type === "receivable")}
+        bankAccounts={accounts.filter(a => a.type === "bank")}
       />
     );
   }

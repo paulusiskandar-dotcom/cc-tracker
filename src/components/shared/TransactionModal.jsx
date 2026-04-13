@@ -646,7 +646,7 @@ export default function TransactionModal({
 
     let groups = [];
     if (type === "collect_loan") {
-      groups = [{ label: "RECEIVABLE", items: recv.filter(r => Number(r.current_balance || 0) > 0) }];
+      groups = [{ label: "RECEIVABLE", items: recv }];
     } else if (type === "reimburse_in") {
       groups = [{ label: "RECEIVABLE", items: recv }];
     } else if (type === "sell_asset") {

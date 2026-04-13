@@ -6,26 +6,21 @@ import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "rec
 import { EmptyState, showToast } from "./shared/Card";
 import Modal from "./shared/Modal";
 import Button from "./shared/Button";
-import Input, { Field, AmountInput, FormRow } from "./shared/Input";
-import { accountsApi, ledgerApi, getTxFromToTypes } from "../api";
+import Input, { Field, AmountInput } from "./shared/Input";
+import { accountsApi, ledgerApi, recalculateBalance } from "../api";
+import TransactionModal from "./shared/TransactionModal";
+import * as XLSX from "xlsx";
 
 const FF = "Figtree, sans-serif";
 
-// Format date as "Apr 2025"
 const fmtMonthYear = (d) => {
-  try {
-    return new Date(d + "T00:00:00").toLocaleDateString("id-ID", { month: "long", year: "numeric" });
-  } catch { return d; }
+  try { return new Date(d + "T00:00:00").toLocaleDateString("id-ID", { month: "long", year: "numeric" }); }
+  catch { return d; }
 };
-
 const fmtDateShort = (d) => {
-  try {
-    return new Date(d + "T00:00:00").toLocaleDateString("id-ID", {
-      day: "2-digit", month: "short", year: "numeric",
-    });
-  } catch { return d; }
+  try { return new Date(d + "T00:00:00").toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }); }
+  catch { return d; }
 };
-
 const ym = (d) => (d || "").slice(0, 7);
 
 // ─── METRIC CARD ─────────────────────────────────────────────
@@ -38,27 +33,18 @@ function MetricCard({ label, value, extra, color, bg }) {
       <div style={{ fontSize: 16, fontWeight: 800, color: color || "#111827", fontFamily: FF, lineHeight: 1.2 }}>
         {value}
       </div>
-      {extra && (
-        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, marginTop: 3 }}>{extra}</div>
-      )}
+      {extra && <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, marginTop: 3 }}>{extra}</div>}
     </div>
   );
 }
 
 // ─── TIMELINE EVENT ROW ───────────────────────────────────────
-function EventRow({ icon, iconBg, iconColor, title, badge, badgeColor, badgeBg, subtitle, valueStr, valueColor }) {
+function EventRow({ icon, iconBg, title, badge, badgeColor, badgeBg, subtitle, valueStr, valueColor, onEdit, onDelete }) {
   return (
     <div style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "10px 0", borderBottom: "1px solid #f3f4f6" }}>
-      {/* Dot */}
-      <div style={{
-        width: 34, height: 34, borderRadius: "50%", flexShrink: 0,
-        background: iconBg || "#f3f4f6",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: 16, color: iconColor,
-      }}>
+      <div style={{ width: 34, height: 34, borderRadius: "50%", flexShrink: 0, background: iconBg || "#f3f4f6", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>
         {icon}
       </div>
-      {/* Text */}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: FF }}>{title}</span>
@@ -68,13 +54,22 @@ function EventRow({ icon, iconBg, iconColor, title, badge, badgeColor, badgeBg, 
             </span>
           )}
         </div>
-        {subtitle && (
-          <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, marginTop: 2 }}>
-            {subtitle}
+        {subtitle && <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, marginTop: 2 }}>{subtitle}</div>}
+        {(onEdit || onDelete) && (
+          <div style={{ display: "flex", gap: 6, marginTop: 5 }}>
+            {onEdit && (
+              <button onClick={onEdit} style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, border: "1px solid #e5e7eb", background: "#f9fafb", color: "#374151", cursor: "pointer", fontFamily: FF, fontWeight: 600 }}>
+                Edit
+              </button>
+            )}
+            {onDelete && (
+              <button onClick={onDelete} style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, border: "1px solid #fee2e2", background: "#fff5f5", color: "#dc2626", cursor: "pointer", fontFamily: FF, fontWeight: 600 }}>
+                Delete
+              </button>
+            )}
           </div>
         )}
       </div>
-      {/* Value */}
       {valueStr && (
         <div style={{ fontSize: 13, fontWeight: 700, color: valueColor || "#111827", fontFamily: FF, flexShrink: 0 }}>
           {valueStr}
@@ -84,7 +79,7 @@ function EventRow({ icon, iconBg, iconColor, title, badge, badgeColor, badgeBg, 
   );
 }
 
-// ─── SPARKLINE CUSTOM TOOLTIP ─────────────────────────────────
+// ─── SPARKLINE TOOLTIP ────────────────────────────────────────
 function SparkTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   return (
@@ -96,21 +91,32 @@ function SparkTooltip({ active, payload, label }) {
 }
 
 // ─── MAIN COMPONENT ───────────────────────────────────────────
-export default function AssetTimeline({ asset, user, accounts, ledger, onBack, onRefresh, setAccounts }) {
+export default function AssetTimeline({
+  asset, user, accounts, ledger, setLedger, onBack, onRefresh, setAccounts,
+  categories = [], fxRates = {}, allCurrencies = [],
+}) {
   const [valueHistory, setValueHistory] = useState([]);
   const [histLoading,  setHistLoading]  = useState(true);
 
-  // Update value modal
+  // Update Value modal
   const [updateModal, setUpdateModal] = useState(false);
   const [updateForm,  setUpdateForm]  = useState({ value: "", date: todayStr(), notes: "" });
   const [saving,      setSaving]      = useState(false);
 
-  // Add transaction modal (buy_asset only — simplified)
-  const [txModal,  setTxModal]  = useState(false);
-  const [txForm,   setTxForm]   = useState({ amount: "", date: todayStr(), description: "", from_id: "", notes: "" });
-  const [txSaving, setTxSaving] = useState(false);
+  // TransactionModal
+  const [txOpen,    setTxOpen]    = useState(false);
+  const [txMode,    setTxMode]    = useState("add");
+  const [txInitial, setTxInitial] = useState(null);
 
-  const bankAccounts = useMemo(() => accounts.filter(a => a.type === "bank"), [accounts]);
+  // Delete confirm
+  const [delEntry,    setDelEntry]    = useState(null);
+  const [delVH,       setDelVH]       = useState(null);
+  const [delConfirm,  setDelConfirm]  = useState(false);
+  const [delSaving,   setDelSaving]   = useState(false);
+
+  const bankAccounts = useMemo(() => accounts.filter(a => a.type === "bank" || a.subtype === "cash"), [accounts]);
+  const ccAccounts   = useMemo(() => accounts.filter(a => a.type === "credit_card"), [accounts]);
+  const assetAccs    = useMemo(() => accounts.filter(a => a.type === "asset"), [accounts]);
   const icon = ASSET_ICON[asset.subtype] || "📦";
 
   useEffect(() => {
@@ -121,10 +127,7 @@ export default function AssetTimeline({ asset, user, accounts, ledger, onBack, o
       .select("*")
       .eq("account_id", asset.id)
       .order("date", { ascending: true })
-      .then(({ data }) => {
-        setValueHistory(data || []);
-        setHistLoading(false);
-      });
+      .then(({ data }) => { setValueHistory(data || []); setHistLoading(false); });
   }, [asset?.id]);
 
   // ── Derived metrics ──────────────────────────────────────────
@@ -132,7 +135,6 @@ export default function AssetTimeline({ asset, user, accounts, ledger, onBack, o
     ledger.filter(e => e.from_id === asset.id || e.to_id === asset.id)
   , [ledger, asset.id]);
 
-  // Cost basis: purchase_price + all buy_asset additions
   const costBasis = useMemo(() => {
     const base = Number(asset.purchase_price || 0);
     const adds = assetLedger
@@ -144,52 +146,36 @@ export default function AssetTimeline({ asset, user, accounts, ledger, onBack, o
   const currentValue = Number(asset.current_value || 0);
   const unrealizedPL = currentValue - costBasis;
   const returnPct    = costBasis > 0 ? (unrealizedPL / costBasis) * 100 : 0;
+  const plColor      = unrealizedPL >= 0 ? "#059669" : "#dc2626";
+  const plBg         = unrealizedPL >= 0 ? "#f0fdf4" : "#fff1f2";
 
   // ── Sparkline data ────────────────────────────────────────────
   const sparkData = useMemo(() => {
     const points = [];
-    // Add initial purchase point if available
-    if (asset.purchase_date && Number(asset.purchase_price || 0) > 0) {
+    if (asset.purchase_date && Number(asset.purchase_price || 0) > 0)
       points.push({ date: asset.purchase_date, value: Number(asset.purchase_price) });
-    }
-    // Add value history points
-    valueHistory.forEach(h => {
-      points.push({ date: h.date, value: Number(h.new_value || 0) });
-    });
-    // Add current value as last point if not already there
+    valueHistory.forEach(h => points.push({ date: h.date, value: Number(h.new_value || 0) }));
     const lastDate = todayStr();
-    if (points.length === 0 || points[points.length - 1].value !== currentValue) {
+    if (points.length === 0 || points[points.length - 1].value !== currentValue)
       points.push({ date: lastDate, value: currentValue });
-    }
-    return points.map(p => ({
-      date: p.date,
-      label: fmtDateShort(p.date),
-      value: p.value,
-    }));
+    return points.map(p => ({ date: p.date, label: fmtDateShort(p.date), value: p.value }));
   }, [asset, valueHistory, currentValue]);
 
   // ── Timeline rows (newest first, grouped by month) ───────────
   const allEvents = useMemo(() => {
     const events = [];
-
-    // Value history events
     valueHistory.forEach((h, i) => {
       const oldVal = Number(h.old_value || 0);
       const newVal = Number(h.new_value || 0);
       events.push({ _type: "value_update", _date: h.date, _sort: `${h.date}_${i}`, data: h, oldVal, newVal });
     });
-
-    // Ledger events
     assetLedger.forEach(e => {
       events.push({ _type: "ledger", _date: e.tx_date, _sort: `${e.tx_date}_${e.id}`, data: e });
     });
-
-    // Sort newest first
     events.sort((a, b) => b._sort.localeCompare(a._sort));
     return events;
   }, [valueHistory, assetLedger]);
 
-  // Group by month
   const grouped = useMemo(() => {
     const map = {};
     allEvents.forEach(ev => {
@@ -200,75 +186,120 @@ export default function AssetTimeline({ asset, user, accounts, ledger, onBack, o
     return Object.entries(map).sort(([a], [b]) => b.localeCompare(a));
   }, [allEvents]);
 
-  // ── Actions ───────────────────────────────────────────────────
+  // ── Update Value ─────────────────────────────────────────────
   const handleUpdateValue = async () => {
     if (!updateForm.value) { showToast("Enter a value", "error"); return; }
     setSaving(true);
     try {
-      const newVal   = Number(updateForm.value);
+      const newVal = Number(updateForm.value);
       const { data: current } = await supabase.from("accounts").select("current_value").eq("id", asset.id).single();
       const oldValue = current?.current_value || 0;
-
       await supabase.from("accounts").update({ current_value: newVal }).eq("id", asset.id);
-      const { error: histErr } = await supabase.from("asset_value_history").insert({
-        account_id: asset.id,
-        user_id:    user.id,
-        old_value:  oldValue,
-        new_value:  newVal,
-        date:       updateForm.date || todayStr(),
-        notes:      updateForm.notes || "Manual update",
+      await supabase.from("asset_value_history").insert({
+        account_id: asset.id, user_id: user.id,
+        old_value: oldValue, new_value: newVal,
+        date: updateForm.date || todayStr(),
+        notes: updateForm.notes || "Manual update",
       });
-      if (histErr) throw new Error(histErr.message);
-
       if (setAccounts) setAccounts(p => p.map(a => a.id === asset.id ? { ...a, current_value: newVal } : a));
       setValueHistory(p => [...p, { account_id: asset.id, old_value: oldValue, new_value: newVal, date: updateForm.date || todayStr(), notes: updateForm.notes || "Manual update" }]);
       showToast("Value updated");
       setUpdateModal(false);
-      if (onRefresh) onRefresh();
+      onRefresh?.();
     } catch (e) { showToast(e.message, "error"); }
     setSaving(false);
   };
 
-  const handleAddTx = async () => {
-    if (!txForm.amount || !txForm.from_id) { showToast("Fill amount and source account", "error"); return; }
-    setTxSaving(true);
+  // ── Delete ledger entry ───────────────────────────────────────
+  const handleDeleteEntry = async () => {
+    if (!delEntry) return;
+    setDelSaving(true);
     try {
-      const amt = Number(txForm.amount);
-      const { from_type, to_type } = getTxFromToTypes("buy_asset");
-      await ledgerApi.create(user.id, {
-        tx_type:     "buy_asset",
-        tx_date:     txForm.date || todayStr(),
-        amount:      amt,
-        currency:    "IDR",
-        amount_idr:  amt,
-        description: txForm.description || `Additional cost: ${asset.name}`,
-        from_id:     txForm.from_id,
-        to_id:       asset.id,
-        from_type,
-        to_type,
-        entity:      "Personal",
-        notes:       txForm.notes || null,
-      }, accounts);
-      showToast("Transaction added");
-      setTxModal(false);
-      setTxForm({ amount: "", date: todayStr(), description: "", from_id: "", notes: "" });
-      if (onRefresh) onRefresh();
+      await ledgerApi.delete(delEntry.id, delEntry, accounts);
+      setLedger?.(p => p.filter(e => e.id !== delEntry.id));
+      const ids = [delEntry.from_id, delEntry.to_id].filter(Boolean);
+      await Promise.all(ids.map(id => recalculateBalance(id, user.id)));
+      showToast("Transaction deleted");
+      setDelConfirm(false);
+      setDelEntry(null);
+      onRefresh?.();
     } catch (e) { showToast(e.message, "error"); }
-    setTxSaving(false);
+    setDelSaving(false);
   };
 
-  const plColor  = unrealizedPL >= 0 ? "#059669" : "#dc2626";
-  const plBg     = unrealizedPL >= 0 ? "#f0fdf4" : "#fff1f2";
+  // ── Delete value history entry ────────────────────────────────
+  const handleDeleteVH = async () => {
+    if (!delVH) return;
+    setDelSaving(true);
+    try {
+      await supabase.from("asset_value_history").delete().eq("id", delVH.id);
+      setValueHistory(p => p.filter(h => h.id !== delVH.id));
+      showToast("Value record deleted");
+      setDelConfirm(false);
+      setDelVH(null);
+    } catch (e) { showToast(e.message, "error"); }
+    setDelSaving(false);
+  };
+
+  // ── Export ────────────────────────────────────────────────────
+  const exportPDF = () => window.print();
+
+  const exportExcel = () => {
+    const wb  = XLSX.utils.book_new();
+    const nm  = (asset.name || "Asset").replace(/[^a-zA-Z0-9]/g, "_");
+
+    const summaryRows = [
+      ["Asset Timeline — Paulus Finance"],
+      ["Asset",        asset.name],
+      ["Type",         asset.subtype || "Asset"],
+      [],
+      ["Current Value", currentValue],
+      ["Cost Basis",    costBasis],
+      ["Unrealized P&L", unrealizedPL],
+      ["Return %",      returnPct.toFixed(2) + "%"],
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), "Summary");
+
+    const txHdr = ["Date", "Type", "Description", "Amount (IDR)", "From / To"];
+    const txRows = assetLedger.map(e => [
+      e.tx_date,
+      e.tx_type,
+      e.description || "",
+      Number(e.amount_idr || 0),
+      accounts.find(a => a.id === (e.to_id === asset.id ? e.from_id : e.to_id))?.name || "",
+    ]);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([txHdr, ...txRows]), "Transactions");
+
+    const vhHdr = ["Date", "Old Value", "New Value", "Change", "Notes"];
+    const vhRows = valueHistory.map(h => [
+      h.date,
+      Number(h.old_value || 0),
+      Number(h.new_value || 0),
+      Number(h.new_value || 0) - Number(h.old_value || 0),
+      h.notes || "",
+    ]);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([vhHdr, ...vhRows]), "Value History");
+
+    XLSX.writeFile(wb, `${nm}_Timeline_${new Date().toISOString().slice(0, 10)}.xlsx`);
+  };
+
+  const BTN = (extra = {}) => ({
+    height: 34, padding: "0 12px", borderRadius: 8, border: "1px solid #e5e7eb",
+    background: "#f9fafb", color: "#374151", fontSize: 12, fontWeight: 600,
+    cursor: "pointer", fontFamily: FF, ...extra,
+  });
+
+  // Derived account lists for TransactionModal
+  const bankAccs  = accounts.filter(a => a.type === "bank" && a.subtype !== "cash" && a.is_active !== false);
+  const cashAccs  = accounts.filter(a => a.is_active !== false && a.subtype === "cash");
+  const ccAccs    = accounts.filter(a => a.is_active !== false && a.type === "credit_card");
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, fontFamily: FF }}>
 
       {/* ── Header ── */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <button
-          onClick={onBack}
-          style={{ height: 34, padding: "0 14px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#f9fafb", color: "#374151", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: FF }}
-        >← Back</button>
+        <button onClick={onBack} style={BTN()}>← Back</button>
         <div style={{ width: 40, height: 40, borderRadius: 12, background: "#eff6ff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>
           {icon}
         </div>
@@ -276,36 +307,24 @@ export default function AssetTimeline({ asset, user, accounts, ledger, onBack, o
           <div style={{ fontSize: 18, fontWeight: 800, color: "#111827" }}>{asset.name}</div>
           <div style={{ fontSize: 12, color: "#9ca3af" }}>{asset.subtype || "Asset"}</div>
         </div>
-        <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
-          <Button variant="secondary" size="sm" onClick={() => {
-            setUpdateForm({ value: String(asset.current_value || ""), date: todayStr(), notes: "" });
-            setUpdateModal(true);
-          }}>
+        <div style={{ display: "flex", gap: 6, flexShrink: 0, flexWrap: "wrap" }}>
+          <button style={BTN()} onClick={exportPDF}>🖨 PDF</button>
+          <button style={BTN()} onClick={exportExcel}>📊 Excel</button>
+          <button style={BTN()} onClick={() => { setUpdateForm({ value: String(asset.current_value || ""), date: todayStr(), notes: "" }); setUpdateModal(true); }}>
             📈 Update Value
-          </Button>
-          <Button size="sm" onClick={() => {
-            setTxForm({ amount: "", date: todayStr(), description: "", from_id: "", notes: "" });
-            setTxModal(true);
-          }}>
+          </button>
+          <button style={BTN({ background: "#111827", color: "#fff", border: "none" })} onClick={() => { setTxMode("add"); setTxInitial(null); setTxOpen(true); }}>
             + Transaction
-          </Button>
+          </button>
         </div>
       </div>
 
       {/* ── Metrics ── */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <MetricCard label="Current Value" value={fmtIDR(currentValue)} color="#3b5bdb" bg="#eff6ff" />
-        <MetricCard label="Cost Basis"    value={fmtIDR(costBasis)}    color="#111827" bg="#f9fafb" />
-        <MetricCard
-          label="Unrealized P&L"
-          value={`${unrealizedPL >= 0 ? "+" : ""}${fmtIDR(Math.abs(unrealizedPL))}`}
-          color={plColor} bg={plBg}
-        />
-        <MetricCard
-          label="Return %"
-          value={`${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(1)}%`}
-          color={plColor} bg={plBg}
-        />
+        <MetricCard label="Current Value"   value={fmtIDR(currentValue)} color="#3b5bdb" bg="#eff6ff" />
+        <MetricCard label="Cost Basis"      value={fmtIDR(costBasis)}    color="#111827" bg="#f9fafb" />
+        <MetricCard label="Unrealized P&L"  value={`${unrealizedPL >= 0 ? "+" : ""}${fmtIDR(Math.abs(unrealizedPL))}`} color={plColor} bg={plBg} />
+        <MetricCard label="Return %"        value={`${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(1)}%`} color={plColor} bg={plBg} />
       </div>
 
       {/* ── Sparkline chart ── */}
@@ -325,13 +344,8 @@ export default function AssetTimeline({ asset, user, accounts, ledger, onBack, o
               <XAxis dataKey="label" tick={{ fontSize: 9, fill: "#9ca3af", fontFamily: FF }} tickLine={false} axisLine={false} />
               <YAxis hide />
               <Tooltip content={<SparkTooltip />} />
-              <Area
-                type="monotone" dataKey="value"
-                stroke="#3b5bdb" strokeWidth={2}
-                fill="url(#assetGrad)"
-                dot={{ r: 3, fill: "#3b5bdb", strokeWidth: 0 }}
-                activeDot={{ r: 5 }}
-              />
+              <Area type="monotone" dataKey="value" stroke="#3b5bdb" strokeWidth={2} fill="url(#assetGrad)"
+                dot={{ r: 3, fill: "#3b5bdb", strokeWidth: 0 }} activeDot={{ r: 5 }} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
@@ -350,7 +364,6 @@ export default function AssetTimeline({ asset, user, accounts, ledger, onBack, o
         ) : (
           grouped.map(([month, events]) => (
             <div key={month}>
-              {/* Month label */}
               <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", padding: "8px 0 4px", marginTop: 8 }}>
                 {fmtMonthYear(month + "-01")}
               </div>
@@ -367,16 +380,15 @@ export default function AssetTimeline({ asset, user, accounts, ledger, onBack, o
                       iconBg={up ? "#f0fdf4" : "#fff1f2"}
                       title="Value Updated"
                       badge="Update"
-                      badgeBg="#f0f9ff"
-                      badgeColor="#0369a1"
+                      badgeBg="#f0f9ff" badgeColor="#0369a1"
                       subtitle={`${fmtDateShort(h.date)} · ${fmtIDR(ev.oldVal)} → ${fmtIDR(ev.newVal)}${h.notes && h.notes !== "Manual update" ? ` · ${h.notes}` : ""}`}
                       valueStr={`${up ? "▲ +" : "▼ −"}${fmtIDR(Math.abs(diff))}`}
                       valueColor={up ? "#059669" : "#dc2626"}
+                      onDelete={h.id ? () => { setDelVH(h); setDelEntry(null); setDelConfirm(true); } : undefined}
                     />
                   );
                 }
 
-                // Ledger event
                 const e     = ev.data;
                 const isBuy  = e.tx_type === "buy_asset"  && e.to_id   === asset.id;
                 const isSell = e.tx_type === "sell_asset" && e.from_id === asset.id;
@@ -392,8 +404,10 @@ export default function AssetTimeline({ asset, user, accounts, ledger, onBack, o
                     badgeBg={isBuy ? "#e0f2fe" : isSell ? "#fef9c3" : "#fde8e8"}
                     badgeColor={isBuy ? "#0369a1" : isSell ? "#92400e" : "#b91c1c"}
                     subtitle={`${fmtDateShort(e.tx_date)}${other ? ` · ${isBuy ? "from" : "to"} ${other.name}` : ""}`}
-                    valueStr={`${isSell ? "+" : ""}${fmtIDR(amt)}`}
+                    valueStr={`${isSell ? "+" : "-"}${fmtIDR(amt)}`}
                     valueColor={isSell ? "#059669" : "#A32D2D"}
+                    onEdit={() => { setTxMode("edit"); setTxInitial(e); setTxOpen(true); }}
+                    onDelete={() => { setDelEntry(e); setDelVH(null); setDelConfirm(true); }}
                   />
                 );
               })}
@@ -403,12 +417,8 @@ export default function AssetTimeline({ asset, user, accounts, ledger, onBack, o
       </div>
 
       {/* ── Update Value Modal ── */}
-      <Modal
-        isOpen={updateModal}
-        onClose={() => setUpdateModal(false)}
-        title="Update Asset Value"
-        footer={<Button fullWidth onClick={handleUpdateValue} busy={saving}>Update →</Button>}
-      >
+      <Modal isOpen={updateModal} onClose={() => setUpdateModal(false)} title="Update Asset Value"
+        footer={<Button fullWidth onClick={handleUpdateValue} busy={saving}>Update →</Button>}>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <AmountInput label="New Value (IDR)" value={updateForm.value} onChange={v => setUpdateForm(f => ({ ...f, value: v }))} />
           <Input label="Date" type="date" value={updateForm.date} onChange={e => setUpdateForm(f => ({ ...f, date: e.target.value }))} />
@@ -420,34 +430,54 @@ export default function AssetTimeline({ asset, user, accounts, ledger, onBack, o
         </div>
       </Modal>
 
-      {/* ── Add Transaction Modal ── */}
-      <Modal
-        isOpen={txModal}
-        onClose={() => setTxModal(false)}
-        title="+ Add Transaction"
-        footer={<Button fullWidth onClick={handleAddTx} busy={txSaving}>Add Transaction →</Button>}
-      >
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div style={{ padding: "10px 12px", background: "#f0f9ff", borderRadius: 10, fontSize: 12, color: "#0369a1", fontFamily: FF }}>
-            Records a buy_asset transaction — adds to cost basis.
+      {/* ── TransactionModal (add + edit) ── */}
+      <TransactionModal
+        open={txOpen}
+        mode={txMode}
+        initialData={txInitial}
+        defaultGroup="asset"
+        defaultTxType={txMode === "add" ? "buy_asset" : undefined}
+        defaultAccount={txMode === "add" ? { to_id: asset.id } : undefined}
+        onSave={() => { setTxOpen(false); onRefresh?.(); }}
+        onDelete={() => { setTxOpen(false); onRefresh?.(); }}
+        onClose={() => setTxOpen(false)}
+        user={user}
+        accounts={accounts}
+        setLedger={setLedger}
+        categories={categories}
+        fxRates={fxRates}
+        allCurrencies={allCurrencies}
+        bankAccounts={bankAccs}
+        creditCards={ccAccs}
+        assets={assetAccs}
+        liabilities={[]}
+        receivables={[]}
+        incomeSrcs={[]}
+        onRefresh={onRefresh}
+      />
+
+      {/* ── Delete confirm ── */}
+      {delConfirm && (
+        <div onClick={e => { if (e.target === e.currentTarget) { setDelConfirm(false); setDelEntry(null); setDelVH(null); } }}
+          style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: 24, maxWidth: 360, width: "100%", fontFamily: FF }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#111827", marginBottom: 8 }}>
+              {delVH ? "Delete value record?" : "Delete transaction?"}
+            </div>
+            <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 20 }}>This cannot be undone.</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => { setDelConfirm(false); setDelEntry(null); setDelVH(null); }}
+                style={{ flex: 1, height: 40, borderRadius: 8, border: "1.5px solid #e5e7eb", background: "#fff", color: "#374151", fontFamily: FF, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                Cancel
+              </button>
+              <button onClick={delVH ? handleDeleteVH : handleDeleteEntry} disabled={delSaving}
+                style={{ flex: 1, height: 40, borderRadius: 8, border: "none", background: "#fee2e2", color: "#dc2626", fontFamily: FF, fontSize: 13, fontWeight: 700, cursor: delSaving ? "default" : "pointer", opacity: delSaving ? 0.6 : 1 }}>
+                {delSaving ? "Deleting…" : "Delete"}
+              </button>
+            </div>
           </div>
-          <AmountInput label="Amount (IDR) *" value={txForm.amount} onChange={v => setTxForm(f => ({ ...f, amount: v }))} />
-          <Input label="Date" type="date" value={txForm.date} onChange={e => setTxForm(f => ({ ...f, date: e.target.value }))} />
-          <Input label="Description" value={txForm.description} onChange={e => setTxForm(f => ({ ...f, description: e.target.value }))} placeholder="e.g. Renovation cost" />
-          <Field label="From Account *">
-            <select value={txForm.from_id} onChange={e => setTxForm(f => ({ ...f, from_id: e.target.value }))}
-              style={{ width: "100%", height: 44, padding: "0 14px", border: "1.5px solid #e5e7eb", borderRadius: 10, fontFamily: FF, fontSize: 14, fontWeight: 500, color: "#111827", background: "#fff", outline: "none", appearance: "none", WebkitAppearance: "none", boxSizing: "border-box" }}>
-              <option value="">Select account…</option>
-              {bankAccounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </select>
-          </Field>
-          <Field label="Notes (optional)">
-            <textarea value={txForm.notes} onChange={e => setTxForm(f => ({ ...f, notes: e.target.value }))} rows={2}
-              style={{ width: "100%", padding: "10px 14px", border: "1.5px solid #e5e7eb", borderRadius: 10, fontFamily: FF, fontSize: 14, fontWeight: 500, color: "#111827", background: "#fff", outline: "none", resize: "vertical", boxSizing: "border-box" }}
-              placeholder="Optional notes…" />
-          </Field>
         </div>
-      </Modal>
+      )}
     </div>
   );
 }
