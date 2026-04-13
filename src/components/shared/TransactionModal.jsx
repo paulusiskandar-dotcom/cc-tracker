@@ -125,7 +125,7 @@ function TypePills({ group, active, onChange, disabled }) {
   const grp = GROUPS.find(g => g.id === group);
   if (!grp) return null;
   return (
-    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
+    <div style={{ display: "flex", gap: 6, flexWrap: "nowrap", overflowX: "auto", marginBottom: 16, paddingBottom: 2, scrollbarWidth: "none", msOverflowStyle: "none" }}>
       {grp.types.map(t => {
         const m = TYPE_META[t];
         const isActive = active === t;
@@ -137,7 +137,7 @@ function TypePills({ group, active, onChange, disabled }) {
             onClick={() => onChange(t)}
             style={{
               display: "flex", alignItems: "center", gap: 5,
-              padding: "6px 12px", borderRadius: 20,
+              padding: "6px 12px", borderRadius: 20, flexShrink: 0, whiteSpace: "nowrap",
               border: `1.5px solid ${isActive ? m.color : "#e5e7eb"}`,
               background: isActive ? m.color + "15" : "#f9fafb",
               color: isActive ? m.color : "#6b7280",
