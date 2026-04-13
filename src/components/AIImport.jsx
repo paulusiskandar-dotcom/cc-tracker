@@ -70,6 +70,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
   const T = dark ? DARK : LIGHT;
   const fileRef = useRef();
 
+  const [scanBankId,  setScanBankId]  = useState("");
   const [scanning,    setScanning]    = useState(false);
   const [results,     setResults]     = useState([]);
   const [selected,    setSelected]    = useState({});
@@ -252,7 +253,9 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       } catch { /* non-critical */ }
 
       // 3. Scan with AI
-      const parsed = await scanApi.scan(user.id, file, { accounts });
+      const bankAcc  = scanBankId ? bankAccounts.find(a => a.id === scanBankId) : null;
+      const bankHint = bankAcc?.bank_name || "";
+      const parsed = await scanApi.scan(user.id, file, { accounts, bankHint });
       console.log(`[AIImport] total transactions from AI: ${parsed.length}`);
       const items  = buildRows(parsed);
       console.log(`[AIImport] after buildRows: ${items.length} rows`);
@@ -287,7 +290,9 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       const { data: blob, error } = await supabase.storage.from("ai-scan-uploads").download(batchFilePath);
       if (error || !blob) throw new Error("Could not download file");
       const file = new File([blob], "rescan.jpg", { type: blob.type || "image/jpeg" });
-      const parsed = await scanApi.scan(user.id, file, { accounts });
+      const bankAccR  = scanBankId ? bankAccounts.find(a => a.id === scanBankId) : null;
+      const bankHintR = bankAccR?.bank_name || "";
+      const parsed = await scanApi.scan(user.id, file, { accounts, bankHint: bankHintR });
       console.log(`[AIImport refresh] total transactions from AI: ${parsed.length}`);
       const items  = buildRows(parsed);
       console.log(`[AIImport refresh] after buildRows: ${items.length} rows`);
@@ -379,6 +384,29 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
   // ─────────────────────────────────────────────────────────────
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+      {/* Bank selector (for Mandiri-specific parsing) */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <div style={{ fontSize: 12, color: T.text3, fontFamily: "Figtree, sans-serif" }}>
+          Bank account (optional — enables bank-specific parsing)
+        </div>
+        <select
+          value={scanBankId}
+          onChange={e => setScanBankId(e.target.value)}
+          style={{
+            height: 40, padding: "0 12px", border: `1.5px solid ${T.border}`,
+            borderRadius: 10, fontFamily: "Figtree, sans-serif", fontSize: 13,
+            fontWeight: 500, color: T.text, background: T.sur, outline: "none",
+            cursor: "pointer", width: "100%", boxSizing: "border-box",
+          }}>
+          <option value="">Auto-detect</option>
+          {bankAccounts.map(a => (
+            <option key={a.id} value={a.id}>
+              {a.name}{a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : ""}
+            </option>
+          ))}
+        </select>
+      </div>
 
       {/* Drop zone */}
       <div

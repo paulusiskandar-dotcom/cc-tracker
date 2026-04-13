@@ -753,7 +753,7 @@ function extractJSON(text) {
 // ─── SCAN BATCHES ─────────────────────────────────────────────
 export const scanApi = {
   // Scan a file (image/PDF) via AI proxy → returns array of transaction objects
-  scan: async (userId, file, { accounts = [], employeeLoans = [] } = {}) => {
+  scan: async (userId, file, { accounts = [], employeeLoans = [], bankHint = "" } = {}) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = async (e) => {
@@ -768,44 +768,85 @@ export const scanApi = {
             `- ${l.employee_name} id:${l.id}`
           ).join("\n");
 
-          const buildPrompt = (pass = 1, skipCount = 0) => `You are a financial transaction extractor for an Indonesian bank statement.
+          // ── Mandiri-specific detection ───────────────────────────
+          const isMandiri = /mandiri/i.test(bankHint);
 
-CRITICAL: Extract EVERY SINGLE transaction row from this bank statement.
-- Look at BOTH columns: Debet/Keluar/Dr (money OUT) AND Kredit/Masuk/Cr (money IN)
-- Do NOT skip any row for any reason
-- Every row in the transaction table must appear in your output
-- Count rows carefully — include fees, transfers in, transfers out, all credits, all debits${skipCount > 0 ? `\n- SKIP the first ${skipCount} transactions already extracted in pass 1, start from transaction #${skipCount + 1}` : ""}
+          // Mandiri page-targeted prompt
+          const buildMandiriPrompt = (page) => `This is a Bank Mandiri (Tabungan Mandiri) e-Statement PDF.
+The table columns are: No | Tanggal/Date | Keterangan/Remarks | Nominal(IDR) | Saldo(IDR)
+
+Extract transactions from PAGE ${page} ONLY.
+
+CRITICAL RULES:
+1. Each numbered row (1, 2, 3...) = exactly ONE transaction
+2. Positive Nominal (+) = incoming money (Dana Masuk / Kredit) — DO NOT SKIP THESE
+3. Negative Nominal (-) = outgoing money (Dana Keluar / Debet)
+4. Multi-line Keterangan = still one transaction — combine all description lines
+5. Extract ALL numbered rows visible on page ${page} — do not skip any
+6. Include the row number (No column) in your output
+
+Return ONLY a JSON array, no other text:
+[{"no":1,"date":"YYYY-MM-DD","description":"full description here","amount":123456,"balance":9876543}]
+
+Amount rules: positive = money IN, negative = money OUT.
+Dates format: convert DD-MMM-YYYY or DD/MM/YYYY to YYYY-MM-DD.`;
+
+          // Normalize Mandiri row → generic AI transaction shape
+          const normMandiri = (tx) => {
+            const amt    = Number(tx.amount || 0);
+            const absAmt = Math.abs(amt);
+            return {
+              date:        tx.date,
+              description: tx.description || "",
+              amount:      absAmt,
+              currency:    "IDR",
+              amount_idr:  absAmt,
+              type:        amt >= 0 ? "income" : "expense",
+              category:    amt >= 0 ? "other_income" : "other",
+              entity:      "Personal",
+              _no:         tx.no,
+            };
+          };
+
+          const buildPrompt = (pass = 1, skipCount = 0) => `You are a financial transaction extractor for an Indonesian bank statement (Mandiri/BCA/BNI/BRI format).
+
+═══ CRITICAL INSTRUCTIONS ═══
+1. Extract EVERY SINGLE row from the transaction table — ALL pages, ALL rows.
+2. The table has columns: Tanggal | Keterangan | Debet | Kredit | Saldo
+3. DEBET column = money leaving account (blank for credit rows)
+4. KREDIT column = money entering account (blank for debit rows)
+5. ⚠ DO NOT skip rows where DEBET is blank — those are KREDIT (incoming) transactions.
+6. Each table row = one transaction object. No exceptions.
+7. Log "total_rows_in_document" as the count of ALL rows you see in the table.${skipCount > 0 ? `\n8. SKIP first ${skipCount} rows already extracted — start from row #${skipCount + 1}.` : ""}
 
 ${accountsCtx ? `Known accounts:\n${accountsCtx}\n` : ""}${loansCtx ? `Employee loans:\n${loansCtx}\n` : ""}
-TRANSACTION TYPE RULES:
-- Debet/Keluar/Dr column (money leaves account) → expense, pay_cc, transfer, give_loan, reimburse_out
-- Kredit/Masuk/Cr column (money enters account) → income, collect_loan, transfer, reimburse_in
-- "Transfer dari BANK MANDIRI [name] [account]" = KREDIT → type: income
-- "Transfer BI Fast dari [bank] [name]" = KREDIT → type: income
-- "Setoran tunai" = KREDIT → type: income
-- "Pembayaran kartu kredit [account]" = DEBET → type: pay_cc
-- "Biaya administrasi" = DEBET → type: expense (category: bank_charges)
-- "Bunga tabungan / Jasa giro" = KREDIT → type: income (category: bank_interest)
-- "PPh bunga / Pajak" = DEBET → type: expense (category: tax)
-- "Materai / Bea materai" = DEBET → type: expense (category: materai)
-- transfer = ONLY between the user's OWN accounts listed above. If external → expense (debet) or income (kredit)
-- Account 0830267743 = BCA Reimburse: credits to this = reimburse_in
+═══ TYPE RULES ═══
+KREDIT (incoming, + amount) → type: income (default for unknown source)
+DEBET (outgoing, - amount) → type: expense (default for unknown dest)
 
-Return a JSON object: {"transactions": [...], "total_rows_in_document": N}
-Each transaction must have:
-- date: "YYYY-MM-DD"
-- description: (keep short, max 60 chars)
-- amount: positive number
-- currency: "IDR"
-- amount_idr: same as amount for IDR
-- type: expense|income|transfer|pay_cc|reimburse_in|reimburse_out|give_loan|collect_loan|fx_exchange
-- from_account_id: matched id or null
-- to_account_id: matched id or null
-- category: food|transport|health|shopping|home|education|entertainment|business|finance|family|social|bank_charges|materai|tax|other
-- entity: "Personal"
-- notes: ""
+Mandiri-specific patterns:
+• "Transfer BI Fast dari [BANK] [NAME]" = KREDIT → type: income
+• "Transfer dari BANK MANDIRI [NAME] [ACCOUNT]" = KREDIT → type: income (if description contains "cicilan" → collect_loan)
+• "Penyetoran tunai" / "Setoran tunai" = KREDIT → type: income
+• "Pembayaran kartu kredit [ACCOUNT]" = DEBET → type: pay_cc
+• "Biaya administrasi" / "Biaya transfer" = DEBET → type: expense, category: bank_charges
+• "Bunga tabungan" / "Jasa giro" = KREDIT → type: income, category: bank_interest
+• "PPh bunga" / "Pajak bunga" = DEBET → type: expense, category: tax
+• "Bea materai" / "Materai" = DEBET → type: expense, category: materai
+• "Transfer ke" / "TRF KE" = DEBET → type: expense (or transfer if dest account is known)
+• "ATM" / "Tarik tunai" = DEBET → type: expense
 
-USE MINIMAL JSON — short strings, omit null fields except required ones. Return ONLY valid JSON, no markdown.`;
+Own accounts (transfer type ONLY if BOTH source AND destination match known accounts):
+${accountsCtx || "none"}
+
+═══ OUTPUT FORMAT ═══
+Return ONLY valid JSON — no markdown, no explanation:
+{"transactions":[...],"total_rows_in_document":N}
+
+Each transaction (use minimal field values, max 60 chars for description):
+{"date":"YYYY-MM-DD","description":"short desc","amount":123456,"currency":"IDR","amount_idr":123456,"type":"income|expense|transfer|pay_cc|collect_loan|give_loan|reimburse_in|reimburse_out","category":"other","entity":"Personal"}
+
+Omit from_account_id and to_account_id unless you can match them to known accounts above.`;
 
           let _aiPass = 0;
           const callAI = async (prompt) => {
@@ -838,14 +879,47 @@ USE MINIMAL JSON — short strings, omit null fields except required ones. Retur
             const d   = await r.json();
             const raw = d?.content?.[0]?.text || "";
             const stopReason = d?.stop_reason || "";
-            console.log(`[AI scan] pass=${_aiPass} stop_reason=${stopReason} raw_len=${raw.length}`);
-            console.log("[AI scan] raw preview:", raw.slice(0, 300));
+            // Log usage for token debugging
+            const usage = d?.usage || {};
+            console.log(`[AI scan] pass=${_aiPass} stop_reason=${stopReason} raw_len=${raw.length} input_tokens=${usage.input_tokens} output_tokens=${usage.output_tokens}`);
+            console.log("[AI scan] raw preview:", raw.slice(0, 400));
             return { raw, stopReason };
           };
+
+          // ── Mandiri 2-page extraction ────────────────────────────
+          if (isMandiri) {
+            console.log("[AI scan] Mandiri format detected — running 2-page extraction");
+            const { raw: mRaw1 } = await callAI(buildMandiriPrompt(1));
+            const { raw: mRaw2 } = await callAI(buildMandiriPrompt(2));
+            const page1 = extractJSON(mRaw1).map(normMandiri);
+            const page2 = extractJSON(mRaw2).map(normMandiri);
+            console.log(`[AI scan] Mandiri page1=${page1.length} page2=${page2.length}`);
+            // Deduplicate by row number
+            const seen = new Set(page1.map(t => t._no).filter(Boolean));
+            const merged = [
+              ...page1,
+              ...page2.filter(t => !t._no || !seen.has(t._no)),
+            ].sort((a, b) => (a._no || 0) - (b._no || 0));
+            console.log(`[AI scan] Mandiri merged=${merged.length} transactions`);
+            resolve(merged);
+            return;
+          }
 
           // Pass 1
           const { raw: raw1, stopReason: stop1 } = await callAI(buildPrompt(1, 0));
           let parsed1 = extractJSON(raw1);
+
+          // Log total_rows_in_document if AI reported it
+          try {
+            const meta = JSON.parse(raw1.replace(/^```json\s*/i,"").replace(/```\s*$/,"").trim());
+            if (meta?.total_rows_in_document) {
+              console.log(`[AI scan] AI reports total_rows_in_document=${meta.total_rows_in_document}, extracted=${parsed1.length}`);
+              if (meta.total_rows_in_document > parsed1.length) {
+                console.warn(`[AI scan] ⚠ Missing ${meta.total_rows_in_document - parsed1.length} rows!`);
+              }
+            }
+          } catch {}
+
           console.log(`[AI scan] pass 1: ${parsed1.length} transactions extracted, stop_reason=${stop1}`);
 
           // Pass 2: if output was truncated (max_tokens hit), do a second pass for remaining rows

@@ -23,8 +23,8 @@
 import { useState, useEffect } from "react";
 import {
   ledgerApi, merchantApi, getTxFromToTypes,
-  employeeLoanApi, accountCurrenciesApi, assetsApi,
-  installmentsApi, recalculateBalance,
+  accountCurrenciesApi, assetsApi,
+  installmentsApi, recalculateBalance, accountsApi,
 } from "../../api";
 import { EXPENSE_CATEGORIES } from "../../constants";
 import { fmtIDR, todayStr, toIDR } from "../../utils";
@@ -235,10 +235,15 @@ export default function TransactionModal({
   const [saving,  setSaving]    = useState(false);
   const [confirm, setConfirm]   = useState(false); // delete confirm
   const [cicilan, setCicilan]   = useState(false);
+  const [newBorrowerName,  setNewBorrowerName]  = useState("");
+  const [creatingBorrower, setCreatingBorrower] = useState(false);
 
   // ── Reset on open ──────────────────────────────────────────
   useEffect(() => {
     if (!open) return;
+
+    setNewBorrowerName("");
+    setCreatingBorrower(false);
 
     if ((mode === "edit" || mode === "confirm") && initialData) {
       const txType = initialData.tx_type || "expense";
@@ -344,7 +349,7 @@ export default function TransactionModal({
     if (type !== "fx_exchange" && (!form.amount || sn(form.amount) <= 0)) {
       showToast("Amount is required", "error"); return;
     }
-    if (["expense","income","reimburse_out"].includes(type) && !form.description?.trim()) {
+    if (type === "income" && !form.description?.trim()) {
       showToast("Description is required", "error"); return;
     }
 
@@ -405,32 +410,32 @@ export default function TransactionModal({
 
       // ── Give Loan ─────────────────────────────────────────────
       if (type === "give_loan" && !isEdit) {
-        if (!form.from_id)              { showToast("Select bank account", "error"); setSaving(false); return; }
-        if (!form.employee_name?.trim()) { showToast("Employee name is required", "error"); setSaving(false); return; }
-        const loan = await employeeLoanApi.create(user.id, {
-          employee_name:       form.employee_name.trim(),
-          monthly_installment: sn(form.monthly_installment),
-          total_amount:        sn(form.amount),
-          start_date:          form.loan_start_date || form.tx_date,
-          notes:               form.notes || null,
-          status:              "active",
-        });
-        setEmployeeLoans?.(prev => [loan, ...prev]);
-        const hasRecv = !!uuid(form.to_id);
+        if (!form.from_id) { showToast("Select from account", "error"); setSaving(false); return; }
+        let toId = uuid(form.to_id);
+        if (creatingBorrower) {
+          if (!newBorrowerName.trim()) { showToast("Borrower name is required", "error"); setSaving(false); return; }
+          const newRecv = await accountsApi.create(user.id, {
+            name: newBorrowerName.trim(), type: "receivable",
+            current_balance: 0, is_active: true,
+          });
+          toId = newRecv.id;
+          await onRefresh?.();
+        }
+        if (!toId) { showToast("Select or create a borrower", "error"); setSaving(false); return; }
+        const desc = form.description?.trim() || "Loan";
         const entry = {
-          tx_date: form.tx_date, description: `Employee Loan — ${loan.employee_name}`,
-          amount: sn(form.amount), currency: "IDR", amount_idr: sn(form.amount),
-          tx_type: "give_loan", from_type: "account", to_type: hasRecv ? "account" : "employee_loan",
-          from_id: uuid(form.from_id), to_id: hasRecv ? uuid(form.to_id) : loan.id,
+          tx_date: form.tx_date, description: desc,
+          amount: sn(form.amount), currency: form.currency || "IDR", amount_idr: sn(form.amount),
+          tx_type: "give_loan", from_type: "account", to_type: "account",
+          from_id: uuid(form.from_id), to_id: toId,
           entity: "Personal", is_reimburse: false, merchant_name: null, notes: form.notes || null,
           attachment_url: null, ai_categorized: false, ai_confidence: null,
           installment_id: null, scan_batch_id: null, category_id: null, category_name: null,
         };
         const created = await ledgerApi.create(user.id, entry, accounts);
         setLedger?.(p => [created, ...p]);
-        const ids = [uuid(form.from_id), hasRecv ? uuid(form.to_id) : null].filter(Boolean);
-        await Promise.all(ids.map(id => recalculateBalance(id, user.id)));
-        showToast(`Loan of ${fmtIDR(sn(form.amount))} created for ${loan.employee_name}`);
+        await Promise.all([uuid(form.from_id), toId].filter(Boolean).map(id => recalculateBalance(id, user.id)));
+        showToast("Loan saved");
         await onRefresh?.();
         onSave?.(created);
         onClose();
@@ -543,6 +548,7 @@ export default function TransactionModal({
         }
       }
 
+      const isReimb = type === "reimburse_out" || type === "reimburse_in";
       const entry = {
         tx_date:        form.tx_date || todayStr(),
         description:    desc,
@@ -551,14 +557,14 @@ export default function TransactionModal({
         amount_idr:     computedAmtIDR,
         fx_rate_used:   computedFxRate,
         tx_type:        type,
-        from_type,
-        to_type,
-        from_id:        uuid(form.from_id),
-        to_id:          uuid(form.to_id),
-        category_id:    uuid(form.category_id),
-        category_name:  cat?.name || form.category_name || null,
-        entity:         type === "reimburse_out" ? (form.entity || "Hamasa") : "Personal",
-        is_reimburse:   type === "reimburse_out",
+        from_type:      type === "reimburse_in" ? null : from_type,
+        to_type:        type === "reimburse_out" ? null : to_type,
+        from_id:        type === "reimburse_in" ? null : uuid(form.from_id),
+        to_id:          type === "reimburse_out" ? null : uuid(form.to_id),
+        category_id:    isReimb ? null : uuid(form.category_id),
+        category_name:  isReimb ? null : (cat?.name || form.category_name || null),
+        entity:         (type === "reimburse_out" || type === "reimburse_in") ? (form.entity || "Hamasa") : "Personal",
+        is_reimburse:   isReimb,
         income_source_id: type === "income" ? uuid(form.income_source_id) : null,
         merchant_name:  null,
         notes:          form.notes || null,
@@ -630,7 +636,7 @@ export default function TransactionModal({
 
   // ── Grouped account dropdown ──────────────────────────────────
   const renderFromSelect = (label = "From Account") => {
-    const needsCC = ["expense","reimburse_out","buy_asset"].includes(type);
+    const needsCC = ["expense","reimburse_out","transfer"].includes(type);
     const byName  = (a, b) => (a.name || "").localeCompare(b.name || "");
     const banks   = bankAccs.sort(byName);
     const cash    = cashAccs.sort(byName);
@@ -682,15 +688,17 @@ export default function TransactionModal({
     const byName = (a, b) => (a.name || "").localeCompare(b.name || "");
     const banks  = [...bankAccs, ...cashAccs].sort(byName);
     const ccs    = ccAccs.sort(byName);
-    const recv   = receivables.filter(r => r.id?.length === 36).sort(byName);
     const libs   = liabilities.filter(l => l.id?.length === 36).sort(byName);
     const assts  = assetAccs.sort(byName);
 
     let groups = [];
     if (type === "pay_cc")        groups = [{ label: "CREDIT CARD", items: ccs }];
     else if (type === "pay_liability") groups = [{ label: "LIABILITY", items: libs }];
-    else if (type === "give_loan" || type === "reimburse_out") groups = [{ label: "RECEIVABLE", items: recv }];
     else if (type === "buy_asset") groups = [{ label: "ASSET", items: assts }];
+    else if (type === "transfer") groups = [
+      ...(banks.length ? [{ label: "BANK / CASH", items: banks }] : []),
+      ...(ccs.length   ? [{ label: "CREDIT CARD", items: ccs   }] : []),
+    ];
     else groups = [{ label: "BANK / CASH", items: banks }];
 
     return (
@@ -728,22 +736,7 @@ export default function TransactionModal({
             const active = form.entity === ent;
             return (
               <button key={ent} type="button"
-                onClick={() => {
-                  set("entity", ent);
-                  if (type === "reimburse_out") {
-                    const rec = receivables.find(r => r.entity === ent);
-                    set("to_id", rec?.id || null);
-                  }
-                  const entLower = ent.toLowerCase();
-                  const matchedCat = categories.find(c => {
-                    const name = (c.name || c.label || "").toLowerCase();
-                    return name.includes("re ") && name.includes(entLower);
-                  }) || categories.find(c => {
-                    const name = (c.name || c.label || "").toLowerCase();
-                    return name.includes(entLower);
-                  });
-                  if (matchedCat) { set("category_id", matchedCat.id); set("category_name", matchedCat.name || null); }
-                }}
+                onClick={() => set("entity", ent)}
                 style={{
                   flex: 1, height: 36, borderRadius: 8,
                   border: `1.5px solid ${active ? entColor : "#e5e7eb"}`,
@@ -980,55 +973,66 @@ export default function TransactionModal({
 
     // ── Give Loan ────────────────────────────────────────────────
     if (type === "give_loan") {
-      const total   = sn(form.amount);
-      const monthly = sn(form.monthly_installment);
-      const nMo     = total > 0 && monthly > 0 ? Math.ceil(total / monthly) : null;
-      const endDate = nMo && form.loan_start_date
-        ? (() => { const d = new Date(form.loan_start_date + "T00:00:00"); d.setMonth(d.getMonth() + nMo); return d.toLocaleDateString("en-US", { month: "long", year: "numeric" }); })()
-        : null;
+      const byName   = (a, b) => (a.name || "").localeCompare(b.name || "");
+      const recvList = receivables.filter(r => r.id?.length === 36).sort(byName);
       return (
         <>
           {DIVIDER}
           {/* 3. FROM */}
-          {renderFromSelect("From Bank Account")}
-          {/* 4. TO */}
-          {renderToSelect("Receivable Account (optional)")}
+          {renderFromSelect("From Account")}
+          {/* 4. TO / BORROWER */}
+          <Field label="Borrower *">
+            {!creatingBorrower ? (
+              <select value={form.to_id || ""} onChange={e => {
+                if (e.target.value === "__new__") { setCreatingBorrower(true); set("to_id", null); }
+                else set("to_id", e.target.value || null);
+              }} style={SEL}>
+                <option value="">Select borrower…</option>
+                {recvList.map(r => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}{Number(r.current_balance || 0) > 0 ? ` · ${fmtIDR(r.current_balance)} outstanding` : ""}
+                  </option>
+                ))}
+                <option value="__new__">+ Create New</option>
+              </select>
+            ) : (
+              <div style={{ display: "flex", gap: 8 }}>
+                <input autoFocus type="text" placeholder="Borrower name…"
+                  value={newBorrowerName} onChange={e => setNewBorrowerName(e.target.value)}
+                  style={{ ...SEL, flex: 1 }} />
+                <button type="button"
+                  onClick={() => { setCreatingBorrower(false); setNewBorrowerName(""); set("to_id", null); }}
+                  style={{ height: 44, padding: "0 12px", borderRadius: 10, border: "1.5px solid #e5e7eb", background: "#fff", color: "#6b7280", fontFamily: FF, fontSize: 13, cursor: "pointer" }}>
+                  ✕
+                </button>
+              </div>
+            )}
+          </Field>
           {/* 5. Date + Currency */}
           {dateCurrencyRow}
-          {/* 6. Amount + loan schedule fields */}
-          <AmountInput label="Loan Amount *" value={form.amount} onChange={v => set("amount", v)} />
-          <AmountInput label="Monthly Installment" value={form.monthly_installment || ""} onChange={v => set("monthly_installment", v)} />
-          <Input label="Start Date" type="date" value={form.loan_start_date || form.tx_date || todayStr()} onChange={e => set("loan_start_date", e.target.value)} />
-          {nMo && (
-            <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "10px 14px", display: "flex", gap: 20 }}>
-              <div><div style={{ fontSize: 9, color: "#059669", fontWeight: 700, textTransform: "uppercase", fontFamily: FF }}>Duration</div><div style={{ fontSize: 13, fontWeight: 700, color: "#111827", fontFamily: FF }}>{nMo} months</div></div>
-              <div><div style={{ fontSize: 9, color: "#059669", fontWeight: 700, textTransform: "uppercase", fontFamily: FF }}>Monthly</div><div style={{ fontSize: 13, fontWeight: 700, color: "#111827", fontFamily: FF }}>{fmtIDR(monthly)}</div></div>
-              {endDate && <div><div style={{ fontSize: 9, color: "#059669", fontWeight: 700, textTransform: "uppercase", fontFamily: FF }}>Ends</div><div style={{ fontSize: 13, fontWeight: 700, color: "#111827", fontFamily: FF }}>{endDate}</div></div>}
-            </div>
-          )}
-          {/* 9. Description = Employee Name */}
-          <Input label="Employee Name *" value={form.employee_name || ""} onChange={e => set("employee_name", e.target.value)} placeholder="Full name" />
-          {/* 11. Notes */}
+          {/* 6. Amount */}
+          <AmountInput label="Amount" value={form.amount} onChange={v => set("amount", v)} />
+          {/* 7. Merchant / Description */}
+          <Input label="Merchant / Description (optional)" value={form.description || ""} onChange={e => set("description", e.target.value)} placeholder="Optional" />
+          {/* 8. Notes */}
           {notesField}
         </>
       );
     }
 
     // ── General (expense, income, transfer, pay_cc, pay_liability, reimburse_out, reimburse_in, collect_loan) ──
-    const showFrom       = !["income"].includes(type);
-    const showTo         = ["income","transfer","pay_cc","pay_liability","collect_loan","reimburse_in"].includes(type);
-    const showCat        = ["expense","reimburse_out"].includes(type);
-    const showEntity     = ["reimburse_out","reimburse_in"].includes(type);
-    const showDesc       = !["transfer","pay_cc","collect_loan","pay_liability"].includes(type);
-    const showDescAsNote = ["transfer","pay_cc"].includes(type);
-    const showIncSrc     = type === "income" && incSrcOpts.length > 0;
-    const showCicilan    = type === "expense";
+    const showFrom    = !["income", "reimburse_in"].includes(type);
+    const showTo      = ["income","transfer","pay_cc","pay_liability","collect_loan","reimburse_in"].includes(type);
+    const showCat     = type === "expense";
+    const showEntity  = ["reimburse_out","reimburse_in"].includes(type);
+    const showIncSrc  = type === "income" && incSrcOpts.length > 0;
+    const showCicilan = type === "expense";
 
     return (
       <>
         {DIVIDER}
         {/* 3. FROM */}
-        {showFrom && renderFromSelect(type === "collect_loan" ? "Receivable" : "From Account")}
+        {showFrom && renderFromSelect(type === "collect_loan" ? "Borrower" : "From Account")}
         {/* 4. TO */}
         {showTo && renderToSelect(
           type === "pay_cc"        ? "Credit Card" :
@@ -1038,14 +1042,15 @@ export default function TransactionModal({
         )}
         {/* 5. Date + Currency */}
         {dateCurrencyRow}
-        {(form.currency || "IDR") !== "IDR" && form.amount && (
+        {/* 6. Amount */}
+        <AmountInput label="Amount" value={form.amount} onChange={v => set("amount", v)} currency={form.currency} />
+        {/* 7. FX Rate + IDR equivalent (non-IDR only) */}
+        {(form.currency || "IDR") !== "IDR" && Number(form.amount) > 0 && (
           <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, marginTop: -8 }}>
             ≈ {fmtIDR(amtIDR)} IDR
           </div>
         )}
-        {/* 6. Amount */}
-        <AmountInput label="Amount" value={form.amount} onChange={v => set("amount", v)} currency={form.currency} />
-        {/* 7. Category */}
+        {/* 8. Category (Expense only) */}
         {showCat && (
           <Field label="Category">
             <select value={form.category_id || ""} onChange={e => {
@@ -1058,7 +1063,7 @@ export default function TransactionModal({
             </select>
           </Field>
         )}
-        {/* 8. Entity */}
+        {/* 9. Entity (Reimburse only) */}
         {showEntity && renderEntityPills()}
         {/* Income source (income only) */}
         {showIncSrc && (
@@ -1069,27 +1074,23 @@ export default function TransactionModal({
             </select>
           </Field>
         )}
-        {/* 9. Description / Merchant */}
-        {showDesc && (
-          <Input
-            label="Description"
-            value={form.description || ""}
-            onChange={e => set("description", e.target.value)}
-            placeholder={
-              type === "income"        ? "e.g. Monthly salary"  :
-              type === "reimburse_out" ? "e.g. Lunch SDC team"  :
-              "e.g. Lunch at Warung"
-            }
-          />
-        )}
-        {showDescAsNote && (
-          <Input label="Notes / Reference (optional)" value={form.description || ""} onChange={e => set("description", e.target.value)} placeholder="Optional" />
-        )}
-        {/* 10. Cicilan (Expense only) */}
+        {/* 10. Merchant / Description */}
+        <Input
+          label="Merchant / Description (optional)"
+          value={form.description || ""}
+          onChange={e => set("description", e.target.value)}
+          placeholder={
+            type === "income"        ? "e.g. Monthly salary"  :
+            type === "reimburse_out" ? "e.g. Lunch SDC team"  :
+            type === "expense"       ? "e.g. Lunch at Warung"  :
+            "Optional"
+          }
+        />
+        {/* 11. Cicilan (Expense only) */}
         {showCicilan && (
           <CicilanSection enabled={cicilan} onToggle={() => setCicilan(v => !v)} form={form} set={set} />
         )}
-        {/* 11. Notes */}
+        {/* 12. Notes */}
         {notesField}
       </>
     );
