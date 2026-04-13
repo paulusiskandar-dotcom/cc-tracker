@@ -190,6 +190,22 @@ export default function Receivables({
       .sort((a, b) => b.tx_date.localeCompare(a.tx_date))
   , [ledger]);
 
+  // Per-entity reimburse totals computed from ledger (not from account.receivable_outstanding)
+  const reimburseStats = useMemo(() => {
+    const map = {};
+    ledger.forEach(e => {
+      if (!e.entity) return;
+      if (e.tx_type === "reimburse_out") {
+        if (!map[e.entity]) map[e.entity] = { out: 0, in: 0 };
+        map[e.entity].out += Number(e.amount_idr || e.amount || 0);
+      } else if (e.tx_type === "reimburse_in") {
+        if (!map[e.entity]) map[e.entity] = { out: 0, in: 0 };
+        map[e.entity].in += Number(e.amount_idr || e.amount || 0);
+      }
+    });
+    return map;
+  }, [ledger]);
+
   // Per-loan: compute paid so far from payments table
   const loansWithStats = useMemo(() => {
     return employeeLoans.map(loan => {
@@ -538,8 +554,14 @@ export default function Receivables({
     padding:      "16px 18px",
   });
 
-  const totalReimburse  = reimburseAccs.reduce((s, a) => s + Number(a.receivable_outstanding || 0), 0);
-  const activeReimburse = reimburseAccs.filter(a => Number(a.receivable_outstanding || 0) > 0).length;
+  const totalReimburse  = reimburseAccs.reduce((s, a) => {
+    const st = reimburseStats[a.entity] || { out: 0, in: 0 };
+    return s + Math.max(0, st.out - st.in);
+  }, 0);
+  const activeReimburse = reimburseAccs.filter(a => {
+    const st = reimburseStats[a.entity] || { out: 0, in: 0 };
+    return (st.out - st.in) > 0;
+  }).length;
 
   const activeLoans = loansWithStats.filter(l => l.status !== "settled" && l.remaining > 0);
   const nextLoanDue = (() => {
@@ -577,9 +599,9 @@ export default function Receivables({
       {/* ── HEADER ──────────────────────────────────────── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ fontSize: 10, fontWeight: 700, color: T.text3, letterSpacing: "0.06em" }}>
-          {reimburseAccs.reduce((s, a) => s + Number(a.receivable_outstanding || 0), 0) > 0 &&
-            `${fmtIDR(reimburseAccs.reduce((s, a) => s + Number(a.receivable_outstanding || 0), 0), true)} reimburse outstanding`}
-          {totalLoanOutstanding > 0 && reimburseAccs.reduce((s, a) => s + Number(a.receivable_outstanding || 0), 0) > 0 && "  ·  "}
+          {totalReimburse > 0 &&
+            `${fmtIDR(totalReimburse, true)} reimburse outstanding`}
+          {totalLoanOutstanding > 0 && totalReimburse > 0 && "  ·  "}
           {totalLoanOutstanding > 0 &&
             `${fmtIDR(totalLoanOutstanding, true)} loans outstanding`}
         </div>
@@ -656,23 +678,29 @@ export default function Receivables({
                 />
               </div>
               {[...recStats].sort((a, b) => {
+                const aOut = (reimburseStats[a.entity] || { out: 0, in: 0 });
+                const bOut = (reimburseStats[b.entity] || { out: 0, in: 0 });
+                const aNet = aOut.out - aOut.in;
+                const bNet = bOut.out - bOut.in;
                 switch (reimSort) {
-                  case "outstanding_asc": return Number(a.receivable_outstanding || 0) - Number(b.receivable_outstanding || 0);
+                  case "outstanding_asc": return aNet - bNet;
                   case "name_asc":        return (a.entity || a.name || "").localeCompare(b.entity || b.name || "");
                   case "name_desc":       return (b.entity || b.name || "").localeCompare(a.entity || a.name || "");
-                  default:                return Number(b.receivable_outstanding || 0) - Number(a.receivable_outstanding || 0);
+                  default:                return bNet - aNet;
                 }
               }).map(r => {
-              const outstanding = Number(r.receivable_outstanding || 0);
+              // Compute outstanding dynamically from ledger
+              const entStats   = reimburseStats[r.entity] || { out: 0, in: 0 };
+              const outstanding = entStats.out - entStats.in; // may be negative (overpaid)
               const entCol      = ENT_COL[r.entity] || T.ac;
               const entBg       = ENT_BG[r.entity]  || T.sur2;
 
-              // Unsettled rows for this entity account
+              // All reimburse rows for this entity (entity-based, not account-id-based)
               const outRows = ledger.filter(e =>
-                e.tx_type === "reimburse_out" && e.to_id === r.id && !e.reimburse_settlement_id
+                e.tx_type === "reimburse_out" && e.entity === r.entity
               ).sort((a, b) => b.tx_date.localeCompare(a.tx_date));
               const inRows = ledger.filter(e =>
-                e.tx_type === "reimburse_in" && e.from_id === r.id && !e.reimburse_settlement_id
+                e.tx_type === "reimburse_in" && e.entity === r.entity
               ).sort((a, b) => b.tx_date.localeCompare(a.tx_date));
 
               const entitySettlements = settlements.filter(s => s.entity === r.entity);
@@ -698,10 +726,12 @@ export default function Receivables({
                         <span style={{ display: "inline-block", background: entBg, color: entCol, borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 700, fontFamily: "Figtree, sans-serif" }}>
                           {r.entity}
                         </span>
-                        <div style={{ fontSize: 20, fontWeight: 900, color: outstanding > 0 ? entCol : "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 4, lineHeight: 1.2 }}>
-                          {fmtIDR(outstanding)}
+                        <div style={{ fontSize: 20, fontWeight: 900, color: outstanding > 0 ? entCol : outstanding < 0 ? "#059669" : "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 4, lineHeight: 1.2 }}>
+                          {fmtIDR(Math.abs(outstanding))}
                         </div>
-                        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>outstanding</div>
+                        <div style={{ fontSize: 11, color: outstanding < 0 ? "#059669" : "#9ca3af", fontFamily: "Figtree, sans-serif", fontWeight: outstanding < 0 ? 700 : 400 }}>
+                          {outstanding < 0 ? "lebih bayar" : "outstanding"}
+                        </div>
                       </div>
                       <div style={{ display: "flex", gap: 6 }}>
                         <button
@@ -727,20 +757,30 @@ export default function Receivables({
                           Expenses (Out)
                         </div>
                         {outRows.length === 0 ? (
-                          <div style={{ fontSize: 11, color: "#9ca3af", padding: "6px 0" }}>No unsettled expenses</div>
+                          <div style={{ fontSize: 11, color: "#9ca3af", padding: "6px 0" }}>No expenses recorded</div>
                         ) : outRows.map(e => {
-                          const isSelected = selOut.has(e.id);
-                          const fromAcc = accounts.find(a => a.id === e.from_id);
+                          const settled    = !!e.reimburse_settlement_id;
+                          const isSelected = !settled && selOut.has(e.id);
+                          const fromAcc    = accounts.find(a => a.id === e.from_id);
                           return (
                             <div
                               key={e.id}
-                              onClick={() => toggleOutRow(r.id, e.id)}
-                              style={{ cursor: "pointer", border: isSelected ? "1.5px solid #dc2626" : "1px solid #f3f4f6", borderRadius: 8, padding: "8px 10px", marginBottom: 4, background: isSelected ? "#fff5f5" : "#fafafa" }}
+                              onClick={settled ? undefined : () => toggleOutRow(r.id, e.id)}
+                              style={{
+                                cursor: settled ? "default" : "pointer",
+                                opacity: settled ? 0.45 : 1,
+                                border: isSelected ? "1.5px solid #dc2626" : "1px solid #f3f4f6",
+                                borderRadius: 8, padding: "8px 10px", marginBottom: 4,
+                                background: isSelected ? "#fff5f5" : "#fafafa",
+                              }}
                             >
                               <div style={{ display: "flex", justifyContent: "space-between", gap: 4 }}>
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                   <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "Figtree, sans-serif" }}>{e.description}</div>
-                                  <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1 }}>{e.tx_date} · {fromAcc?.name || "—"}</div>
+                                  <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1 }}>
+                                    {e.tx_date} · {fromAcc?.name || "—"}
+                                    {settled && <span style={{ marginLeft: 4, color: "#d1d5db" }}>· settled</span>}
+                                  </div>
                                 </div>
                                 <div style={{ fontSize: 12, fontWeight: 700, color: "#dc2626", flexShrink: 0 }}>{fmtIDR(Number(e.amount || 0), true)}</div>
                               </div>
@@ -755,20 +795,30 @@ export default function Receivables({
                           Received (In)
                         </div>
                         {inRows.length === 0 ? (
-                          <div style={{ fontSize: 11, color: "#9ca3af", padding: "6px 0" }}>No unsettled received</div>
+                          <div style={{ fontSize: 11, color: "#9ca3af", padding: "6px 0" }}>No payments received</div>
                         ) : inRows.map(e => {
-                          const isSelected = selIn.has(e.id);
-                          const toAcc = accounts.find(a => a.id === e.to_id);
+                          const settled    = !!e.reimburse_settlement_id;
+                          const isSelected = !settled && selIn.has(e.id);
+                          const toAcc      = accounts.find(a => a.id === e.to_id);
                           return (
                             <div
                               key={e.id}
-                              onClick={() => toggleInRow(r.id, e.id)}
-                              style={{ cursor: "pointer", border: isSelected ? "1.5px solid #059669" : "1px solid #f3f4f6", borderRadius: 8, padding: "8px 10px", marginBottom: 4, background: isSelected ? "#f0fdf4" : "#fafafa" }}
+                              onClick={settled ? undefined : () => toggleInRow(r.id, e.id)}
+                              style={{
+                                cursor: settled ? "default" : "pointer",
+                                opacity: settled ? 0.45 : 1,
+                                border: isSelected ? "1.5px solid #059669" : "1px solid #f3f4f6",
+                                borderRadius: 8, padding: "8px 10px", marginBottom: 4,
+                                background: isSelected ? "#f0fdf4" : "#fafafa",
+                              }}
                             >
                               <div style={{ display: "flex", justifyContent: "space-between", gap: 4 }}>
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                   <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "Figtree, sans-serif" }}>{e.description}</div>
-                                  <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1 }}>{e.tx_date} · {toAcc?.name || "—"}</div>
+                                  <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1 }}>
+                                    {e.tx_date} · {toAcc?.name || "—"}
+                                    {settled && <span style={{ marginLeft: 4, color: "#d1d5db" }}>· settled</span>}
+                                  </div>
                                 </div>
                                 <div style={{ fontSize: 12, fontWeight: 700, color: "#059669", flexShrink: 0 }}>+{fmtIDR(Number(e.amount || 0), true)}</div>
                               </div>
