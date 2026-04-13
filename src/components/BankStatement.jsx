@@ -1,11 +1,9 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../lib/supabase";
-import { ledgerApi, getTxFromToTypes, categoriesApi, recalculateBalance } from "../api";
-import { toIDR as toIDRFn, fmtIDR } from "../utils";
+import { fmtIDR } from "../utils";
 import { TX_TYPE_MAP } from "../constants";
-import Modal, { ConfirmModal } from "./shared/Modal";
 import { showToast } from "./shared/Card";
-import { TxForm, EMPTY } from "./shared/TxForm";
+import TransactionModal from "./shared/TransactionModal";
 import * as XLSX from "xlsx";
 
 const FF = "Figtree, sans-serif";
@@ -114,167 +112,16 @@ export default function BankStatement({
   const [toDate,    setToDate]    = useState(todayStr());
   const [loading,   setLoading]   = useState(false);
   const [data,      setData]      = useState(null);
-  // Edit modal state
-  const [editEntry,        setEditEntry]        = useState(null);  // the original ledger row
-  const [editForm,         setEditForm]         = useState({});    // current form state
-  const [editSaving,       setEditSaving]       = useState(false);
-  const [editConfirmDelete, setEditConfirmDelete] = useState(false); // confirm dialog
-  const [editDeleting,     setEditDeleting]     = useState(false);
-  const [modalCategories,  setModalCategories]  = useState([]);    // fetched fresh on open
+  const [editEntry, setEditEntry] = useState(null);  // open edit modal
   const printRef = useRef(null);
-
-  const setF = (k, v) => setEditForm(f => ({ ...f, [k]: v }));
 
   // Derive bank accounts from all accounts if not passed separately
   const bankAccs = bankAccsProp.length > 0
     ? bankAccsProp
     : accounts.filter(a => a.type === "bank");
 
-  // Derive fromOptions / toOptions based on current edit tx type
-  const editType       = editForm.tx_type || "expense";
-  const editFromOptions = useMemo(() => ({
-    expense:       [...bankAccs, ...creditCards],
-    income:        [],
-    transfer:      [...bankAccs],
-    pay_cc:        [...bankAccs],
-    buy_asset:     [...bankAccs, ...creditCards],
-    sell_asset:    [...assets],
-    pay_liability: [...bankAccs],
-    reimburse_out: [...bankAccs, ...creditCards],
-    reimburse_in:  [...receivables],
-    give_loan:     [...bankAccs],
-    collect_loan:  [...receivables],
-    fx_exchange:   [...bankAccs],
-  })[editType] || accounts, [editType, bankAccs, creditCards, assets, receivables, accounts]);
-
-  const editToOptions = useMemo(() => ({
-    expense:       [],
-    income:        [...bankAccs],
-    transfer:      [...bankAccs],
-    pay_cc:        [...creditCards],
-    buy_asset:     [...assets],
-    sell_asset:    [...bankAccs],
-    pay_liability: [...liabilities],
-    reimburse_out: [...receivables],
-    reimburse_in:  [...bankAccs],
-    give_loan:     [...receivables],
-    collect_loan:  [...bankAccs],
-    fx_exchange:   [...bankAccs],
-  })[editType] || [], [editType, bankAccs, creditCards, assets, liabilities, receivables]);
-
-  const editAmtIDR = toIDRFn(Number(editForm.amount || 0), editForm.currency || "IDR", fxRates, allCurrencies);
-
   // ── Open edit modal ────────────────────────────────────────
-  const openEdit = (tx) => {
-    setEditForm({
-      ...EMPTY,
-      tx_date:       tx.tx_date       || "",
-      description:   tx.description   || tx.merchant_name || "",
-      amount:        tx.amount        || "",
-      currency:      tx.currency      || "IDR",
-      tx_type:       tx.tx_type       || "expense",
-      from_id:       tx.from_id       || null,
-      to_id:         tx.to_id         || null,
-      from_type:     tx.from_type     || getTxFromToTypes(tx.tx_type || "expense").from_type,
-      to_type:       tx.to_type       || getTxFromToTypes(tx.tx_type || "expense").to_type,
-      category_id:   tx.category_id   || null,
-      category_name: tx.category_name || null,
-      entity:        tx.entity        || "Personal",
-      notes:         tx.notes         || "",
-      is_reimburse:  tx.is_reimburse  || false,
-    });
-    setEditEntry(tx);
-    // Fetch fresh categories for this user on modal open
-    categoriesApi.getAll(user.id)
-      .then(cats => setModalCategories(cats || []))
-      .catch(() => setModalCategories(categories));
-  };
-
-  // ── Save edit ──────────────────────────────────────────────
-  const saveEdit = async () => {
-    if (!editEntry) return;
-    if (!editForm.amount || Number(editForm.amount) <= 0) {
-      showToast("Amount is required", "error"); return;
-    }
-    setEditSaving(true);
-    try {
-      const uuid = (v) => (v && typeof v === "string" && v.length === 36) ? v : null;
-      const sn   = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
-      const type = editForm.tx_type;
-      const cat  = categories.find(c => c.id === editForm.category_id);
-      const { from_type, to_type } = getTxFromToTypes(type);
-      const AUTO_DESC = {
-        transfer: "Transfer", pay_cc: "CC Payment", buy_asset: "Asset Purchase",
-        sell_asset: "Asset Sale", give_loan: "Employee Loan", collect_loan: "Loan Collection",
-        reimburse_in: "Reimburse Received", pay_liability: "Liability Payment", fx_exchange: "FX Exchange",
-      };
-      const description = editForm.description?.trim() || AUTO_DESC[type] || "Transaction";
-      let computedAmtIDR = sn(editAmtIDR);
-      let computedFxRate = null;
-      if (type === "fx_exchange") {
-        const rate = sn(editForm.fx_rate_used);
-        computedFxRate = rate || null;
-        if (rate > 0) computedAmtIDR = Math.round(sn(editForm.amount) * rate);
-      }
-      const entry = {
-        tx_date:       editForm.tx_date || todayStr(),
-        description,
-        amount:        sn(editForm.amount),
-        currency:      editForm.currency || "IDR",
-        amount_idr:    computedAmtIDR,
-        fx_rate_used:  computedFxRate,
-        tx_type:       type,
-        from_type,  to_type,
-        from_id:       uuid(editForm.from_id),
-        to_id:         uuid(editForm.to_id),
-        category_id:   uuid(editForm.category_id),
-        category_name: cat?.name || editForm.category_name || null,
-        entity:        type === "reimburse_out" ? (editForm.entity || "Hamasa") : (editForm.entity || "Personal"),
-        is_reimburse:  editForm.is_reimburse || false,
-        merchant_name: null,
-        notes:         editForm.notes || null,
-      };
-      await ledgerApi.update(editEntry.id, entry);
-      // Sync current_balance for all affected bank accounts
-      const affectedIds = [
-        ...(entry.from_type === "account" && entry.from_id ? [entry.from_id] : []),
-        ...(entry.to_type   === "account" && entry.to_id   ? [entry.to_id]   : []),
-        // Also recalculate original account IDs in case from/to changed
-        ...(editEntry.from_type === "account" && editEntry.from_id ? [editEntry.from_id] : []),
-        ...(editEntry.to_type   === "account" && editEntry.to_id   ? [editEntry.to_id]   : []),
-      ];
-      await Promise.all([...new Set(affectedIds)].map(id => recalculateBalance(id, user.id)));
-      showToast("Transaction updated");
-      setEditEntry(null);
-      await load();
-      if (onRefresh) onRefresh();
-    } catch (e) {
-      showToast(e.message, "error");
-    }
-    setEditSaving(false);
-  };
-
-  // ── Delete from edit modal ─────────────────────────────────
-  const deleteFromEdit = async () => {
-    if (!editEntry) return;
-    setEditDeleting(true);
-    try {
-      const affectedIds = [
-        ...(editEntry.from_type === "account" && editEntry.from_id ? [editEntry.from_id] : []),
-        ...(editEntry.to_type   === "account" && editEntry.to_id   ? [editEntry.to_id]   : []),
-      ];
-      await ledgerApi.delete(editEntry.id, editEntry, accounts);
-      await Promise.all([...new Set(affectedIds)].map(id => recalculateBalance(id, user.id)));
-      showToast("Transaction deleted");
-      setEditConfirmDelete(false);
-      setEditEntry(null);
-      await load();
-      if (onRefresh) onRefresh();
-    } catch (e) {
-      showToast(e.message, "error");
-    }
-    setEditDeleting(false);
-  };
+  const openEdit = (tx) => setEditEntry(tx);
 
   const selectedAccount = accounts.find(a => a.id === accountId) || null;
 
@@ -671,56 +518,27 @@ export default function BankStatement({
       )}
 
       {/* ── Edit Transaction Modal ── */}
-      <Modal
-        isOpen={!!editEntry}
+      <TransactionModal
+        open={!!editEntry}
+        mode="edit"
+        initialData={editEntry}
+        onSave={() => { load(); onRefresh?.(); }}
+        onDelete={() => { load(); onRefresh?.(); }}
         onClose={() => setEditEntry(null)}
-        title="Edit Transaction"
-        footer={
-          <div style={{ display: "flex", gap: 8 }}>
-            <button
-              onClick={() => setEditConfirmDelete(true)}
-              disabled={editSaving}
-              style={{ height: 44, padding: "0 16px", borderRadius: 10, border: "1px solid #fca5a5", background: "#fff1f2", color: "#b91c1c", fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: FF, flexShrink: 0 }}
-            >
-              Delete
-            </button>
-            <button
-              onClick={saveEdit}
-              disabled={editSaving}
-              style={{ flex: 1, height: 44, borderRadius: 10, border: "none", background: "#111827", color: "#fff", fontSize: 14, fontWeight: 700, cursor: editSaving ? "default" : "pointer", fontFamily: FF, opacity: editSaving ? 0.6 : 1 }}
-            >
-              {editSaving ? "Saving…" : "Save Changes"}
-            </button>
-          </div>
-        }
-      >
-        {editEntry && (
-          <TxForm
-            form={editForm}
-            set={setF}
-            fromOptions={editFromOptions}
-            toOptions={editToOptions}
-            accounts={accounts}
-            categories={modalCategories.length > 0 ? modalCategories : categories}
-            incomeSrcs={incomeSrcs}
-            allCurrencies={allCurrencies}
-            amtIDR={editAmtIDR}
-            receivables={receivables}
-            assets={assets}
-            accountCurrencies={accountCurrencies}
-          />
-        )}
-      </Modal>
-
-      {/* ── Delete confirm ── */}
-      <ConfirmModal
-        isOpen={editConfirmDelete}
-        onClose={() => setEditConfirmDelete(false)}
-        onConfirm={deleteFromEdit}
-        title="Hapus Transaksi"
-        message="Hapus transaksi ini? Tindakan ini tidak bisa dibatalkan."
-        danger
-        busy={editDeleting}
+        user={user}
+        accounts={accounts}
+        setLedger={() => {}}
+        categories={categories}
+        fxRates={fxRates}
+        allCurrencies={allCurrencies}
+        bankAccounts={bankAccs}
+        creditCards={creditCards}
+        assets={assets}
+        liabilities={liabilities}
+        receivables={receivables}
+        incomeSrcs={incomeSrcs}
+        accountCurrencies={accountCurrencies}
+        onRefresh={() => { load(); onRefresh?.(); }}
       />
     </div>
   );

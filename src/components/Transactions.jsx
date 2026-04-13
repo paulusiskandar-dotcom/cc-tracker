@@ -1,14 +1,11 @@
 import { useState, useMemo } from "react";
-import { ledgerApi, merchantApi, gmailApi, getTxFromToTypes, employeeLoanApi, accountCurrenciesApi, assetsApi, recalculateBalance } from "../api";
-import { EXPENSE_CATEGORIES, ENTITIES, TX_TYPES, TX_TYPE_MAP } from "../constants";
-import { fmtIDR, fmtCur, todayStr, ym, toIDR, groupByDate, fmtDateLabel } from "../utils";
-import Modal, { ConfirmModal } from "./shared/Modal";
-import Button from "./shared/Button";
-import Input, { Field, AmountInput, FormRow, Toggle, Textarea } from "./shared/Input";
-import Select from "./shared/Select";
+import { ledgerApi, gmailApi, getTxFromToTypes, recalculateBalance } from "../api";
+import { EXPENSE_CATEGORIES, ENTITIES } from "../constants";
+import { fmtIDR, fmtCur, todayStr, ym, groupByDate, fmtDateLabel } from "../utils";
+import { ConfirmModal } from "./shared/Modal";
 import { EmptyState, showToast } from "./shared/Card";
 import SortDropdown from "./shared/SortDropdown";
-import { TYPE_CHOICES, EMPTY, TxForm, TypePickerGrid } from "./shared/TxForm";
+import TransactionModal from "./shared/TransactionModal";
 
 // ─── SUBTABS ─────────────────────────────────────────────────
 const SUBTABS = [
@@ -33,53 +30,14 @@ export default function Transactions({
   // ── UI state ──
   const [txSort,  setTxSort]  = useState(() => localStorage.getItem("sort_transactions") || "date_desc");
   const [subTab,  setSubTab]  = useState("all");
-  const [modal,   setModal]   = useState(null); // "add" | "edit" | "delete" | null
-  const [step,    setStep]    = useState(1);
-  const [form,    setForm]    = useState({ ...EMPTY });
-  const [editEntry, setEditEntry] = useState(null);
+  const [txModal, setTxModal] = useState({ open: false, mode: "add", entry: null });
   const [deleteEntry, setDeleteEntry] = useState(null);
-  const [saving,  setSaving]  = useState(false);
 
   // ── Filters ──
   const [filterMonth,  setFilterMonth]  = useState("");
   const [filterEntity, setFilterEntity] = useState("");
   const [filterAccId,  setFilterAccId]  = useState("");
   const [search,       setSearch]       = useState("");
-
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-
-  // ── Account options per tx type ──
-  const fromOptions = useMemo(() => ({
-    expense:       [...bankAccounts, ...creditCards],
-    income:        [],
-    transfer:      [...bankAccounts],
-    pay_cc:        [...bankAccounts],
-    buy_asset:     [...bankAccounts, ...creditCards],
-    sell_asset:    [...assets],
-    pay_liability: [...bankAccounts],
-    reimburse_out: [...bankAccounts, ...creditCards],
-    reimburse_in:  [...receivables],
-    give_loan:     [...bankAccounts],
-    collect_loan:  [...receivables.filter(r => Number(r.current_balance || 0) > 0)],
-    fx_exchange:   [...bankAccounts],
-  })[form.tx_type] || accounts, [form.tx_type, bankAccounts, creditCards, assets, liabilities, receivables, accounts]);
-
-  const toOptions = useMemo(() => ({
-    expense:       [],
-    income:        [...bankAccounts],
-    transfer:      [...bankAccounts],
-    pay_cc:        [...creditCards],
-    buy_asset:     [...assets],
-    sell_asset:    [...bankAccounts],
-    pay_liability: [...liabilities],
-    reimburse_out: [...receivables],
-    reimburse_in:  [...bankAccounts],
-    give_loan:     [...receivables],
-    collect_loan:  [...bankAccounts],
-    fx_exchange:   [...bankAccounts],
-  })[form.tx_type] || [], [form.tx_type, bankAccounts, creditCards, assets, liabilities, receivables]);
-
-  const amtIDR = toIDR(Number(form.amount || 0), form.currency || "IDR", fxRates, allCurrencies);
 
   // ── Filtering ──
   const filtered = useMemo(() => {
@@ -130,376 +88,12 @@ export default function Transactions({
   const missingTypeCount = useMemo(() => filtered.filter(e => !e.tx_type).length, [filtered]);
 
   // ── Open add ──
-  const openAdd = () => {
-    setForm({ ...EMPTY });
-    setEditEntry(null);
-    setStep(1);
-    setModal("add");
-  };
+  const openAdd = () => setTxModal({ open: true, mode: "add", entry: null });
 
   // ── Open edit ──
-  const openEdit = (e) => {
-    const missingType = !e.tx_type;
-    setForm({
-      tx_date:         e.tx_date,
-      description:     e.description || "",
-      amount:          e.amount,
-      currency:        e.currency || "IDR",
-      tx_type:         e.tx_type || "expense",
-      from_id:         e.from_id || null,
-      to_id:           e.to_id   || null,
-      from_type:       e.from_type || getTxFromToTypes(e.tx_type || "expense").from_type,
-      to_type:         e.to_type   || getTxFromToTypes(e.tx_type || "expense").to_type,
-      category_id:     e.category_id   || null,
-      category_name:   e.category_name || null,
-      entity:          e.entity          || "Personal",
-      notes:           e.notes           || "",
-      is_reimburse:    e.is_reimburse     || false,
-    });
-    setEditEntry(e);
-    setStep(missingType ? 1 : 2);
-    setModal("edit");
-  };
-
-  // ── Save ──
-  const save = async () => {
-    const type = form.tx_type;
-
-    if (!form.amount || Number(form.amount) <= 0) {
-      showToast("Amount is required", "error");
-      return;
-    }
-    // Description required only for these types
-    if (["expense", "income", "reimburse_out"].includes(type) && !form.description?.trim()) {
-      showToast("Description is required", "error");
-      return;
-    }
-    // Both accounts required (buy_asset only needs from_id + asset_name)
-    if (["transfer", "pay_cc", "fx_exchange", "sell_asset", "pay_liability"].includes(type)) {
-      if (!form.from_id || !form.to_id) {
-        showToast("Both From and To accounts are required", "error");
-        return;
-      }
-    }
-    if (type === "buy_asset") {
-      if (!form.from_id) { showToast("Select source account", "error"); return; }
-      if (form.asset_mode === "existing") {
-        if (!form.asset_id) { showToast("Select an asset", "error"); return; }
-      } else {
-        if (!form.asset_name?.trim()) { showToast("Asset name is required", "error"); return; }
-      }
-    }
-    // FX exchange — handled separately below as early return
+  const openEdit = (e) => setTxModal({ open: true, mode: "edit", entry: e });
 
 
-    // ── FX Exchange — self-contained early return ──────────────
-    if (type === "fx_exchange" && !editEntry) {
-      const currency  = form.currency;
-      const rate      = Number(form.fx_rate_used || 0);
-      const foreignAmt = Number(form.amount || 0);
-      const idrAmt    = Math.round(foreignAmt * rate);
-      const direction = form.fx_direction || "buy";
-
-      if (!currency || currency === "IDR") { showToast("Select a foreign currency", "error"); return; }
-      if (!form.from_id)                   { showToast("Select From account", "error"); return; }
-      if (!form.to_id)                     { showToast("Select To account", "error"); return; }
-      if (rate <= 0)                       { showToast("Enter a valid rate", "error"); return; }
-      if (foreignAmt <= 0)                 { showToast("Enter amount", "error"); return; }
-
-      setSaving(true);
-      try {
-        const uuidV = (v) => (v && typeof v === "string" && v.length === 36) ? v : null;
-        const fromId = uuidV(form.from_id);
-        const toId   = uuidV(form.to_id);
-        const txDate = form.tx_date || todayStr();
-        const notes  = form.notes || null;
-
-        if (direction === "buy") {
-          // Debit IDR from From account
-          const ledgerEntry = {
-            tx_date: txDate, description: `Buy ${currency}`,
-            amount: idrAmt, currency: "IDR", amount_idr: idrAmt,
-            fx_rate_used: rate,
-            tx_type: "fx_exchange", from_type: "account", to_type: "account",
-            from_id: fromId, to_id: toId,
-            category_id: null, category_name: null, entity: "Personal",
-            is_reimburse: false, merchant_name: null, notes,
-            attachment_url: null, ai_categorized: false, ai_confidence: null,
-            installment_id: null, scan_batch_id: null,
-            fx_direction: "buy",
-          };
-          const created = await ledgerApi.create(user.id, ledgerEntry, accounts);
-          setLedger(p => [created, ...p]);
-          // Credit foreign currency into To account's pocket
-          await accountCurrenciesApi.addBalance(toId, currency, +foreignAmt, user.id);
-        } else {
-          // Debit foreign currency from From account's pocket
-          await accountCurrenciesApi.addBalance(fromId, currency, -foreignAmt, user.id);
-          // Credit IDR into To account
-          const ledgerEntry = {
-            tx_date: txDate, description: `Sell ${currency}`,
-            amount: idrAmt, currency: "IDR", amount_idr: idrAmt,
-            fx_rate_used: rate,
-            tx_type: "fx_exchange", from_type: "account", to_type: "account",
-            from_id: fromId, to_id: toId,
-            category_id: null, category_name: null, entity: "Personal",
-            is_reimburse: false, merchant_name: null, notes,
-            attachment_url: null, ai_categorized: false, ai_confidence: null,
-            installment_id: null, scan_batch_id: null,
-            fx_direction: "sell",
-          };
-          const created = await ledgerApi.create(user.id, ledgerEntry, accounts);
-          setLedger(p => [created, ...p]);
-        }
-        showToast(`FX ${direction === "buy" ? "Buy" : "Sell"} saved`);
-        await onRefresh();
-        setModal(null);
-      } catch (e) { showToast(e.message, "error"); }
-      setSaving(false);
-      return;
-    }
-
-    setSaving(true);
-    try {
-      // UUID sanitizer — only accept exactly 36-char strings
-      const uuid = (v) => {
-        if (!v || v === "" || v === "null" || v === "undefined") return null;
-        if (typeof v === "string" && v.length === 36) return v;
-        return null;
-      };
-      const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
-
-      // ── Give Loan (Method A): create employee_loan first, then ledger ──
-      if (type === "give_loan" && !editEntry) {
-        if (!form.from_id) { showToast("Select bank account", "error"); setSaving(false); return; }
-        if (!form.employee_name?.trim()) { showToast("Employee name is required", "error"); setSaving(false); return; }
-        const loan = await employeeLoanApi.create(user.id, {
-          employee_name:       form.employee_name.trim(),
-          monthly_installment: sn(form.monthly_installment),
-          total_amount:        sn(form.amount),
-          start_date:          form.loan_start_date || form.tx_date,
-          notes:               form.notes || null,
-          status:              "active",
-        });
-        setEmployeeLoans?.(prev => [loan, ...prev]);
-        // If a receivable account is selected, link to it so balance tracking works
-        const hasRecv = !!uuid(form.to_id);
-        const loanEntry = {
-          tx_date:        form.tx_date,
-          description:    `Employee Loan — ${loan.employee_name}`,
-          amount:         sn(form.amount),
-          currency:       "IDR",
-          amount_idr:     sn(form.amount),
-          tx_type:        "give_loan",
-          from_type:      "account",
-          to_type:        hasRecv ? "account" : "employee_loan",
-          from_id:        uuid(form.from_id),
-          to_id:          hasRecv ? uuid(form.to_id) : loan.id,
-          entity:         "Personal",
-          is_reimburse:   false,
-          merchant_name:  null,
-          notes:          form.notes || null,
-          attachment_url: null,
-          ai_categorized: false,
-          ai_confidence:  null,
-          installment_id: null,
-          scan_batch_id:  null,
-          category_id:    null,
-          category_name:  null,
-        };
-        const created = await ledgerApi.create(user.id, loanEntry, accounts);
-        setLedger(p => [created, ...p]);
-        // Sync balances for both accounts
-        const giveFromId = uuid(form.from_id);
-        const giveToId   = hasRecv ? uuid(form.to_id) : null;
-        if (giveFromId) await recalculateBalance(giveFromId, user.id);
-        if (giveToId)   await recalculateBalance(giveToId,   user.id);
-        showToast(`Loan of ${fmtIDR(sn(form.amount), true)} created for ${loan.employee_name}`);
-        await onRefresh();
-        setModal(null);
-        setSaving(false);
-        return;
-      }
-
-      // ── Buy Asset ──────────────────────────────────────────────
-      if (type === "buy_asset" && !editEntry) {
-        const price = sn(form.amount);
-        const isExisting = form.asset_mode === "existing";
-        const assetName = isExisting
-          ? (assets.find(a => a.id === form.asset_id)?.name || "Asset Purchase")
-          : (form.asset_name?.trim() || "Asset Purchase");
-
-        if (isExisting) {
-          // Pass to_id = asset account so ledgerApi.create applies +price to current_value via getDeltas
-          const txEntry = {
-            tx_date:       form.tx_date || todayStr(),
-            description:   assetName,
-            amount:        price, currency: "IDR", amount_idr: price,
-            tx_type:       "buy_asset", from_type: "account", to_type: "account",
-            from_id:       uuid(form.from_id), to_id: uuid(form.asset_id),
-            category_id:   null, category_name: null,
-            entity:        "Personal", is_reimburse: false,
-            merchant_name: null, notes: form.notes || null,
-            attachment_url: null, ai_categorized: false, ai_confidence: null,
-            installment_id: null, scan_batch_id: null,
-          };
-          const created = await ledgerApi.create(user.id, txEntry, accounts);
-          console.log("[buy_asset] ledger insert:", created?.id, "from_id:", txEntry.from_id, "to_id:", txEntry.to_id, "amount:", price);
-          setLedger(p => [created, ...p]);
-        } else {
-          // New asset — no account to credit, ledger debit only
-          const txEntry = {
-            tx_date:       form.tx_date || todayStr(),
-            description:   assetName,
-            amount:        price, currency: "IDR", amount_idr: price,
-            tx_type:       "buy_asset", from_type: "account", to_type: "account",
-            from_id:       uuid(form.from_id), to_id: null,
-            category_id:   null, category_name: null,
-            entity:        "Personal", is_reimburse: false,
-            merchant_name: null, notes: form.notes || null,
-            attachment_url: null, ai_categorized: false, ai_confidence: null,
-            installment_id: null, scan_batch_id: null,
-          };
-          const created = await ledgerApi.create(user.id, txEntry, accounts);
-          console.log("[buy_asset] ledger insert (new asset):", created?.id, "amount:", price);
-          setLedger(p => [created, ...p]);
-          // Create asset record in assets table for tracking
-          try {
-            const newAsset = await assetsApi.create(user.id, {
-              name:           form.asset_name.trim(),
-              type:           form.asset_type || "Investment",
-              current_value:  price,
-              purchase_price: price,
-              purchase_date:  form.tx_date || todayStr(),
-              notes:          form.notes || null,
-            });
-            console.log("[buy_asset] asset record created:", newAsset?.id);
-          } catch (ae) { console.warn("[buy_asset] asset record create failed:", ae.message); }
-        }
-        showToast("Asset purchased");
-        await onRefresh();
-        setModal(null);
-        setSaving(false);
-        return;
-      }
-
-      // ── Sell Asset ─────────────────────────────────────────────
-      if (type === "sell_asset" && !editEntry) {
-        const sellPrice = sn(form.amount);
-        // from_id = asset account (current_value decreases via getDeltas { from: { asset: -a } })
-        // to_id   = bank account  (current_balance increases via getDeltas { to: { bank: +a } })
-        const txEntry = {
-          tx_date:       form.tx_date || todayStr(),
-          description:   assets.find(a => a.id === form.from_id)?.name ? `Sell ${assets.find(a => a.id === form.from_id).name}` : "Asset Sale",
-          amount:        sellPrice, currency: "IDR", amount_idr: sellPrice,
-          tx_type:       "sell_asset", from_type: "account", to_type: "account",
-          from_id:       uuid(form.from_id), to_id: uuid(form.to_id),
-          category_id:   null, category_name: null,
-          entity:        "Personal", is_reimburse: false,
-          merchant_name: null, notes: form.notes || null,
-          attachment_url: null, ai_categorized: false, ai_confidence: null,
-          installment_id: null, scan_batch_id: null,
-        };
-        const created = await ledgerApi.create(user.id, txEntry, accounts);
-        console.log("[sell_asset] ledger insert:", created?.id, "from_id (asset):", txEntry.from_id, "to_id (bank):", txEntry.to_id, "amount:", sellPrice);
-        setLedger(p => [created, ...p]);
-        // ledgerApi.create already decrements asset current_value via getDeltas
-        // No secondary update needed
-        showToast("Asset sold");
-        await onRefresh();
-        setModal(null);
-        setSaving(false);
-        return;
-      }
-
-      const cat = categories.find(c => c.id === form.category_id);
-      const { from_type, to_type } = getTxFromToTypes(type);
-
-      // Auto-generate description for types that don't require manual input
-      const AUTO_DESC = {
-        transfer:      "Transfer",
-        pay_cc:        "CC Payment",
-        buy_asset:     "Asset Purchase",
-        sell_asset:    "Asset Sale",
-        give_loan:     "Employee Loan",
-        collect_loan:  "Loan Collection",
-        reimburse_in:  "Reimburse Received",
-        pay_liability: "Liability Payment",
-        fx_exchange:   "FX Exchange",
-      };
-      const description = form.description?.trim() || AUTO_DESC[type] || "Transaction";
-
-      // For FX exchange, IDR amount = foreign amount × user-entered rate
-      let computedAmtIDR = sn(amtIDR);
-      let computedFxRate = null;
-      if (type === "fx_exchange") {
-        const rate = sn(form.fx_rate_used);
-        computedFxRate = rate || null;
-        if (rate > 0) computedAmtIDR = Math.round(sn(form.amount) * rate);
-      }
-
-      // Explicit full entry — every UUID field goes through uuid()
-      const entry = {
-        tx_date:        form.tx_date || new Date().toISOString().slice(0, 10),
-        description,
-        amount:         sn(form.amount),
-        currency:       form.currency  || "IDR",
-        amount_idr:     computedAmtIDR,
-        fx_rate_used:   computedFxRate,
-        tx_type:        type,
-        from_type,
-        to_type,
-        from_id:        uuid(form.from_id),
-        to_id:          uuid(form.to_id),
-        category_id:    uuid(form.category_id),
-        category_name:  cat?.name || form.category_name || null,
-        entity:         type === "reimburse_out" ? (form.entity || "Hamasa") : "Personal",
-        is_reimburse:   type === "reimburse_out",
-        merchant_name:  null,
-        notes:          form.notes || null,
-        attachment_url: null,
-        ai_categorized: false,
-        ai_confidence:  null,
-        installment_id: null,
-        scan_batch_id:  null,
-        // client-only: stripped before DB insert in ledgerApi.create
-        fx_direction:   type === "fx_exchange" ? (form.fx_direction || "buy") : undefined,
-      };
-
-      console.log("Inserting ledger entry:", entry);
-      if (editEntry) {
-        const updated = await ledgerApi.update(editEntry.id, entry);
-        setLedger(p => p.map(e => e.id === editEntry.id ? updated : e));
-        // Sync current_balance for all affected bank accounts (new + old from/to)
-        const affectedIds = [
-          ...(entry.from_type === "account" && entry.from_id ? [entry.from_id] : []),
-          ...(entry.to_type   === "account" && entry.to_id   ? [entry.to_id]   : []),
-          ...(editEntry.from_type === "account" && editEntry.from_id ? [editEntry.from_id] : []),
-          ...(editEntry.to_type   === "account" && editEntry.to_id   ? [editEntry.to_id]   : []),
-        ];
-        await Promise.all([...new Set(affectedIds)].map(id => recalculateBalance(id, user.id)));
-        showToast("Transaction updated");
-      } else {
-        const created = await ledgerApi.create(user.id, entry, accounts);
-        setLedger(p => [created, ...p]);
-        const affectedIds = [
-          ...(entry.from_type === "account" && entry.from_id ? [entry.from_id] : []),
-          ...(entry.to_type   === "account" && entry.to_id   ? [entry.to_id]   : []),
-        ];
-        await Promise.all([...new Set(affectedIds)].map(id => recalculateBalance(id, user.id)));
-        showToast("Transaction added");
-        await onRefresh();
-      }
-      // Save merchant mapping
-      if (description && form.category_id) {
-        merchantApi.upsert(user.id, description, form.category_id, cat?.name || "").catch(() => {});
-      }
-      setModal(null);
-    } catch (e) {
-      showToast(e.message, "error");
-    }
-    setSaving(false);
-  };
 
   // ── Delete ──
   const confirmDelete = async () => {
@@ -700,55 +294,30 @@ export default function Transactions({
       )}
 
       {/* ── ADD / EDIT MODAL ── */}
-      <Modal
-        isOpen={modal === "add" || modal === "edit"}
-        onClose={() => setModal(null)}
-        title={
-          step === 1
-            ? (modal === "edit" ? "Change Type" : "Add Transaction")
-            : (modal === "edit" ? "Edit Transaction" : TYPE_CHOICES.find(t => t.id === form.tx_type)?.label || "Add")
-        }
-        footer={
-          step === 2 && (
-            <div style={{ display: "flex", gap: 8 }}>
-              {modal === "edit" && (
-                <Button
-                  variant="danger"
-                  style={{ flexShrink: 0 }}
-                  onClick={() => { setDeleteEntry(editEntry); setModal(null); }}
-                >
-                  Delete
-                </Button>
-              )}
-              {modal !== "edit" && (
-                <Button variant="secondary" onClick={() => setStep(1)} style={{ flexShrink: 0 }}>
-                  ← Back
-                </Button>
-              )}
-              <Button fullWidth onClick={save} busy={saving}>
-                {modal === "edit" ? "Save Changes" : "Add Transaction"}
-              </Button>
-            </div>
-          )
-        }
-      >
-        {step === 1 ? (
-          <TypePickerGrid
-            types={TYPE_CHOICES}
-            onSelect={type => { set("tx_type", type); setStep(2); }}
-          />
-        ) : (
-          <TxForm
-            form={form} set={set}
-            fromOptions={fromOptions} toOptions={toOptions}
-            accounts={accounts} categories={categories}
-            incomeSrcs={incomeSrcs} allCurrencies={allCurrencies}
-            amtIDR={amtIDR} receivables={receivables}
-            assets={assets} accountCurrencies={accountCurrencies}
-            onChangeType={() => setStep(1)}
-          />
-        )}
-      </Modal>
+      <TransactionModal
+        open={txModal.open}
+        mode={txModal.mode}
+        initialData={txModal.entry}
+        onSave={() => {}}
+        onDelete={() => {}}
+        onClose={() => setTxModal({ open: false, mode: "add", entry: null })}
+        user={user}
+        accounts={accounts}
+        setLedger={setLedger}
+        categories={categories}
+        fxRates={fxRates}
+        allCurrencies={allCurrencies}
+        bankAccounts={bankAccounts}
+        creditCards={creditCards}
+        assets={assets}
+        liabilities={liabilities}
+        receivables={receivables}
+        incomeSrcs={incomeSrcs}
+        employeeLoans={employeeLoans}
+        setEmployeeLoans={setEmployeeLoans}
+        accountCurrencies={accountCurrencies}
+        onRefresh={onRefresh}
+      />
 
       {/* ── DELETE CONFIRM ── */}
       <ConfirmModal
