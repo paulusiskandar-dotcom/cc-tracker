@@ -72,6 +72,17 @@ export default function Upcoming({
   const items = useMemo(() => {
     const all = [];
     const today = new Date();
+    const cutoff = new Date(today.getTime() + 7 * 86400000);
+
+    // Returns the next future occurrence of dayOfMonth (>=tomorrow).
+    // If that day already passed this month (or is today), use next month.
+    const getNextDueDate = (dayOfMonth) => {
+      const thisMonth = new Date(today.getFullYear(), today.getMonth(), dayOfMonth);
+      if (thisMonth <= today) {
+        return new Date(today.getFullYear(), today.getMonth() + 1, dayOfMonth);
+      }
+      return thisMonth;
+    };
 
     // 1. Pending recurring reminders
     reminders.forEach(r => {
@@ -129,11 +140,16 @@ export default function Upcoming({
     receivables
       .filter(r => r.subtype !== "reimburse" && Number(r.current_balance || 0) > 0)
       .forEach(r => {
+        let dueDate = null;
+        if (r.day_of_month) {
+          dueDate = getNextDueDate(Number(r.day_of_month));
+          if (dueDate > cutoff) return; // outside 7-day window
+        }
         all.push({
           id: `loan-recv-${r.id}`,
           type: "loan_recv",
           raw: r,
-          date: todayStr(),
+          date: dueDate ? dueDate.toISOString().slice(0, 10) : todayStr(),
           title: `${r.name} — Loan Repayment`,
           amount: Number(r.monthly_installment || r.current_balance || 0),
           sub: `Outstanding: ${fmtIDR(Number(r.current_balance || 0), true)}`,
@@ -163,13 +179,9 @@ export default function Upcoming({
         });
       });
 
-    const cutoff = new Date(today.getTime() + 7 * 86400000);
-
     // 6. CC Jatuh Tempo — due within next 7 days
     creditCards.filter(cc => cc.due_day).forEach(cc => {
-      const dueDay = Number(cc.due_day);
-      let dueDate = new Date(today.getFullYear(), today.getMonth(), dueDay);
-      if (dueDate < today) dueDate = new Date(today.getFullYear(), today.getMonth() + 1, dueDay);
+      const dueDate = getNextDueDate(Number(cc.due_day));
       if (dueDate > cutoff) return;
       all.push({
         id: `cc-due-${cc.id}`,
@@ -189,9 +201,7 @@ export default function Upcoming({
       .filter(t => t.active && (t.tx_type === "income" || t.tx_type === "expense") && t.day_of_month)
       .forEach(t => {
         if (reminderTplIds.has(t.id)) return;
-        const dueDay = Number(t.day_of_month);
-        let dueDate = new Date(today.getFullYear(), today.getMonth(), dueDay);
-        if (dueDate < today) dueDate = new Date(today.getFullYear(), today.getMonth() + 1, dueDay);
+        const dueDate = getNextDueDate(Number(t.day_of_month));
         if (dueDate > cutoff) return;
         all.push({
           id: `recur-${t.id}`,
