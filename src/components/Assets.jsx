@@ -208,6 +208,118 @@ function AssetCard({ asset: a, ledger, valueHistoryCount = 0, color, onUpdate, o
   );
 }
 
+// ─── DEPOSITO CARD ────────────────────────────────────────────
+function DepositoCard({ asset: a, color, accounts: allAccounts, onTimeline }) {
+  const principal = Number(a.current_value || 0);
+  const rate      = Number(a.interest_rate || 0);
+  const netRate   = rate * 0.8;
+  const netMonthly = principal * (netRate / 100) / 12;
+
+  const today     = new Date();
+  const daysLeft  = a.maturity_date
+    ? Math.ceil((new Date(a.maturity_date + "T00:00:00") - today) / 86400000)
+    : null;
+  const maturityStr = a.maturity_date
+    ? new Date(a.maturity_date + "T00:00:00").toLocaleDateString("id-ID", {
+        day: "2-digit", month: "short", year: "numeric",
+      })
+    : null;
+
+  const rolloverLabel = { non_aro: "Non ARO", aro: "ARO", aro_plus: "ARO+" }[a.deposit_rollover_type] || a.deposit_rollover_type;
+  const statusColor   = { active: "#059669", matured: "#d97706", closed: "#9ca3af" }[a.deposit_status] || "#9ca3af";
+  const statusBg      = { active: "#f0fdf4", matured: "#fef9ec", closed: "#f3f4f6" }[a.deposit_status] || "#f3f4f6";
+  const bankAcc       = allAccounts?.find(b => b.id === a.deposit_bank_id);
+
+  return (
+    <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      <div style={{ height: 3, background: color }} />
+      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10, flex: 1 }}>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: color + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>
+            🏦
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {a.name}
+            </div>
+            <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
+              {bankAcc ? bankAcc.name : "Deposito"}
+            </div>
+          </div>
+          {a.deposit_status && (
+            <span style={{ fontSize: 9, fontWeight: 700, color: statusColor, background: statusBg, padding: "2px 7px", borderRadius: 5, fontFamily: "Figtree, sans-serif", flexShrink: 0, textTransform: "capitalize" }}>
+              {a.deposit_status}
+            </span>
+          )}
+        </div>
+
+        {/* Nominal */}
+        <div>
+          <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 3 }}>Nominal</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: "#2563eb", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
+            {fmtIDR(principal)}
+          </div>
+        </div>
+
+        {/* Details row */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {rate > 0 && (
+            <div style={{ fontSize: 11, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
+              <strong>{rate}% p.a.</strong> → net {netRate.toFixed(2)}% setelah pajak
+            </div>
+          )}
+          {maturityStr && (
+            <div style={{ fontSize: 11, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
+              Jatuh tempo: <strong>{maturityStr}</strong>
+              {daysLeft !== null && (
+                <span style={{ marginLeft: 6, fontWeight: 700, color: daysLeft <= 0 ? "#dc2626" : daysLeft <= 7 ? "#dc2626" : daysLeft <= 30 ? "#d97706" : "#9ca3af" }}>
+                  {daysLeft > 0 ? `(${daysLeft} hari lagi)` : "⚠️ Matured"}
+                </span>
+              )}
+            </div>
+          )}
+          {netMonthly > 0 && (
+            <div style={{ fontSize: 11, fontWeight: 600, color: "#059669", fontFamily: "Figtree, sans-serif" }}>
+              Est. bunga/bulan: {fmtIDR(netMonthly, true)}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 2 }}>
+            {rolloverLabel && (
+              <span style={{ fontSize: 9, fontWeight: 700, background: "#dbeafe", color: "#2563eb", padding: "2px 7px", borderRadius: 5, fontFamily: "Figtree, sans-serif" }}>
+                {rolloverLabel}
+              </span>
+            )}
+            {a.tenor_months && (
+              <span style={{ fontSize: 9, fontWeight: 700, background: "#f3f4f6", color: "#6b7280", padding: "2px 7px", borderRadius: 5, fontFamily: "Figtree, sans-serif" }}>
+                {a.tenor_months} bulan
+              </span>
+            )}
+            {a.monthly_interest_payout && (
+              <span style={{ fontSize: 9, fontWeight: 700, background: "#fef3c7", color: "#d97706", padding: "2px 7px", borderRadius: 5, fontFamily: "Figtree, sans-serif" }}>
+                Bunga bulanan
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div style={{ marginTop: "auto" }}>
+          <button onClick={onTimeline} style={{ ...ACCT_BTN, width: "100%" }}>📋 Timeline</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Helper: calculate maturity date from open date + tenor
+const calcMaturity = (openDate, tenorMonths) => {
+  if (!openDate || !tenorMonths) return "";
+  const d = new Date(openDate + "T00:00:00");
+  d.setMonth(d.getMonth() + Number(tenorMonths));
+  return d.toISOString().slice(0, 10);
+};
+
 // ─── MAIN ─────────────────────────────────────────────────────
 export default function Assets({ user, accounts, setAccounts, dark, ledger = [] }) {
   const T = dark ? DARK : LIGHT;
@@ -240,7 +352,14 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
   }, [user?.id]);
 
   // Add asset modal
-  const emptyAssetForm = () => ({ name: "", subtype: "", current_value: "", purchase_price: "", notes: "" });
+  const emptyAssetForm = () => ({
+    name: "", subtype: "", current_value: "", purchase_price: "", notes: "",
+    // Deposito fields
+    deposit_bank_id: "", interest_rate: "", tenor_months: "6",
+    maturity_date: "", monthly_interest_payout: false,
+    deposit_rollover_type: "non_aro", deposit_status: "active",
+    purchase_date: todayStr(),
+  });
   const [addAssetModal, setAddAssetModal] = useState(false);
   const [addAssetForm,  setAddAssetForm]  = useState(emptyAssetForm());
   const setAF = (k, v) => setAddAssetForm(f => ({ ...f, [k]: v }));
@@ -345,16 +464,27 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
     if (!addAssetForm.name) return showToast("Asset name is required", "error");
     setSaving(true);
     try {
-      const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? null : n; };
+      const sn  = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? null : n; };
+      const isDeposito = addAssetForm.subtype === "Deposito";
       const data = {
         name:           addAssetForm.name.trim(),
         subtype:        addAssetForm.subtype || null,
         current_value:  sn(addAssetForm.current_value) ?? 0,
-        purchase_price: sn(addAssetForm.purchase_price),
+        purchase_price: sn(addAssetForm.current_value) ?? 0, // deposito: cost = nominal
         notes:          addAssetForm.notes || null,
         type:           "asset",
         is_active:      true,
         sort_order:     accounts.length,
+        ...(isDeposito && {
+          deposit_bank_id:         addAssetForm.deposit_bank_id || null,
+          interest_rate:           sn(addAssetForm.interest_rate),
+          tenor_months:            sn(addAssetForm.tenor_months),
+          maturity_date:           addAssetForm.maturity_date || null,
+          monthly_interest_payout: addAssetForm.monthly_interest_payout || false,
+          deposit_rollover_type:   addAssetForm.deposit_rollover_type || "non_aro",
+          deposit_status:          "active",
+          purchase_date:           addAssetForm.purchase_date || todayStr(),
+        }),
       };
       const created = await accountsApi.create(user.id, data);
       if (created) setAccounts(prev => [...prev, created]);
@@ -440,6 +570,17 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
             {sorted.map(({ a, i }) => {
               const color = ASSET_COL[a.subtype] || "#9ca3af";
+              if (a.subtype === "Deposito") {
+                return (
+                  <DepositoCard
+                    key={a.id}
+                    asset={a}
+                    color={color}
+                    accounts={accounts}
+                    onTimeline={() => setTimelineAsset(a)}
+                  />
+                );
+              }
               return (
                 <AssetCard
                   key={a.id}
@@ -508,26 +649,100 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
         title="+ Add Asset"
         footer={<Button fullWidth onClick={handleAddAsset} busy={saving}>Add Asset →</Button>}
       >
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <Field label="Asset Name *">
-            <Input value={addAssetForm.name} onChange={e => setAF("name", e.target.value)} placeholder="e.g. Rumah Jagakarsa" />
-          </Field>
-          <Field label="Type">
-            <Select
-              value={addAssetForm.subtype}
-              onChange={e => setAF("subtype", e.target.value)}
-              options={ASSET_SUBTYPES.map(s => ({ value: s, label: `${ASSET_ICON[s] || "📦"} ${s}` }))}
-              placeholder="Select type…"
-            />
-          </Field>
-          <FormRow>
-            <AmountInput label="Current Value (IDR)" value={addAssetForm.current_value} onChange={v => setAF("current_value", v)} currency="IDR" />
-            <AmountInput label="Purchase Price (IDR)" value={addAssetForm.purchase_price} onChange={v => setAF("purchase_price", v)} currency="IDR" />
-          </FormRow>
-          <Field label="Notes">
-            <Input value={addAssetForm.notes} onChange={e => setAF("notes", e.target.value)} placeholder="Optional notes…" />
-          </Field>
-        </div>
+        {(() => {
+          const isDeposito = addAssetForm.subtype === "Deposito";
+          const bankAccounts = accounts.filter(a => a.type === "bank");
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <Field label="Asset Name *">
+                <Input value={addAssetForm.name} onChange={e => setAF("name", e.target.value)}
+                  placeholder={isDeposito ? "e.g. BCA Deposito 3 bulan" : "e.g. Rumah Jagakarsa"} />
+              </Field>
+              <Field label="Type">
+                <Select
+                  value={addAssetForm.subtype}
+                  onChange={e => setAF("subtype", e.target.value)}
+                  options={ASSET_SUBTYPES.map(s => ({ value: s, label: `${ASSET_ICON[s] || "📦"} ${s}` }))}
+                  placeholder="Select type…"
+                />
+              </Field>
+
+              {isDeposito ? (
+                <>
+                  {/* Deposito fields */}
+                  <Field label="Bank">
+                    <select
+                      value={addAssetForm.deposit_bank_id}
+                      onChange={e => setAF("deposit_bank_id", e.target.value)}
+                      style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 13, fontFamily: "Figtree, sans-serif", background: "#fff" }}
+                    >
+                      <option value="">— Select bank —</option>
+                      {bankAccounts.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    </select>
+                  </Field>
+                  <AmountInput label="Nominal Deposito (IDR)" value={addAssetForm.current_value} onChange={v => setAF("current_value", v)} currency="IDR" />
+                  <FormRow>
+                    <Input label="Interest Rate (% p.a.)" type="number" value={addAssetForm.interest_rate}
+                      onChange={e => setAF("interest_rate", e.target.value)} placeholder="5.5" style={{ flex: 1 }} />
+                    <Field label="Tenor (bulan)" style={{ width: 130, flexShrink: 0 }}>
+                      <select
+                        value={addAssetForm.tenor_months}
+                        onChange={e => {
+                          setAF("tenor_months", e.target.value);
+                          const mat = calcMaturity(addAssetForm.purchase_date, e.target.value);
+                          if (mat) setAF("maturity_date", mat);
+                        }}
+                        style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 13, fontFamily: "Figtree, sans-serif", background: "#fff" }}
+                      >
+                        {[1, 3, 6, 12, 24].map(m => <option key={m} value={m}>{m} bulan</option>)}
+                      </select>
+                    </Field>
+                  </FormRow>
+                  <FormRow>
+                    <Input label="Tanggal Buka" type="date" value={addAssetForm.purchase_date}
+                      onChange={e => {
+                        setAF("purchase_date", e.target.value);
+                        const mat = calcMaturity(e.target.value, addAssetForm.tenor_months);
+                        if (mat) setAF("maturity_date", mat);
+                      }}
+                      style={{ flex: 1 }} />
+                    <Input label="Jatuh Tempo" type="date" value={addAssetForm.maturity_date}
+                      onChange={e => setAF("maturity_date", e.target.value)} style={{ flex: 1 }} />
+                  </FormRow>
+                  <Field label="Rollover">
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {[{ id: "non_aro", label: "Non-ARO" }, { id: "aro", label: "ARO" }, { id: "aro_plus", label: "ARO+" }].map(opt => (
+                        <label key={opt.id} style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", fontSize: 13, fontFamily: "Figtree, sans-serif" }}>
+                          <input type="radio" name="add_rollover"
+                            checked={(addAssetForm.deposit_rollover_type || "non_aro") === opt.id}
+                            onChange={() => setAF("deposit_rollover_type", opt.id)}
+                          />
+                          {opt.label}
+                        </label>
+                      ))}
+                    </div>
+                  </Field>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, fontFamily: "Figtree, sans-serif" }}>
+                    <input type="checkbox" checked={addAssetForm.monthly_interest_payout}
+                      onChange={e => setAF("monthly_interest_payout", e.target.checked)} />
+                    Bunga dibayar bulanan
+                  </label>
+                </>
+              ) : (
+                <>
+                  <FormRow>
+                    <AmountInput label="Current Value (IDR)" value={addAssetForm.current_value} onChange={v => setAF("current_value", v)} currency="IDR" />
+                    <AmountInput label="Purchase Price (IDR)" value={addAssetForm.purchase_price} onChange={v => setAF("purchase_price", v)} currency="IDR" />
+                  </FormRow>
+                </>
+              )}
+
+              <Field label="Notes">
+                <Input value={addAssetForm.notes} onChange={e => setAF("notes", e.target.value)} placeholder="Optional notes…" />
+              </Field>
+            </div>
+          );
+        })()}
       </Modal>
 
     </div>
