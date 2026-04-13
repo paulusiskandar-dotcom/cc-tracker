@@ -133,6 +133,11 @@ export default function Receivables({
   const [selectedIn,    setSelectedIn]   = useState({}); // { accId: Set<ledgerId> }
   const [settling,      setSettling]     = useState(false);
   const [expandedSett,  setExpandedSett] = useState(new Set());
+  // ── Edit / Delete settlement ──────────────────────────────────
+  const [editSModal,    setEditSModal]   = useState(false);
+  const [editSItem,     setEditSItem]    = useState(null);
+  const [editSForm,     setEditSForm]    = useState({ settled_at: "", notes: "" });
+  const [editSSaving,   setEditSSaving]  = useState(false);
 
   // ── Loan statement state ─────────────────────────────────────
   const [loanStatementRec, setLoanStatementRec] = useState(null);
@@ -313,78 +318,169 @@ export default function Receivables({
     return { ...prev, [accId]: s };
   });
 
-  // ── Settle entity ─────────────────────────────────────────────
+  // ── Settle entity (upsert — update today's settlement if it exists) ──
   const handleSettleEntity = async (entity, acc) => {
     const outIds = Array.from(selectedOut[acc.id] || []);
     const inIds  = Array.from(selectedIn[acc.id]  || []);
     if (!outIds.length || !inIds.length)
       return showToast("Select at least one expense and one received item", "error");
 
-    const outEntries = ledger.filter(e => outIds.includes(e.id));
-    const inEntries  = ledger.filter(e => inIds.includes(e.id));
-    const totalOut   = outEntries.reduce((s, e) => s + Number(e.amount || 0), 0);
-    const totalIn    = inEntries.reduce((s, e) => s + Number(e.amount || 0), 0);
-    const reimbursable = totalOut - totalIn;
     const recat = getRECat(entity);
+
+    // Check for existing settlement for this entity created today
+    const todayMidnight = new Date(); todayMidnight.setHours(0, 0, 0, 0);
+    const existingToday = settlements.find(s =>
+      s.entity === entity && new Date(s.settled_at) >= todayMidnight
+    );
 
     setSettling(true);
     try {
-      const { data: settlement, error: sErr } = await supabase
-        .from("reimburse_settlements")
-        .insert([{
-          user_id:              user.id,
-          entity,
-          settled_at:           new Date().toISOString(),
-          out_ledger_ids:       outIds,
-          in_ledger_ids:        inIds,
-          total_out:            totalOut,
-          total_in:             totalIn,
-          reimbursable_expense: reimbursable,
-          re_category_id:       recat?.id || null,
-          notes:                null,
-        }])
-        .select().single();
-      if (sErr) throw new Error(sErr.message);
+      let settlement;
 
-      if (reimbursable > 0) {
-        const fromId = outEntries[0]?.from_id || null;
-        const { error: lErr } = await supabase.from("ledger").insert([{
-          user_id:       user.id,
-          tx_date:       todayStr(),
-          description:   `${entity} Reimbursable Expense`,
-          amount:        reimbursable,
-          amount_idr:    reimbursable,
-          currency:      "IDR",
-          tx_type:       "expense",
-          from_type:     "account",
-          to_type:       "expense",
-          from_id:       fromId,
-          to_id:         null,
-          category_id:   recat?.id || null,
-          category_name: recat?.label || RE_CAT_NAMES[entity],
-          entity:        "Personal",
-          is_reimburse:  false,
-          notes:         `Settlement: ${entity}`,
-          reimburse_settlement_id: settlement.id,
-        }]);
-        if (lErr) throw new Error(lErr.message);
+      if (existingToday) {
+        // ── UPDATE existing settlement ──────────────────────────
+        const mergedOut = Array.from(new Set([...(existingToday.out_ledger_ids || []), ...outIds]));
+        const mergedIn  = Array.from(new Set([...(existingToday.in_ledger_ids  || []), ...inIds]));
+        const newTotalOut   = ledger.filter(e => mergedOut.includes(e.id)).reduce((s, e) => s + Number(e.amount || 0), 0);
+        const newTotalIn    = ledger.filter(e => mergedIn.includes(e.id)).reduce((s, e) => s + Number(e.amount || 0), 0);
+        const newReimbursable = newTotalOut - newTotalIn;
+
+        const { data: updated, error: uErr } = await supabase
+          .from("reimburse_settlements")
+          .update({
+            out_ledger_ids:       mergedOut,
+            in_ledger_ids:        mergedIn,
+            total_out:            newTotalOut,
+            total_in:             newTotalIn,
+            reimbursable_expense: newReimbursable,
+          })
+          .eq("id", existingToday.id)
+          .select().single();
+        if (uErr) throw new Error(uErr.message);
+        settlement = updated;
+
+        // Delete old RE expense entry for this settlement, then recreate
+        await supabase.from("ledger")
+          .delete()
+          .eq("reimburse_settlement_id", existingToday.id)
+          .eq("tx_type", "expense");
+
+        if (newReimbursable > 0) {
+          const fromId = ledger.find(e => mergedOut.includes(e.id))?.from_id || null;
+          const { error: lErr } = await supabase.from("ledger").insert([{
+            user_id: user.id, tx_date: todayStr(),
+            description: `${entity} Reimbursable Expense`,
+            amount: newReimbursable, amount_idr: newReimbursable, currency: "IDR",
+            tx_type: "expense", from_type: "account", to_type: "expense",
+            from_id: fromId, to_id: null,
+            category_id: recat?.id || null, category_name: recat?.label || RE_CAT_NAMES[entity],
+            entity: "Personal", is_reimburse: false,
+            notes: `Settlement: ${entity}`, reimburse_settlement_id: settlement.id,
+          }]);
+          if (lErr) throw new Error(lErr.message);
+        }
+
+        // Mark only the newly added ledger rows (avoid re-marking already-marked rows)
+        const newIds = [...outIds, ...inIds];
+        await supabase.from("ledger").update({ reimburse_settlement_id: settlement.id }).in("id", newIds);
+        setLedger(prev => prev.map(e => newIds.includes(e.id) ? { ...e, reimburse_settlement_id: settlement.id } : e));
+        setSettlements(prev => prev.map(x => x.id === existingToday.id ? settlement : x));
+        showToast(`${entity} settlement updated · RE: ${fmtIDR(newReimbursable, true)}`);
+      } else {
+        // ── INSERT new settlement ───────────────────────────────
+        const outEntries   = ledger.filter(e => outIds.includes(e.id));
+        const inEntries    = ledger.filter(e => inIds.includes(e.id));
+        const totalOut     = outEntries.reduce((s, e) => s + Number(e.amount || 0), 0);
+        const totalIn      = inEntries.reduce((s, e) => s + Number(e.amount || 0), 0);
+        const reimbursable = totalOut - totalIn;
+
+        const { data: newSett, error: sErr } = await supabase
+          .from("reimburse_settlements")
+          .insert([{
+            user_id: user.id, entity,
+            settled_at: new Date().toISOString(),
+            out_ledger_ids: outIds, in_ledger_ids: inIds,
+            total_out: totalOut, total_in: totalIn,
+            reimbursable_expense: reimbursable,
+            re_category_id: recat?.id || null, notes: null,
+          }])
+          .select().single();
+        if (sErr) throw new Error(sErr.message);
+        settlement = newSett;
+
+        if (reimbursable > 0) {
+          const fromId = outEntries[0]?.from_id || null;
+          const { error: lErr } = await supabase.from("ledger").insert([{
+            user_id: user.id, tx_date: todayStr(),
+            description: `${entity} Reimbursable Expense`,
+            amount: reimbursable, amount_idr: reimbursable, currency: "IDR",
+            tx_type: "expense", from_type: "account", to_type: "expense",
+            from_id: fromId, to_id: null,
+            category_id: recat?.id || null, category_name: recat?.label || RE_CAT_NAMES[entity],
+            entity: "Personal", is_reimburse: false,
+            notes: `Settlement: ${entity}`, reimburse_settlement_id: settlement.id,
+          }]);
+          if (lErr) throw new Error(lErr.message);
+        }
+
+        const allIds = [...outIds, ...inIds];
+        await supabase.from("ledger").update({ reimburse_settlement_id: settlement.id }).in("id", allIds);
+        setLedger(prev => prev.map(e => allIds.includes(e.id) ? { ...e, reimburse_settlement_id: settlement.id } : e));
+        setSettlements(prev => [settlement, ...prev]);
+        showToast(`${entity} settled${reimbursable > 0 ? ` · RE: ${fmtIDR(reimbursable, true)}` : ""}`);
       }
 
-      const allIds = [...outIds, ...inIds];
-      const { error: uErr } = await supabase.from("ledger")
-        .update({ reimburse_settlement_id: settlement.id })
-        .in("id", allIds);
-      if (uErr) throw new Error(uErr.message);
-
-      setLedger(prev => prev.map(e => allIds.includes(e.id) ? { ...e, reimburse_settlement_id: settlement.id } : e));
-      setSettlements(prev => [settlement, ...prev]);
       setSelectedOut(prev => ({ ...prev, [acc.id]: new Set() }));
       setSelectedIn(prev =>  ({ ...prev, [acc.id]: new Set() }));
-
       await onRefresh();
-      showToast(`${entity} settled${reimbursable > 0 ? ` · RE: ${fmtIDR(reimbursable, true)}` : ""}`);
     } catch (e) { showToast(e.message, "error"); }
     setSettling(false);
+  };
+
+  // ── Edit settlement ────────────────────────────────────────────
+  const openEditSettle = (s) => {
+    setEditSItem(s);
+    setEditSForm({
+      settled_at: s.settled_at ? s.settled_at.slice(0, 10) : todayStr(),
+      notes:      s.notes || "",
+    });
+    setEditSModal(true);
+  };
+
+  const handleEditSettle = async () => {
+    if (!editSItem) return;
+    setEditSSaving(true);
+    try {
+      const { data: updated, error } = await supabase
+        .from("reimburse_settlements")
+        .update({ settled_at: editSForm.settled_at, notes: editSForm.notes || null })
+        .eq("id", editSItem.id)
+        .select().single();
+      if (error) throw new Error(error.message);
+      setSettlements(prev => prev.map(x => x.id === editSItem.id ? updated : x));
+      showToast("Settlement updated");
+      setEditSModal(false);
+    } catch (e) { showToast(e.message, "error"); }
+    setEditSSaving(false);
+  };
+
+  // ── Delete settlement ──────────────────────────────────────────
+  const handleDeleteSettle = async (s) => {
+    if (!window.confirm(`Delete this settlement for ${s.entity}? The linked transactions will become unsettled.`)) return;
+    try {
+      // Unmark all linked ledger entries
+      const linkedIds = [...(s.out_ledger_ids || []), ...(s.in_ledger_ids || [])];
+      if (linkedIds.length) {
+        await supabase.from("ledger").update({ reimburse_settlement_id: null }).in("id", linkedIds);
+        setLedger(prev => prev.map(e => linkedIds.includes(e.id) ? { ...e, reimburse_settlement_id: null } : e));
+      }
+      // Delete the RE expense entry created for this settlement
+      await supabase.from("ledger").delete().eq("reimburse_settlement_id", s.id).eq("tx_type", "expense");
+      // Delete the settlement record itself
+      await supabase.from("reimburse_settlements").delete().eq("id", s.id);
+      setSettlements(prev => prev.filter(x => x.id !== s.id));
+      showToast(`Settlement deleted — transactions are now unsettled`);
+    } catch (e) { showToast(e.message, "error"); }
   };
 
   // ── PERSONAL LOAN COLLECT ─────────────────────────────────
@@ -878,18 +974,33 @@ export default function Receivables({
                           const re = Number(s.reimbursable_expense || 0);
                           return (
                             <div key={s.id} style={{ border: "0.5px solid #f3f4f6", borderRadius: 8, marginBottom: 4, overflow: "hidden" }}>
-                              <div
-                                onClick={() => setExpandedSett(prev => { const ns = new Set(prev); ns.has(s.id) ? ns.delete(s.id) : ns.add(s.id); return ns; })}
-                                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", cursor: "pointer", background: "#fafafa" }}
-                              >
-                                <div>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", background: "#fafafa" }}>
+                                <div
+                                  onClick={() => setExpandedSett(prev => { const ns = new Set(prev); ns.has(s.id) ? ns.delete(s.id) : ns.add(s.id); return ns; })}
+                                  style={{ flex: 1, cursor: "pointer", minWidth: 0 }}
+                                >
                                   <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", fontFamily: "Figtree, sans-serif" }}>{date}</div>
                                   <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1, fontFamily: "Figtree, sans-serif" }}>
                                     Out {fmtIDR(Number(s.total_out || 0), true)} · In {fmtIDR(Number(s.total_in || 0), true)} ·{" "}
                                     <span style={{ fontWeight: 700, color: re > 0 ? "#dc2626" : "#059669" }}>RE {fmtIDR(re, true)}</span>
                                   </div>
                                 </div>
-                                <span style={{ fontSize: 10, color: "#9ca3af" }}>{isExpanded ? "▲" : "▼"}</span>
+                                <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                                  <button
+                                    onClick={e => { e.stopPropagation(); openEditSettle(s); }}
+                                    style={{ border: "none", background: "none", cursor: "pointer", padding: "2px 4px", fontSize: 13, color: "#9ca3af", lineHeight: 1 }}
+                                    title="Edit"
+                                  >✏️</button>
+                                  <button
+                                    onClick={e => { e.stopPropagation(); handleDeleteSettle(s); }}
+                                    style={{ border: "none", background: "none", cursor: "pointer", padding: "2px 4px", fontSize: 13, color: "#9ca3af", lineHeight: 1 }}
+                                    title="Delete"
+                                  >🗑</button>
+                                  <span
+                                    onClick={() => setExpandedSett(prev => { const ns = new Set(prev); ns.has(s.id) ? ns.delete(s.id) : ns.add(s.id); return ns; })}
+                                    style={{ fontSize: 10, color: "#9ca3af", cursor: "pointer", padding: "2px 4px" }}
+                                  >{isExpanded ? "▲" : "▼"}</span>
+                                </div>
                               </div>
                               {isExpanded && (
                                 <div style={{ padding: "8px 10px", borderTop: "0.5px solid #f3f4f6", background: "#fff" }}>
@@ -1436,6 +1547,57 @@ export default function Receivables({
             </FormRow>
             <Field label="Notes">
               <Input value={payForm.notes} onChange={e => setPayForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional" />
+            </Field>
+          </div>
+        )}
+      </Modal>
+
+      {/* ── EDIT SETTLEMENT MODAL ───────────────────────── */}
+      <Modal
+        isOpen={editSModal && !!editSItem}
+        onClose={() => setEditSModal(false)}
+        title={`Edit Settlement — ${editSItem?.entity || ""}`}
+        footer={
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <Button variant="secondary" size="md" onClick={() => setEditSModal(false)}>Cancel</Button>
+            <Button variant="primary" size="md" busy={editSSaving} onClick={handleEditSettle}>Save</Button>
+          </div>
+        }
+      >
+        {editSItem && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {/* Read-only summary */}
+            <div style={{ background: "#f9fafb", borderRadius: 10, padding: "10px 14px", display: "flex", gap: 16, fontSize: 12, fontFamily: "Figtree, sans-serif" }}>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", marginBottom: 2 }}>Total Out</div>
+                <div style={{ fontWeight: 700, color: "#dc2626" }}>{fmtIDR(Number(editSItem.total_out || 0))}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", marginBottom: 2 }}>Total In</div>
+                <div style={{ fontWeight: 700, color: "#059669" }}>+{fmtIDR(Number(editSItem.total_in || 0))}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", marginBottom: 2 }}>RE</div>
+                <div style={{ fontWeight: 700, color: Number(editSItem.reimbursable_expense || 0) > 0 ? "#dc2626" : "#059669" }}>
+                  {fmtIDR(Number(editSItem.reimbursable_expense || 0))}
+                </div>
+              </div>
+            </div>
+            <FormRow>
+              <Field label="Date">
+                <Input
+                  type="date"
+                  value={editSForm.settled_at}
+                  onChange={e => setEditSForm(f => ({ ...f, settled_at: e.target.value }))}
+                />
+              </Field>
+            </FormRow>
+            <Field label="Notes">
+              <Input
+                value={editSForm.notes}
+                onChange={e => setEditSForm(f => ({ ...f, notes: e.target.value }))}
+                placeholder="Optional"
+              />
             </Field>
           </div>
         )}
