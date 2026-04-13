@@ -22,13 +22,23 @@ const normaliseTxType = (raw, catId) => {
 
 // ── Keyword-based auto-classification ───────────────────────────
 const KEYWORD_RULES = [
-  { match: /biaya\s*adm|admin\s*fee|bi-?fast\s*fee|transfer\s*fee|provisi|biaya\s*transfer|administration\s*fee|service\s*charge/i, tx_type: "expense", category_id: "bank_charges" },
+  // Bank admin / fees (debit)
+  { match: /biaya\s*adm(?:inistrasi)?|admin\s*fee|bi-?fast\s*fee|transfer\s*fee|provisi|biaya\s*transfer|administration\s*fee|service\s*charge/i, tx_type: "expense", category_id: "bank_charges" },
   { match: /bi-?fast|bifast/i, maxAmount: 5000, tx_type: "expense", category_id: "bank_charges" },
   { match: /materai|stamp\s*duty|bea\s*materai/i, tx_type: "expense", category_id: "materai" },
   { match: /\bpph\b|pajak|withholding\s*tax|interest\s*tax|pph\s*bunga/i, tx_type: "expense", category_id: "tax" },
   { match: /\btax\b/i, notMatch: /cashback|interest|bunga/i, tx_type: "expense", category_id: "tax" },
+  // Bank interest / cashback (credit)
   { match: /bunga\s*tabungan|bunga\s*deposito|jasa\s*giro|bank\s*interest|bunga\b/i, notMatch: /pph|pajak|tax/i, tx_type: "income", category_id: "bank_interest" },
   { match: /cashback|cash\s*back|reward\s*points|poin\s*reward/i, tx_type: "income", category_id: "cashback" },
+  // Mandiri: incoming transfers (credit column) → income
+  { match: /transfer\s+dari\s+bank|tf\s+dari|setoran\s+tunai|setor\s+tunai/i, notMatch: /ke\s+bank|to\s+bank/i, tx_type: "income", category_id: "other_income" },
+  { match: /bi\s*fast\s+dari|bifast\s+dari|transfer\s+bi\s*fast\s+dari/i, tx_type: "income", category_id: "other_income" },
+  { match: /penerimaan\s+transfer|incoming\s+transfer|kredit\s+transfer/i, tx_type: "income", category_id: "other_income" },
+  // Mandiri: CC payment (debit) → pay_cc
+  { match: /pembayaran\s+kartu\s+kredit|bayar\s+kartu\s+kredit|cc\s+payment|credit\s+card\s+pay/i, tx_type: "pay_cc" },
+  // Mandiri: cash withdrawal (debit) → expense
+  { match: /penarikan\s+tunai|tarik\s+tunai|atm\s+withdrawal|withdrawal\s+atm/i, tx_type: "expense", category_id: "other" },
 ];
 
 const applyKeywordRules = (desc, amount) => {
@@ -243,7 +253,9 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
 
       // 3. Scan with AI
       const parsed = await scanApi.scan(user.id, file, { accounts });
+      console.log(`[AIImport] total transactions from AI: ${parsed.length}`);
       const items  = buildRows(parsed);
+      console.log(`[AIImport] after buildRows: ${items.length} rows`);
 
       // 4. Save results to DB
       if (newBatchId) {
@@ -276,7 +288,9 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       if (error || !blob) throw new Error("Could not download file");
       const file = new File([blob], "rescan.jpg", { type: blob.type || "image/jpeg" });
       const parsed = await scanApi.scan(user.id, file, { accounts });
+      console.log(`[AIImport refresh] total transactions from AI: ${parsed.length}`);
       const items  = buildRows(parsed);
+      console.log(`[AIImport refresh] after buildRows: ${items.length} rows`);
       if (batchId) scanApi.updateBatch(batchId, { ai_raw_result: parsed, total_detected: items.length, processed_at: new Date().toISOString() }).catch(() => {});
       setResults(items);
       const sel = {};

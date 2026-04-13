@@ -768,75 +768,105 @@ export const scanApi = {
             `- ${l.employee_name} id:${l.id}`
           ).join("\n");
 
-          const prompt = `You are a financial transaction extractor. Extract ALL transactions from this document.
+          const buildPrompt = (pass = 1, skipCount = 0) => `You are a financial transaction extractor for an Indonesian bank statement.
+
+CRITICAL: Extract EVERY SINGLE transaction row from this bank statement.
+- Look at BOTH columns: Debet/Keluar/Dr (money OUT) AND Kredit/Masuk/Cr (money IN)
+- Do NOT skip any row for any reason
+- Every row in the transaction table must appear in your output
+- Count rows carefully — include fees, transfers in, transfers out, all credits, all debits${skipCount > 0 ? `\n- SKIP the first ${skipCount} transactions already extracted in pass 1, start from transaction #${skipCount + 1}` : ""}
 
 ${accountsCtx ? `Known accounts:\n${accountsCtx}\n` : ""}${loansCtx ? `Employee loans:\n${loansCtx}\n` : ""}
-IMPORTANT RULES:
-- Account number 0830267743 is "BCA Reimburse" — any credit/incoming to this account is type "reimburse_in"
-- If account name or description includes "reimburse", treat as reimburse_in (credit) or reimburse_out (debit)
-- For reimburse_in, from_account_id = the receivable/reimburse account id, to_account_id = bank account
+TRANSACTION TYPE RULES:
+- Debet/Keluar/Dr column (money leaves account) → expense, pay_cc, transfer, give_loan, reimburse_out
+- Kredit/Masuk/Cr column (money enters account) → income, collect_loan, transfer, reimburse_in
+- "Transfer dari BANK MANDIRI [name] [account]" = KREDIT → type: income
+- "Transfer BI Fast dari [bank] [name]" = KREDIT → type: income
+- "Setoran tunai" = KREDIT → type: income
+- "Pembayaran kartu kredit [account]" = DEBET → type: pay_cc
+- "Biaya administrasi" = DEBET → type: expense (category: bank_charges)
+- "Bunga tabungan / Jasa giro" = KREDIT → type: income (category: bank_interest)
+- "PPh bunga / Pajak" = DEBET → type: expense (category: tax)
+- "Materai / Bea materai" = DEBET → type: expense (category: materai)
+- transfer = ONLY between the user's OWN accounts listed above. If external → expense (debet) or income (kredit)
+- Account 0830267743 = BCA Reimburse: credits to this = reimburse_in
 
-Return a JSON object with a "transactions" array. Each item must have:
+Return a JSON object: {"transactions": [...], "total_rows_in_document": N}
+Each transaction must have:
 - date: "YYYY-MM-DD"
-- description: merchant or narration
-- amount: number (positive)
-- currency: "IDR" (or foreign currency code e.g. USD, SGD, JPY)
-- amount_idr: converted IDR amount. If only IDR shown, same as amount. If both shown (e.g. USD 100 = Rp 1.640.000), amount=100, currency=USD, amount_idr=1640000
-- type: one of expense|income|transfer|pay_cc|reimburse_in|reimburse_out|give_loan|collect_loan|fx_exchange
-  IMPORTANT: "transfer" = ONLY between user's own accounts listed above. If destination is unknown/external, use "expense".
-  For bank admin fees, stamp duty (materai), bea materai → use type "expense". For bank interest, cashback → use type "income".
-  Never use bank_charges, stamp_duty, tax, bank_interest, cashback as type values — they are categories, not types.
-- from_account_id: matched account id or null
-- to_account_id: matched account id or null
-- category: expense category slug (food|transport|health|shopping|home|education|entertainment|business|finance|family|social|cash_advance_fee|other)
+- description: (keep short, max 60 chars)
+- amount: positive number
+- currency: "IDR"
+- amount_idr: same as amount for IDR
+- type: expense|income|transfer|pay_cc|reimburse_in|reimburse_out|give_loan|collect_loan|fx_exchange
+- from_account_id: matched id or null
+- to_account_id: matched id or null
+- category: food|transport|health|shopping|home|education|entertainment|business|finance|family|social|bank_charges|materai|tax|other
 - entity: "Personal"
-- notes: any extra detail
+- notes: ""
 
-Be concise. Use short field values. Prioritize completing the full JSON array over adding detail. Return ONLY valid JSON, no markdown, no explanation.`;
+USE MINIMAL JSON — short strings, omit null fields except required ones. Return ONLY valid JSON, no markdown.`;
 
-          const contentParts = [];
-          // PDFs must use document type; images use image type
-          if (mime === "application/pdf") {
-            contentParts.push({
-              type: "document",
-              source: { type: "base64", media_type: "application/pdf", data: base64 },
+          let _aiPass = 0;
+          const callAI = async (prompt) => {
+            _aiPass++;
+            const contentParts = [];
+            if (mime === "application/pdf") {
+              contentParts.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } });
+            } else {
+              contentParts.push({ type: "image", source: { type: "base64", media_type: mime, data: base64 } });
+            }
+            contentParts.push({ type: "text", text: prompt });
+
+            const key = process.env.REACT_APP_SUPABASE_ANON_KEY || "";
+            const url = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/ai-proxy`;
+            const r = await fetch(url, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "apikey": key, "Authorization": `Bearer ${key}` },
+              body: JSON.stringify({
+                model:      "claude-sonnet-4-20250514",
+                max_tokens: 32000,
+                messages: [{ role: "user", content: contentParts }],
+              }),
             });
-          } else {
-            contentParts.push({
-              type: "image",
-              source: { type: "base64", media_type: mime, data: base64 },
-            });
+            if (!r.ok) {
+              const e2  = await r.json().catch(() => ({}));
+              const msg = e2?.error?.message || e2?.message ||
+                          (typeof e2?.error === "string" ? e2.error : null) || `HTTP ${r.status}`;
+              throw new Error(msg);
+            }
+            const d   = await r.json();
+            const raw = d?.content?.[0]?.text || "";
+            const stopReason = d?.stop_reason || "";
+            console.log(`[AI scan] pass=${_aiPass} stop_reason=${stopReason} raw_len=${raw.length}`);
+            console.log("[AI scan] raw preview:", raw.slice(0, 300));
+            return { raw, stopReason };
+          };
+
+          // Pass 1
+          const { raw: raw1, stopReason: stop1 } = await callAI(buildPrompt(1, 0));
+          let parsed1 = extractJSON(raw1);
+          console.log(`[AI scan] pass 1: ${parsed1.length} transactions extracted, stop_reason=${stop1}`);
+
+          // Pass 2: if output was truncated (max_tokens hit), do a second pass for remaining rows
+          let allTx = parsed1;
+          if (stop1 === "max_tokens" && parsed1.length > 0) {
+            console.warn(`[AI scan] Output truncated after ${parsed1.length} rows — running pass 2`);
+            try {
+              const { raw: raw2, stopReason: stop2 } = await callAI(buildPrompt(2, parsed1.length));
+              const parsed2 = extractJSON(raw2);
+              console.log(`[AI scan] pass 2: ${parsed2.length} additional transactions, stop_reason=${stop2}`);
+              // Deduplicate by date+amount
+              const seen = new Set(parsed1.map(t => `${t.date}|${t.amount}`));
+              const newRows = parsed2.filter(t => !seen.has(`${t.date}|${t.amount}`));
+              allTx = [...parsed1, ...newRows];
+              console.log(`[AI scan] merged total: ${allTx.length} transactions`);
+            } catch (e2) {
+              console.warn("[AI scan] pass 2 failed:", e2.message);
+            }
           }
-          contentParts.push({ type: "text", text: prompt });
 
-          const key = process.env.REACT_APP_SUPABASE_ANON_KEY || "";
-          const url = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/ai-proxy`;
-          const r = await fetch(url, {
-            method:  "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "apikey":        key,
-              "Authorization": `Bearer ${key}`,
-            },
-            body: JSON.stringify({
-              model:      "claude-sonnet-4-20250514",
-              max_tokens: 16000,
-              messages: [{ role: "user", content: contentParts }],
-            }),
-          });
-
-          if (!r.ok) {
-            const e2  = await r.json().catch(() => ({}));
-            const msg = e2?.error?.message || e2?.message ||
-                        (typeof e2?.error === "string" ? e2.error : null) ||
-                        `HTTP ${r.status}`;
-            throw new Error(msg);
-          }
-
-          const d = await r.json();
-          const raw = d?.content?.[0]?.text || "";
-          console.log("AI raw response:", raw.slice(0, 500));
-          resolve(extractJSON(raw));
+          resolve(allTx);
         } catch (err) { reject(err); }
       };
       reader.readAsDataURL(file);
