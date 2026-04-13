@@ -1,6 +1,5 @@
 import { useMemo, useState, useEffect } from "react";
-import { ledgerApi, recurringApi, reimburseSettlementsApi, settingsApi, loanPaymentsApi, employeeLoanApi, accountsApi } from "../api";
-import { supabase } from "../lib/supabase";
+import { ledgerApi, recurringApi, reimburseSettlementsApi, settingsApi, loanPaymentsApi, employeeLoanApi } from "../api";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
 import { fmtIDR, ym, mlShort, getGreeting, todayStr, groupByDate, checkDuplicateTransaction } from "../utils";
 import { showToast, EmptyState, Modal, Button, AmountInput, Field, Input, FormRow } from "./shared/index";
@@ -48,16 +47,6 @@ export default function Dashboard({
   const [payLoan,       setPayLoan]       = useState(null);
   const [payForm,       setPayForm]       = useState({ amount: "", pay_date: todayStr(), notes: "" });
   const [paySaving,     setPaySaving]     = useState(false);
-  // Deposito modals
-  const [cairkanModal,    setCairkanModal]    = useState(null); // deposito account
-  const [cairkanBankId,   setCairkanBankId]   = useState("");
-  const [cairkanAmount,   setCairkanAmount]   = useState("");
-  const [cairkanInterest, setCairkanInterest] = useState("");
-  const [cairkanDate,     setCairkanDate]     = useState(todayStr());
-  const [cairkanSaving,   setCairkanSaving]   = useState(false);
-  const [perpanjangModal,  setPerpanjangModal]  = useState(null); // deposito account
-  const [perpanjangSaving, setPerpanjangSaving] = useState(false);
-
   // ─── DERIVED STATS ───────────────────────────────────────────
   const nw = netWorth || { total: 0, bank: 0, assets: 0, receivables: 0, ccDebt: 0, liabilities: 0 };
 
@@ -441,75 +430,6 @@ export default function Dashboard({
 
   const dismissUpcoming = (itemId) => {
     setDismissed(prev => new Set([...prev, itemId]));
-  };
-
-  const openCairkanModal = (deposito) => {
-    setCairkanModal(deposito);
-    setCairkanBankId(deposito.deposit_bank_id || bankAccounts[0]?.id || "");
-    setCairkanAmount(String(deposito.current_value || ""));
-    setCairkanInterest("");
-    setCairkanDate(todayStr());
-  };
-
-  const doCairkan = async () => {
-    if (!cairkanModal || !cairkanBankId) return showToast("Pilih rekening tujuan", "error");
-    setCairkanSaving(true);
-    try {
-      const amount = Number(cairkanAmount) || Number(cairkanModal.current_value) || 0;
-      // Transfer from deposito → bank (sell_asset)
-      await ledgerApi.create(user.id, {
-        tx_date:    cairkanDate, description: `Cairkan Deposito — ${cairkanModal.name}`,
-        amount, currency: cairkanModal.currency || "IDR", amount_idr: amount,
-        tx_type: "sell_asset", from_type: "account", from_id: cairkanModal.id,
-        to_type: "account", to_id: cairkanBankId,
-      });
-      // Optionally record interest income
-      const interest = Number(cairkanInterest) || 0;
-      if (interest > 0) {
-        await ledgerApi.create(user.id, {
-          tx_date:    cairkanDate, description: `Bunga Deposito — ${cairkanModal.name}`,
-          amount: interest, currency: "IDR", amount_idr: interest,
-          tx_type: "income", from_type: "income_source", from_id: null,
-          to_type: "account", to_id: cairkanBankId,
-        });
-      }
-      // Mark deposito as closed
-      await accountsApi.update(cairkanModal.id, { deposit_status: "closed", current_value: 0 });
-      showToast(`Deposito ${cairkanModal.name} dicairkan`);
-      setCairkanModal(null);
-      setDismissed(prev => new Set([...prev, `dep-${cairkanModal.id}`]));
-      await onRefresh?.();
-    } catch (e) { showToast(e.message, "error"); }
-    setCairkanSaving(false);
-  };
-
-  const openPerpanjangModal = (deposito) => {
-    setPerpanjangModal(deposito);
-  };
-
-  const doPerpanjang = async () => {
-    if (!perpanjangModal) return;
-    setPerpanjangSaving(true);
-    try {
-      const tenor = Number(perpanjangModal.tenor_months || 3);
-      const base  = perpanjangModal.maturity_date || todayStr();
-      const d = new Date(base + "T00:00:00");
-      d.setMonth(d.getMonth() + tenor);
-      const newMaturity = d.toISOString().slice(0, 10);
-      await accountsApi.update(perpanjangModal.id, { maturity_date: newMaturity });
-      await supabase.from("asset_value_history").insert({
-        account_id: perpanjangModal.id, user_id: user.id,
-        old_value: Number(perpanjangModal.current_value || 0),
-        new_value: Number(perpanjangModal.current_value || 0),
-        date: todayStr(),
-        notes: `Deposito diperpanjang ${tenor} bulan → jatuh tempo ${newMaturity}`,
-      });
-      showToast(`Deposito diperpanjang hingga ${newMaturity}`);
-      setPerpanjangModal(null);
-      setDismissed(prev => new Set([...prev, `dep-${perpanjangModal.id}`]));
-      await onRefresh?.();
-    } catch (e) { showToast(e.message, "error"); }
-    setPerpanjangSaving(false);
   };
 
   const openLoanPayModal = (loan) => {
@@ -924,18 +844,16 @@ export default function Dashboard({
                         key={item.id}
                         item={item}
                         onEdit={
-                          item.type === "reminder"          ? () => openConfirmModal(item.raw, true) :
-                          item.type === "receivable"        ? () => openSettleModal(item.raw) :
-                          item.type === "loan"              ? () => openLoanPayModal(item.raw) :
-                          item.type === "deposito_maturity" ? () => openPerpanjangModal(item.raw) :
+                          item.type === "reminder"   ? () => openConfirmModal(item.raw, true) :
+                          item.type === "receivable" ? () => openSettleModal(item.raw) :
+                          item.type === "loan"       ? () => openLoanPayModal(item.raw) :
                           null
                         }
                         onConfirm={
-                          item.type === "reminder"          ? () => openConfirmModal(item.raw) :
-                          item.type === "receivable"        ? () => openSettleModal(item.raw) :
-                          item.type === "loan"              ? () => openLoanPayModal(item.raw) :
-                          item.type === "reimburse"         ? () => openReimburseModal(item.raw) :
-                          item.type === "deposito_maturity" ? () => openCairkanModal(item.raw) :
+                          item.type === "reminder"   ? () => openConfirmModal(item.raw) :
+                          item.type === "receivable" ? () => openSettleModal(item.raw) :
+                          item.type === "loan"       ? () => openLoanPayModal(item.raw) :
+                          item.type === "reimburse"  ? () => openReimburseModal(item.raw) :
                           null
                         }
                         onSkip={
@@ -945,8 +863,6 @@ export default function Dashboard({
                           item.type === "deposito_maturity"                   ? () => dismissUpcoming(item.id) :
                           null
                         }
-                        editLabel={item.type === "deposito_maturity" ? "↻" : undefined}
-                        confirmLabel={item.type === "deposito_maturity" ? "Cairkan" : undefined}
                       />
                     ))}
                   </div>
@@ -1195,86 +1111,13 @@ export default function Dashboard({
         })()}
       </Modal>
 
-      {/* ── CAIRKAN DEPOSITO MODAL ── */}
-      <Modal
-        isOpen={!!cairkanModal}
-        onClose={() => setCairkanModal(null)}
-        title={`Cairkan Deposito — ${cairkanModal?.name || ""}`}
-        footer={
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <Button variant="secondary" size="md" onClick={() => setCairkanModal(null)}>Batal</Button>
-            <Button variant="primary" size="md" busy={cairkanSaving} disabled={!cairkanBankId} onClick={doCairkan}>
-              ✓ Cairkan
-            </Button>
-          </div>
-        }
-      >
-        {cairkanModal && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ background: "#dbeafe", borderRadius: 10, padding: "10px 14px", fontSize: 12, color: "#1d4ed8", fontFamily: "Figtree, sans-serif" }}>
-              {cairkanModal.name} · {fmtIDR(Number(cairkanModal.current_value || 0), true)}
-              {cairkanModal.maturity_date && ` · Jatuh tempo ${cairkanModal.maturity_date}`}
-            </div>
-            <Field label="Tanggal Pencairan">
-              <Input type="date" value={cairkanDate} onChange={e => setCairkanDate(e.target.value)} />
-            </Field>
-            <AmountInput label="Nominal (IDR)" value={cairkanAmount} onChange={v => setCairkanAmount(v)} currency="IDR" />
-            <Field label="Rekening Tujuan">
-              <Select
-                value={cairkanBankId}
-                onChange={e => setCairkanBankId(e.target.value)}
-                options={bankAccounts.map(a => ({ value: a.id, label: a.name }))}
-                placeholder="Pilih rekening…"
-              />
-            </Field>
-            {!cairkanModal.monthly_interest_payout && (
-              <AmountInput label="Bunga (opsional, jika belum dicatat)" value={cairkanInterest} onChange={v => setCairkanInterest(v)} currency="IDR" />
-            )}
-          </div>
-        )}
-      </Modal>
-
-      {/* ── PERPANJANG DEPOSITO MODAL ── */}
-      <Modal
-        isOpen={!!perpanjangModal}
-        onClose={() => setPerpanjangModal(null)}
-        title={`Perpanjang Deposito — ${perpanjangModal?.name || ""}`}
-        footer={
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <Button variant="secondary" size="md" onClick={() => setPerpanjangModal(null)}>Batal</Button>
-            <Button variant="primary" size="md" busy={perpanjangSaving} onClick={doPerpanjang}>
-              ↻ Perpanjang
-            </Button>
-          </div>
-        }
-      >
-        {perpanjangModal && (() => {
-          const tenor   = Number(perpanjangModal.tenor_months || 3);
-          const base    = perpanjangModal.maturity_date || todayStr();
-          const d       = new Date(base + "T00:00:00");
-          d.setMonth(d.getMonth() + tenor);
-          const newDate = d.toISOString().slice(0, 10);
-          return (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "10px 14px", fontSize: 12, color: "#166534", fontFamily: "Figtree, sans-serif" }}>
-                Deposito akan diperpanjang <strong>{tenor} bulan</strong>.<br />
-                Jatuh tempo baru: <strong>{newDate}</strong>
-              </div>
-              <div style={{ fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
-                {perpanjangModal.name} · {fmtIDR(Number(perpanjangModal.current_value || 0), true)}
-                {perpanjangModal.interest_rate > 0 && ` · ${perpanjangModal.interest_rate}% p.a.`}
-              </div>
-            </div>
-          );
-        })()}
-      </Modal>
 
     </div>
   );
 }
 
 // ─── UPCOMING ROW ─────────────────────────────────────────────
-function UpcomingRow({ item, onConfirm, onEdit, onSkip, editLabel, confirmLabel }) {
+function UpcomingRow({ item, onConfirm, onEdit, onSkip }) {
   const isInfo = item.infoOnly;
   return (
     <div style={{
@@ -1340,10 +1183,10 @@ function UpcomingRow({ item, onConfirm, onEdit, onSkip, editLabel, confirmLabel 
       {!isInfo && (
         <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
           {onEdit && (
-            <button onClick={e => { e.stopPropagation(); onEdit(e); }} style={RUPT_GHOST} title="Edit">{editLabel || "✏️"}</button>
+            <button onClick={e => { e.stopPropagation(); onEdit(e); }} style={RUPT_GHOST} title="Edit">✏️</button>
           )}
           {onConfirm && (
-            <button onClick={e => { e.stopPropagation(); onConfirm(e); }} style={RUPT_PRIMARY} title="Confirm">{confirmLabel ? `✓ ${confirmLabel}` : "✓"}</button>
+            <button onClick={e => { e.stopPropagation(); onConfirm(e); }} style={RUPT_PRIMARY} title="Confirm">✓</button>
           )}
           {onSkip && (
             <button onClick={e => { e.stopPropagation(); onSkip(e); }} style={RUPT_GHOST} title="Skip">✕</button>

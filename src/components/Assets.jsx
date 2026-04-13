@@ -209,14 +209,12 @@ function AssetCard({ asset: a, ledger, valueHistoryCount = 0, color, onUpdate, o
 }
 
 // ─── DEPOSITO CARD ────────────────────────────────────────────
-function DepositoCard({ asset: a, color, accounts: allAccounts, onTimeline }) {
+function DepositoCard({ asset: a, color, onUpdate, onEdit }) {
   const principal = Number(a.current_value || 0);
   const rate      = Number(a.interest_rate || 0);
-  const netRate   = rate * 0.8;
-  const netMonthly = principal * (netRate / 100) / 12;
 
-  const today     = new Date();
-  const daysLeft  = a.maturity_date
+  const today    = new Date();
+  const daysLeft = a.maturity_date
     ? Math.ceil((new Date(a.maturity_date + "T00:00:00") - today) / 86400000)
     : null;
   const maturityStr = a.maturity_date
@@ -224,101 +222,73 @@ function DepositoCard({ asset: a, color, accounts: allAccounts, onTimeline }) {
         day: "2-digit", month: "short", year: "numeric",
       })
     : null;
-
-  const rolloverLabel = { non_aro: "Non ARO", aro: "ARO", aro_plus: "ARO+" }[a.deposit_rollover_type] || a.deposit_rollover_type;
-  const statusColor   = { active: "#059669", matured: "#d97706", closed: "#9ca3af" }[a.deposit_status] || "#9ca3af";
-  const statusBg      = { active: "#f0fdf4", matured: "#fef9ec", closed: "#f3f4f6" }[a.deposit_status] || "#f3f4f6";
-  const bankAcc       = allAccounts?.find(b => b.id === a.deposit_bank_id);
+  const matColor = daysLeft !== null
+    ? (daysLeft <= 0 ? "#dc2626" : daysLeft <= 30 ? "#d97706" : "#9ca3af")
+    : "#9ca3af";
 
   return (
     <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       <div style={{ height: 3, background: color }} />
       <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10, flex: 1 }}>
-        {/* Header */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        {/* Header: name + badge */}
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
           <div style={{ width: 36, height: 36, borderRadius: 10, background: color + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>
             🏦
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {a.name}
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {a.name}
+              </div>
+              <span style={{ fontSize: 9, fontWeight: 700, background: "#dbeafe", color: "#2563eb", padding: "2px 6px", borderRadius: 4, fontFamily: "Figtree, sans-serif", flexShrink: 0 }}>
+                Deposito
+              </span>
             </div>
-            <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
-              {bankAcc ? bankAcc.name : "Deposito"}
-            </div>
+            {a.bank_name && (
+              <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
+                {a.bank_name}
+              </div>
+            )}
           </div>
-          {a.deposit_status && (
-            <span style={{ fontSize: 9, fontWeight: 700, color: statusColor, background: statusBg, padding: "2px 7px", borderRadius: 5, fontFamily: "Figtree, sans-serif", flexShrink: 0, textTransform: "capitalize" }}>
-              {a.deposit_status}
-            </span>
-          )}
         </div>
 
-        {/* Nominal */}
+        {/* Value */}
         <div>
-          <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 3 }}>Nominal</div>
+          <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 3 }}>Current Value</div>
           <div style={{ fontSize: 22, fontWeight: 800, color: "#2563eb", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
             {fmtIDR(principal)}
           </div>
         </div>
 
-        {/* Details row */}
+        {/* Info rows */}
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           {rate > 0 && (
             <div style={{ fontSize: 11, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
-              <strong>{rate}% p.a.</strong> → net {netRate.toFixed(2)}% setelah pajak
+              Bunga: <strong>{rate}% p.a.</strong>
             </div>
           )}
           {maturityStr && (
-            <div style={{ fontSize: 11, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
-              Jatuh tempo: <strong>{maturityStr}</strong>
+            <div style={{ fontSize: 11, fontFamily: "Figtree, sans-serif" }}>
+              <span style={{ color: "#374151" }}>Jatuh tempo: </span>
+              <strong style={{ color: matColor }}>{maturityStr}</strong>
               {daysLeft !== null && (
-                <span style={{ marginLeft: 6, fontWeight: 700, color: daysLeft <= 0 ? "#dc2626" : daysLeft <= 7 ? "#dc2626" : daysLeft <= 30 ? "#d97706" : "#9ca3af" }}>
-                  {daysLeft > 0 ? `(${daysLeft} hari lagi)` : "⚠️ Matured"}
+                <span style={{ marginLeft: 5, fontWeight: 700, color: matColor }}>
+                  · {daysLeft > 0 ? `${daysLeft} hari lagi` : "⚠️ Jatuh tempo"}
                 </span>
               )}
             </div>
           )}
-          {netMonthly > 0 && (
-            <div style={{ fontSize: 11, fontWeight: 600, color: "#059669", fontFamily: "Figtree, sans-serif" }}>
-              Est. bunga/bulan: {fmtIDR(netMonthly, true)}
-            </div>
-          )}
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 2 }}>
-            {rolloverLabel && (
-              <span style={{ fontSize: 9, fontWeight: 700, background: "#dbeafe", color: "#2563eb", padding: "2px 7px", borderRadius: 5, fontFamily: "Figtree, sans-serif" }}>
-                {rolloverLabel}
-              </span>
-            )}
-            {a.tenor_months && (
-              <span style={{ fontSize: 9, fontWeight: 700, background: "#f3f4f6", color: "#6b7280", padding: "2px 7px", borderRadius: 5, fontFamily: "Figtree, sans-serif" }}>
-                {a.tenor_months} bulan
-              </span>
-            )}
-            {a.monthly_interest_payout && (
-              <span style={{ fontSize: 9, fontWeight: 700, background: "#fef3c7", color: "#d97706", padding: "2px 7px", borderRadius: 5, fontFamily: "Figtree, sans-serif" }}>
-                Bunga bulanan
-              </span>
-            )}
-          </div>
         </div>
 
         {/* Actions */}
-        <div style={{ marginTop: "auto" }}>
-          <button onClick={onTimeline} style={{ ...ACCT_BTN, width: "100%" }}>📋 Timeline</button>
+        <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
+          <button onClick={onUpdate} style={ACCT_BTN}>Update Value</button>
+          <button onClick={onEdit}   style={{ ...ACCT_BTN, flex: 1 }}>✏️ Edit</button>
         </div>
       </div>
     </div>
   );
 }
-
-// Helper: calculate maturity date from open date + tenor
-const calcMaturity = (openDate, tenorMonths) => {
-  if (!openDate || !tenorMonths) return "";
-  const d = new Date(openDate + "T00:00:00");
-  d.setMonth(d.getMonth() + Number(tenorMonths));
-  return d.toISOString().slice(0, 10);
-};
 
 // ─── MAIN ─────────────────────────────────────────────────────
 export default function Assets({ user, accounts, setAccounts, dark, ledger = [] }) {
@@ -354,15 +324,16 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
   // Add asset modal
   const emptyAssetForm = () => ({
     name: "", subtype: "", current_value: "", purchase_price: "", notes: "",
-    // Deposito fields
-    deposit_bank_id: "", interest_rate: "", tenor_months: "6",
-    maturity_date: "", monthly_interest_payout: false,
-    deposit_rollover_type: "non_aro", deposit_status: "active",
-    purchase_date: todayStr(),
+    bank_name: "", interest_rate: "", maturity_date: "", currency: "IDR",
   });
   const [addAssetModal, setAddAssetModal] = useState(false);
   const [addAssetForm,  setAddAssetForm]  = useState(emptyAssetForm());
   const setAF = (k, v) => setAddAssetForm(f => ({ ...f, [k]: v }));
+
+  // Edit deposito modal
+  const [editDepositoModal, setEditDepositoModal] = useState(null); // deposito account
+  const [editDepositoForm,  setEditDepositoForm]  = useState({});
+  const setEDF = (k, v) => setEditDepositoForm(f => ({ ...f, [k]: v }));
 
   // ── DERIVED ─────────────────────────────────────────────────
   const assets = useMemo(() => accounts.filter(a => a.type === "asset"), [accounts]);
@@ -470,20 +441,16 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
         name:           addAssetForm.name.trim(),
         subtype:        addAssetForm.subtype || null,
         current_value:  sn(addAssetForm.current_value) ?? 0,
-        purchase_price: sn(addAssetForm.current_value) ?? 0, // deposito: cost = nominal
+        purchase_price: isDeposito ? (sn(addAssetForm.current_value) ?? 0) : (sn(addAssetForm.purchase_price) ?? 0),
         notes:          addAssetForm.notes || null,
         type:           "asset",
         is_active:      true,
         sort_order:     accounts.length,
         ...(isDeposito && {
-          deposit_bank_id:         addAssetForm.deposit_bank_id || null,
-          interest_rate:           sn(addAssetForm.interest_rate),
-          tenor_months:            sn(addAssetForm.tenor_months),
-          maturity_date:           addAssetForm.maturity_date || null,
-          monthly_interest_payout: addAssetForm.monthly_interest_payout || false,
-          deposit_rollover_type:   addAssetForm.deposit_rollover_type || "non_aro",
-          deposit_status:          "active",
-          purchase_date:           addAssetForm.purchase_date || todayStr(),
+          bank_name:     addAssetForm.bank_name || null,
+          interest_rate: sn(addAssetForm.interest_rate),
+          maturity_date: addAssetForm.maturity_date || null,
+          currency:      addAssetForm.currency || "IDR",
         }),
       };
       const created = await accountsApi.create(user.id, data);
@@ -491,6 +458,38 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
       showToast("Asset added");
       setAddAssetModal(false);
       setAddAssetForm(emptyAssetForm());
+    } catch (e) { showToast(e.message, "error"); }
+    setSaving(false);
+  };
+
+  const openEditDeposito = (asset) => {
+    setEditDepositoModal(asset);
+    setEditDepositoForm({
+      name:          asset.name || "",
+      bank_name:     asset.bank_name || "",
+      current_value: String(asset.current_value || ""),
+      interest_rate: String(asset.interest_rate || ""),
+      maturity_date: asset.maturity_date || "",
+      notes:         asset.notes || "",
+    });
+  };
+
+  const handleSaveDeposito = async () => {
+    if (!editDepositoModal) return;
+    setSaving(true);
+    try {
+      const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? null : n; };
+      const updated = await accountsApi.update(editDepositoModal.id, {
+        name:          editDepositoForm.name.trim(),
+        bank_name:     editDepositoForm.bank_name || null,
+        current_value: sn(editDepositoForm.current_value) ?? 0,
+        interest_rate: sn(editDepositoForm.interest_rate),
+        maturity_date: editDepositoForm.maturity_date || null,
+        notes:         editDepositoForm.notes || null,
+      });
+      if (updated) setAccounts(prev => prev.map(a => a.id === editDepositoModal.id ? { ...a, ...updated } : a));
+      showToast("Deposito updated");
+      setEditDepositoModal(null);
     } catch (e) { showToast(e.message, "error"); }
     setSaving(false);
   };
@@ -576,8 +575,8 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
                     key={a.id}
                     asset={a}
                     color={color}
-                    accounts={accounts}
-                    onTimeline={() => setTimelineAsset(a)}
+                    onUpdate={() => openUpdateModal(a)}
+                    onEdit={() => openEditDeposito(a)}
                   />
                 );
               }
@@ -651,7 +650,6 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
       >
         {(() => {
           const isDeposito = addAssetForm.subtype === "Deposito";
-          const bankAccounts = accounts.filter(a => a.type === "bank");
           return (
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               <Field label="Asset Name *">
@@ -669,72 +667,24 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
 
               {isDeposito ? (
                 <>
-                  {/* Deposito fields */}
-                  <Field label="Bank">
-                    <select
-                      value={addAssetForm.deposit_bank_id}
-                      onChange={e => setAF("deposit_bank_id", e.target.value)}
-                      style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 13, fontFamily: "Figtree, sans-serif", background: "#fff" }}
-                    >
-                      <option value="">— Select bank —</option>
-                      {bankAccounts.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-                    </select>
-                  </Field>
-                  <AmountInput label="Nominal Deposito (IDR)" value={addAssetForm.current_value} onChange={v => setAF("current_value", v)} currency="IDR" />
+                  <Input label="Nama Bank" value={addAssetForm.bank_name}
+                    onChange={e => setAF("bank_name", e.target.value)} placeholder="e.g. BCA, Mandiri" />
+                  <AmountInput label="Nominal *" value={addAssetForm.current_value}
+                    onChange={v => setAF("current_value", v)} currency="IDR" />
                   <FormRow>
-                    <Input label="Interest Rate (% p.a.)" type="number" value={addAssetForm.interest_rate}
+                    <Input label="Bunga (% p.a.)" type="number" value={addAssetForm.interest_rate}
                       onChange={e => setAF("interest_rate", e.target.value)} placeholder="5.5" style={{ flex: 1 }} />
-                    <Field label="Tenor (bulan)" style={{ width: 130, flexShrink: 0 }}>
-                      <select
-                        value={addAssetForm.tenor_months}
-                        onChange={e => {
-                          setAF("tenor_months", e.target.value);
-                          const mat = calcMaturity(addAssetForm.purchase_date, e.target.value);
-                          if (mat) setAF("maturity_date", mat);
-                        }}
-                        style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 13, fontFamily: "Figtree, sans-serif", background: "#fff" }}
-                      >
-                        {[1, 3, 6, 12, 24].map(m => <option key={m} value={m}>{m} bulan</option>)}
-                      </select>
-                    </Field>
-                  </FormRow>
-                  <FormRow>
-                    <Input label="Tanggal Buka" type="date" value={addAssetForm.purchase_date}
-                      onChange={e => {
-                        setAF("purchase_date", e.target.value);
-                        const mat = calcMaturity(e.target.value, addAssetForm.tenor_months);
-                        if (mat) setAF("maturity_date", mat);
-                      }}
-                      style={{ flex: 1 }} />
                     <Input label="Jatuh Tempo" type="date" value={addAssetForm.maturity_date}
                       onChange={e => setAF("maturity_date", e.target.value)} style={{ flex: 1 }} />
                   </FormRow>
-                  <Field label="Rollover">
-                    <div style={{ display: "flex", gap: 8 }}>
-                      {[{ id: "non_aro", label: "Non-ARO" }, { id: "aro", label: "ARO" }, { id: "aro_plus", label: "ARO+" }].map(opt => (
-                        <label key={opt.id} style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", fontSize: 13, fontFamily: "Figtree, sans-serif" }}>
-                          <input type="radio" name="add_rollover"
-                            checked={(addAssetForm.deposit_rollover_type || "non_aro") === opt.id}
-                            onChange={() => setAF("deposit_rollover_type", opt.id)}
-                          />
-                          {opt.label}
-                        </label>
-                      ))}
-                    </div>
-                  </Field>
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, fontFamily: "Figtree, sans-serif" }}>
-                    <input type="checkbox" checked={addAssetForm.monthly_interest_payout}
-                      onChange={e => setAF("monthly_interest_payout", e.target.checked)} />
-                    Bunga dibayar bulanan
-                  </label>
                 </>
               ) : (
-                <>
-                  <FormRow>
-                    <AmountInput label="Current Value (IDR)" value={addAssetForm.current_value} onChange={v => setAF("current_value", v)} currency="IDR" />
-                    <AmountInput label="Purchase Price (IDR)" value={addAssetForm.purchase_price} onChange={v => setAF("purchase_price", v)} currency="IDR" />
-                  </FormRow>
-                </>
+                <FormRow>
+                  <AmountInput label="Current Value (IDR)" value={addAssetForm.current_value}
+                    onChange={v => setAF("current_value", v)} currency="IDR" />
+                  <AmountInput label="Purchase Price (IDR)" value={addAssetForm.purchase_price}
+                    onChange={v => setAF("purchase_price", v)} currency="IDR" />
+                </FormRow>
               )}
 
               <Field label="Notes">
@@ -743,6 +693,37 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [] 
             </div>
           );
         })()}
+      </Modal>
+
+      {/* ── EDIT DEPOSITO MODAL ──────────────────────────── */}
+      <Modal
+        isOpen={!!editDepositoModal}
+        onClose={() => setEditDepositoModal(null)}
+        title="Edit Deposito"
+        footer={
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <Button variant="secondary" size="md" onClick={() => setEditDepositoModal(null)}>Cancel</Button>
+            <Button variant="primary" size="md" busy={saving} onClick={handleSaveDeposito}>Save</Button>
+          </div>
+        }
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <Input label="Nama *" value={editDepositoForm.name || ""}
+            onChange={e => setEDF("name", e.target.value)} />
+          <Input label="Nama Bank" value={editDepositoForm.bank_name || ""}
+            onChange={e => setEDF("bank_name", e.target.value)} placeholder="e.g. BCA, Mandiri" />
+          <AmountInput label="Nominal (IDR)" value={editDepositoForm.current_value || ""}
+            onChange={v => setEDF("current_value", v)} currency="IDR" />
+          <FormRow>
+            <Input label="Bunga (% p.a.)" type="number" value={editDepositoForm.interest_rate || ""}
+              onChange={e => setEDF("interest_rate", e.target.value)} placeholder="5.5" style={{ flex: 1 }} />
+            <Input label="Jatuh Tempo" type="date" value={editDepositoForm.maturity_date || ""}
+              onChange={e => setEDF("maturity_date", e.target.value)} style={{ flex: 1 }} />
+          </FormRow>
+          <Field label="Notes">
+            <Input value={editDepositoForm.notes || ""} onChange={e => setEDF("notes", e.target.value)} placeholder="Optional notes…" />
+          </Field>
+        </div>
       </Modal>
 
     </div>
