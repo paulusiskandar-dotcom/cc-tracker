@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import PILogo from "./PILogo";
 import { fxApi, merchantApi, settingsApi, recurringApi, gmailApi, accountsApi, installmentsApi, ledgerApi, getTxFromToTypes, loanPaymentsApi } from "../api";
-import { fmtIDR, resolveCategoryIds } from "../utils";
+import { fmtIDR, resolveCategoryIds, checkDuplicateTransaction } from "../utils";
 import { CURRENCIES, EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST, TX_TYPES, APP_VERSION, APP_BUILD } from "../constants";
 import { LIGHT, DARK } from "../theme";
 import {
@@ -1484,7 +1484,7 @@ function EStatementTab({
             : [];
           const rows = isExtracted ? buildRows(rawTxs, r.account_id || "", fetchedAcctCurrencies) : null;
           const sel = {};
-          if (rows) rows.forEach(row => { sel[row._id] = row.status !== "duplicate" && row.status !== "possible_duplicate"; });
+          if (rows) rows.forEach(row => { sel[row._id] = row.status !== "duplicate"; });
           const detectedCurrency = rows?.find(row => row.currency && row.currency !== "IDR")?.currency || "IDR";
           return {
             id:         r.id,
@@ -1711,49 +1711,20 @@ function EStatementTab({
         toId   = !isDebit ? (defaultBank?.id || "") : "";
       }
 
-      // duplicate check — exact criteria
+      // duplicate check — shared 3-level logic
       const amt = Number(t.amount || 0);
-      const descSim = (a, b) => {
-        const wordsA = new Set((a || "").toLowerCase().split(/\s+/).filter(w => w.length > 2));
-        const wordsB = new Set((b || "").toLowerCase().split(/\s+/).filter(w => w.length > 2));
-        if (!wordsA.size || !wordsB.size) return 0;
-        let common = 0;
-        wordsA.forEach(w => { if (wordsB.has(w)) common++; });
-        return common / Math.max(wordsA.size, wordsB.size);
-      };
-
-      let dupStatus = "new";
-      let dupEntry  = null;
-      let dupReasons = [];
-      for (const e of ledger) {
-        const eAmt = Number(e.amount_idr || e.amount || 0);
-        if (Math.abs(eAmt - amt) > 0.01) continue;           // exact amount
-        if (!e.tx_date || !t.date) continue;
-        if (e.tx_date !== t.date) continue;                   // exact date
-        const eCurrency = (e.currency || "IDR").toUpperCase();
-        const tCurrency = (t.currency || "IDR").toUpperCase();
-        if (eCurrency !== tCurrency) continue;                // same currency
-
-        // Check description similarity or exact merchant match
-        const tDesc = (t.merchant || t.description || "").toLowerCase().trim();
-        const eDesc = (e.description || e.merchant_name || "").toLowerCase().trim();
-        const sim = descSim(eDesc, tDesc);
-        const merchantExact = tDesc && eDesc && tDesc === eDesc;
-        if (sim < 0.8 && !merchantExact) continue;           // desc sim > 80% OR exact merchant
-
-        const reasons = ["same date", "same amount", "same currency"];
-        if (sim >= 0.8) reasons.push(`${Math.round(sim * 100)}% desc match`);
-        if (merchantExact) reasons.push("exact merchant");
-        // Check account match (from_account_id)
-        if (fromId && e.from_account_id && fromId === e.from_account_id) {
-          reasons.push("same account");
-        }
-
-        dupStatus = "duplicate";
-        dupEntry  = e;
-        dupReasons = reasons;
-        break;
-      }
+      const dupResult = checkDuplicateTransaction(ledger, {
+        tx_date:     t.date,
+        amount_idr:  String(amt),
+        currency:    txCurrencyUpper,
+        from_id:     fromId,
+        description: t.merchant || t.description || "",
+      });
+      const dupStatus = dupResult
+        ? (dupResult.level === "red" ? "duplicate" : dupResult.level === "orange" ? "possible_duplicate" : "review")
+        : "new";
+      const dupEntry   = dupResult?.matchEntry || null;
+      const dupReasons = dupResult?.reasons    || [];
 
       // installment cross-check
       const isInstallment = cat === "installment";
@@ -1847,7 +1818,7 @@ function EStatementTab({
 
       const rows = buildRows(result.transactions || [], item.account_id || "");
       const sel = {};
-      rows.forEach(r => { sel[r._id] = r.status !== "duplicate" && r.status !== "possible_duplicate"; });
+      rows.forEach(r => { sel[r._id] = r.status !== "duplicate"; });
       const detectedCurrency = rows.find(r => r.currency && r.currency !== "IDR")?.currency || "IDR";
       setQueue(prev => prev.map(i => i.id === itemId
         ? { ...i, status: "reviewed", rows, selected: sel, currency: detectedCurrency, skipped: new Set(), notesOpen: new Set(), file: null } : i

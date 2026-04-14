@@ -181,24 +181,73 @@ export const parseJSON = (text, fallback) => {
 // Checks in-memory ledger for a possible duplicate transaction.
 // Returns the first matching entry (description, amount_idr, tx_date) or null.
 // Match criteria: date ±1 day, amount ±1% or ±500 IDR, currency match.
-export const checkDuplicateTransaction = (ledger, { tx_date, amount_idr, currency = "IDR" }) => {
+// Returns { level: 'red'|'orange'|'green', reasons: string[], matchEntry: object } or null.
+// RED   — all 5: currency + account + amount exact + date exact + desc ≥80% (or exact merchant)
+// ORANGE — all 5: currency + account + amount ±1% + date ±1 day + desc ≥50%
+// GREEN  — currency + amount exact + date ±3 days (account NOT required)
+export const checkDuplicateTransaction = (ledger, {
+  tx_date, amount_idr, currency = "IDR", from_id = "", description = "",
+}) => {
   if (!tx_date || !amount_idr) return null;
   const amt = Number(amount_idr);
   if (!amt) return null;
-  const tolerance = Math.max(500, amt * 0.01);
   const tCurrency = (currency || "IDR").toUpperCase();
+
+  const descSim = (a, b) => {
+    const wa = new Set((a || "").toLowerCase().split(/\s+/).filter(w => w.length > 2));
+    const wb = new Set((b || "").toLowerCase().split(/\s+/).filter(w => w.length > 2));
+    if (!wa.size || !wb.size) return 0;
+    let common = 0;
+    wa.forEach(w => { if (wb.has(w)) common++; });
+    return common / Math.max(wa.size, wb.size);
+  };
+
+  let orangeResult = null;
+  let greenResult  = null;
+
   for (const e of (ledger || [])) {
     if (!e.tx_date) continue;
     const eCurrency = (e.currency || "IDR").toUpperCase();
     if (eCurrency !== tCurrency) continue;
-    const dayDiff = Math.abs(new Date(e.tx_date) - new Date(tx_date)) / 86400000;
-    if (dayDiff > 1) continue;
-    const eAmt = Number(e.amount_idr || e.amount || 0);
-    if (Math.abs(eAmt - amt) <= tolerance) {
-      return { description: e.description || "", amount_idr: eAmt, tx_date: e.tx_date };
+
+    const eAmt     = Number(e.amount_idr || e.amount || 0);
+    const amtDiff  = Math.abs(eAmt - amt);
+    const dayDiff  = Math.abs(new Date(e.tx_date) - new Date(tx_date)) / 86400000;
+    const tolerance = Math.max(500, amt * 0.01);
+    const tDesc    = (description || "").toLowerCase().trim();
+    const eDesc    = (e.description || e.merchant_name || "").toLowerCase().trim();
+    const sim      = descSim(eDesc, tDesc);
+    const exactMerchant = tDesc && eDesc && tDesc === eDesc;
+    const sameAccount   = !!(from_id && (e.from_id || e.from_account_id) &&
+                             from_id === (e.from_id || e.from_account_id));
+
+    // ── RED ───────────────────────────────────────────────────────
+    if (amtDiff < 0.01 && dayDiff < 0.5 && sameAccount && (sim >= 0.8 || exactMerchant)) {
+      const reasons = ["same date", "exact amount", "same currency", "same account"];
+      if (exactMerchant) reasons.push("exact merchant");
+      else reasons.push(`${Math.round(sim * 100)}% desc match`);
+      return { level: "red", reasons, matchEntry: e };
+    }
+
+    // ── ORANGE ────────────────────────────────────────────────────
+    if (!orangeResult && amtDiff <= tolerance && dayDiff <= 1 && sameAccount && sim >= 0.5) {
+      const reasons = ["same currency", "same account"];
+      reasons.push(dayDiff < 0.5 ? "same date" : "±1 day");
+      reasons.push(amtDiff < 0.01 ? "exact amount" : `amount ±${(amtDiff / amt * 100).toFixed(1)}%`);
+      reasons.push(`${Math.round(sim * 100)}% desc match`);
+      orangeResult = { level: "orange", reasons, matchEntry: e };
+    }
+
+    // ── GREEN ─────────────────────────────────────────────────────
+    if (!greenResult && amtDiff < 0.01 && dayDiff <= 3) {
+      const reasons = ["same currency", "exact amount"];
+      reasons.push(dayDiff < 0.5 ? "same date" : `±${Math.round(dayDiff)} day${Math.round(dayDiff) > 1 ? "s" : ""}`);
+      if (!sameAccount) reasons.push("different account");
+      greenResult = { level: "green", reasons, matchEntry: e };
     }
   }
-  return null;
+
+  return orangeResult || greenResult || null;
 };
 
 // ─── CATEGORY RESOLUTION ─────────────────────────────────────

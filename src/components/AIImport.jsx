@@ -104,7 +104,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       if (!items.length) return;
       setResults(items);
       const sel = {};
-      items.forEach(r => { sel[r._id] = true; });
+      items.forEach(r => { sel[r._id] = r.status !== "duplicate"; });
       setSelected(sel);
       setBatchId(latest.id);
       setBatchFilePath(latest.file_path || null);
@@ -250,6 +250,13 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       let catId = NO_CAT.has(txType) ? null : aiCatId;
       if (learned && !NO_CAT.has(txType) && learned.confidence >= 2) catId = learned.category_id;
 
+      const dupResult = checkDuplicateTransaction(ledger, {
+        tx_date: txDate, amount_idr: amtIDR, currency, from_id: fromId, description: desc,
+      });
+      const dupStatus = dupResult
+        ? (dupResult.level === "red" ? "duplicate" : dupResult.level === "orange" ? "possible_duplicate" : "review")
+        : "new";
+
       return {
         _id:          i,
         tx_date:      txDate,
@@ -270,8 +277,9 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
         flagged,
         _hasAccountMatch: hasAccountMatch,
         _invalidAmount: amount <= 0,
-        _dupMatch:    checkDuplicateTransaction(ledger, { tx_date: txDate, amount_idr: amtIDR, currency }),
-        status:       checkDuplicateTransaction(ledger, { tx_date: txDate, amount_idr: amtIDR, currency }) ? "possible_duplicate" : "new",
+        _dupEntry:    dupResult?.matchEntry || null,
+        _dupReasons:  dupResult?.reasons   || [],
+        status:       dupStatus,
       };
     });
   };
@@ -325,7 +333,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
 
       setResults(items);
       const sel = {};
-      items.forEach(r => { sel[r._id] = true; });
+      items.forEach(r => { sel[r._id] = r.status !== "duplicate"; });
       setSelected(sel);
     } catch (e) {
       if (newBatchId) scanApi.updateBatch(newBatchId, { status: "failed" }).catch(() => {});
@@ -357,7 +365,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       if (batchId) scanApi.updateBatch(batchId, { ai_raw_result: parsed, total_detected: items.length, processed_at: new Date().toISOString() }).catch(() => {});
       setResults(items);
       const sel = {};
-      items.forEach(r => { sel[r._id] = true; });
+      items.forEach(r => { sel[r._id] = r.status !== "duplicate"; });
       setSelected(sel);
     } catch (e) { showToast(e.message || "Refresh failed", "error"); }
     setScanning(false);
@@ -383,7 +391,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       if (batchId) scanApi.updateBatch(batchId, { ai_raw_result: parsed, total_detected: items.length, processed_at: new Date().toISOString() }).catch(() => {});
       setResults(items);
       const sel = {};
-      items.forEach(r => { sel[r._id] = true; });
+      items.forEach(r => { sel[r._id] = r.status !== "duplicate"; });
       setSelected(sel);
     } catch (e) { showToast(e.message || "Re-scan failed", "error"); }
     setRetrySonnet(false);
