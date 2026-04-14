@@ -157,6 +157,10 @@ export default function Receivables({
   const [txModalOpen, setTxModalOpen] = useState(false);
   const [txModalLoan, setTxModalLoan] = useState(null);
 
+  // TransactionModal for + New Loan (settled employees)
+  const [newLoanModalOpen,     setNewLoanModalOpen]     = useState(false);
+  const [newLoanEmployeeName,  setNewLoanEmployeeName]  = useState("");
+
   // ── DERIVED ────────────────────────────────────────────────
   const receivables    = useMemo(() => accounts.filter(a => a.type === "receivable"), [accounts]);
   const reimburseAccs  = useMemo(() => receivables, [receivables]);
@@ -214,6 +218,38 @@ export default function Receivables({
     () => loansWithStats.filter(l => l.status !== "settled").reduce((s, l) => s + l.remaining, 0),
     [loansWithStats]
   );
+
+  // Assign loan index per employee (by start_date order), and sort active first / settled last
+  const loansWithIndex = useMemo(() => {
+    // Group by employee_name
+    const groups = {};
+    loansWithStats.forEach(loan => {
+      const name = loan.employee_name || "Unknown";
+      if (!groups[name]) groups[name] = [];
+      groups[name].push(loan);
+    });
+
+    const result = [];
+    Object.values(groups).forEach(loans => {
+      // Sort loans within employee by start_date ASC to assign #1, #2, …
+      const byDate = [...loans].sort((a, b) => (a.start_date || "").localeCompare(b.start_date || ""));
+      byDate.forEach((loan, i) => {
+        result.push({ ...loan, loanIndex: i + 1, totalLoansForEmployee: byDate.length });
+      });
+    });
+
+    // Sort overall: active first, settled last; within each group by employee name then loanIndex
+    result.sort((a, b) => {
+      const aSettled = (a.status === "settled" || a.remaining <= 0) ? 1 : 0;
+      const bSettled = (b.status === "settled" || b.remaining <= 0) ? 1 : 0;
+      if (aSettled !== bSettled) return aSettled - bSettled;
+      const nameCmp = (a.employee_name || "").localeCompare(b.employee_name || "");
+      if (nameCmp !== 0) return nameCmp;
+      return a.loanIndex - b.loanIndex;
+    });
+
+    return result;
+  }, [loansWithStats]);
 
   // ── REIMBURSE ACTIONS ──────────────────────────────────────
   const handleOut = async () => {
@@ -962,11 +998,11 @@ export default function Receivables({
             </Button>
           </div>
 
-          {loansWithStats.length === 0 ? (
+          {loansWithIndex.length === 0 ? (
             <EmptyState icon="👤" message="No employee loans yet. Click + Add Loan to create one." />
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
-              {loansWithStats.map(loan => {
+              {loansWithIndex.map(loan => {
                 const total     = Number(loan.total_amount || 0);
                 const paid      = loan.paidSoFar;
                 const remaining = loan.remaining;
@@ -1018,7 +1054,13 @@ export default function Receivables({
                             {loan.employee_name}
                           </div>
                           <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
-                            {[loan.employee_dept, startedLabel ? `Started ${startedLabel}` : null].filter(Boolean).join(" · ")}
+                            {loan.totalLoansForEmployee > 1 ? (
+                              <span style={{ fontWeight: 700, color: isSettled ? "#059669" : "#d97706" }}>
+                                {`Loan #${loan.loanIndex}${startedLabel ? ` · ${startedLabel}` : ""} · ${isSettled ? "SETTLED" : "ACTIVE"}`}
+                              </span>
+                            ) : (
+                              [loan.employee_dept, startedLabel ? `Started ${startedLabel}` : null].filter(Boolean).join(" · ")
+                            )}
                           </div>
                         </div>
                         {isSettled && (
@@ -1101,13 +1143,20 @@ export default function Receivables({
 
                     {/* Bottom action bar */}
                     <div style={{ borderTop: "0.5px solid #f3f4f6", padding: "10px 14px 8px", display: "flex", flexDirection: "column", gap: 6 }}>
-                      {/* Row 1: + Payment (active only, full width) */}
-                      {!isSettled && (
+                      {/* Row 1: + Payment (active only) or + New Loan (settled only), full width */}
+                      {!isSettled ? (
                         <button
                           onClick={() => { setTxModalLoan(loan); setTxModalOpen(true); }}
                           style={{ width: "100%", height: 34, border: "none", borderRadius: 8, cursor: "pointer", background: "#d97706", color: "#fff", fontSize: 13, fontWeight: 700, fontFamily: "Figtree, sans-serif", letterSpacing: "0.01em" }}
                         >
                           + Payment
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => { setNewLoanEmployeeName(loan.employee_name); setNewLoanModalOpen(true); }}
+                          style={{ width: "100%", height: 34, border: "none", borderRadius: 8, cursor: "pointer", background: "#d97706", color: "#fff", fontSize: 13, fontWeight: 700, fontFamily: "Figtree, sans-serif", letterSpacing: "0.01em" }}
+                        >
+                          + New Loan
                         </button>
                       )}
                       {/* Row 2: Statement + Edit + Delete */}
@@ -1410,6 +1459,33 @@ export default function Receivables({
         defaultAccount={{ from_id: txModalLoan?.id || null }}
         onSave={() => { setTxModalOpen(false); setTxModalLoan(null); onRefresh?.(); }}
         onClose={() => { setTxModalOpen(false); setTxModalLoan(null); }}
+        user={user}
+        accounts={accounts}
+        setLedger={setLedger}
+        categories={categories || []}
+        fxRates={fxRates}
+        allCurrencies={CURRENCIES}
+        bankAccounts={allBankCashAccounts}
+        creditCards={creditCards}
+        assets={assets}
+        liabilities={liabilities}
+        receivables={[]}
+        incomeSrcs={incomeSrcs}
+        employeeLoans={employeeLoans}
+        setEmployeeLoans={setEmployeeLoans}
+        accountCurrencies={accountCurrencies}
+        onRefresh={onRefresh}
+      />
+
+      {/* ── TRANSACTION MODAL (+ New Loan for settled employees) ─── */}
+      <TransactionModal
+        open={newLoanModalOpen}
+        mode="add"
+        defaultGroup="loan"
+        defaultTxType="give_loan"
+        defaultEmployeeName={newLoanEmployeeName}
+        onSave={() => { setNewLoanModalOpen(false); setNewLoanEmployeeName(""); onRefresh?.(); }}
+        onClose={() => { setNewLoanModalOpen(false); setNewLoanEmployeeName(""); }}
         user={user}
         accounts={accounts}
         setLedger={setLedger}

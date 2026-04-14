@@ -220,6 +220,7 @@ const accLabel = a => a.name + (a.bank_name && a.bank_name !== a.name ? ` · ${a
 export default function TransactionModal({
   open, mode = "add", initialData = null,
   defaultGroup, defaultTxType, defaultAccount,
+  defaultEmployeeName = "",
   openCicilan = false,
   onSave, onDelete, onClose,
   // data
@@ -313,8 +314,13 @@ export default function TransactionModal({
       });
       setGroup(g);
       setCicilan(openCicilan || false);
+      // Pre-fill new borrower name for give_loan (e.g., "+ New Loan" from settled card)
+      if (txType === "give_loan" && defaultEmployeeName) {
+        setCreatingBorrower(true);
+        setNewBorrowerName(defaultEmployeeName);
+      }
     }
-  }, [open, mode, initialData, defaultGroup, defaultTxType, defaultAccount, openCicilan]);
+  }, [open, mode, initialData, defaultGroup, defaultTxType, defaultAccount, openCicilan, defaultEmployeeName]);
 
   const set = (k, v) => setFormState(f => ({ ...f, [k]: v }));
 
