@@ -69,7 +69,7 @@ const EMPTY = () => ({
   tx_type: "expense", from_id: null, to_id: null,
   from_type: "account", to_type: "expense",
   category_id: null, category_name: null, entity: "Personal",
-  notes: "", is_reimburse: false, income_source_id: null,
+  notes: "", is_reimburse: false,
   // give_loan extras
   employee_name: "", monthly_installment: "", loan_start_date: todayStr(),
   // buy_asset extras
@@ -279,7 +279,6 @@ export default function TransactionModal({
         entity:           initialData.entity      || "Personal",
         notes:            initialData.notes       || "",
         is_reimburse:     initialData.is_reimburse || false,
-        income_source_id: initialData.income_source_id || null,
         employee_name:    initialData.employee_name || "",
         monthly_installment: initialData.monthly_installment || "",
         loan_start_date:  initialData.loan_start_date || todayStr(),
@@ -371,9 +370,6 @@ export default function TransactionModal({
   if (!catOptions.length) {
     EXPENSE_CATEGORIES.forEach(c => catOptions.push({ value: c.id, label: `${c.icon} ${c.label}` }));
   }
-
-  // Income sources
-  const incSrcOpts = incomeSrcs.filter(s => s.id?.length === 36).map(s => ({ value: s.id, label: s.name }));
 
   // ── UUID sanitizer ────────────────────────────────────────────
   const uuid = v => (v && typeof v === "string" && v.length === 36) ? v : null;
@@ -666,7 +662,6 @@ export default function TransactionModal({
         category_name:  isReimb ? null : (cat?.name || form.category_name || null),
         entity:         (type === "reimburse_out" || type === "reimburse_in") ? (form.entity || "Hamasa") : "Personal",
         is_reimburse:   isReimb,
-        income_source_id: type === "income" ? uuid(form.income_source_id) : null,
         merchant_name:  null,
         notes:          form.notes || null,
         attachment_url: null,
@@ -1214,7 +1209,6 @@ export default function TransactionModal({
     const showTo      = ["income","transfer","pay_cc","pay_liability","reimburse_in"].includes(type);
     const showCat     = type === "expense";
     const showEntity  = ["reimburse_out","reimburse_in"].includes(type);
-    const showIncSrc  = type === "income" && incSrcOpts.length > 0;
     const showCicilan = type === "expense";
 
     return (
@@ -1253,15 +1247,6 @@ export default function TransactionModal({
         )}
         {/* 9. Entity (Reimburse only) */}
         {showEntity && renderEntityPills()}
-        {/* Income source (income only) */}
-        {showIncSrc && (
-          <Field label="Income Source (optional)">
-            <select value={form.income_source_id || ""} onChange={e => set("income_source_id", e.target.value || null)} style={SEL}>
-              <option value="">Select source…</option>
-              {incSrcOpts.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-            </select>
-          </Field>
-        )}
         {/* 10. Merchant / Description */}
         <Input
           label="Merchant / Description (optional)"

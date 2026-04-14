@@ -43,7 +43,7 @@ export default function Income({
   // Record income modal
   const [incModal, setIncModal]     = useState(false);
   const [incForm, setIncForm]       = useState({
-    income_source_id: "", tx_date: todayStr(), description: "",
+    tx_date: todayStr(), description: "",
     amount: "", currency: "IDR", to_account_id: "", entity: "Personal", notes: "",
   });
 
@@ -118,7 +118,7 @@ export default function Income({
 
   const openIncModal = () => {
     setIncForm({
-      income_source_id: "", tx_date: todayStr(), description: "",
+      tx_date: todayStr(), description: "",
       amount: "", currency: "IDR",
       to_account_id: bankAccounts[0]?.id || "",
       entity: "Personal", notes: "",
@@ -133,7 +133,6 @@ export default function Income({
     try {
       const sn2 = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
       const amt = sn2(incForm.amount);
-      const src = incomeSrcs.find(s => s.id === incForm.income_source_id);
       const entry = {
         tx_date:          incForm.tx_date,
         description:      incForm.description,
@@ -143,11 +142,11 @@ export default function Income({
         tx_type:          "income",
         from_type:        "income_source",
         to_type:          "account",
-        from_id:          incForm.income_source_id || null,
+        from_id:          null,
         to_id:            incForm.to_account_id,
         entity:           incForm.entity || "Personal",
         notes:            incForm.notes || "",
-        category_name:    src?.type || "Salary",
+        category_name:    "Salary",
         category_id:      null,
       };
       const r = await ledgerApi.create(user.id, entry, accounts);
@@ -549,25 +548,6 @@ export default function Income({
         }
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <Field label="Income Source (optional)">
-            <Select
-              value={incForm.income_source_id}
-              onChange={e => {
-                const src = incomeSrcs.find(s => s.id === e.target.value);
-                setIncForm(f => ({
-                  ...f,
-                  income_source_id: e.target.value,
-                  description:    src?.name || f.description,
-                  amount:         src?.expected_amount ? String(src.expected_amount) : f.amount,
-                  entity:         src?.entity || f.entity,
-                  to_account_id:  src?.to_account_id || f.to_account_id,
-                }));
-              }}
-              options={incomeSrcs.filter(s => s.is_active).map(s => ({ value: s.id, label: s.name }))}
-              placeholder="— Manual entry —"
-            />
-          </Field>
-
           <FormRow>
             <Field label="Date">
               <Input type="date" value={incForm.tx_date} onChange={e => setIncForm(f => ({ ...f, tx_date: e.target.value }))} />

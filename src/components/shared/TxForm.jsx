@@ -630,17 +630,6 @@ export function TxForm({ form, set, fromOptions, toOptions, accounts, categories
         />
       )}
 
-      {/* Income source */}
-      {type === "income" && incOpts.length > 0 && (
-        <Select
-          label="Income Source (optional)"
-          value={form.income_source_id || ""}
-          onChange={e => set("income_source_id", e.target.value)}
-          options={incOpts}
-          placeholder="Select source…"
-        />
-      )}
-
       {/* Category — expense / reimburse */}
       {needsCat && (
         <Select
