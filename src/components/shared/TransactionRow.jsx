@@ -3,10 +3,7 @@ import { fmtIDR, fmtDateLabel, fmtCur } from "../../utils";
 import { EXPENSE_CATEGORIES, TX_TYPE_MAP } from "../../constants";
 
 // ─── TWO-DIRECTIONAL TYPES ────────────────────────────────────
-const TWO_DIR_TYPES = new Set([
-  "transfer", "pay_cc", "buy_asset", "sell_asset", "fx_exchange",
-  "reimburse_out", "reimburse_in", "give_loan", "collect_loan", "pay_liability",
-]);
+const TWO_DIR_TYPES = new Set(["transfer", "pay_cc"]);
 
 // ─── EXPANDED ROW CONTENT ─────────────────────────────────────
 function getExpandedContent(entry, accounts) {

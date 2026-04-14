@@ -333,10 +333,7 @@ export default function Transactions({
 }
 
 // ─── TWO-DIRECTIONAL TYPES ────────────────────────────────────
-const TWO_DIR_TYPES = new Set([
-  "transfer", "pay_cc", "buy_asset", "sell_asset", "fx_exchange",
-  "reimburse_out", "reimburse_in", "give_loan", "collect_loan", "pay_liability",
-]);
+const TWO_DIR_TYPES = new Set(["transfer", "pay_cc"]);
 
 function getTxExpandedContent(e, fromAcc, toAcc) {
   const amtIDR = Number(e.amount_idr || e.amount || 0);
