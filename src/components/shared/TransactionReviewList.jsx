@@ -465,9 +465,12 @@ function TxReviewCard({
         {showCat && (
           <select style={{ ...inSel(T), width: 118, flexShrink: 0 }}
             value={r.category_id || ""}
-            onChange={e => onUpdate({ category_id: e.target.value })}>
+            onChange={e => {
+              const cat = cats.find(c => c.id === e.target.value);
+              onUpdate({ category_id: e.target.value, category_name: cat?.label || "" });
+            }}>
             <option value="">Category…</option>
-            {cats.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+            {cats.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>)}
           </select>
         )}
 
