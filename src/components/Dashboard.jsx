@@ -267,11 +267,74 @@ export default function Dashboard({
         });
       });
 
+    // Helper: given a day-of-month integer, return the next date string on or after today
+    const nextDueDateStr = (dayOfMonth) => {
+      const d = Number(dayOfMonth);
+      let next = new Date(todayDate.getFullYear(), todayDate.getMonth(), d);
+      if (next < todayDate) next = new Date(todayDate.getFullYear(), todayDate.getMonth() + 1, d);
+      return next.toISOString().slice(0, 10);
+    };
+
+    // G) CC payment due dates within next 7 days
+    creditCards
+      .filter(cc => cc.due_day && Number(cc.current_balance || 0) > 0)
+      .forEach(cc => {
+        const dueDateStr = nextDueDateStr(cc.due_day);
+        if (dueDateStr > cutoffDate.toISOString().slice(0, 10)) return;
+        all.push({
+          id: `cc-${cc.id}`, type: "cc_due", raw: cc,
+          date: dueDateStr,
+          title: cc.name,
+          sub: "Payment due",
+          amount: Number(cc.current_balance || 0),
+          amountColor: "#dc2626", amountSign: "−",
+          icon: "💳", iconBg: "#fee2e2", iconColor: "#dc2626",
+          actionable: false,
+        });
+      });
+
+    // H) Recurring income/expense with day_of_month within next 7 days
+    recurTemplates
+      .filter(t => t.day_of_month && (t.tx_type === "income" || t.tx_type === "expense"))
+      .forEach(t => {
+        const dueDateStr = nextDueDateStr(t.day_of_month);
+        if (dueDateStr > cutoffDate.toISOString().slice(0, 10)) return;
+        const isInc = t.tx_type === "income";
+        all.push({
+          id: `rt-${t.id}`, type: "recurring", raw: t,
+          date: dueDateStr,
+          title: t.name || "Recurring",
+          sub: `Recurring ${isInc ? "income" : "expense"}`,
+          amount: Number(t.amount || 0),
+          amountColor: isInc ? "#059669" : "#dc2626",
+          amountSign: isInc ? "+" : "−",
+          icon: "🔄", iconBg: isInc ? "#dcfce7" : "#fee2e2", iconColor: isInc ? "#059669" : "#dc2626",
+          actionable: false,
+        });
+      });
+
+    // I) Pending reimburse settlements — no date filter, show all pending
+    reimburseSettlements.forEach(s => {
+      // Skip if already added by section D (same id prefix used there is 'rs-')
+      if (all.some(x => x.id === `rs-${s.id}`)) return;
+      const outstanding = Math.max(0, Number(s.total_out || 0) - Number(s.total_in || 0));
+      all.push({
+        id: `rsp-${s.id}`, type: "reimburse_pending", raw: s,
+        date: today,
+        title: s.entity,
+        sub: "Pending reimbursement",
+        amount: outstanding,
+        amountColor: "#059669", amountSign: "+",
+        icon: "🧾", iconBg: "#dcfce7", iconColor: "#059669",
+        actionable: false,
+      });
+    });
+
     return all
       .filter(item => !dismissed.has(item.id))
       .sort((a, b) => a.date.localeCompare(b.date) || (a.type === "installment" ? 1 : -1))
-      .slice(0, 10);
-  }, [reminders, loansWithStats, receivables, installments, creditCards, dismissed, reimburseSettlements, assets, bankAccounts]);
+      .slice(0, 15);
+  }, [reminders, loansWithStats, receivables, installments, creditCards, dismissed, reimburseSettlements, assets, bankAccounts, recurTemplates]);
 
   // Group upcoming by date
   const upcomingGroups = useMemo(() => {
@@ -862,6 +925,8 @@ export default function Dashboard({
                           item.type === "loan" || item.type === "receivable"  ? () => dismissUpcoming(item.id) :
                           item.type === "reimburse"                           ? () => dismissReimburse(item.raw) :
                           item.type === "deposito_maturity"                   ? () => dismissUpcoming(item.id) :
+                          item.type === "cc_due" || item.type === "recurring" ||
+                          item.type === "reimburse_pending"                   ? () => dismissUpcoming(item.id) :
                           null
                         }
                       />
