@@ -259,7 +259,7 @@ function TxReviewCard({
           {amtStr}
         </span>
 
-        <button onClick={handleConfirm} disabled={isSkipped || isConfirming}
+        <button onClick={handleConfirm} disabled={isSkipped || isConfirming || r._invalidAmount}
           style={ACT_BTN({ background: "#dcfce7", color: "#059669", border: "1px solid #bbf7d0" })}
           title="Import this row">
           {isConfirming ? "…" : "✓"}
@@ -293,6 +293,7 @@ function TxReviewCard({
         </select>
 
         {/* Badges */}
+        {r._invalidAmount && <span style={{ fontSize: 9, fontWeight: 800, background: "#fee2e2", color: "#dc2626", padding: "2px 5px", borderRadius: 4, whiteSpace: "nowrap" }}>Amount missing</span>}
         {dupLevel === 3 && <span style={{ fontSize: 9, fontWeight: 800, background: "#fee2e2", color: "#dc2626", padding: "2px 5px", borderRadius: 4, whiteSpace: "nowrap" }}>DUPLICATE</span>}
         {dupLevel === 2 && <span style={{ fontSize: 9, fontWeight: 800, background: "#ffedd5", color: "#ea580c", padding: "2px 5px", borderRadius: 4, whiteSpace: "nowrap" }}>⚠ Possible Dup</span>}
         {dupLevel === 1 && <span style={{ fontSize: 9, fontWeight: 800, background: "#fef9c3", color: "#ca8a04", padding: "2px 5px", borderRadius: 4, whiteSpace: "nowrap" }}>REVIEW</span>}

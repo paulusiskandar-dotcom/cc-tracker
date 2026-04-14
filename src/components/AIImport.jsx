@@ -179,7 +179,14 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       const currency = (r.currency || "IDR").toUpperCase();
       const isFX     = currency !== "IDR";
       const fxRate   = isFX ? String(r.fx_rate_used || r.rate || getDefaultRate(currency)) : "1";
-      const amount   = Number(r.amount || 0);
+      const parseAmount = (raw) => {
+        if (raw == null) return 0;
+        if (typeof raw === 'number') return Math.abs(raw);
+        const cleaned = String(raw).replace(/[^0-9.]/g, '');
+        const parsed  = parseFloat(cleaned);
+        return isNaN(parsed) ? 0 : Math.abs(parsed);
+      };
+      const amount   = parseAmount(r.amount);
       const amtIDR   = isFX ? String(Math.round(amount * Number(fxRate))) : String(r.amount_idr || amount);
 
       const norm = normaliseTxType(txType, aiCatId);
@@ -215,6 +222,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
         learned_cat:  learned,
         notes:        r.notes || "",
         flagged,
+        _invalidAmount: amount <= 0,
         _dupMatch:    checkDuplicateTransaction(ledger, { tx_date: txDate, amount_idr: amtIDR, currency }),
         status:       checkDuplicateTransaction(ledger, { tx_date: txDate, amount_idr: amtIDR, currency }) ? "possible_duplicate" : "new",
       };
@@ -335,28 +343,33 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
   const importSelected = async (toImport) => {
     const rows = toImport || results.filter(r => selected[r._id] && !skipped.has(r._id));
     if (!rows.length) return showToast("Select at least one entry", "warning");
+    const validRows   = rows.filter(r => !r._invalidAmount);
+    const zeroSkipped = rows.length - validRows.length;
+    if (!validRows.length) return showToast("All selected rows have missing amounts — edit them first", "warning");
     setImporting(true);
     let ok = 0;
-    for (const r of rows) {
+    for (const r of validRows) {
       try {
         const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
         if (created) { setLedger(prev => [created, ...prev]); ok++; saveMerchantMapping(r); }
       } catch { /* continue */ }
     }
     // Mark all as skipped (remove from view)
-    const importedIds = new Set(rows.map(r => r._id));
+    const importedIds = new Set(validRows.map(r => r._id));
     setResults(prev => prev.filter(r => !importedIds.has(r._id)));
     setSelected(s => { const ns = { ...s }; importedIds.forEach(id => delete ns[id]); return ns; });
     if (batchId && results.filter(r => !importedIds.has(r._id)).length === 0) {
       scanApi.updateBatch(batchId, { status: "imported", total_imported: ok }).catch(() => {});
     }
     await onRefresh();
-    showToast(`Imported ${ok} of ${rows.length} entries`);
+    const skipNote = zeroSkipped > 0 ? `. ${zeroSkipped} skipped (amount = 0)` : "";
+    showToast(`Imported ${ok} of ${rows.length} entries${skipNote}`);
     setImporting(false);
   };
 
   // ── Import single row ─────────────────────────────────────────
   const importOne = async (r) => {
+    if (r._invalidAmount) return showToast("Amount is required — edit the row first", "error");
     try {
       const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
       if (created) {

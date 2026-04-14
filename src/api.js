@@ -236,7 +236,6 @@ export const ledgerApi = {
         entity:               safeEntry.entity,
         status:               "pending",
         total_out:            amount,
-        linked_ledger_id:     data.id,
         out_ledger_ids:       [data.id],
         in_ledger_ids:        [],
         total_in:             0,
