@@ -2321,6 +2321,9 @@ function EStmtQueueItem({
           {item.status === "failed" && (
             <Button variant="secondary" size="sm" onClick={onProcess}>Retry</Button>
           )}
+          {item.status === "reviewed" && (
+            <Button variant="secondary" size="sm" onClick={onProcess}>🔄 Re-scan</Button>
+          )}
           {["queued","failed","reviewed"].includes(item.status) && !item._uploading && (
             <button onClick={onRemove}
               style={{ border: "none", background: "none", cursor: "pointer", fontSize: 16, color: "#d1d5db", padding: 2 }}
