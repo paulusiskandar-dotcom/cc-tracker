@@ -16,7 +16,7 @@
 //   onRefreshScan   () => void         — optional, shows 🔄 button
 //   onCreateInstallment (row) => void  — optional, estatement only
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../../constants";
 import { showToast } from "./Card";
 
@@ -211,9 +211,62 @@ const ACT_BTN = (extra = {}) => ({
   fontFamily: "Figtree, sans-serif", padding: 0, flexShrink: 0, ...extra,
 });
 
+// ─── COLLECT LOAN CELL ──────────────────────────────────────────
+// Separate component so useEffect can be called unconditionally (React hook rules)
+function CollectLoanCell({ r, onUpdate, T, accounts, employeeLoans }) {
+  const activeLoans = (employeeLoans || []).filter(l => l.status !== "settled");
+  const bc = accounts.filter(a => ["bank", "cash"].includes(a.type));
+
+  // Auto-detect borrower from description on first render
+  useEffect(() => {
+    if (r.from_id || !r.description || !activeLoans.length) return;
+    const descLower = (r.description || "").toLowerCase();
+    const match = activeLoans.find(l =>
+      (l.employee_name || "").split(/\s+/).some(w => w.length >= 3 && descLower.includes(w.toLowerCase()))
+    );
+    if (match) onUpdate({ from_id: match.id });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div style={{ display: "flex", gap: 4, alignItems: "flex-start" }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <select style={{ ...inSel(T), width: "100%" }}
+          value={r.from_id || ""}
+          onChange={e => onUpdate({ from_id: e.target.value })}>
+          <option value="">Borrower…</option>
+          {activeLoans.map(l => {
+            const outstanding = Math.max(0, Number(l.total_amount || 0) - Number(l.paid_months || 0) * Number(l.monthly_installment || 0));
+            return (
+              <option key={l.id} value={l.id}>
+                {l.employee_name} ({fmtAmt(outstanding)})
+              </option>
+            );
+          })}
+        </select>
+      </div>
+      <span style={{ fontSize: 10, color: T.text3, flexShrink: 0, paddingTop: 4 }}>→</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <TabbedAcctSelect
+          accounts={bc}
+          value={r.to_id || ""}
+          onChange={v => onUpdate({ to_id: v })}
+          placeholder="To Account…"
+          showLast4
+          T={T}
+        />
+      </div>
+    </div>
+  );
+}
+
 // ─── ACCOUNT CELL ───────────────────────────────────────────────
-function AccountCell({ r, onUpdate, T, accounts }) {
+function AccountCell({ r, onUpdate, T, accounts, employeeLoans }) {
   const cfg = getAcctCfg(r.tx_type, accounts);
+
+  // ── collect_loan: rendered by dedicated component to satisfy hook rules ──
+  if (r.tx_type === "collect_loan") {
+    return <CollectLoanCell r={r} onUpdate={onUpdate} T={T} accounts={accounts} employeeLoans={employeeLoans} />;
+  }
 
   if (cfg.mode === "to") return (
     <TabbedAcctSelect
@@ -267,7 +320,7 @@ function AccountCell({ r, onUpdate, T, accounts }) {
 // ─── SINGLE TX REVIEW CARD ─────────────────────────────────────
 function TxReviewCard({
   r, isSelected, isSkipped, isNotesOpen, T,
-  source, accounts, txTypes,
+  source, accounts, employeeLoans, txTypes,
   onUpdate, onConfirm, onSkip, onToggleSelect, onToggleNotes,
   onCreateInstallment, confirmingId,
 }) {
@@ -402,7 +455,7 @@ function TxReviewCard({
 
         {/* Account cell */}
         <div style={{ flex: 1, minWidth: 140 }}>
-          <AccountCell r={r} onUpdate={onUpdate} T={T} accounts={accounts} />
+          <AccountCell r={r} onUpdate={onUpdate} T={T} accounts={accounts} employeeLoans={employeeLoans} />
         </div>
 
         {/* FX rate (fx_exchange or foreign currency) */}
@@ -531,6 +584,7 @@ export default function TransactionReviewList({
   onToggleAll,
   source = "ai_scan",
   accounts = [],
+  employeeLoans = [],
   T,
   busy = false,
   onRefreshScan,
@@ -628,6 +682,7 @@ export default function TransactionReviewList({
             T={T}
             source={source}
             accounts={accounts}
+            employeeLoans={employeeLoans}
             txTypes={txTypes}
             onUpdate={patch => onUpdateRow(r._id, patch)}
             onConfirm={() => handleConfirmRow(r)}
