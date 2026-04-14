@@ -364,7 +364,9 @@ function TxReviewCard({
   const typeColor = TX_REVIEW_TYPES.find(t => t.value === r.tx_type)?.color || T.text;
 
   const amtStr = isFX
-    ? `${sign}${r.currency} ${Number(r.amount || 0).toLocaleString("id-ID")} ≈ ${fmtAmt(r.amount_idr || 0)}`
+    ? (source === "estatement"
+        ? `${sign}${r.currency} ${Number(r.amount || 0).toLocaleString("id-ID")}`
+        : `${sign}${r.currency} ${Number(r.amount || 0).toLocaleString("id-ID")} ≈ ${fmtAmt(r.amount_idr || 0)}`)
     : `${sign}${fmtAmt(r.amount_idr || r.amount || 0)}`;
 
   const handleConfirm = () => {
