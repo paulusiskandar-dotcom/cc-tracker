@@ -833,10 +833,13 @@ Mandiri-specific patterns:
 • "PPh bunga" / "Pajak bunga" = DEBET → type: expense, category: tax
 • "Bea materai" / "Materai" = DEBET → type: expense, category: materai
 • "Transfer ke" / "TRF KE" = DEBET → type: expense (or transfer if dest account is known)
+• "Transfer BI Fast ke [BANK]" / "Bifast ke [BANK]" = DEBET → type: transfer IF destination bank matches known accounts below; otherwise type: expense
 • "ATM" / "Tarik tunai" = DEBET → type: expense
+• If the description contains an account number that matches one of the known accounts below → type: transfer
 
-Own accounts (transfer type ONLY if BOTH source AND destination match known accounts):
+Own accounts (use for transfer detection — if description contains own bank name or account number → type: transfer):
 ${accountsCtx || "none"}
+Note: SMBC Indonesia = Jenius (same bank, different name). Treat as the same institution.
 
 ═══ OUTPUT FORMAT ═══
 Return ONLY valid JSON — no markdown, no explanation:

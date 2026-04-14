@@ -130,7 +130,7 @@ const amtSign = (t) =>
   INCOME_LIKE.has(t) ? "+" : t === "transfer" || t === "pay_cc" || t === "fx_exchange" ? "" : "-";
 
 const fmtAmt = (v) => {
-  const n = Math.round(Number(v) || 0);
+  const n = Math.abs(Math.round(Number(v) || 0));
   return "Rp " + n.toLocaleString("id-ID", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 };
 
@@ -462,6 +462,7 @@ export default function TransactionReviewList({
   T,
   busy = false,
   onRefreshScan,
+  onClearAll,
   onCreateInstallment,
 }) {
   const [notesOpen,    setNotesOpen]    = useState(new Set());
@@ -520,6 +521,12 @@ export default function TransactionReviewList({
             <button onClick={onRefreshScan}
               style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, border: `1px solid ${T.border}`, background: T.sur2, color: T.text2, cursor: "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 600 }}>
               🔄 Refresh Scan
+            </button>
+          )}
+          {onClearAll && (
+            <button onClick={onClearAll}
+              style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, border: `1px solid ${T.border}`, background: "transparent", color: T.text3, cursor: "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 600 }}>
+              Clear All
             </button>
           )}
           <button

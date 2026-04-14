@@ -74,10 +74,11 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
   const [scanning,    setScanning]    = useState(false);
   const [results,     setResults]     = useState([]);
   const [selected,    setSelected]    = useState({});
-  const [skipped,     setSkipped]     = useState(new Set());
   const [importing,   setImporting]   = useState(false);
   const [batchId,     setBatchId]     = useState(null);   // current scan_batch id
   const [batchFilePath, setBatchFilePath] = useState(null);
+  // Fingerprints of rows permanently skipped — persist across Refresh Scan
+  const [skippedFPs,  setSkippedFPs]  = useState(new Set());
 
   const spendAccounts = accounts.filter(a => ["bank","cash","credit_card"].includes(a.type));
   const bankAccounts  = accounts.filter(a => a.type === "bank");
@@ -96,7 +97,6 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       const sel = {};
       items.forEach(r => { sel[r._id] = true; });
       setSelected(sel);
-      setSkipped(new Set());
       setBatchId(latest.id);
       setBatchFilePath(latest.file_path || null);
     }).catch(() => {});
@@ -200,6 +200,41 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       const kwMatch = applyKeywordRules(desc, isFX ? Number(amtIDR) : amount);
       if (kwMatch) { txType = kwMatch.tx_type; aiCatId = kwMatch.category_id; }
 
+      // BI Fast outgoing to own bank → reclassify as transfer
+      // e.g. "Transfer BI Fast Ke SMBC INDONESIA" where user has SMBC/Jenius account
+      if (txType === "expense" && /bi[\s-]*fast\s+ke|bifast\s+ke/i.test(desc)) {
+        const descLower = desc.toLowerCase();
+        // Build set of own-bank tokens from accounts (words ≥ 3 chars from bank_name)
+        const ownBankTokens = new Set();
+        accounts.forEach(a => {
+          (a.bank_name || "").split(/\s+/).forEach(w => {
+            if (w.length >= 3) ownBankTokens.add(w.toLowerCase());
+          });
+          // Also check account name tokens
+          (a.name || "").split(/\s+/).forEach(w => {
+            if (w.length >= 4) ownBankTokens.add(w.toLowerCase());
+          });
+          // Explicit aliases: SMBC Indonesia = Jenius
+          if (/(smbc|jenius)/i.test(a.bank_name || "")) {
+            ownBankTokens.add("smbc"); ownBankTokens.add("jenius");
+          }
+        });
+        if ([...ownBankTokens].some(token => descLower.includes(token))) {
+          txType = "transfer";
+          aiCatId = null;
+          // Try to auto-set to_id to the matching account
+          if (!toId) {
+            const matchAcc = accounts.find(a => {
+              const bnLower = (a.bank_name || "").toLowerCase();
+              const nameTokenMatch = (a.bank_name || "").split(/\s+/).some(w => (w.length >= 3) && descLower.includes(w.toLowerCase()));
+              const smbcMatch = (/(smbc|jenius)/i.test(a.bank_name || "")) && descLower.includes("smbc");
+              return nameTokenMatch || smbcMatch;
+            });
+            if (matchAcc) toId = matchAcc.id;
+          }
+        }
+      }
+
       const learned = lookupLearned(desc);
       let catId = NO_CAT.has(txType) ? null : aiCatId;
       if (learned && !NO_CAT.has(txType) && learned.confidence >= 2) catId = learned.category_id;
@@ -235,7 +270,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
     setScanning(true);
     setResults([]);
     setSelected({});
-    setSkipped(new Set());
+    setSkippedFPs(new Set()); // new upload → clear all skip history
     setBatchId(null);
     setBatchFilePath(null);
 
@@ -293,7 +328,6 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
     setScanning(true);
     setResults([]);
     setSelected({});
-    setSkipped(new Set());
     try {
       const { data: blob, error } = await supabase.storage.from("ai-scan-uploads").download(batchFilePath);
       if (error || !blob) throw new Error("Could not download file");
@@ -302,8 +336,12 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       const bankHintR = bankAccR?.bank_name || "";
       const parsed = await scanApi.scan(user.id, file, { accounts, bankHint: bankHintR });
       console.log(`[AIImport refresh] total transactions from AI: ${parsed.length}`);
-      const items  = buildRows(parsed);
-      console.log(`[AIImport refresh] after buildRows: ${items.length} rows`);
+      let items = buildRows(parsed);
+      // Filter out previously skipped rows (by fingerprint)
+      if (skippedFPs.size > 0) {
+        items = items.filter(r => !skippedFPs.has(`${r.tx_date}|${r.amount_idr}|${(r.description || "").toLowerCase().trim()}`));
+      }
+      console.log(`[AIImport refresh] after buildRows+skip filter: ${items.length} rows`);
       if (batchId) scanApi.updateBatch(batchId, { ai_raw_result: parsed, total_detected: items.length, processed_at: new Date().toISOString() }).catch(() => {});
       setResults(items);
       const sel = {};
@@ -341,7 +379,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
 
   // ── Import selected (bulk) ────────────────────────────────────
   const importSelected = async (toImport) => {
-    const rows = toImport || results.filter(r => selected[r._id] && !skipped.has(r._id));
+    const rows = toImport || results.filter(r => selected[r._id]);
     if (!rows.length) return showToast("Select at least one entry", "warning");
     const validRows   = rows.filter(r => !r._invalidAmount);
     const zeroSkipped = rows.length - validRows.length;
@@ -383,15 +421,39 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
   };
 
   const toggleAll = () => {
-    const cur = results.filter(r => !skipped.has(r._id)).every(r => selected[r._id]);
+    const cur = results.every(r => selected[r._id]);
     const ns = {};
     results.forEach(r => { ns[r._id] = !cur; });
     setSelected(ns);
   };
 
+  // Permanently remove a row from the list; remember its fingerprint so it stays gone after Refresh Scan
   const skipRow = (id) => {
-    setSkipped(s => { const ns = new Set(s); ns.has(id) ? ns.delete(id) : ns.add(id); return ns; });
-    setSelected(s => ({ ...s, [id]: false }));
+    const row = results.find(r => r._id === id);
+    if (row) {
+      const fp = `${row.tx_date}|${row.amount_idr}|${(row.description || "").toLowerCase().trim()}`;
+      setSkippedFPs(prev => new Set([...prev, fp]));
+    }
+    setResults(prev => prev.filter(r => r._id !== id));
+    setSelected(s => { const ns = { ...s }; delete ns[id]; return ns; });
+  };
+
+  // Clear All: delete batch + file from DB/Storage, reset to empty state
+  const handleClearAll = async () => {
+    if (!window.confirm("Remove all extracted transactions? This cannot be undone.")) return;
+    setResults([]);
+    setSelected({});
+    setSkippedFPs(new Set());
+    try {
+      if (batchId) {
+        await supabase.from("scan_batches").delete().eq("id", batchId);
+      }
+      if (batchFilePath) {
+        await supabase.storage.from("ai-scan-uploads").remove([batchFilePath]);
+      }
+    } catch { /* non-critical */ }
+    setBatchId(null);
+    setBatchFilePath(null);
   };
 
   // ─────────────────────────────────────────────────────────────
@@ -456,7 +518,6 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
           <TransactionReviewList
             rows={results}
             selected={selected}
-            skipped={skipped}
             onUpdateRow={updateRow}
             onConfirmRow={importOne}
             onSkipRow={skipRow}
@@ -468,6 +529,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
             T={T}
             busy={importing}
             onRefreshScan={batchFilePath ? handleRefreshScan : null}
+            onClearAll={handleClearAll}
           />
         </div>
       )}
