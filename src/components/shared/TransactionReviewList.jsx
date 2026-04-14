@@ -480,8 +480,8 @@ function TxReviewCard({
           </select>
         )}
 
-        {/* FX rate */}
-        {(r.tx_type === "fx_exchange" || isFX) && (
+        {/* FX rate — hidden for estatement (amount stays in original currency) */}
+        {(r.tx_type === "fx_exchange" || isFX) && source !== "estatement" && (
           <div style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}>
             <span style={{ fontSize: 10, color: T.text3, whiteSpace: "nowrap", fontFamily: "Figtree, sans-serif" }}>Rate:</span>
             <input type="number"

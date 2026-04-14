@@ -1451,11 +1451,20 @@ function EStatementTab({
   employeeLoans = [],
   fxRates = {},
 }) {
-  const [queue,       setQueue]       = useState([]);
-  const [history,     setHistory]     = useState([]);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const [dragging,    setDragging]    = useState(false);
-  const [dbLoading,   setDbLoading]   = useState(true);
+  const [queue,          setQueue]          = useState([]);
+  const [history,        setHistory]        = useState([]);
+  const [historyOpen,    setHistoryOpen]    = useState(false);
+  const [dragging,       setDragging]       = useState(false);
+  const [dbLoading,      setDbLoading]      = useState(true);
+  const [acctCurrencies, setAcctCurrencies] = useState([]);
+
+  // ── Fetch account_currencies for non-IDR account auto-select ─
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase.from("account_currencies").select("account_id, currency")
+      .eq("user_id", user.id)
+      .then(({ data }) => { if (data) setAcctCurrencies(data); });
+  }, [user?.id]);
 
   // ── Load persisted queue + history from DB on mount ───────
   useEffect(() => {
@@ -1654,15 +1663,27 @@ function EStatementTab({
       }
 
       // Account assignment — use the user-selected statement account when available,
-      // otherwise fall back to AI card_last4 matching.
+      // otherwise try currency-matching via account_currencies, then fall back to
+      // AI card_last4 matching or first bank/CC account.
       const last4 = t.card_last4 || null;
       const ccAccounts   = accounts.filter(a => a.type === "credit_card");
       const bankAccounts = accounts.filter(a => a.type === "bank");
+
+      // Currency-matched account: find account_id in account_currencies for this currency
+      const txCurrencyUpper = (t.currency || "IDR").toUpperCase();
+      const currencyMatchedId = txCurrencyUpper !== "IDR"
+        ? acctCurrencies.find(ac => ac.currency === txCurrencyUpper)?.account_id || null
+        : null;
+
       let fromId, toId;
       if (statementAccountId) {
         // Override: debit → from selected account; credit → to selected account
         fromId = isDebit ? statementAccountId : "";
         toId   = !isDebit ? statementAccountId : "";
+      } else if (currencyMatchedId) {
+        // Non-IDR: use the account that holds this currency
+        fromId = isDebit ? currencyMatchedId : "";
+        toId   = !isDebit ? currencyMatchedId : "";
       } else {
         // Fallback: try card_last4 matching then first CC/bank
         const matchedAcc = last4
@@ -1737,9 +1758,9 @@ function EStatementTab({
         && isBCAReimburse
         && (fromId === isBCAReimburse.id || toId === isBCAReimburse.id);
 
-      const txCurrency = (t.currency || "IDR").toUpperCase();
-      const rate = txCurrency !== "IDR" ? Number(fxRates[txCurrency] || 0) : 1;
-      const amtIdr = txCurrency !== "IDR" && rate > 0 ? Math.round(amt * rate) : amt;
+      const txCurrency = txCurrencyUpper; // already computed above
+      // For e-statement, amount_idr = amount (original currency); FX rate used elsewhere for net worth
+      const amtIdr = amt;
 
       return {
         _id:              idx,
