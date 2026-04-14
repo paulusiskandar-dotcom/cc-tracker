@@ -656,6 +656,7 @@ const BANK_LOGO_DOMAINS = {
   "Superbank": "superbank.id",
   "BLU":       "blubybcadigital.id",
   "Neobank":   "neobank.id",
+  "Mayapada":  "bankmayapada.com",
 };
 
 function BankLogo({ bankName, color, size = 36 }) {
@@ -669,7 +670,7 @@ function BankLogo({ bankName, color, size = 36 }) {
     <div style={{ width: size, height: size, borderRadius: 8, background: bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
       {domain && !imgError ? (
         <img
-          src={`https://logo.clearbit.com/${domain}`}
+          src={`https://www.google.com/s2/favicons?domain=${domain}&sz=64`}
           onError={() => setImgError(true)}
           alt={bankName || ""}
           style={{ width: size * 0.72, height: size * 0.72, objectFit: "contain" }}
