@@ -1100,35 +1100,39 @@ export default function Receivables({
                     </div>
 
                     {/* Bottom action bar */}
-                    <div style={{ borderTop: "0.5px solid #f3f4f6", padding: "8px 14px", display: "flex", gap: 6 }}>
+                    <div style={{ borderTop: "0.5px solid #f3f4f6", padding: "10px 14px 8px", display: "flex", flexDirection: "column", gap: 6 }}>
+                      {/* Row 1: + Payment (active only, full width) */}
                       {!isSettled && (
                         <button
                           onClick={() => { setTxModalLoan(loan); setTxModalOpen(true); }}
-                          style={{ flex: 1, height: 30, border: "none", borderRadius: 8, cursor: "pointer", background: "#fef3c7", color: "#d97706", fontSize: 12, fontWeight: 700, fontFamily: "Figtree, sans-serif" }}
+                          style={{ width: "100%", height: 34, border: "none", borderRadius: 8, cursor: "pointer", background: "#d97706", color: "#fff", fontSize: 13, fontWeight: 700, fontFamily: "Figtree, sans-serif", letterSpacing: "0.01em" }}
                         >
                           + Payment
                         </button>
                       )}
-                      <button
-                        onClick={() => { setStmtLoan(loan); setStmtOpen(true); }}
-                        style={{ height: 30, padding: "0 12px", border: "0.5px solid #e5e7eb", borderRadius: 8, cursor: "pointer", background: "#f9fafb", color: "#374151", fontSize: 12, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
-                      >
-                        Statement
-                      </button>
-                      <button
-                        onClick={() => { setSelectedLoan(loan); setLoanForm({ employee_name: loan.employee_name, employee_dept: loan.employee_dept || "", total_amount: String(loan.total_amount || ""), monthly_installment: String(loan.monthly_installment || ""), start_date: loan.start_date || todayStr(), notes: loan.notes || "" }); setEditLoanModal(true); }}
-                        style={{ height: 30, padding: "0 12px", border: "0.5px solid #e5e7eb", borderRadius: 8, cursor: "pointer", background: "#ffffff", color: "#374151", fontSize: 12, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDeleteLoan(loan)}
-                        style={{ height: 30, padding: "0 10px", border: "none", borderRadius: 8, cursor: "pointer", background: "none", color: "#d1d5db", fontSize: 12, fontFamily: "Figtree, sans-serif" }}
-                        onMouseEnter={e => e.currentTarget.style.color = "#ef4444"}
-                        onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}
-                      >
-                        🗑
-                      </button>
+                      {/* Row 2: Statement + Edit + Delete */}
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <button
+                          onClick={() => { setStmtLoan(loan); setStmtOpen(true); }}
+                          style={{ flex: 1, height: 28, padding: "0 10px", border: "1px solid #e5e7eb", borderRadius: 7, cursor: "pointer", background: "#fff", color: "#374151", fontSize: 11, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
+                        >
+                          Statement
+                        </button>
+                        <button
+                          onClick={() => { setSelectedLoan(loan); setLoanForm({ employee_name: loan.employee_name, employee_dept: loan.employee_dept || "", total_amount: String(loan.total_amount || ""), monthly_installment: String(loan.monthly_installment || ""), start_date: loan.start_date || todayStr(), notes: loan.notes || "" }); setEditLoanModal(true); }}
+                          style={{ flex: 1, height: 28, padding: "0 10px", border: "1px solid #e5e7eb", borderRadius: 7, cursor: "pointer", background: "#fff", color: "#374151", fontSize: 11, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDeleteLoan(loan)}
+                          style={{ height: 28, width: 28, border: "none", borderRadius: 7, cursor: "pointer", background: "none", color: "#d1d5db", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontFamily: "Figtree, sans-serif" }}
+                          onMouseEnter={e => e.currentTarget.style.color = "#ef4444"}
+                          onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}
+                        >
+                          🗑
+                        </button>
+                      </div>
                     </div>
                   </div>
                 );
