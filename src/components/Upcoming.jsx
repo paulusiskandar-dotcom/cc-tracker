@@ -36,12 +36,6 @@ export default function Upcoming({
   const [settleAmount,  setSettleAmount]  = useState("");
   const [settleBankId,  setSettleBankId]  = useState("");
   const [settleSaving,  setSettleSaving]  = useState(false);
-  // Personal loan collect modal
-  const [collectModal,  setCollectModal]  = useState(false);
-  const [collectRec,    setCollectRec]    = useState(null);
-  const [collectAmount, setCollectAmount] = useState("");
-  const [collectBankId, setCollectBankId] = useState("");
-  const [collectSaving, setCollectSaving] = useState(false);
   // CC Pay modal
   const [ccPayModal,  setCcPayModal]  = useState(false);
   const [ccPayCard,   setCcPayCard]   = useState(null);
@@ -58,15 +52,17 @@ export default function Upcoming({
   const [reimForm,    setReimForm]    = useState({ amount: "", date: todayStr(), to_id: "" });
   const [reimSaving,  setReimSaving]  = useState(false);
 
-  // ── Loan stats ──────────────────────────────────────────────
+  // ── Loan stats (outstanding = paid_months × monthly_installment) ────
   const loansWithStats = useMemo(() => {
     return employeeLoans.map(loan => {
-      const payments = loanPayments.filter(p => p.loan_id === loan.id);
-      const paidSoFar = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
-      const remaining = Math.max(0, Number(loan.total_amount || 0) - paidSoFar);
+      const paidMonths = Number(loan.paid_months || 0);
+      const monthly    = Number(loan.monthly_installment || 0);
+      const total      = Number(loan.total_amount || 0);
+      const paidSoFar  = paidMonths * monthly;
+      const remaining  = Math.max(0, total - paidSoFar);
       return { ...loan, paidSoFar, remaining };
     });
-  }, [employeeLoans, loanPayments]);
+  }, [employeeLoans]);
 
   // ── Build unified upcoming list ──────────────────────────────
   const items = useMemo(() => {
@@ -98,16 +94,15 @@ export default function Upcoming({
       });
     });
 
-    // 2. Employee loan next payments
+    // 2. Employee loan next payments (next due = start_date + (paid_months+1) months)
     loansWithStats
       .filter(l => l.status !== "settled" && l.remaining > 0)
       .forEach(loan => {
-        if (!loan.monthly_installment) return;
-        const startDay = loan.start_date
-          ? new Date(loan.start_date + "T00:00:00").getDate()
-          : 1;
-        let nextDue = new Date(today.getFullYear(), today.getMonth(), startDay);
-        if (nextDue <= today) nextDue = new Date(today.getFullYear(), today.getMonth() + 1, startDay);
+        if (!loan.monthly_installment || !loan.start_date) return;
+        const start = new Date(loan.start_date + "T00:00:00");
+        const paidMo = Number(loan.paid_months || 0);
+        const nextDue = new Date(start.getFullYear(), start.getMonth() + paidMo + 1, start.getDate());
+        if (nextDue > cutoff) return; // only show within 7 days
         all.push({
           id: `loan-${loan.id}`,
           type: "loan",
@@ -136,28 +131,7 @@ export default function Upcoming({
         });
       });
 
-    // 4. Personal loan receivables (type=receivable, subtype !== 'reimburse', current_balance > 0)
-    receivables
-      .filter(r => r.subtype !== "reimburse" && Number(r.current_balance || 0) > 0)
-      .forEach(r => {
-        let dueDate = null;
-        if (r.day_of_month) {
-          dueDate = getNextDueDate(Number(r.day_of_month));
-          if (dueDate > cutoff) return; // outside 7-day window
-        }
-        all.push({
-          id: `loan-recv-${r.id}`,
-          type: "loan_recv",
-          raw: r,
-          date: dueDate ? dueDate.toISOString().slice(0, 10) : todayStr(),
-          title: `${r.name} — Loan Repayment`,
-          amount: Number(r.monthly_installment || r.current_balance || 0),
-          sub: `Outstanding: ${fmtIDR(Number(r.current_balance || 0), true)}`,
-          actionable: true,
-        });
-      });
-
-    // 5. CC installments (info-only)
+    // 4. CC installments (info-only)
     installments
       .filter(inst => (inst.paid_months || 0) < (inst.months || 0))
       .forEach(inst => {
@@ -270,44 +244,6 @@ export default function Upcoming({
     setPayLoan(loan);
     setPayForm({ amount: String(loan.monthly_installment || ""), pay_date: todayStr(), notes: "" });
     setPayModal(true);
-  };
-
-  const openCollectModal = (rec) => {
-    setCollectRec(rec);
-    setCollectAmount(String(rec.monthly_installment || rec.current_balance || ""));
-    setCollectBankId(bankAccounts[0]?.id || "");
-    setCollectModal(true);
-  };
-
-  const doCollect = async () => {
-    if (!collectRec || !collectBankId) return showToast("Select a bank account", "error");
-    setCollectSaving(true);
-    try {
-      const amount = Number(collectAmount) || Number(collectRec.current_balance) || 0;
-      await ledgerApi.create(user.id, {
-        tx_date:      todayStr(),
-        description:  `Loan repayment — ${collectRec.name}`,
-        amount,
-        currency:     "IDR",
-        amount_idr:   amount,
-        tx_type:      "collect_loan",
-        from_type:    "account",
-        from_id:      collectRec.id,
-        to_type:      "account",
-        to_id:        collectBankId,
-        entity:       "Personal",
-        category_id:  null,
-        notes:        "",
-      }, accounts);
-      await Promise.all([
-        recalculateBalance(collectRec.id, user.id),
-        recalculateBalance(collectBankId, user.id),
-      ]);
-      showToast("Loan repayment recorded");
-      setCollectModal(false);
-      await onRefresh?.();
-    } catch (e) { showToast(e.message, "error"); }
-    setCollectSaving(false);
   };
 
   const openSettleModal = (rec) => {
@@ -507,7 +443,6 @@ export default function Upcoming({
           const isReminder    = item.type === "reminder";
           const isLoan        = item.type === "loan";
           const isReceivable  = item.type === "receivable";
-          const isLoanRecv    = item.type === "loan_recv";
           const isInstall     = item.type === "installment";
           const isCCDue       = item.type === "cc_due";
           const isIncomeRecur = item.type === "income_recur";
@@ -592,14 +527,6 @@ export default function Upcoming({
                     style={BTN_AMBER}
                   >
                     Settle
-                  </button>
-                )}
-                {isLoanRecv && (
-                  <button
-                    onClick={e => { e.stopPropagation(); e.preventDefault(); openCollectModal(item.raw); }}
-                    style={{ ...BTN_BASE, background: "#dcfce7", color: "#059669" }}
-                  >
-                    Collect
                   </button>
                 )}
                 {isInstall && (
@@ -710,41 +637,6 @@ export default function Upcoming({
             </FormRow>
             <Field label="Notes">
               <Input value={payForm.notes} onChange={e => setPayForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional" />
-            </Field>
-          </div>
-        )}
-      </Modal>
-
-      {/* Collect Loan Modal */}
-      <Modal
-        isOpen={collectModal && !!collectRec}
-        onClose={() => setCollectModal(false)}
-        title={`Collect Loan — ${collectRec?.name || ""}`}
-        footer={
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <Button variant="secondary" size="md" onClick={() => setCollectModal(false)}>Cancel</Button>
-            <Button variant="primary" size="md" busy={collectSaving} disabled={!collectBankId} onClick={doCollect}>✓ Record</Button>
-          </div>
-        }
-      >
-        {collectRec && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ background: "#f0fdf4", borderRadius: 10, padding: "10px 14px", fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
-              Outstanding: <strong style={{ color: "#d97706" }}>{fmtIDR(Number(collectRec.current_balance || 0))}</strong>
-            </div>
-            <AmountInput
-              label="Amount Collected"
-              value={collectAmount}
-              onChange={v => setCollectAmount(v)}
-              currency="IDR"
-            />
-            <Field label="To Bank Account">
-              <Select
-                value={collectBankId}
-                onChange={e => setCollectBankId(e.target.value)}
-                options={bankAccounts.map(a => ({ value: a.id, label: a.name }))}
-                placeholder="Select bank…"
-              />
             </Field>
           </div>
         )}
