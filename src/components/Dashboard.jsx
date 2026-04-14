@@ -548,8 +548,9 @@ export default function Dashboard({
 
       {/* ── GMAIL PENDING BANNER ── */}
       {(() => {
-        // Only count rows that have actual extracted transactions
-        const gmailCount = (pendingSyncs || []).filter(s => s.ai_raw_result && Number(s.extracted_count || 0) > 0).length;
+        // pendingSyncs is already flattened individual transactions from pending email_sync rows
+        // (getPending already filters status='pending', extracted_count>0, ai_raw_result IS NOT NULL)
+        const gmailCount = (pendingSyncs || []).length;
         if (gmailCount === 0) return null;
         return (
           <div style={{

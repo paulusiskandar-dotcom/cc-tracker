@@ -1014,7 +1014,10 @@ export function flattenEmailSync(rows) {
         amount:                  tx.amount,
         currency:                tx.currency || "IDR",
         amount_idr:              tx.amount_idr || tx.amount,
-        tx_type:                 normEmailTxType(tx.suggested_tx_type),
+        // If a card_last4 is present it's a CC debit — never classify as transfer
+        tx_type: (tx.card_last4 && normEmailTxType(tx.suggested_tx_type) === "transfer")
+          ? "expense"
+          : normEmailTxType(tx.suggested_tx_type),
         matched_account_id:      tx.from_account_id,
         to_account_id:           tx.to_account_id,
         suggested_category_label: tx.suggested_category,

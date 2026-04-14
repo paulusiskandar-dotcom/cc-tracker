@@ -123,9 +123,10 @@ SPECIAL EMAIL PATTERNS — apply these before generic extraction:
      → from_bank_name = "Mandiri"
    - confidence = 0.95
 
-4. BCA DEBIT NOTIFICATION (subject contains "Transaksi Kartu Debit" or "Notifikasi Transaksi"):
+4. BCA DEBIT / CREDIT CARD NOTIFICATION (subject contains "Transaksi Kartu Debit", "Transaksi Kartu Kredit", "Notifikasi Transaksi", or "BCA Krisflyer"):
    - Extract amount, date, merchant, card number (last4)
-   - suggested_tx_type = "expense"
+   - suggested_tx_type = "expense" — ALWAYS expense for BCA card transactions at merchants
+   - If card is a credit card product (Krisflyer, Visa, Mastercard mentioned) → card_last4 from "No. Kartu" or masked card number
 
 5. TRANSFER NOTIFICATION (subject contains "Transfer", body has "Transfer ke" or "Berhasil ditransfer"):
    - Extract amount, date, destination account
@@ -167,6 +168,7 @@ Rules:
 - QRIS/QR payment → is_qris=true, suggested_tx_type=qris_debit
 - Transfer to own account → is_transfer=true, suggested_tx_type=transfer
 - CC payment → is_cc_payment=true, suggested_tx_type=pay_cc
+- CRITICAL — CC debit rule: if card_last4 is present (i.e. the transaction comes from a credit card account like BCA Krisflyer, CIMB, Mandiri CC, etc.) AND the description/merchant is a business/store name → suggested_tx_type MUST be "expense", NOT "transfer". Transfer only applies when money moves between two of the user's own bank accounts with no merchant name.
 - For Mandiri "Pembayaran Berhasil": ALWAYS extract even if layout is unusual — Penerima = recipient/merchant, Nominal Transaksi = amount (remove "Rp" and dots).
 - Return ONLY valid JSON array, no markdown.
 `;
