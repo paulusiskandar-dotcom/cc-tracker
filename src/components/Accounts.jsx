@@ -1581,6 +1581,8 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
                   label={i === 0 ? "Balance" : ""}
                   value={row.balance}
                   onChange={v => updateFxRow(i, "balance", v)}
+                  currency={row.currency}
+                  allowDecimal
                   style={{ flex: 1 }}
                 />
                 <button onClick={() => removeFxRow(i)} style={{

@@ -172,21 +172,39 @@ export function Textarea({
 
 // ─── AMOUNT INPUT ─────────────────────────────────────────────
 // Handles number formatting with dot separators
-export function AmountInput({ label, value, onChange, currency = "IDR", error, hint, style = {} }) {
+const CURRENCY_SYMBOLS = {
+  IDR: "Rp", USD: "$", EUR: "€", SGD: "S$", GBP: "£",
+  AUD: "A$", JPY: "¥", HKD: "HK$", CHF: "Fr", MYR: "RM",
+  CNY: "¥", KRW: "₩", THB: "฿",
+};
+
+export function AmountInput({ label, value, onChange, currency = "IDR", allowDecimal = false, error, hint, style = {} }) {
   const [focused, setFocused] = useState(false);
 
   // Show raw number while focused, formatted otherwise
   const display = focused
     ? (value || "")
-    : value
-      ? Number(value).toLocaleString("id-ID")
+    : value !== "" && value !== null && value !== undefined && value !== false
+      ? allowDecimal
+        ? Number(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : Number(value).toLocaleString("id-ID")
       : "";
 
   const handleChange = (e) => {
-    // Strip everything except digits
-    const raw = e.target.value.replace(/\D/g, "");
-    onChange(raw ? Number(raw) : "");
+    if (allowDecimal) {
+      // Allow digits, one decimal point, up to 2 decimal places
+      const raw = e.target.value.replace(/[^\d.]/g, "");
+      const parts = raw.split(".");
+      const cleaned = parts[0] + (parts.length > 1 ? "." + parts[1].slice(0, 2) : "");
+      onChange(cleaned);
+    } else {
+      // Strip everything except digits
+      const raw = e.target.value.replace(/\D/g, "");
+      onChange(raw ? Number(raw) : "");
+    }
   };
+
+  const prefix = CURRENCY_SYMBOLS[currency] || currency;
 
   return (
     <Field label={label} error={error} hint={hint} style={style}>
@@ -209,16 +227,16 @@ export function AmountInput({ label, value, onChange, currency = "IDR", error, h
           fontFamily: "Figtree, sans-serif",
           flexShrink: 0,
         }}>
-          {currency === "IDR" ? "Rp" : currency}
+          {prefix}
         </span>
         <input
           type="text"
-          inputMode="numeric"
+          inputMode={allowDecimal ? "decimal" : "numeric"}
           value={display}
           onChange={handleChange}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          placeholder="0"
+          placeholder={allowDecimal ? "0.00" : "0"}
           style={{
             flex:       1,
             minWidth:   0,

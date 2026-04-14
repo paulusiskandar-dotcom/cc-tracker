@@ -606,6 +606,7 @@ export default function Settings({
           accounts={accounts} categories={categories} ledger={ledger}
           installments={installments} setInstallments={setInstallments}
           employeeLoans={employeeLoans}
+          fxRates={fxRates}
         />
       )}
 
@@ -1448,6 +1449,7 @@ function EStatementTab({
   T, card, user,
   accounts, categories = [], ledger, installments = [], setInstallments,
   employeeLoans = [],
+  fxRates = {},
 }) {
   const [queue,       setQueue]       = useState([]);
   const [history,     setHistory]     = useState([]);
@@ -1735,13 +1737,17 @@ function EStatementTab({
         && isBCAReimburse
         && (fromId === isBCAReimburse.id || toId === isBCAReimburse.id);
 
+      const txCurrency = (t.currency || "IDR").toUpperCase();
+      const rate = txCurrency !== "IDR" ? Number(fxRates[txCurrency] || 0) : 1;
+      const amtIdr = txCurrency !== "IDR" && rate > 0 ? Math.round(amt * rate) : amt;
+
       return {
         _id:              idx,
         tx_date:          t.date,
         description:      t.merchant || t.description || "",
         amount:           String(amt),
-        amount_idr:       String(amt),
-        currency:         "IDR",
+        amount_idr:       String(amtIdr),
+        currency:         txCurrency,
         tx_type:          autoReimburse ? "reimburse_in" : txType,
         from_id:          fromId,
         to_id:            toId,
