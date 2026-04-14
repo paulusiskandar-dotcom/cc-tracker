@@ -93,13 +93,13 @@ function TabbedAcctSelect({ accounts, value, onChange, placeholder = "Select…"
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
       {tabs.length > 1 && (
-        <div style={{ display: "flex", gap: 1 }}>
+        <div style={{ display: "flex", gap: 1, flexShrink: 0 }}>
           {tabs.map(t => tabBtn(t.id, t.label))}
         </div>
       )}
-      <select style={{ ...inSel(T), width: "100%" }}
+      <select style={{ ...inSel(T), flex: 1, minWidth: 0 }}
         value={value || ""}
         onChange={e => onChange(e.target.value)}>
         <option value="">{placeholder}</option>
@@ -210,6 +210,10 @@ const ACT_BTN = (extra = {}) => ({
   display: "flex", alignItems: "center", justifyContent: "center",
   fontFamily: "Figtree, sans-serif", padding: 0, flexShrink: 0, ...extra,
 });
+const BADGE = (bg, color) => ({
+  fontSize: 9, fontWeight: 800, background: bg, color,
+  padding: "2px 5px", borderRadius: 4, whiteSpace: "nowrap", flexShrink: 0,
+});
 
 // ─── COLLECT LOAN CELL ──────────────────────────────────────────
 // Separate component so useEffect can be called unconditionally (React hook rules)
@@ -244,7 +248,7 @@ function CollectLoanCell({ r, onUpdate, T, accounts, employeeLoans }) {
           })}
         </select>
       </div>
-      <span style={{ fontSize: 10, color: T.text3, flexShrink: 0, paddingTop: 4 }}>→</span>
+      <span style={{ fontSize: 10, color: T.text3, flexShrink: 0 }}>→</span>
       <div style={{ flex: 1, minWidth: 0 }}>
         <TabbedAcctSelect
           accounts={bc}
@@ -291,7 +295,7 @@ function AccountCell({ r, onUpdate, T, accounts, employeeLoans }) {
           T={T}
         />
       </div>
-      <span style={{ fontSize: 10, color: T.text3, flexShrink: 0, paddingTop: 18 }}>→</span>
+      <span style={{ fontSize: 10, color: T.text3, flexShrink: 0 }}>→</span>
       <div style={{ flex: 1, minWidth: 0 }}>
         <TabbedAcctSelect
           accounts={cfg.to}
@@ -365,32 +369,50 @@ function TxReviewCard({
   return (
     <div style={{ background: cardBg, border: cardBorder, borderRadius: 10, opacity: isSkipped ? 0.55 : 1, overflow: "hidden" }}>
 
-      {/* ── ROW 1: ☑ date desc amount ✓ ✕ ── */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px 5px" }}>
+      {/* ── ROW 1: ☑ date desc [badges] amount ✓ ✗ ✏️ ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 10px 4px" }}>
         <input type="checkbox" checked={isSelected && !isSkipped}
           onChange={onToggleSelect} disabled={isSkipped}
-          style={{ accentColor: "#3b5bdb", width: 15, height: 15, flexShrink: 0, cursor: "pointer" }} />
+          style={{ accentColor: "#3b5bdb", width: 14, height: 14, flexShrink: 0, cursor: "pointer" }} />
 
-        <span style={{ width: 52, fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif", flexShrink: 0, whiteSpace: "nowrap" }}>
+        <span style={{ width: 44, fontSize: 11, color: T.text3, fontFamily: "Figtree, sans-serif", flexShrink: 0, whiteSpace: "nowrap" }}>
           {fmtDateShort(r.tx_date)}
         </span>
 
         <input
           style={{ flex: 1, minWidth: 0, border: "none", background: "transparent", outline: "none",
-            fontSize: 13, fontWeight: 600, color: isSkipped ? T.text3 : T.text,
+            fontSize: 12, fontWeight: 600, color: isSkipped ? T.text3 : T.text,
             fontFamily: "Figtree, sans-serif", textDecoration: isSkipped ? "line-through" : "none" }}
           value={r.description || ""}
           onChange={e => onUpdate({ description: e.target.value })}
           placeholder="Description…"
         />
 
-        <span style={{ fontSize: 13, fontWeight: 800, color, fontFamily: "Figtree, sans-serif", flexShrink: 0, whiteSpace: "nowrap", marginLeft: 4 }}>
+        {/* Inline badges next to description */}
+        {r._invalidAmount && <span style={BADGE("#fee2e2","#dc2626")}>Amount!</span>}
+        {dupLevel === 3 && <span style={BADGE("#fee2e2","#dc2626")}>DUP</span>}
+        {dupLevel === 2 && <span style={BADGE("#ffedd5","#ea580c")}>⚠ Dup?</span>}
+        {dupLevel === 1 && <span style={BADGE("#fef9c3","#ca8a04")}>REVIEW</span>}
+        {r.flagged && dupLevel === 0 && <span style={BADGE("#fff7ed","#f97316")}>⚠ Reimb</span>}
+        {source === "estatement" && r._isInstallment && (
+          <span style={BADGE("#dbeafe","#1d4ed8")}>
+            CICILAN{r._instNo ? ` ${r._instNo}${r._instTotal ? `/${r._instTotal}` : ""}` : ""}
+          </span>
+        )}
+        {source === "ai_scan" && r.learned_cat?.confidence >= 2 && r.learned_cat?.category_id === r.category_id && (
+          <span style={BADGE("#dcfce7","#059669")}>✓ Learned</span>
+        )}
+        {source === "ai_scan" && r.learned_cat?.confidence === 1 && (
+          <span style={BADGE("#fef9c3","#a16207")}>Suggest</span>
+        )}
+
+        <span style={{ fontSize: 12, fontWeight: 800, color, fontFamily: "Figtree, sans-serif", flexShrink: 0, whiteSpace: "nowrap" }}>
           {amtStr}
         </span>
 
         <button onClick={handleConfirm} disabled={isSkipped || isConfirming || r._invalidAmount}
           style={ACT_BTN({ background: "#dcfce7", color: "#059669", border: "1px solid #bbf7d0" })}
-          title="Import this row">
+          title="Import">
           {isConfirming ? "…" : "✓"}
         </button>
 
@@ -399,19 +421,25 @@ function TxReviewCard({
           title={isSkipped ? "Restore" : "Skip"}>
           {isSkipped ? "↩" : "✕"}
         </button>
+
+        <button onClick={onToggleNotes}
+          style={ACT_BTN({ background: isNotesOpen ? "#dbeafe" : T.sur2, color: isNotesOpen ? "#3b5bdb" : T.text3, width: 24, height: 24, fontSize: 11 })}
+          title="Notes">
+          ✏️
+        </button>
       </div>
 
-      {/* ── ROW 2: type [badges] category account [entity] [fx] [✏️] ── */}
-      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 5, padding: "2px 12px 9px 35px" }}>
+      {/* ── ROW 2: type [cat/entity] [fx] [B][C][CC] account — single line ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "2px 10px 8px 32px", flexWrap: "nowrap", overflow: "hidden" }}>
 
         {/* Type dropdown */}
         <select
-          style={{ ...inSel(T), width: 120, color: typeColor, fontWeight: 600 }}
+          style={{ ...inSel(T), width: 112, flexShrink: 0, color: typeColor, fontWeight: 600 }}
           value={r.tx_type}
           onChange={e => {
             const t = e.target.value;
             onUpdate({
-              tx_type:    t,
+              tx_type:     t,
               category_id: NO_CAT_TYPES.has(t) ? null : r.category_id,
               entity:      REIMBURSE_TYPES.has(t) ? (r.entity || "") : "",
             });
@@ -421,31 +449,9 @@ function TxReviewCard({
           ))}
         </select>
 
-        {/* Badges */}
-        {r._invalidAmount && <span style={{ fontSize: 9, fontWeight: 800, background: "#fee2e2", color: "#dc2626", padding: "2px 5px", borderRadius: 4, whiteSpace: "nowrap" }}>Amount missing</span>}
-        {dupLevel === 3 && <span style={{ fontSize: 9, fontWeight: 800, background: "#fee2e2", color: "#dc2626", padding: "2px 5px", borderRadius: 4, whiteSpace: "nowrap" }}>DUPLICATE</span>}
-        {dupLevel === 2 && <span style={{ fontSize: 9, fontWeight: 800, background: "#ffedd5", color: "#ea580c", padding: "2px 5px", borderRadius: 4, whiteSpace: "nowrap" }}>⚠ Possible Dup</span>}
-        {dupLevel === 1 && <span style={{ fontSize: 9, fontWeight: 800, background: "#fef9c3", color: "#ca8a04", padding: "2px 5px", borderRadius: 4, whiteSpace: "nowrap" }}>REVIEW</span>}
-        {r.flagged && dupLevel === 0 && <span style={{ fontSize: 9, fontWeight: 800, background: "#fff7ed", color: "#f97316", padding: "2px 5px", borderRadius: 4, whiteSpace: "nowrap" }}>⚠ Reimburse</span>}
-
-        {/* Cicilan badge — estatement only */}
-        {source === "estatement" && r._isInstallment && (
-          <span style={{ fontSize: 9, fontWeight: 800, background: "#dbeafe", color: "#1d4ed8", padding: "2px 5px", borderRadius: 4, whiteSpace: "nowrap" }}>
-            CICILAN{r._instNo ? ` ${r._instNo}${r._instTotal ? `/${r._instTotal}` : ""}` : ""}
-          </span>
-        )}
-
-        {/* Learned/Suggest badge — ai_scan only */}
-        {source === "ai_scan" && r.learned_cat?.confidence >= 2 && r.learned_cat?.category_id === r.category_id && (
-          <span style={{ fontSize: 9, fontWeight: 800, background: "#dcfce7", color: "#059669", padding: "2px 5px", borderRadius: 4, whiteSpace: "nowrap" }}>✓ Learned</span>
-        )}
-        {source === "ai_scan" && r.learned_cat?.confidence === 1 && (
-          <span style={{ fontSize: 9, fontWeight: 800, background: "#fef9c3", color: "#a16207", padding: "2px 5px", borderRadius: 4, whiteSpace: "nowrap" }}>Suggest</span>
-        )}
-
         {/* Category */}
         {showCat && (
-          <select style={{ ...inSel(T), width: 128 }}
+          <select style={{ ...inSel(T), width: 118, flexShrink: 0 }}
             value={r.category_id || ""}
             onChange={e => onUpdate({ category_id: e.target.value })}>
             <option value="">Category…</option>
@@ -453,17 +459,23 @@ function TxReviewCard({
           </select>
         )}
 
-        {/* Account cell */}
-        <div style={{ flex: 1, minWidth: 140 }}>
-          <AccountCell r={r} onUpdate={onUpdate} T={T} accounts={accounts} employeeLoans={employeeLoans} />
-        </div>
+        {/* Entity (reimburse — inline, no separate row) */}
+        {REIMBURSE_TYPES.has(r.tx_type) && (
+          <select
+            style={{ ...inSel(T), width: 90, flexShrink: 0, fontWeight: 600, color: r.entity ? "#92400e" : "#6b7280" }}
+            value={r.entity || ""}
+            onChange={e => onUpdate({ entity: e.target.value })}>
+            <option value="">Entity…</option>
+            {["Hamasa", "SDC", "Travelio"].map(e => <option key={e} value={e}>{e}</option>)}
+          </select>
+        )}
 
-        {/* FX rate (fx_exchange or foreign currency) */}
+        {/* FX rate */}
         {(r.tx_type === "fx_exchange" || isFX) && (
-          <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 3, flexShrink: 0 }}>
             <span style={{ fontSize: 10, color: T.text3, whiteSpace: "nowrap", fontFamily: "Figtree, sans-serif" }}>Rate:</span>
             <input type="number"
-              style={inInp(T, { width: 68, fontSize: 11, textAlign: "right" })}
+              style={inInp(T, { width: 60, fontSize: 11, textAlign: "right" })}
               value={r.fx_rate ?? ""}
               onChange={e => {
                 const rate = e.target.value;
@@ -474,42 +486,24 @@ function TxReviewCard({
           </div>
         )}
 
-        {/* Notes toggle */}
-        <button onClick={onToggleNotes}
-          style={ACT_BTN({ background: isNotesOpen ? "#dbeafe" : T.sur2, color: isNotesOpen ? "#3b5bdb" : T.text3, width: 24, height: 24, fontSize: 11 })}
-          title="Notes">
-          ✏️
-        </button>
-      </div>
-
-      {/* ── Entity row (reimburse only) ── */}
-      {REIMBURSE_TYPES.has(r.tx_type) && (
-        <div style={{ borderTop: "1px solid #fde68a", background: "#fffbeb", padding: "6px 12px 8px 35px", display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 10, fontWeight: 700, color: "#92400e", textTransform: "uppercase", letterSpacing: "0.04em", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
-            Entity
-          </span>
-          <select
-            style={{ ...inSel(T), flex: 1, border: "1px solid #fcd34d", fontWeight: 600, color: r.entity ? "#92400e" : "#6b7280" }}
-            value={r.entity || ""}
-            onChange={e => onUpdate({ entity: e.target.value })}>
-            <option value="">Select entity…</option>
-            {["Hamasa", "SDC", "Travelio"].map(e => <option key={e} value={e}>{e}</option>)}
-          </select>
+        {/* Account cell — TabbedAcctSelect renders [B][C][CC] tabs inline */}
+        <div style={{ flex: 1, minWidth: 120, overflow: "hidden" }}>
+          <AccountCell r={r} onUpdate={onUpdate} T={T} accounts={accounts} employeeLoans={employeeLoans} />
         </div>
-      )}
+      </div>
 
       {/* ── Validation error ── */}
       {validErr && (
-        <div style={{ borderTop: "1px solid #fecaca", background: "#fff5f5", padding: "5px 12px 5px 35px" }}>
+        <div style={{ borderTop: "1px solid #fecaca", background: "#fff5f5", padding: "5px 10px 5px 32px" }}>
           <span style={{ fontSize: 10, color: "#dc2626", fontFamily: "Figtree, sans-serif", fontWeight: 600 }}>
-            ⚠ Lengkapi data dulu: {validErr}
+            ⚠ {validErr}
           </span>
         </div>
       )}
 
-      {/* ── Duplicate info ── */}
+      {/* ── Duplicate info panel ── */}
       {rawDupLevel > 0 && !dupDismissed && r._dupEntry && (
-        <div style={{ borderTop: "1px solid #fde68a", background: "#fffbeb", padding: "5px 12px 6px 35px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ borderTop: "1px solid #fde68a", background: "#fffbeb", padding: "5px 10px 6px 32px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontSize: 10, color: "#92400e", fontFamily: "Figtree, sans-serif", flex: 1, minWidth: 0 }}>
             <span style={{ fontWeight: 600 }}>Similar to:</span>{" "}
             <strong>{r._dupEntry.description || r._dupEntry.merchant_name || "(no desc)"}</strong>
@@ -535,7 +529,7 @@ function TxReviewCard({
 
       {/* ── Cicilan cross-check (estatement only) ── */}
       {source === "estatement" && r._isInstallment && (
-        <div style={{ borderTop: "1px solid #bfdbfe", background: "#eff6ff", padding: "6px 12px 7px 35px", display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ borderTop: "1px solid #bfdbfe", background: "#eff6ff", padding: "6px 10px 7px 32px", display: "flex", alignItems: "center", gap: 8 }}>
           {r._instMatch ? (
             <span style={{ fontSize: 10, color: "#1d4ed8", fontFamily: "Figtree, sans-serif" }}>
               ✓ Tracked: {r._instMatch.description}
@@ -557,7 +551,7 @@ function TxReviewCard({
 
       {/* ── Notes ── */}
       {isNotesOpen && (
-        <div style={{ borderTop: `1px solid ${T.border}`, background: T.sur2, padding: "6px 12px 8px 35px", display: "flex", gap: 6, alignItems: "center" }}>
+        <div style={{ borderTop: `1px solid ${T.border}`, background: T.sur2, padding: "6px 10px 8px 32px", display: "flex", gap: 6, alignItems: "center" }}>
           <span style={{ fontSize: 10, fontWeight: 700, color: T.text3, textTransform: "uppercase", letterSpacing: "0.04em", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>Notes</span>
           <input
             style={{ ...inSel(T), flex: 1, border: `1px solid ${T.border}`, padding: "3px 5px" }}
@@ -594,6 +588,7 @@ export default function TransactionReviewList({
   const [notesOpen,    setNotesOpen]    = useState(new Set());
   const [confirmingId, setConfirmingId] = useState(null);
   const [confirmingAll,setConfirmingAll]= useState(false);
+  const [confirmedIds, setConfirmedIds] = useState(new Set());
 
   const toggleNotes = (id) => setNotesOpen(s => {
     const ns = new Set(s); ns.has(id) ? ns.delete(id) : ns.add(id); return ns;
@@ -601,15 +596,24 @@ export default function TransactionReviewList({
 
   const handleConfirmRow = async (row) => {
     setConfirmingId(row._id);
-    try { await onConfirmRow(row); }
-    finally { setConfirmingId(null); }
+    try {
+      await onConfirmRow(row);
+      setConfirmedIds(s => { const ns = new Set(s); ns.add(row._id); return ns; });
+    } finally { setConfirmingId(null); }
   };
 
+  // visible = not yet confirmed locally, not already-imported from server
+  const visibleRows = rows.filter(r =>
+    !confirmedIds.has(r._id) &&
+    r.status !== "imported" &&
+    r.status !== "confirmed"
+  );
+
   const handleConfirmAll = async () => {
-    const toConfirm = rows.filter(r =>
+    const toConfirm = visibleRows.filter(r =>
       selected[r._id] && !skipped?.has(r._id) && !validateRow(r, accounts)
     );
-    const invalid = rows.filter(r =>
+    const invalid = visibleRows.filter(r =>
       selected[r._id] && !skipped?.has(r._id) && validateRow(r, accounts)
     );
     if (invalid.length) showToast(`${invalid.length} baris belum lengkap`, "warning");
@@ -624,7 +628,7 @@ export default function TransactionReviewList({
     ? TX_REVIEW_TYPES
     : TX_REVIEW_TYPES.filter(t => t.value !== "cc_installment");
 
-  const activeRows    = rows.filter(r => !skipped?.has(r._id));
+  const activeRows    = visibleRows.filter(r => !skipped?.has(r._id));
   const countSelected = activeRows.filter(r => selected[r._id]).length;
   const allSelected   = activeRows.length > 0 && activeRows.every(r => selected[r._id]);
 
@@ -672,7 +676,7 @@ export default function TransactionReviewList({
 
       {/* ── Cards ── */}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {rows.map(r => (
+        {visibleRows.map(r => (
           <TxReviewCard
             key={r._id}
             r={r}
