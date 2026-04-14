@@ -1854,7 +1854,7 @@ function EStatementTab({
         amount, amount_idr, currency: r.currency || "IDR",
         tx_type: "collect_loan", from_type: "employee_loan", to_type: "account",
         from_id: null, to_id: isUUID(r.to_id) ? r.to_id : null,
-        employee_loan_id: isUUID(r.from_id) ? r.from_id : null,
+        employee_loan_id: isUUID(r.employee_loan_id) ? r.employee_loan_id : (isUUID(r.from_id) ? r.from_id : null),
         entity: "Personal", category_id: null, category_name: null,
         notes: r.notes || null,
       };
@@ -1951,9 +1951,9 @@ function EStatementTab({
         });
         if (rsErr) console.error("[reimburse_settlements saveRow]", rsErr);
       }
-      if (row.tx_type === "collect_loan" && row.from_id) {
+      if (row.tx_type === "collect_loan" && (row.employee_loan_id || row.from_id)) {
         loanPaymentsApi.recordAndIncrement(user.id, {
-          loanId: row.from_id, payDate: row.tx_date,
+          loanId: row.employee_loan_id || row.from_id, payDate: row.tx_date,
           amount: Math.abs(Number(row.amount_idr || row.amount || 0)),
           notes: row.description || "Collected via import",
         }).catch(e => console.error("[collect_loan payment saveRow]", e));
@@ -2006,9 +2006,9 @@ function EStatementTab({
           });
           if (rsErr) console.error("[reimburse_settlements saveFile]", rsErr);
         }
-        if (r.tx_type === "collect_loan" && r.from_id) {
+        if (r.tx_type === "collect_loan" && (r.employee_loan_id || r.from_id)) {
           loanPaymentsApi.recordAndIncrement(user.id, {
-            loanId: r.from_id, payDate: r.tx_date,
+            loanId: r.employee_loan_id || r.from_id, payDate: r.tx_date,
             amount: Math.abs(Number(r.amount_idr || r.amount || 0)),
             notes: r.description || "Collected via import",
           }).catch(e => console.error("[collect_loan payment saveFile]", e));

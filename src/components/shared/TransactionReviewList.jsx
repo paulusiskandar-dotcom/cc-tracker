@@ -160,6 +160,12 @@ function getAcctCfg(txType, accounts) {
 function validateRow(r, accounts) {
   const cfg = getAcctCfg(r.tx_type, accounts);
   const isUUID = v => typeof v === "string" && v.length === 36;
+  // collect_loan uses a dedicated employee_loan_id field (from_id holds the same value but may also hold a receivable account UUID from AI scan)
+  if (r.tx_type === "collect_loan") {
+    if (!isUUID(r.employee_loan_id)) return "Pilih borrower";
+    if (!isUUID(r.to_id)) return "Pilih akun tujuan";
+    return null;
+  }
   if ((cfg.mode === "from" || cfg.mode === "from_to") && !isUUID(r.from_id))
     return "Pilih akun sumber";
   if ((cfg.mode === "to"   || cfg.mode === "from_to") && !isUUID(r.to_id))
@@ -227,20 +233,20 @@ function CollectLoanCell({ r, onUpdate, T, accounts, employeeLoans }) {
 
   // Auto-detect borrower from description on first render
   useEffect(() => {
-    if (r.from_id || !r.description || !activeLoans.length) return;
+    if (r.employee_loan_id || r.from_id || !r.description || !activeLoans.length) return;
     const descLower = (r.description || "").toLowerCase();
     const match = activeLoans.find(l =>
       (l.employee_name || "").split(/\s+/).some(w => w.length >= 3 && descLower.includes(w.toLowerCase()))
     );
-    if (match) onUpdate({ from_id: match.id });
+    if (match) onUpdate({ employee_loan_id: match.id, from_id: match.id });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div style={{ display: "flex", gap: 4, alignItems: "flex-start" }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <select style={{ ...inSel(T), width: "100%" }}
-          value={r.from_id || ""}
-          onChange={e => onUpdate({ from_id: e.target.value })}>
+          value={r.employee_loan_id || ""}
+          onChange={e => onUpdate({ employee_loan_id: e.target.value, from_id: e.target.value })}>
           <option value="">Borrower…</option>
           {activeLoans.map(l => {
             const outstanding = Math.max(0, Number(l.total_amount || 0) - Number(l.paid_months || 0) * Number(l.monthly_installment || 0));

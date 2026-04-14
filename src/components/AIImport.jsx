@@ -365,7 +365,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
         fx_rate_used: isFX ? fxRate : null, amount_idr: amtIDR,
         tx_type: "collect_loan", from_type: "employee_loan", to_type: "account",
         from_id: null, to_id: r.to_id || null,
-        employee_loan_id: r.from_id || null,
+        employee_loan_id: r.employee_loan_id || r.from_id || null,
         entity: "Personal", category_id: null, category_name: null,
         notes: r.notes || "", source: "ai_scan", scan_batch_id: batchId || null,
       };
@@ -404,9 +404,9 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
         const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
         if (created) {
           setLedger(prev => [created, ...prev]); ok++; saveMerchantMapping(r);
-          if (r.tx_type === "collect_loan" && r.from_id) {
+          if (r.tx_type === "collect_loan" && (r.employee_loan_id || r.from_id)) {
             loanPaymentsApi.recordAndIncrement(user.id, {
-              loanId: r.from_id, payDate: r.tx_date,
+              loanId: r.employee_loan_id || r.from_id, payDate: r.tx_date,
               amount: Number(r.amount_idr || r.amount || 0),
               notes: r.description || "Collected via import",
             }).catch(e => console.error("[collect_loan payment]", e));
