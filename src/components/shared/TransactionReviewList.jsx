@@ -74,24 +74,27 @@ function GroupedOpts({ accounts, placeholder = "— select —", showLast4 = fal
   );
 }
 
+const REIMBURSE_ENTITY_NAMES = ["Hamasa", "SDC", "Travelio"];
+
 // ── Account filter/mode per tx_type ────────────────────────────
 function getAcctCfg(txType, accounts) {
-  const bc   = accounts.filter(a => ["bank","cash"].includes(a.type));
-  const bccc = accounts.filter(a => ["bank","cash","credit_card"].includes(a.type));
-  const cc   = accounts.filter(a => a.type === "credit_card");
-  const asset= accounts.filter(a => a.type === "asset");
-  const recv = accounts.filter(a => a.type === "receivable");
-  const liab = accounts.filter(a => a.type === "liability");
-  const all  = accounts;
+  const bc      = accounts.filter(a => ["bank","cash"].includes(a.type));
+  const bccc    = accounts.filter(a => ["bank","cash","credit_card"].includes(a.type));
+  const cc      = accounts.filter(a => a.type === "credit_card");
+  const asset    = accounts.filter(a => a.type === "asset");
+  const loanRecv = accounts.filter(a => a.type === "receivable" && !REIMBURSE_ENTITY_NAMES.includes(a.name));
+  const loanRecvWithBal = loanRecv.filter(a => Number(a.current_balance || 0) > 0);
+  const liab    = accounts.filter(a => a.type === "liability");
+  const all     = accounts;
   switch (txType) {
     case "income":        return { mode: "to",       to: bc };
     case "reimburse_in":  return { mode: "to",       to: bc };
     case "sell_asset":    return { mode: "from_to",  from: asset, to: bc };
-    case "collect_loan":  return { mode: "from_to",  from: recv,  to: bc };
+    case "collect_loan":  return { mode: "from_to",  from: loanRecvWithBal.length ? loanRecvWithBal : loanRecv, to: bc };
     case "transfer":      return { mode: "from_to",  from: all,   to: all };
     case "pay_cc":        return { mode: "from_to",  from: bc,    to: cc };
     case "buy_asset":     return { mode: "from_to",  from: bc,    to: asset };
-    case "give_loan":     return { mode: "from_to",  from: bc,    to: recv };
+    case "give_loan":     return { mode: "from_to",  from: bc,    to: loanRecv };
     case "pay_liability": return { mode: "from_to",  from: bc,    to: liab };
     case "fx_exchange":   return { mode: "from_to",  from: all,   to: all };
     case "cc_installment":return { mode: "from",     from: cc };

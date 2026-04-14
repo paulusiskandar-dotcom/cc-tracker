@@ -641,14 +641,18 @@ export default function TransactionModal({
     const banks   = bankAccs.sort(byName);
     const cash    = cashAccs.sort(byName);
     const ccs     = ccAccs.sort(byName);
-    const recv    = receivables.filter(r => r.id?.length === 36).sort(byName);
+    const loanRecv = receivables
+      .filter(r => r.id?.length === 36 && !ENTITY_OPTS.includes(r.name))
+      .sort(byName);
     const assts   = assetAccs.sort(byName);
 
     let groups = [];
     if (type === "collect_loan") {
-      groups = [{ label: "RECEIVABLE", items: recv }];
+      const withBalance = loanRecv.filter(r => Number(r.current_balance || 0) > 0);
+      groups = [{ label: "RECEIVABLE", items: withBalance.length ? withBalance : loanRecv }];
     } else if (type === "reimburse_in") {
-      groups = [{ label: "RECEIVABLE", items: recv }];
+      // reimburse_in never shows FROM (showFrom excludes it), but keep branch for safety
+      groups = [{ label: "RECEIVABLE", items: loanRecv }];
     } else if (type === "sell_asset") {
       groups = [{ label: "ASSET", items: assts }];
     } else {
@@ -974,7 +978,7 @@ export default function TransactionModal({
     // ── Give Loan ────────────────────────────────────────────────
     if (type === "give_loan") {
       const byName   = (a, b) => (a.name || "").localeCompare(b.name || "");
-      const recvList = receivables.filter(r => r.id?.length === 36).sort(byName);
+      const recvList = receivables.filter(r => r.id?.length === 36 && !ENTITY_OPTS.includes(r.name)).sort(byName);
       return (
         <>
           {DIVIDER}
