@@ -1673,14 +1673,14 @@ function EStatementTab({
         : null;
 
       let fromId, toId;
-      if (statementAccountId) {
-        // Override: debit → from selected account; credit → to selected account
-        fromId = isDebit ? statementAccountId : "";
-        toId   = !isDebit ? statementAccountId : "";
-      } else if (currencyMatchedId) {
-        // Non-IDR: use the account that holds this currency
+      if (currencyMatchedId) {
+        // Non-IDR: currency match always wins — use the account that holds this currency
         fromId = isDebit ? currencyMatchedId : "";
         toId   = !isDebit ? currencyMatchedId : "";
+      } else if (statementAccountId) {
+        // IDR or no currency match: use the user-selected statement account
+        fromId = isDebit ? statementAccountId : "";
+        toId   = !isDebit ? statementAccountId : "";
       } else {
         // Fallback: try card_last4 matching then first CC/bank
         const matchedAcc = last4
