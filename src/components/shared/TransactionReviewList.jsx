@@ -348,11 +348,11 @@ function TxReviewCard({
   const cardBg = isSkipped ? T.sur2
                : dupLevel === 3 ? "#FCEBEB"
                : dupLevel === 2 ? "#FAEEDA"
-               : dupLevel === 1 ? "#EAF3DE"
+               : dupLevel === 1 ? "#FAEEDA"
                : T.surface;
   const cardBorder = dupLevel === 3 ? "1.5px solid #E24B4A"
                    : dupLevel === 2 ? "1.5px solid #EF9F27"
-                   : dupLevel === 1 ? "1.5px solid #639922"
+                   : dupLevel === 1 ? "1.5px solid #BA7517"
                    : r.flagged    ? "1.5px solid #f97316"
                    : `1px solid ${T.border}`;
 
@@ -403,8 +403,8 @@ function TxReviewCard({
         {/* Inline badges next to description */}
         {r._invalidAmount && <span style={BADGE("#fee2e2","#dc2626")}>Amount!</span>}
         {dupLevel === 3 && <span style={BADGE("#F7C1C1","#791F1F")}>DUP</span>}
-        {dupLevel === 2 && <span style={BADGE("#FAC775","#633806")}>⚠ Dup?</span>}
-        {dupLevel === 1 && <span style={BADGE("#C0DD97","#27500A")}>Suspicious</span>}
+        {dupLevel === 2 && <span style={BADGE("#FAC775","#633806")}>POSSIBLE DUP</span>}
+        {dupLevel === 1 && <span style={BADGE("#FAEEDA","#854F0B")}>SUSPICIOUS</span>}
         {r.flagged && dupLevel === 0 && <span style={BADGE("#fff7ed","#f97316")}>⚠ Reimb</span>}
         {source === "estatement" && r._isInstallment && (
           <span style={BADGE("#dbeafe","#1d4ed8")}>
@@ -521,7 +521,7 @@ function TxReviewCard({
         const DUP_THEME = {
           3: { bg: "#FCEBEB", border: "#E24B4A", text: "#A32D2D", pillBg: "#F7C1C1", pillText: "#791F1F", title: "High confidence duplicate — not imported by default" },
           2: { bg: "#FAEEDA", border: "#EF9F27", text: "#854F0B", pillBg: "#FAC775", pillText: "#633806", title: "Possible duplicate — please verify before importing" },
-          1: { bg: "#EAF3DE", border: "#639922", text: "#3B6D11", pillBg: "#C0DD97", pillText: "#27500A", title: "Suspicious — same amount found in different account" },
+          1: { bg: "#FAEEDA", border: "#FAC775", text: "#854F0B", pillBg: "#FAC775", pillText: "#633806", title: "Suspicious — same amount found in different account" },
         };
         const dt = DUP_THEME[dupLevel];
         const matchAcc = accounts.find(a => a.id === (r._dupEntry.from_id || r._dupEntry.from_account_id));
