@@ -757,7 +757,7 @@ function extractJSON(text) {
 // ─── SCAN BATCHES ─────────────────────────────────────────────
 export const scanApi = {
   // Scan a file (image/PDF) via AI proxy → returns array of transaction objects
-  scan: async (userId, file, { accounts = [], employeeLoans = [], bankHint = "" } = {}) => {
+  scan: async (userId, file, { accounts = [], employeeLoans = [], bankHint = "", model = "claude-haiku-4-5-20251001" } = {}) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = async (e) => {
@@ -872,7 +872,7 @@ Omit from_account_id and to_account_id unless you can match them to known accoun
               method: "POST",
               headers: { "Content-Type": "application/json", "apikey": key, "Authorization": `Bearer ${key}` },
               body: JSON.stringify({
-                model:      "claude-sonnet-4-20250514",
+                model:      model,
                 max_tokens: 32000,
                 messages: [{ role: "user", content: contentParts }],
               }),

@@ -72,6 +72,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
 
   const [scanBankId,  setScanBankId]  = useState("");
   const [scanning,    setScanning]    = useState(false);
+  const [retrySonnet, setRetrySonnet] = useState(false);
   const [results,     setResults]     = useState([]);
   const [selected,    setSelected]    = useState({});
   const [importing,   setImporting]   = useState(false);
@@ -351,6 +352,32 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
     setScanning(false);
   };
 
+  // ── Retry with Sonnet ────────────────────────────────────────
+  const handleRetrySonnet = async () => {
+    if (!batchFilePath) { showToast("File not found for re-scan", "error"); return; }
+    setRetrySonnet(true);
+    setResults([]);
+    setSelected({});
+    try {
+      const { data: blob, error } = await supabase.storage.from("ai-scan-uploads").download(batchFilePath);
+      if (error || !blob) throw new Error("Could not download file");
+      const file = new File([blob], "rescan.jpg", { type: blob.type || "image/jpeg" });
+      const bankAccR  = scanBankId ? bankAccounts.find(a => a.id === scanBankId) : null;
+      const bankHintR = bankAccR?.bank_name || "";
+      const parsed = await scanApi.scan(user.id, file, { accounts, bankHint: bankHintR, model: "claude-sonnet-4-20250514" });
+      let items = buildRows(parsed);
+      if (skippedFPs.size > 0) {
+        items = items.filter(r => !skippedFPs.has(`${r.tx_date}|${r.amount_idr}|${(r.description || "").toLowerCase().trim()}`));
+      }
+      if (batchId) scanApi.updateBatch(batchId, { ai_raw_result: parsed, total_detected: items.length, processed_at: new Date().toISOString() }).catch(() => {});
+      setResults(items);
+      const sel = {};
+      items.forEach(r => { sel[r._id] = true; });
+      setSelected(sel);
+    } catch (e) { showToast(e.message || "Re-scan failed", "error"); }
+    setRetrySonnet(false);
+  };
+
   // ── Build ledger entry ────────────────────────────────────────
   const buildEntry = (r) => {
     const isFX    = r.currency && r.currency !== "IDR";
@@ -559,6 +586,8 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
             T={T}
             busy={importing}
             onRefreshScan={batchFilePath ? handleRefreshScan : null}
+            onRetrySonnet={batchFilePath ? handleRetrySonnet : null}
+            retrySonnet={retrySonnet}
             onClearAll={handleClearAll}
           />
         </div>
