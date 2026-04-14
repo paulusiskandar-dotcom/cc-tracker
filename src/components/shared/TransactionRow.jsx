@@ -115,7 +115,10 @@ export default function TransactionRow({
 
   const color  = amountColor(entry.tx_type);
   const prefix = amountPrefix(entry.tx_type);
-  const amount = fmtIDR(entry.amount_idr || entry.amount);
+  const entryCurrency = entry.currency && entry.currency !== "IDR" ? entry.currency : null;
+  const amount = entryCurrency
+    ? fmtCur(entry.amount || 0, entryCurrency)
+    : fmtIDR(entry.amount_idr || entry.amount);
 
   const iconSize = compact ? 32 : 36;
   // indent = icon width + gap (12) — no chevron anymore

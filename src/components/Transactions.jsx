@@ -383,7 +383,8 @@ function TxRow({ entry: e, accounts, categories = [], onEdit, onDelete }) {
 
   const fromAcc = accounts.find(a => a.id === e.from_id);
   const toAcc   = accounts.find(a => a.id === e.to_id);
-  const amt     = Number(e.amount_idr || e.amount || 0);
+  const entryCurrency = e.currency && e.currency !== "IDR" ? e.currency : null;
+  const amt     = entryCurrency ? Number(e.amount || 0) : Number(e.amount_idr || e.amount || 0);
 
   const isOut    = ["expense","pay_cc","buy_asset","pay_liability","reimburse_out","give_loan"].includes(e.tx_type);
   const isIn     = ["income","sell_asset","reimburse_in","collect_loan"].includes(e.tx_type);
@@ -539,7 +540,7 @@ function TxRow({ entry: e, accounts, categories = [], onEdit, onDelete }) {
           color: amtColor, fontFamily: "Figtree, sans-serif",
           flexShrink: 0, textAlign: "right",
         }}>
-          {prefix}{fmtIDR(amt)}
+          {prefix}{entryCurrency ? fmtCur(amt, entryCurrency) : fmtIDR(amt)}
         </div>
 
         {/* Actions */}

@@ -375,12 +375,10 @@ export default function BankStatement({
           {loading ? "Loading…" : "Apply"}
         </button>
 
-        {/* Currency tabs — only for multicurrency accounts with loaded currencies */}
-        {selectedAccount?.is_multicurrency && acctCurrencies.length > 0 && (
+        {/* Currency tabs — only for multicurrency accounts */}
+        {selectedAccount?.is_multicurrency && (
           <div style={{ width: "100%", display: "flex", gap: 4, flexWrap: "wrap", paddingTop: 2 }}>
-            {acctCurrencies
-              .map(c => c.currency)
-              .sort((a, b) => (a === "IDR" ? -1 : b === "IDR" ? 1 : a.localeCompare(b)))
+            {["IDR", ...acctCurrencies.map(c => c.currency).filter(c => c !== "IDR").sort()]
               .map(cur => {
                 const active = activeCurrency === cur;
                 return (
