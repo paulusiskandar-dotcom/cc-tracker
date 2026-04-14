@@ -16,6 +16,7 @@ export const CURRENCIES = [
   { code: "CNY", symbol: "¥",   rate: 2250,   flag: "🇨🇳", name: "Chinese Yuan"       },
   { code: "THB", symbol: "฿",   rate: 470,    flag: "🇹🇭", name: "Thai Baht"          },
   { code: "KRW", symbol: "₩",   rate: 12,     flag: "🇰🇷", name: "Korean Won"         },
+  { code: "HKD", symbol: "HK$", rate: 2100,   flag: "🇭🇰", name: "Hong Kong Dollar"   },
 ];
 
 // ─── ENTITIES ─────────────────────────────────────────────────

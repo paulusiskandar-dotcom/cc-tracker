@@ -281,7 +281,7 @@ export default function Accounts({
       if (formType === "bank" && form.is_multicurrency && savedAccount?.id && form.fxBalances?.length) {
         const upserts = form.fxBalances
           .filter(r => r.currency && r.balance !== "" && r.balance !== null)
-          .map(r => accountCurrenciesApi.upsert(savedAccount.id, r.currency, Number(r.balance || 0)));
+          .map(r => accountCurrenciesApi.upsert(savedAccount.id, r.currency, Number(r.balance || 0), undefined, user.id));
         await Promise.all(upserts);
         const newRows = await accountCurrenciesApi.getForAccount(savedAccount.id);
         setAccountCurrencies(prev => [

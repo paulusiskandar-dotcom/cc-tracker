@@ -488,7 +488,7 @@ export function TxForm({ form, set, fromOptions, toOptions, accounts, categories
             }}>
               {allCurrencies.length > 0
                 ? allCurrencies.map(c => <option key={c.code} value={c.code}>{c.flag} {c.code}</option>)
-                : ["IDR","USD","SGD","EUR","GBP","AUD","JPY","MYR"].map(c => <option key={c} value={c}>{c}</option>)
+                : ["IDR","USD","SGD","EUR","GBP","AUD","JPY","MYR","HKD"].map(c => <option key={c} value={c}>{c}</option>)
               }
             </select>
           </Field>

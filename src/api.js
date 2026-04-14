@@ -557,11 +557,16 @@ export const accountCurrenciesApi = {
     if (error) throw new Error(error.message);
     return data || [];
   },
-  upsert: async (accountId, currency, balance, initialBalance) => {
+  upsert: async (accountId, currency, balance, initialBalance, userId) => {
+    let uid = userId;
+    if (!uid) {
+      const { data: { user } } = await supabase.auth.getUser();
+      uid = user?.id;
+    }
     const { error } = await supabase
       .from("account_currencies")
       .upsert(
-        { account_id: accountId, currency, balance, initial_balance: initialBalance ?? balance },
+        { account_id: accountId, currency, balance, initial_balance: initialBalance ?? balance, user_id: uid },
         { onConflict: "account_id,currency" }
       );
     if (error) throw new Error(error.message);

@@ -199,7 +199,7 @@ function Finance({ user, signOut }) {
   const [merchantMaps,   setMerchantMaps]   = useState([]);
   const [fxRates,        setFxRates]        = useState({
     USD: 16400, SGD: 12200, MYR: 3700, JPY: 110, EUR: 17800, AUD: 10500,
-    GBP: 21200, CHF: 18500, CNY: 2250, THB: 470, KRW: 12,
+    GBP: 21200, CHF: 18500, CNY: 2250, THB: 470, KRW: 12, HKD: 2100,
   });
   const [pendingSyncs,          setPendingSyncs]          = useState([]);
   const [reimburseSettlements,  setReimburseSettlements]  = useState([]);

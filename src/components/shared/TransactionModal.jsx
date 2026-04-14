@@ -858,7 +858,7 @@ export default function TransactionModal({
           <select value={form.currency || "IDR"} onChange={e => set("currency", e.target.value)} style={{ ...SEL, padding: "0 8px", fontSize: 13, fontWeight: 600 }}>
             {allCurrencies.length > 0
               ? allCurrencies.map(c => <option key={c.code} value={c.code}>{c.flag ? `${c.flag} ` : ""}{c.code}</option>)
-              : ["IDR","USD","SGD","EUR","GBP","AUD","JPY","MYR"].map(c => <option key={c} value={c}>{c}</option>)
+              : ["IDR","USD","SGD","EUR","GBP","AUD","JPY","MYR","HKD"].map(c => <option key={c} value={c}>{c}</option>)
             }
           </select>
         </Field>

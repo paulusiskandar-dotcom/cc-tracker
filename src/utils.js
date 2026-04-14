@@ -15,7 +15,7 @@ export const fmtIDR = (n, short = false) => {
 
 export const fmtCur = (amount, currency) => {
   if (!currency || currency === "IDR") return fmtIDR(amount);
-  const symbols = { USD: "$", SGD: "S$", MYR: "RM", JPY: "¥", EUR: "€", AUD: "A$", GBP: "£", CHF: "Fr", CNY: "¥", THB: "฿", KRW: "₩" };
+  const symbols = { USD: "$", SGD: "S$", MYR: "RM", JPY: "¥", EUR: "€", AUD: "A$", GBP: "£", CHF: "Fr", CNY: "¥", THB: "฿", KRW: "₩", HKD: "HK$" };
   const sym = symbols[currency] || currency + " ";
   const num = Number(amount || 0);
   return sym + num.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
