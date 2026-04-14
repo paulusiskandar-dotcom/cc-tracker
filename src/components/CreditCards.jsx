@@ -64,7 +64,7 @@ export default function CreditCards({
   const [deleteInstId, setDeleteInstId] = useState(null);
 
   // Edit card state
-  const emptyEditCardForm = () => ({ name: "", bank_name: "", last4: "", network: "", card_limit: "", statement_day: "", due_day: "", color: "" });
+  const emptyEditCardForm = () => ({ name: "", bank_name: "", last4: "", network: "", card_limit: "", statement_day: "", due_day: "", color: "", shared_limit_on: false, shared_limit: "", is_limit_group_master: false });
   const [editCardModal, setEditCardModal] = useState(false);
   const [editCardAcc,   setEditCardAcc]   = useState(null);
   const [editCardForm,  setEditCardForm]  = useState(emptyEditCardForm());
@@ -326,14 +326,17 @@ export default function CreditCards({
   const openEditCard = (cc) => {
     setEditCardAcc(cc);
     setEditCardForm({
-      name:          cc.name          || "",
-      bank_name:     cc.bank_name     || "",
-      last4:         cc.last4         || "",
-      network:       cc.network       || "",
-      card_limit:    cc.card_limit    != null ? String(cc.card_limit)    : "",
-      statement_day: cc.statement_day != null ? String(cc.statement_day) : "",
-      due_day:       cc.due_day       != null ? String(cc.due_day)       : "",
-      color:         cc.color         || "",
+      name:                  cc.name          || "",
+      bank_name:             cc.bank_name     || "",
+      last4:                 cc.last4         || "",
+      network:               cc.network       || "",
+      card_limit:            cc.card_limit    != null ? String(cc.card_limit)    : "",
+      statement_day:         cc.statement_day != null ? String(cc.statement_day) : "",
+      due_day:               cc.due_day       != null ? String(cc.due_day)       : "",
+      color:                 cc.color         || "",
+      shared_limit_on:       !!(cc.shared_limit_group_id || Number(cc.shared_limit || 0) > 0),
+      shared_limit:          cc.shared_limit  != null ? String(cc.shared_limit)  : "",
+      is_limit_group_master: cc.is_limit_group_master || false,
     });
     setEditCardModal(true);
   };
@@ -344,14 +347,17 @@ export default function CreditCards({
     try {
       const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? null : n; };
       const data = {
-        name:          editCardForm.name.trim(),
-        bank_name:     editCardForm.bank_name     || null,
-        last4:         editCardForm.last4          || null,
-        network:       editCardForm.network        || null,
-        card_limit:    sn(editCardForm.card_limit),
-        statement_day: sn(editCardForm.statement_day),
-        due_day:       sn(editCardForm.due_day),
-        color:         editCardForm.color          || null,
+        name:                  editCardForm.name.trim(),
+        bank_name:             editCardForm.bank_name     || null,
+        last4:                 editCardForm.last4          || null,
+        network:               editCardForm.network        || null,
+        card_limit:            sn(editCardForm.card_limit),
+        statement_day:         sn(editCardForm.statement_day),
+        due_day:               sn(editCardForm.due_day),
+        color:                 editCardForm.color          || null,
+        shared_limit:          editCardForm.shared_limit_on ? sn(editCardForm.shared_limit) : null,
+        is_limit_group_master: editCardForm.shared_limit_on ? (editCardForm.is_limit_group_master || false) : false,
+        // shared_limit_group_id is not touched — grouping is managed separately
       };
       const updated = await accountsApi.update(editCardAcc.id, data);
       setAccounts(p => p.map(a => a.id === editCardAcc.id ? { ...a, ...updated } : a));
@@ -952,6 +958,52 @@ export default function CreditCards({
                 style={{ width: "100%", height: 44, padding: "0 12px", border: "1.5px solid #e5e7eb", borderRadius: 10, fontFamily: "Figtree, sans-serif", fontSize: 14, fontWeight: 700, color: "#111827", background: "#fff", outline: "none", boxSizing: "border-box" }} />
             </Field>
           </FormRow>
+
+          {/* ── Shared Limit ── */}
+          <Field label="Shared Limit">
+            <button type="button"
+              onClick={() => setEC("shared_limit_on", !editCardForm.shared_limit_on)}
+              style={{
+                height: 28, padding: "0 14px", borderRadius: 20, border: "none", cursor: "pointer",
+                fontFamily: "Figtree, sans-serif", fontSize: 12, fontWeight: 700,
+                background: editCardForm.shared_limit_on ? "#3b5bdb" : "#e5e7eb",
+                color: editCardForm.shared_limit_on ? "#fff" : "#6b7280",
+              }}>
+              {editCardForm.shared_limit_on ? "ON" : "OFF"}
+            </button>
+          </Field>
+          {editCardForm.shared_limit_on && (<>
+            <AmountInput label="Shared Limit Amount" value={editCardForm.shared_limit} onChange={v => setEC("shared_limit", v)} currency="IDR" />
+            <Field label="Is Master Card">
+              <button type="button"
+                onClick={() => setEC("is_limit_group_master", !editCardForm.is_limit_group_master)}
+                style={{
+                  height: 28, padding: "0 14px", borderRadius: 20, border: "none", cursor: "pointer",
+                  fontFamily: "Figtree, sans-serif", fontSize: 12, fontWeight: 700,
+                  background: editCardForm.is_limit_group_master ? "#059669" : "#e5e7eb",
+                  color: editCardForm.is_limit_group_master ? "#fff" : "#6b7280",
+                }}>
+                {editCardForm.is_limit_group_master ? "Yes — Master" : "No"}
+              </button>
+            </Field>
+            {editCardAcc?.shared_limit_group_id && groupMap[editCardAcc.shared_limit_group_id] && (
+              <Field label="Shared Group">
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {groupMap[editCardAcc.shared_limit_group_id].members.map(m => (
+                    <span key={m.id} style={{
+                      fontSize: 11, fontWeight: 600, padding: "3px 10px", borderRadius: 20,
+                      background: m.is_limit_group_master ? "#dbeafe" : "#f3f4f6",
+                      color: m.is_limit_group_master ? "#1d4ed8" : "#374151",
+                      fontFamily: "Figtree, sans-serif",
+                    }}>
+                      {m.name}{m.is_limit_group_master ? " ★" : ""}
+                    </span>
+                  ))}
+                </div>
+              </Field>
+            )}
+          </>)}
+
           <Field label="Card Color">
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", paddingTop: 4 }}>
               {CARD_PALETTE.map(c => (
