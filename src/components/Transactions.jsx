@@ -367,9 +367,11 @@ function getTxExpandedContent(e, fromAcc, toAcc) {
     case "reimburse_in":
       return { label: fromAcc?.name || "?", amount: `-${fmtIDR(amtIDR)}`, positive: false };
     case "give_loan":
-      return { label: toAcc?.name || "?", amount: `+${fmtIDR(amtIDR)}`, positive: true };
+      // from_id = account, to_id = null (employee_loan). Show the source account.
+      return { label: fromAcc?.name || "Loan", amount: `+${fmtIDR(amtIDR)}`, positive: true };
     case "collect_loan":
-      return { label: fromAcc?.name || "?", amount: `-${fmtIDR(amtIDR)}`, positive: false };
+      // from_id = null (employee_loan), to_id = account. Show the destination account.
+      return { label: toAcc?.name || "Repayment", amount: `-${fmtIDR(amtIDR)}`, positive: false };
     case "pay_liability":
       return { label: toAcc?.name || "?", amount: `-${fmtIDR(amtIDR)}`, positive: false };
     default:

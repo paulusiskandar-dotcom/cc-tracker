@@ -38,7 +38,7 @@ export const TX_REVIEW_TYPES = [
 ];
 
 const NO_CAT_TYPES    = new Set(["transfer","pay_cc","give_loan","collect_loan","fx_exchange",
-                                  "reimburse_in","buy_asset","sell_asset","pay_liability","cc_installment"]);
+                                  "reimburse_in","reimburse_out","buy_asset","sell_asset","pay_liability","cc_installment"]);
 const REIMBURSE_TYPES = new Set(["reimburse_in","reimburse_out"]);
 const INCOME_LIKE     = new Set(["income","collect_loan","reimburse_in","sell_asset"]);
 
@@ -112,7 +112,8 @@ function validateRow(r, accounts) {
     return "Pilih akun tujuan";
   if (!NO_CAT_TYPES.has(r.tx_type) && !r.category_id)
     return "Pilih kategori";
-  if (REIMBURSE_TYPES.has(r.tx_type) && !r.entity)
+  // entity required only for reimburse_in (reimburse_out entity is optional)
+  if (r.tx_type === "reimburse_in" && !r.entity)
     return "Pilih entity reimburse";
   if (r.tx_type === "fx_exchange" && (!r.fx_rate || Number(r.fx_rate) <= 0))
     return "Isi FX rate";
