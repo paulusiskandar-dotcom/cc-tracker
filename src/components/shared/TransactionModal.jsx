@@ -237,7 +237,9 @@ export default function TransactionModal({
   const [cicilan, setCicilan]   = useState(false);
   const [newBorrowerName,    setNewBorrowerName]    = useState("");
   const [newMonthlyInstall,  setNewMonthlyInstall]  = useState("");
+  const [newTotalMonths,     setNewTotalMonths]     = useState("");
   const [creatingBorrower,   setCreatingBorrower]   = useState(false);
+  const [loanAccTab,         setLoanAccTab]         = useState("bank");
 
   // ── Reset on open ──────────────────────────────────────────
   useEffect(() => {
@@ -245,7 +247,9 @@ export default function TransactionModal({
 
     setNewBorrowerName("");
     setNewMonthlyInstall("");
+    setNewTotalMonths("");
     setCreatingBorrower(false);
+    setLoanAccTab("bank");
 
     if ((mode === "edit" || mode === "confirm") && initialData) {
       const txType = initialData.tx_type || "expense";
@@ -300,6 +304,7 @@ export default function TransactionModal({
       entity: txType === "reimburse_out" ? (f.entity || "Hamasa") : "Personal",
     }));
     if (!cicilan) setCicilan(false);
+    setLoanAccTab("bank");
   };
 
   const handleGroupChange = (g) => {
@@ -419,10 +424,15 @@ export default function TransactionModal({
 
         if (creatingBorrower) {
           if (!newBorrowerName.trim()) { showToast("Employee name is required", "error"); setSaving(false); return; }
-          const newLoan = await employeeLoanApi.create(user.id, {
+          if (!sn(newMonthlyInstall))  { showToast("Monthly installment is required", "error"); setSaving(false); return; }
+          if (!sn(newTotalMonths))     { showToast("Total months is required", "error"); setSaving(false); return; }
+          const monthly  = sn(newMonthlyInstall);
+          const months   = sn(newTotalMonths);
+          const totalAmt = monthly * months;
+          const newLoan  = await employeeLoanApi.create(user.id, {
             employee_name:        newBorrowerName.trim(),
-            total_amount:         amt,
-            monthly_installment:  sn(newMonthlyInstall) || 0,
+            total_amount:         totalAmt,
+            monthly_installment:  monthly,
             start_date:           form.tx_date,
             status:               "active",
             paid_months:          0,
@@ -705,28 +715,6 @@ export default function TransactionModal({
     const ccs     = ccAccs.sort(byName);
     const assts = assetAccs.sort(byName);
 
-    // collect_loan: render employee_loans dropdown directly (not via optgroup)
-    if (type === "collect_loan") {
-      const activeLoans = [...employeeLoans]
-        .filter(l => l.status !== "settled")
-        .sort((a, b) => (a.employee_name || "").localeCompare(b.employee_name || ""));
-      return (
-        <Field label={label}>
-          <select value={form.from_id || ""} onChange={e => set("from_id", e.target.value || null)} style={SEL}>
-            <option value="">Select borrower…</option>
-            {activeLoans.map(l => {
-              const outstanding = Math.max(0, Number(l.total_amount || 0) - Number(l.paid_months || 0) * Number(l.monthly_installment || 0));
-              return (
-                <option key={l.id} value={l.id}>
-                  {l.employee_name}{outstanding > 0 ? ` · ${fmtIDR(outstanding)} outstanding` : ""}
-                </option>
-              );
-            })}
-          </select>
-        </Field>
-      );
-    }
-
     let groups = [];
     if (type === "sell_asset") {
       groups = [{ label: "ASSET", items: assts }];
@@ -787,9 +775,6 @@ export default function TransactionModal({
                 let extra = "";
                 if (type === "pay_cc" || g.label === "CREDIT CARD") {
                   extra = (a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : "";
-                } else if (type === "give_loan") {
-                  const bal = Number(a.current_balance || 0);
-                  if (bal > 0) extra = ` · ${fmtIDR(bal)} outstanding`;
                 } else {
                   extra = a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : "";
                 }
@@ -1049,21 +1034,44 @@ export default function TransactionModal({
 
     // ── Give Loan ────────────────────────────────────────────────
     if (type === "give_loan") {
-      const loanList = [...employeeLoans]
+      const loanFromAccs = loanAccTab === "bank" ? bankAccs : cashAccs;
+      const loanList     = [...employeeLoans]
         .filter(l => l.status !== "settled")
         .sort((a, b) => (a.employee_name || "").localeCompare(b.employee_name || ""));
+      const prevMonthly  = sn(newMonthlyInstall);
+      const prevMonths   = sn(newTotalMonths);
+      const prevTotal    = prevMonthly > 0 && prevMonths > 0 ? prevMonthly * prevMonths : null;
+      const pill = (active, onClick, label, color = "#3b5bdb", bg = "#eff3ff") => (
+        <button type="button" onClick={onClick} style={{
+          flex: 1, height: 34, borderRadius: 8, border: "1.5px solid",
+          borderColor: active ? color : "#e5e7eb",
+          background:  active ? bg    : "#fff",
+          color:       active ? color : "#6b7280",
+          fontFamily: FF, fontSize: 12, fontWeight: 600, cursor: "pointer",
+        }}>{label}</button>
+      );
       return (
         <>
           {DIVIDER}
-          {/* 3. FROM */}
-          {renderFromSelect("From Account")}
-          {/* 4. BORROWER */}
+          {/* 3. FROM ACCOUNT — Bank / Cash tabs */}
+          <Field label="From Account *">
+            <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+              {pill(loanAccTab === "bank", () => { setLoanAccTab("bank"); set("from_id", null); }, "Bank")}
+              {pill(loanAccTab === "cash", () => { setLoanAccTab("cash"); set("from_id", null); }, "Cash")}
+            </div>
+            <select value={form.from_id || ""} onChange={e => set("from_id", e.target.value || null)} style={SEL}>
+              <option value="">Select account…</option>
+              {loanFromAccs.map(a => <option key={a.id} value={a.id}>{a.name}{a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : ""}</option>)}
+            </select>
+          </Field>
+          {/* 4. BORROWER — Existing / New toggle */}
           <Field label="Borrower *">
+            <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+              {pill(!creatingBorrower, () => { setCreatingBorrower(false); setNewBorrowerName(""); setNewMonthlyInstall(""); setNewTotalMonths(""); set("to_id", null); }, "Existing Borrower")}
+              {pill(creatingBorrower,  () => { setCreatingBorrower(true); set("to_id", null); }, "New Borrower")}
+            </div>
             {!creatingBorrower ? (
-              <select value={form.to_id || ""} onChange={e => {
-                if (e.target.value === "__new__") { setCreatingBorrower(true); set("to_id", null); }
-                else set("to_id", e.target.value || null);
-              }} style={SEL}>
+              <select value={form.to_id || ""} onChange={e => set("to_id", e.target.value || null)} style={SEL}>
                 <option value="">Select borrower…</option>
                 {loanList.map(l => {
                   const outstanding = Math.max(0, Number(l.total_amount || 0) - Number(l.paid_months || 0) * Number(l.monthly_installment || 0));
@@ -1073,41 +1081,108 @@ export default function TransactionModal({
                     </option>
                   );
                 })}
-                <option value="__new__">+ Create New</option>
               </select>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input autoFocus type="text" placeholder="Employee name…"
-                    value={newBorrowerName} onChange={e => setNewBorrowerName(e.target.value)}
-                    style={{ ...SEL, flex: 1 }} />
-                  <button type="button"
-                    onClick={() => { setCreatingBorrower(false); setNewBorrowerName(""); setNewMonthlyInstall(""); set("to_id", null); }}
-                    style={{ height: 44, padding: "0 12px", borderRadius: 10, border: "1.5px solid #e5e7eb", background: "#fff", color: "#6b7280", fontFamily: FF, fontSize: 13, cursor: "pointer" }}>
-                    ✕
-                  </button>
-                </div>
-                <input type="number" min="0" placeholder="Monthly installment (Rp)…"
-                  value={newMonthlyInstall} onChange={e => setNewMonthlyInstall(e.target.value)}
+                <input autoFocus type="text" placeholder="Employee name *"
+                  value={newBorrowerName} onChange={e => setNewBorrowerName(e.target.value)}
                   style={{ ...SEL }} />
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input type="number" min="0" placeholder="Monthly installment (Rp) *"
+                    value={newMonthlyInstall} onChange={e => setNewMonthlyInstall(e.target.value)}
+                    style={{ ...SEL, flex: 1 }} />
+                  <input type="number" min="1" placeholder="Total months *"
+                    value={newTotalMonths} onChange={e => setNewTotalMonths(e.target.value)}
+                    style={{ ...SEL, width: 110, flexShrink: 0 }} />
+                </div>
+                {prevTotal !== null && (
+                  <div style={{ background: "#eff3ff", border: "1px solid #c7d2fe", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#3b5bdb", fontWeight: 600, fontFamily: FF }}>
+                    {fmtIDR(prevMonthly)}/mo × {prevMonths} months = {fmtIDR(prevTotal)} total
+                  </div>
+                )}
               </div>
             )}
           </Field>
           {/* 5. Date + Currency */}
           {dateCurrencyRow}
           {/* 6. Amount */}
-          <AmountInput label="Amount" value={form.amount} onChange={v => set("amount", v)} />
-          {/* 7. Merchant / Description */}
-          <Input label="Merchant / Description (optional)" value={form.description || ""} onChange={e => set("description", e.target.value)} placeholder="Optional" />
+          <AmountInput label="Amount *" value={form.amount} onChange={v => set("amount", v)} />
+          {/* 7. Description */}
+          <Input label="Description (optional)" value={form.description || ""} onChange={e => set("description", e.target.value)} placeholder="Optional" />
           {/* 8. Notes */}
           {notesField}
         </>
       );
     }
 
-    // ── General (expense, income, transfer, pay_cc, pay_liability, reimburse_out, reimburse_in, collect_loan) ──
+    // ── Collect Loan ─────────────────────────────────────────────
+    if (type === "collect_loan") {
+      const activeLoans = [...employeeLoans]
+        .filter(l => l.status !== "settled")
+        .sort((a, b) => (a.employee_name || "").localeCompare(b.employee_name || ""));
+      const loanToAccs  = loanAccTab === "bank" ? bankAccs : cashAccs;
+      const pill = (active, onClick, label) => (
+        <button type="button" onClick={onClick} style={{
+          flex: 1, height: 34, borderRadius: 8, border: "1.5px solid",
+          borderColor: active ? "#059669" : "#e5e7eb",
+          background:  active ? "#f0fdf4" : "#fff",
+          color:       active ? "#059669" : "#6b7280",
+          fontFamily: FF, fontSize: 12, fontWeight: 600, cursor: "pointer",
+        }}>{label}</button>
+      );
+      return (
+        <>
+          {DIVIDER}
+          {/* 3. BORROWER */}
+          <Field label="Borrower *">
+            <select value={form.from_id || ""} onChange={e => {
+              const id = e.target.value || null;
+              set("from_id", id);
+              if (id) {
+                const loan = employeeLoans.find(l => l.id === id);
+                if (loan?.monthly_installment) set("amount", String(loan.monthly_installment));
+              } else {
+                set("amount", "");
+              }
+            }} style={SEL}>
+              <option value="">Select borrower…</option>
+              {activeLoans.map(l => {
+                const outstanding = Math.max(0, Number(l.total_amount || 0) - Number(l.paid_months || 0) * Number(l.monthly_installment || 0));
+                const monthly     = Number(l.monthly_installment || 0);
+                return (
+                  <option key={l.id} value={l.id}>
+                    {l.employee_name}
+                    {outstanding > 0 ? ` · ${fmtIDR(outstanding)} outstanding` : ""}
+                    {monthly > 0 ? ` · ${fmtIDR(monthly)}/mo` : ""}
+                  </option>
+                );
+              })}
+            </select>
+          </Field>
+          {/* 4. TO ACCOUNT — Bank / Cash tabs */}
+          <Field label="To Account *">
+            <div style={{ display: "flex", gap: 4, marginBottom: 6 }}>
+              {pill(loanAccTab === "bank", () => { setLoanAccTab("bank"); set("to_id", null); }, "Bank")}
+              {pill(loanAccTab === "cash", () => { setLoanAccTab("cash"); set("to_id", null); }, "Cash")}
+            </div>
+            <select value={form.to_id || ""} onChange={e => set("to_id", e.target.value || null)} style={SEL}>
+              <option value="">Select account…</option>
+              {loanToAccs.map(a => <option key={a.id} value={a.id}>{a.name}{a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : ""}</option>)}
+            </select>
+          </Field>
+          {/* 5. Date + Currency */}
+          {dateCurrencyRow}
+          {/* 6. Amount (pre-filled from monthly_installment, editable) */}
+          <AmountInput label="Amount *" value={form.amount} onChange={v => set("amount", v)} />
+          {/* 7. Notes */}
+          {notesField}
+        </>
+      );
+    }
+
+    // ── General (expense, income, transfer, pay_cc, pay_liability, reimburse_out, reimburse_in) ──
     const showFrom    = !["income", "reimburse_in"].includes(type);
-    const showTo      = ["income","transfer","pay_cc","pay_liability","collect_loan","reimburse_in"].includes(type);
+    const showTo      = ["income","transfer","pay_cc","pay_liability","reimburse_in"].includes(type);
     const showCat     = type === "expense";
     const showEntity  = ["reimburse_out","reimburse_in"].includes(type);
     const showIncSrc  = type === "income" && incSrcOpts.length > 0;
@@ -1117,12 +1192,11 @@ export default function TransactionModal({
       <>
         {DIVIDER}
         {/* 3. FROM */}
-        {showFrom && renderFromSelect(type === "collect_loan" ? "Borrower" : "From Account")}
+        {showFrom && renderFromSelect("From Account")}
         {/* 4. TO */}
         {showTo && renderToSelect(
           type === "pay_cc"        ? "Credit Card" :
           type === "pay_liability" ? "Liability"   :
-          type === "collect_loan"  ? "To Account"  :
           "To Account"
         )}
         {/* 5. Date + Currency */}
