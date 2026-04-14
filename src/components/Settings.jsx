@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import PILogo from "./PILogo";
-import { fxApi, merchantApi, settingsApi, recurringApi, gmailApi, accountsApi, installmentsApi, ledgerApi, getTxFromToTypes } from "../api";
+import { fxApi, merchantApi, settingsApi, recurringApi, gmailApi, accountsApi, installmentsApi, ledgerApi, getTxFromToTypes, loanPaymentsApi } from "../api";
 import { fmtIDR, resolveCategoryIds } from "../utils";
 import { CURRENCIES, EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST, TX_TYPES, APP_VERSION, APP_BUILD } from "../constants";
 import { LIGHT, DARK } from "../theme";
@@ -45,6 +45,7 @@ export default function Settings({
   categories = [], incomeSrcs = [],
   ledger = [], installments = [],
   setInstallments,
+  employeeLoans = [],
   initialTab,
 }) {
   const T = dark ? DARK : LIGHT;
@@ -604,6 +605,7 @@ export default function Settings({
           T={T} card={card} user={user}
           accounts={accounts} categories={categories} ledger={ledger}
           installments={installments} setInstallments={setInstallments}
+          employeeLoans={employeeLoans}
         />
       )}
 
@@ -1445,6 +1447,7 @@ const ESTMT_NO_CAT = new Set([
 function EStatementTab({
   T, card, user,
   accounts, categories = [], ledger, installments = [], setInstallments,
+  employeeLoans = [],
 }) {
   const [queue,       setQueue]       = useState([]);
   const [history,     setHistory]     = useState([]);
@@ -1841,6 +1844,22 @@ function EStatementTab({
     const isReimburseOut  = txType === "reimburse_out";
     const isReimburseType = isReimburseIn || isReimburseOut;
 
+    // collect_loan: from_id holds employee_loan_id; ledger from_id is null
+    if (txType === "collect_loan") {
+      const amount     = Math.abs(Number(r.amount || 0));
+      const amount_idr = Math.abs(Number(r.amount_idr || r.amount || 0));
+      return {
+        tx_date: r.tx_date, description: r.description || "Loan payment",
+        merchant_name: r.description || null,
+        amount, amount_idr, currency: r.currency || "IDR",
+        tx_type: "collect_loan", from_type: "employee_loan", to_type: "account",
+        from_id: null, to_id: isUUID(r.to_id) ? r.to_id : null,
+        employee_loan_id: isUUID(r.from_id) ? r.from_id : null,
+        entity: "Personal", category_id: null, category_name: null,
+        notes: r.notes || null,
+      };
+    }
+
     // For reimburse_in: from_type is "expense", from_id is the RE category for the entity
     // e.g. entity "Hamasa" → look up category named "Hamasa RE"
     let from_type, to_type, from_id;
@@ -1932,6 +1951,13 @@ function EStatementTab({
         });
         if (rsErr) console.error("[reimburse_settlements saveRow]", rsErr);
       }
+      if (row.tx_type === "collect_loan" && row.from_id) {
+        loanPaymentsApi.recordAndIncrement(user.id, {
+          loanId: row.from_id, payDate: row.tx_date,
+          amount: Math.abs(Number(row.amount_idr || row.amount || 0)),
+          notes: row.description || "Collected via import",
+        }).catch(e => console.error("[collect_loan payment saveRow]", e));
+      }
       removeRow(itemId, row._id);
       showToast(`Saved: ${row.description || "transaction"}`);
     } catch (e) {
@@ -1979,6 +2005,13 @@ function EStatementTab({
             reimbursable_expense: Number(r.amount_idr || r.amount || 0),
           });
           if (rsErr) console.error("[reimburse_settlements saveFile]", rsErr);
+        }
+        if (r.tx_type === "collect_loan" && r.from_id) {
+          loanPaymentsApi.recordAndIncrement(user.id, {
+            loanId: r.from_id, payDate: r.tx_date,
+            amount: Math.abs(Number(r.amount_idr || r.amount || 0)),
+            notes: r.description || "Collected via import",
+          }).catch(e => console.error("[collect_loan payment saveFile]", e));
         }
       } catch (e) {
         console.error("[saveFile] row error", e);
@@ -2141,6 +2174,7 @@ function EStatementTab({
               item={item}
               T={T} card={card}
               accounts={accounts}
+              employeeLoans={employeeLoans}
               onProcess={() => processFile(item.id)}
               onSetAccount={(accountId) => setItemAccount(item.id, accountId)}
               onUpdateRow={(rowId, patch) => updateRow(item.id, rowId, patch)}
@@ -2214,7 +2248,7 @@ function EStatementTab({
 
 // ─── QUEUE FILE ITEM (card wrapper + preview) ─────────────────
 function EStmtQueueItem({
-  item, T, card, accounts,
+  item, T, card, accounts, employeeLoans = [],
   onProcess, onSetAccount,
   onUpdateRow, onToggleSel, onToggleAll,
   onSave, onSaveRow, onSkipRow, onCreateInstallment, onRemove,
@@ -2373,6 +2407,7 @@ function EStmtQueueItem({
               onToggleAll={onToggleAll}
               source="estatement"
               accounts={accounts}
+              employeeLoans={employeeLoans}
               T={T}
               onCreateInstallment={(row) => onCreateInstallment(row)}
             />

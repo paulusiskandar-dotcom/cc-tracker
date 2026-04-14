@@ -1231,6 +1231,21 @@ export const loanPaymentsApi = {
     const { error } = await supabase.from("employee_loan_payments").delete().eq("id", id);
     if (error) throw new Error(error.message);
   },
+
+  // Insert a payment record AND increment employee_loans.paid_months by 1
+  recordAndIncrement: async (userId, { loanId, payDate, amount, notes }) => {
+    const { error: payErr } = await supabase.from("employee_loan_payments").insert({
+      user_id: userId, loan_id: loanId,
+      pay_date: payDate, amount, notes: notes || "Collected via import",
+    });
+    if (payErr) throw new Error(payErr.message);
+    const { data: loan } = await supabase
+      .from("employee_loans").select("paid_months").eq("id", loanId).maybeSingle();
+    if (loan != null) {
+      await supabase.from("employee_loans")
+        .update({ paid_months: (loan.paid_months || 0) + 1 }).eq("id", loanId);
+    }
+  },
 };
 
 // ─── REIMBURSE SETTLEMENTS ────────────────────────────────────

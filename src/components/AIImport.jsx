@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { supabase } from "../lib/supabase";
-import { ledgerApi, scanApi, merchantApi, getTxFromToTypes } from "../api";
+import { ledgerApi, scanApi, merchantApi, getTxFromToTypes, loanPaymentsApi } from "../api";
 import { fmtIDR, todayStr, checkDuplicateTransaction, resolveCategoryIds } from "../utils";
 import { LIGHT, DARK } from "../theme";
 import { Button, EmptyState, Spinner, showToast, TransactionReviewList } from "./shared/index";
@@ -66,7 +66,7 @@ const fmtDateShort = (d) => {
 };
 
 // ─────────────────────────────────────────────────────────────────
-export default function AIImport({ user, accounts, categories = [], ledger, onRefresh, setLedger, dark, merchantMaps = [], fxRates = {}, CURRENCIES = [], setPendingSyncs }) {
+export default function AIImport({ user, accounts, categories = [], ledger, onRefresh, setLedger, dark, merchantMaps = [], fxRates = {}, CURRENCIES = [], setPendingSyncs, employeeLoans = [] }) {
   const T = dark ? DARK : LIGHT;
   const fileRef = useRef();
 
@@ -353,11 +353,24 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
 
   // ── Build ledger entry ────────────────────────────────────────
   const buildEntry = (r) => {
-    const { from_type, to_type } = getTxFromToTypes(r.tx_type);
     const isFX    = r.currency && r.currency !== "IDR";
     const fxRate  = isFX ? (Number(r.fx_rate) || 1) : 1;
     const amtOrig = Number(r.amount) || 0;
     const amtIDR  = isFX ? (Number(r.amount_idr) || Math.round(amtOrig * fxRate)) : amtOrig;
+    // collect_loan: from_id holds employee_loan_id; ledger from_id is null
+    if (r.tx_type === "collect_loan") {
+      return {
+        tx_date: r.tx_date, description: r.description,
+        amount: amtOrig, currency: r.currency || "IDR",
+        fx_rate_used: isFX ? fxRate : null, amount_idr: amtIDR,
+        tx_type: "collect_loan", from_type: "employee_loan", to_type: "account",
+        from_id: null, to_id: r.to_id || null,
+        employee_loan_id: r.from_id || null,
+        entity: "Personal", category_id: null, category_name: null,
+        notes: r.notes || "", source: "ai_scan", scan_batch_id: batchId || null,
+      };
+    }
+    const { from_type, to_type } = getTxFromToTypes(r.tx_type);
     return {
       tx_date:        r.tx_date,
       description:    r.description,
@@ -389,7 +402,16 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
     for (const r of validRows) {
       try {
         const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
-        if (created) { setLedger(prev => [created, ...prev]); ok++; saveMerchantMapping(r); }
+        if (created) {
+          setLedger(prev => [created, ...prev]); ok++; saveMerchantMapping(r);
+          if (r.tx_type === "collect_loan" && r.from_id) {
+            loanPaymentsApi.recordAndIncrement(user.id, {
+              loanId: r.from_id, payDate: r.tx_date,
+              amount: Number(r.amount_idr || r.amount || 0),
+              notes: r.description || "Collected via import",
+            }).catch(e => console.error("[collect_loan payment]", e));
+          }
+        }
       } catch { /* continue */ }
     }
     // Mark all as skipped (remove from view)
@@ -413,6 +435,13 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       if (created) {
         setLedger(prev => [created, ...prev]);
         saveMerchantMapping(r);
+        if (r.tx_type === "collect_loan" && r.from_id) {
+          loanPaymentsApi.recordAndIncrement(user.id, {
+            loanId: r.from_id, payDate: r.tx_date,
+            amount: Number(r.amount_idr || r.amount || 0),
+            notes: r.description || "Collected via import",
+          }).catch(e => console.error("[collect_loan payment]", e));
+        }
         setResults(prev => prev.filter(x => x._id !== r._id));
         setSelected(s => { const ns = { ...s }; delete ns[r._id]; return ns; });
         showToast(`Imported: ${r.description}`);
@@ -526,6 +555,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
             onToggleAll={toggleAll}
             source="ai_scan"
             accounts={accounts}
+            employeeLoans={employeeLoans}
             T={T}
             busy={importing}
             onRefreshScan={batchFilePath ? handleRefreshScan : null}

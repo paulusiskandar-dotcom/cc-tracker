@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { gmailApi, settingsApi, ledgerApi, getTxFromToTypes, flattenEmailSync } from "../api";
+import { gmailApi, settingsApi, ledgerApi, getTxFromToTypes, flattenEmailSync, loanPaymentsApi } from "../api";
 import { todayStr, resolveCategoryIds } from "../utils";
 import { LIGHT, DARK } from "../theme";
 import {
@@ -52,6 +52,7 @@ export default function Email({
   user, accounts, categories, ledger, setLedger,
   pendingSyncs, setPendingSyncs,
   dark, onRefresh,
+  employeeLoans = [],
   initialTab = "pending",
 }) {
   const T = dark ? DARK : LIGHT;
@@ -197,6 +198,7 @@ export default function Email({
           onRefresh={onRefresh}
           dark={dark}
           T={T}
+          employeeLoans={employeeLoans}
         />
       )}
 
@@ -354,7 +356,7 @@ export default function Email({
 }
 
 // ─── EMAIL PENDING TAB ────────────────────────────────────────────
-function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, user, ledger, setLedger, onRefresh, dark, T: theme }) {
+function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, user, ledger, setLedger, onRefresh, dark, T: theme, employeeLoans = [] }) {
   const T = theme || LIGHT;
 
   // Local editable rows (mirrors pendingSyncs but editable)
@@ -388,23 +390,38 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
   };
 
   const buildEntry = (r) => {
+    const desc   = r.description || r.subject || "Gmail transaction";
+    const amount = Number(r.amount || 0);
+    const amount_idr = Number(r.amount_idr || r.amount || 0);
+    const notes  = r.notes || `Imported from Gmail: ${r.subject || ""}`;
+    // collect_loan: from_id holds employee_loan_id; ledger from_id is null
+    if (r.tx_type === "collect_loan") {
+      return {
+        tx_date: r.tx_date, description: desc, amount, currency: r.currency || "IDR", amount_idr,
+        tx_type: "collect_loan", from_type: "employee_loan", to_type: "account",
+        from_id: null, to_id: r.to_id || null,
+        employee_loan_id: r.from_id || null,
+        entity: "Personal", category_id: null, category_name: null,
+        notes, source: "gmail", email_sync_id: r.email_sync_id || r._id,
+      };
+    }
     const { from_type, to_type } = getTxFromToTypes(r.tx_type);
     // Resolve category slug (from user selection or AI suggestion) to DB UUID + label
     const catSlug = r.category_id || r.suggested_category_label || null;
     const { category_id, category_name } = resolveCategoryIds(catSlug, categories);
     return {
       tx_date:       r.tx_date,
-      description:   r.description || r.subject || "Gmail transaction",
-      amount:        Number(r.amount || 0),
+      description:   desc,
+      amount,
       currency:      r.currency || "IDR",
-      amount_idr:    Number(r.amount_idr || r.amount || 0),
+      amount_idr,
       tx_type:       r.tx_type, from_type, to_type,
       from_id:       r.from_id || null,
       to_id:         r.to_id   || null,
       category_id,
       category_name,
       entity:        "Personal",
-      notes:         r.notes || `Imported from Gmail: ${r.subject || ""}`,
+      notes,
       source:        "gmail",
       email_sync_id: r.email_sync_id || r._id,
     };
@@ -414,6 +431,13 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     try {
       const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
       setLedger(p => [created, ...p]);
+      if (r.tx_type === "collect_loan" && r.from_id) {
+        loanPaymentsApi.recordAndIncrement(user.id, {
+          loanId: r.from_id, payDate: r.tx_date,
+          amount: Number(r.amount_idr || r.amount || 0),
+          notes: r.description || "Collected via import",
+        }).catch(e => console.error("[collect_loan payment]", e));
+      }
       await gmailApi.updateSync(r.email_sync_id, { status: "confirmed" });
       removeRow(r._id);
       showToast("Imported");
@@ -439,6 +463,13 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       try {
         const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
         setLedger(p => [created, ...p]);
+        if (r.tx_type === "collect_loan" && r.from_id) {
+          loanPaymentsApi.recordAndIncrement(user.id, {
+            loanId: r.from_id, payDate: r.tx_date,
+            amount: Number(r.amount_idr || r.amount || 0),
+            notes: r.description || "Collected via import",
+          }).catch(e => console.error("[collect_loan payment]", e));
+        }
         await gmailApi.updateSync(r.email_sync_id, { status: "confirmed" });
         removeRow(r._id);
         count++;
@@ -509,6 +540,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
           )}
           source="gmail"
           accounts={accounts}
+          employeeLoans={employeeLoans}
           T={T}
           busy={importing}
         />
