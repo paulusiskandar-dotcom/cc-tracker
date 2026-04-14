@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../lib/supabase";
-import { fmtIDR } from "../utils";
+import { fmtIDR, fmtCur } from "../utils";
 import { TX_TYPE_MAP } from "../constants";
 import { showToast } from "./shared/Card";
 import TransactionModal from "./shared/TransactionModal";
@@ -84,7 +84,7 @@ function AccountOptions({ accounts }) {
 }
 
 // ─── SUMMARY CARD ────────────────────────────────────────────
-function SummaryCard({ label, value, color, bg }) {
+function SummaryCard({ label, value, displayText, color, bg }) {
   return (
     <div style={{
       background: bg, borderRadius: 12, padding: "14px 16px",
@@ -94,7 +94,9 @@ function SummaryCard({ label, value, color, bg }) {
         {label}
       </div>
       <div style={{ fontSize: 16, fontWeight: 800, color, fontFamily: FF, lineHeight: 1.2 }}>
-        {value < 0 ? "-" : ""}{fmtIDR(value)}
+        {displayText !== undefined
+          ? displayText
+          : (value < 0 ? "-" : "") + fmtIDR(Math.abs(value))}
       </div>
     </div>
   );
@@ -107,12 +109,14 @@ export default function BankStatement({
   receivables = [], accountCurrencies = [], allCurrencies = [], fxRates = {},
   incomeSrcs = [],
 }) {
-  const [accountId, setAccountId] = useState(initialAccount?.id || "");
-  const [fromDate,  setFromDate]  = useState(firstOfMonthStr());
-  const [toDate,    setToDate]    = useState(todayStr());
-  const [loading,   setLoading]   = useState(false);
-  const [data,      setData]      = useState(null);
-  const [editEntry, setEditEntry] = useState(null);  // open edit modal
+  const [accountId,      setAccountId]      = useState(initialAccount?.id || "");
+  const [fromDate,       setFromDate]       = useState(firstOfMonthStr());
+  const [toDate,         setToDate]         = useState(todayStr());
+  const [loading,        setLoading]        = useState(false);
+  const [rawData,        setRawData]        = useState(null);  // { allTxs, allPreTxs }
+  const [editEntry,      setEditEntry]      = useState(null);
+  const [activeCurrency, setActiveCurrency] = useState("IDR");
+  const [acctCurrencies, setAcctCurrencies] = useState([]);    // rows from account_currencies
   const printRef = useRef(null);
 
   // Derive bank accounts from all accounts if not passed separately
@@ -125,7 +129,21 @@ export default function BankStatement({
 
   const selectedAccount = accounts.find(a => a.id === accountId) || null;
 
-  // ── Load data ──────────────────────────────────────────────
+  // ── Fetch account_currencies when account changes (multicurrency only) ──
+  useEffect(() => {
+    setActiveCurrency("IDR");
+    setAcctCurrencies([]);
+    setRawData(null);
+    if (!accountId) return;
+    const acc = accounts.find(a => a.id === accountId);
+    if (!acc?.is_multicurrency) return;
+    supabase.from("account_currencies")
+      .select("currency, balance, initial_balance")
+      .eq("account_id", accountId)
+      .then(({ data: rows }) => { if (rows?.length) setAcctCurrencies(rows); });
+  }, [accountId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Load raw transaction data ───────────────────────────────
   const load = async () => {
     if (!accountId) return;
     setLoading(true);
@@ -140,36 +158,14 @@ export default function BankStatement({
           .order("tx_date",    { ascending: true })
           .order("created_at", { ascending: true }),
         supabase.from("ledger")
-          .select("amount_idr, from_id, from_type, to_id, to_type")
+          .select("amount_idr, amount, currency, from_id, from_type, to_id, to_type")
           .eq("user_id", user.id)
           .or(`from_id.eq.${accountId},to_id.eq.${accountId}`)
           .lt("tx_date", fromDate),
       ]);
       if (e1) throw e1;
       if (e2) throw e2;
-
-      // Opening balance = initial_balance + all txns BEFORE range start date
-      const initialBal    = Number(selectedAccount?.initial_balance || 0);
-      const preTxs        = beforeRange || [];
-      const beforeCredit  = preTxs
-        .filter(t => t.to_id   === accountId && t.to_type   === "account")
-        .reduce((s, t) => s + Number(t.amount_idr || 0), 0);
-      const beforeDebit   = preTxs
-        .filter(t => t.from_id === accountId && t.from_type === "account")
-        .reduce((s, t) => s + Number(t.amount_idr || 0), 0);
-      const openingBal    = initialBal + beforeCredit - beforeDebit;
-
-      // In-range totals (using same from_type/to_type checks)
-      const txs         = inRange || [];
-      const totalCredit = txs
-        .filter(t => t.to_id   === accountId && t.to_type   === "account")
-        .reduce((s, t) => s + Number(t.amount_idr || 0), 0);
-      const totalDebit  = txs
-        .filter(t => t.from_id === accountId && t.from_type === "account")
-        .reduce((s, t) => s + Number(t.amount_idr || 0), 0);
-      const closingBal  = openingBal + totalCredit - totalDebit;
-
-      setData({ txs, openingBal, totalCredit, totalDebit, closingBal });
+      setRawData({ allTxs: inRange || [], allPreTxs: beforeRange || [] });
     } catch (e) {
       console.error("[BankStatement]", e);
     }
@@ -181,18 +177,57 @@ export default function BankStatement({
     if (accountId) load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Compute currency-filtered data from raw transactions ───
+  const data = useMemo(() => {
+    if (!rawData || !selectedAccount) return null;
+    const { allTxs, allPreTxs } = rawData;
+    const isMulti  = !!selectedAccount.is_multicurrency;
+    const curIsIDR = !isMulti || activeCurrency === "IDR";
+
+    // Pick the correct amount field: IDR uses amount_idr, foreign currency uses amount
+    const getAmt = (t) => curIsIDR ? Number(t.amount_idr || 0) : Number(t.amount || 0);
+
+    // Filter transactions for the selected currency tab
+    const txs    = isMulti ? allTxs.filter(t => (t.currency || "IDR") === activeCurrency)    : allTxs;
+    const preTxs = isMulti ? allPreTxs.filter(t => (t.currency || "IDR") === activeCurrency) : allPreTxs;
+
+    // Opening balance seed: IDR uses accounts.initial_balance; foreign uses account_currencies.initial_balance
+    const initialBal = curIsIDR
+      ? Number(selectedAccount.initial_balance || 0)
+      : Number(acctCurrencies.find(c => c.currency === activeCurrency)?.initial_balance || 0);
+
+    const beforeCredit = preTxs
+      .filter(t => t.to_id === accountId && t.to_type === "account")
+      .reduce((s, t) => s + getAmt(t), 0);
+    const beforeDebit = preTxs
+      .filter(t => t.from_id === accountId && t.from_type === "account")
+      .reduce((s, t) => s + getAmt(t), 0);
+    const openingBal = initialBal + beforeCredit - beforeDebit;
+
+    const totalCredit = txs
+      .filter(t => t.to_id === accountId && t.to_type === "account")
+      .reduce((s, t) => s + getAmt(t), 0);
+    const totalDebit = txs
+      .filter(t => t.from_id === accountId && t.from_type === "account")
+      .reduce((s, t) => s + getAmt(t), 0);
+    const closingBal = openingBal + totalCredit - totalDebit;
+
+    return { txs, openingBal, totalCredit, totalDebit, closingBal };
+  }, [rawData, activeCurrency, acctCurrencies, accountId, selectedAccount]);
+
   // ── Compute rows with running balance ─────────────────────
   const rowsWithBalance = useMemo(() => {
-    if (!data) return [];
+    if (!data || !selectedAccount) return [];
+    const curIsIDR = !selectedAccount.is_multicurrency || activeCurrency === "IDR";
     let bal = data.openingBal;
     return data.txs.map(tx => {
       const dir = txDirection(tx, accountId);
-      const amt = Number(tx.amount_idr || 0);
+      const amt = curIsIDR ? Number(tx.amount_idr || 0) : Number(tx.amount || 0);
       if (dir === "debit")  bal -= amt;
       if (dir === "credit") bal += amt;
-      return { ...tx, _dir: dir, _runBal: bal };
+      return { ...tx, _dir: dir, _runBal: bal, _displayAmt: amt };
     });
-  }, [data, accountId]);
+  }, [data, accountId, selectedAccount, activeCurrency]);
 
   // Group by date
   const grouped = useMemo(() => {
@@ -206,7 +241,7 @@ export default function BankStatement({
 
   // ── Excel export ───────────────────────────────────────────
   const exportExcel = () => {
-    if (!data) return;
+    if (!data || !rawData) return;
     const wb   = XLSX.utils.book_new();
     const name = (selectedAccount?.name || "Statement").replace(/[^a-zA-Z0-9]/g, "_");
 
@@ -256,6 +291,14 @@ export default function BankStatement({
     } catch { return `${fromDate} – ${toDate}`; }
   })();
 
+  // ── Currency-aware amount formatters ─────────────────────
+  const curIsIDR = !selectedAccount?.is_multicurrency || activeCurrency === "IDR";
+  const fmtAmt   = (n) => fmtCur(Math.abs(Number(n || 0)), curIsIDR ? "IDR" : activeCurrency);
+  const fmtBalCur = (v) => {
+    const n = Number(v || 0);
+    return { text: fmtAmt(n), color: n < 0 ? "#A32D2D" : "#111827", sign: n < 0 ? "-" : "" };
+  };
+
   // ── Styles ────────────────────────────────────────────────
   const SEL_STYLE = {
     fontSize: 12, padding: "6px 8px", borderRadius: 8,
@@ -279,7 +322,7 @@ export default function BankStatement({
         </span>
         <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
           <button onClick={exportPDF} style={BTN()}>🖨 PDF</button>
-          <button onClick={exportExcel} disabled={!data} style={BTN({ opacity: data ? 1 : 0.4, cursor: data ? "pointer" : "default" })}>
+          <button onClick={exportExcel} disabled={!rawData} style={BTN({ opacity: rawData ? 1 : 0.4, cursor: rawData ? "pointer" : "default" })}>
             📊 Excel
           </button>
         </div>
@@ -331,15 +374,39 @@ export default function BankStatement({
           })}>
           {loading ? "Loading…" : "Apply"}
         </button>
+
+        {/* Currency tabs — only for multicurrency accounts with loaded currencies */}
+        {selectedAccount?.is_multicurrency && acctCurrencies.length > 0 && (
+          <div style={{ width: "100%", display: "flex", gap: 4, flexWrap: "wrap", paddingTop: 2 }}>
+            {acctCurrencies
+              .map(c => c.currency)
+              .sort((a, b) => (a === "IDR" ? -1 : b === "IDR" ? 1 : a.localeCompare(b)))
+              .map(cur => {
+                const active = activeCurrency === cur;
+                return (
+                  <button key={cur} onClick={() => setActiveCurrency(cur)} style={{
+                    height: 30, padding: "0 12px", borderRadius: 20,
+                    border: `1.5px solid ${active ? "#111827" : "#e5e7eb"}`,
+                    background: active ? "#111827" : "#fff",
+                    color: active ? "#fff" : "#6b7280",
+                    fontSize: 12, fontWeight: active ? 700 : 500,
+                    cursor: "pointer", fontFamily: FF, transition: "all 0.15s",
+                  }}>
+                    {cur}
+                  </button>
+                );
+              })}
+          </div>
+        )}
       </div>
 
       {/* ── Summary cards ── */}
       {data && (
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <SummaryCard label="Opening Balance"  value={data.openingBal}  color={data.openingBal  < 0 ? "#A32D2D" : "#1d4ed8"} bg={data.openingBal  < 0 ? "#fff1f2" : "#eff6ff"} />
-          <SummaryCard label="Total Debit (Out)" value={data.totalDebit}  color="#A32D2D" bg="#fff1f2" />
-          <SummaryCard label="Total Kredit (In)" value={data.totalCredit} color="#3B6D11" bg="#f0fdf4" />
-          <SummaryCard label="Closing Balance"  value={data.closingBal}  color={data.closingBal < 0 ? "#A32D2D" : "#111827"} bg={data.closingBal < 0 ? "#fff1f2" : "#f9fafb"} />
+          <SummaryCard label="Opening Balance"   value={data.openingBal}  displayText={(data.openingBal  < 0 ? "-" : "") + fmtAmt(data.openingBal)}  color={data.openingBal  < 0 ? "#A32D2D" : "#1d4ed8"} bg={data.openingBal  < 0 ? "#fff1f2" : "#eff6ff"} />
+          <SummaryCard label="Total Debit (Out)" value={data.totalDebit}  displayText={fmtAmt(data.totalDebit)}  color="#A32D2D" bg="#fff1f2" />
+          <SummaryCard label="Total Kredit (In)" value={data.totalCredit} displayText={fmtAmt(data.totalCredit)} color="#3B6D11" bg="#f0fdf4" />
+          <SummaryCard label="Closing Balance"   value={data.closingBal}  displayText={(data.closingBal  < 0 ? "-" : "") + fmtAmt(data.closingBal)}  color={data.closingBal  < 0 ? "#A32D2D" : "#111827"} bg={data.closingBal  < 0 ? "#fff1f2" : "#f9fafb"} />
         </div>
       )}
 
@@ -351,7 +418,7 @@ export default function BankStatement({
       )}
 
       {/* ── Empty state ── */}
-      {!loading && !data && (
+      {!loading && !rawData && (
         <div style={{ textAlign: "center", padding: "40px 0", color: "#9ca3af", fontFamily: FF, fontSize: 13 }}>
           {accountId ? "Press Apply to load statement" : "Select an account to view statement"}
         </div>
@@ -393,7 +460,7 @@ export default function BankStatement({
             </div>
 
             {/* Opening balance row */}
-            {(() => { const b = fmtBal(data.openingBal); const c = b.color === "#A32D2D" ? "#A32D2D" : "#1d4ed8"; return (
+            {(() => { const b = fmtBalCur(data.openingBal); const c = b.color === "#A32D2D" ? "#A32D2D" : "#1d4ed8"; return (
             <div style={{ display: "grid", gridTemplateColumns: COLS, background: "#eff6ff", borderBottom: "0.5px solid #dbeafe", padding: ROW_PAD }}>
               <div style={{ fontSize: 11, color: c, fontFamily: FF, padding: "7px 6px", whiteSpace: "nowrap" }}>{fmtDateShort(fromDate)}</div>
               <div style={{ fontSize: 11, fontWeight: 700, color: c, fontFamily: FF, padding: "7px 6px" }}>Opening Balance</div>
@@ -414,7 +481,7 @@ export default function BankStatement({
 
                 {txs.map(tx => {
                   const typeInfo = TX_TYPE_MAP[tx.tx_type];
-                  const amt      = Number(tx.amount_idr || 0);
+                  const amt      = tx._displayAmt ?? Number(tx.amount_idr || 0);
                   const subLine  = [tx.category_name, tx.entity && tx.entity !== "Personal" ? tx.entity : ""].filter(Boolean).join(" · ");
                   return (
                     <div key={tx.id}
@@ -450,16 +517,16 @@ export default function BankStatement({
 
                       {/* Debit */}
                       <div style={{ fontSize: 12, fontWeight: 600, color: "#A32D2D", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
-                        {tx._dir === "debit" ? fmtIDR(amt) : <span style={{ color: "#d1d5db" }}>—</span>}
+                        {tx._dir === "debit" ? fmtAmt(amt) : <span style={{ color: "#d1d5db" }}>—</span>}
                       </div>
 
                       {/* Kredit */}
                       <div style={{ fontSize: 12, fontWeight: 600, color: "#3B6D11", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
-                        {tx._dir === "credit" ? fmtIDR(amt) : <span style={{ color: "#d1d5db" }}>—</span>}
+                        {tx._dir === "credit" ? fmtAmt(amt) : <span style={{ color: "#d1d5db" }}>—</span>}
                       </div>
 
                       {/* Saldo */}
-                      {(() => { const b = fmtBal(tx._runBal); return (
+                      {(() => { const b = fmtBalCur(tx._runBal); return (
                         <div style={{ fontSize: 12, fontWeight: 700, color: b.color, fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
                           {b.sign}{b.text}
                         </div>
@@ -489,7 +556,7 @@ export default function BankStatement({
             ))}
 
             {/* Closing balance row */}
-            {(() => { const b = fmtBal(data.closingBal); return (
+            {(() => { const b = fmtBalCur(data.closingBal); return (
             <div style={{ display: "grid", gridTemplateColumns: COLS, background: "#f9fafb", borderTop: "1.5px solid #e5e7eb", padding: ROW_PAD }}>
               <div style={{ fontSize: 11, color: "#374151", fontFamily: FF, padding: "9px 6px", whiteSpace: "nowrap" }}>{fmtDateShort(toDate)}</div>
               <div style={{ fontSize: 11, fontWeight: 800, color: b.color, fontFamily: FF, padding: "9px 6px" }}>Closing Balance</div>
@@ -509,7 +576,7 @@ export default function BankStatement({
           <span style={{ fontSize: 12, color: "#9ca3af", fontFamily: FF }}>
             {rowsWithBalance.length} transaction{rowsWithBalance.length !== 1 ? "s" : ""} · {periodLabel}
           </span>
-          {(() => { const b = fmtBal(data.closingBal); return (
+          {(() => { const b = fmtBalCur(data.closingBal); return (
             <span style={{ fontSize: 12, fontWeight: 700, color: b.color, fontFamily: FF }}>
               Closing balance: {b.sign}{b.text}
             </span>
