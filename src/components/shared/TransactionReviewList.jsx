@@ -19,6 +19,7 @@
 import { useState, useEffect } from "react";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../../constants";
 import { showToast } from "./Card";
+import { supabase } from "../../lib/supabase";
 
 // ── TX Types (13 total) ─────────────────────────────────────────
 export const TX_REVIEW_TYPES = [
@@ -218,7 +219,10 @@ const BADGE = (bg, color) => ({
 // ─── COLLECT LOAN CELL ──────────────────────────────────────────
 // Separate component so useEffect can be called unconditionally (React hook rules)
 function CollectLoanCell({ r, onUpdate, T, accounts, employeeLoans }) {
-  const activeLoans = (employeeLoans || []).filter(l => l.status !== "settled");
+  const activeLoans = (employeeLoans || []).filter(l => {
+    const s = (l.status || "active").toLowerCase();
+    return s === "active" || s === "partial";
+  });
   const bc = accounts.filter(a => ["bank", "cash"].includes(a.type));
 
   // Auto-detect borrower from description on first render
@@ -588,7 +592,30 @@ export default function TransactionReviewList({
   const [notesOpen,    setNotesOpen]    = useState(new Set());
   const [confirmingId, setConfirmingId] = useState(null);
   const [confirmingAll,setConfirmingAll]= useState(false);
-  const [confirmedIds, setConfirmedIds] = useState(new Set());
+  const [confirmedIds,  setConfirmedIds]  = useState(new Set());
+  const [fetchedLoans,  setFetchedLoans]  = useState([]);
+
+  // Fallback: fetch employee loans directly if prop arrives empty and rows contain collect_loan
+  useEffect(() => {
+    const needsLoans = rows.some(r => r.tx_type === "collect_loan");
+    if (!needsLoans || employeeLoans.length > 0) return;
+    let cancelled = false;
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user || cancelled) return;
+      supabase
+        .from("employee_loans")
+        .select("id, employee_name, status, total_amount, monthly_installment, paid_months")
+        .eq("user_id", user.id)
+        .in("status", ["active", "partial"])
+        .then(({ data }) => {
+          if (!cancelled && data?.length) setFetchedLoans(data);
+        });
+    });
+    return () => { cancelled = true; };
+  }, [rows, employeeLoans]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Prefer prop data; fall back to locally fetched loans
+  const effectiveLoans = employeeLoans.length > 0 ? employeeLoans : fetchedLoans;
 
   const toggleNotes = (id) => setNotesOpen(s => {
     const ns = new Set(s); ns.has(id) ? ns.delete(id) : ns.add(id); return ns;
@@ -686,7 +713,7 @@ export default function TransactionReviewList({
             T={T}
             source={source}
             accounts={accounts}
-            employeeLoans={employeeLoans}
+            employeeLoans={effectiveLoans}
             txTypes={txTypes}
             onUpdate={patch => onUpdateRow(r._id, patch)}
             onConfirm={() => handleConfirmRow(r)}
