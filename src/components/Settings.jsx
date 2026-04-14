@@ -2372,21 +2372,18 @@ function EStmtQueueItem({
         </div>
 
         {/* Buttons */}
-        {isReviewed && (
-          <button style={OUTLINE_BTN} disabled>👁 Review</button>
-        )}
         {item.status === "queued" && !item._uploading && (
           <button style={{ ...OUTLINE_BTN, background: "#1d4ed8", color: "#fff", border: "none" }}
             onClick={() => {
               if (!item.account_id) { showToast("Select an account first", "error"); return; }
               onProcess();
-            }}>▶ Process</button>
+            }}>Process</button>
         )}
         {item.status === "failed" && (
           <button style={OUTLINE_BTN} onClick={onProcess}>Retry</button>
         )}
         {isReviewed && (
-          <button style={OUTLINE_BTN} onClick={onProcess}>🔄 Re-scan</button>
+          <button style={OUTLINE_BTN} onClick={onProcess}>Re-scan</button>
         )}
         {["queued","failed","reviewed"].includes(item.status) && !item._uploading && (
           <button onClick={onRemove}
