@@ -639,9 +639,52 @@ function DistributionBar({ accounts, total }) {
   );
 }
 
+// ─── BANK LOGO MAP ───────────────────────────────────────────
+const BANK_LOGO_DOMAINS = {
+  "BCA":       "bca.co.id",
+  "Mandiri":   "bankmandiri.co.id",
+  "BRI":       "bri.co.id",
+  "BNI":       "bni.co.id",
+  "CIMB":      "cimbniaga.co.id",
+  "Danamon":   "danamon.co.id",
+  "Jenius":    "jenius.co.id",
+  "OCBC":      "ocbc.id",
+  "Maybank":   "maybank.co.id",
+  "UOB":       "uob.co.id",
+  "HSBC":      "hsbc.co.id",
+  "Mega":      "bankmega.com",
+  "Superbank": "superbank.id",
+  "BLU":       "blubybcadigital.id",
+  "Neobank":   "neobank.id",
+};
+
+function BankLogo({ bankName, color, size = 36 }) {
+  const [imgError, setImgError] = useState(false);
+  const domain = Object.entries(BANK_LOGO_DOMAINS).find(([k]) =>
+    (bankName || "").toLowerCase().includes(k.toLowerCase())
+  )?.[1];
+  const initials = (bankName || "BNK").slice(0, 3).toUpperCase();
+  const bg = (color || "#3b5bdb") + "22";
+  return (
+    <div style={{ width: size, height: size, borderRadius: 8, background: bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, overflow: "hidden" }}>
+      {domain && !imgError ? (
+        <img
+          src={`https://logo.clearbit.com/${domain}`}
+          onError={() => setImgError(true)}
+          alt={bankName || ""}
+          style={{ width: size * 0.72, height: size * 0.72, objectFit: "contain" }}
+        />
+      ) : (
+        <span style={{ fontSize: 9, fontWeight: 800, color: color || "#3b5bdb", fontFamily: "Figtree, sans-serif", letterSpacing: -0.5 }}>
+          {initials}
+        </span>
+      )}
+    </div>
+  );
+}
+
 // ─── BANK ACCOUNT CARD ───────────────────────────────────────
 function BankAccountCard({ account: a, ledger, accountCurrencies = [], fxRates = {}, CURRENCIES: C = [], color, onEdit, onHistory, onStatement }) {
-  const txCount   = ledger.filter(e => e.from_id === a.id || e.to_id === a.id).length;
   const bal       = Number(a.current_balance || 0);
   const cur       = C.find(c => c.code === (a.currency || "IDR"));
   const isForeign = a.currency && a.currency !== "IDR";
@@ -650,14 +693,13 @@ function BankAccountCard({ account: a, ledger, accountCurrencies = [], fxRates =
   const fxRows    = accountCurrencies.filter(r => r.account_id === a.id);
 
   return (
-    <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-      <div style={{ height: 3, background: color }} />
-      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
-        {/* Icon + Name + edit */}
+    <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "row" }}>
+      {/* Left accent bar */}
+      <div style={{ width: 5, flexShrink: 0, background: color }} />
+      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, flex: 1, minWidth: 0 }}>
+        {/* Logo + Name + edit */}
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: "#e8f4fd", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>
-            🏦
-          </div>
+          <BankLogo bankName={a.bank_name} color={color} size={36} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {a.name}
@@ -689,12 +731,8 @@ function BankAccountCard({ account: a, ledger, accountCurrencies = [], fxRates =
               <div style={{ fontSize: 24, fontWeight: 800, color: "#059669", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
                 {cur?.symbol || a.currency} {bal.toLocaleString("id-ID")}
               </div>
-              <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 3 }}>
-                ≈ {fmtIDR(idrEquiv, true)}
-              </div>
-              <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
-                Rate: {fmtIDR(rate, true)}/{a.currency}
-              </div>
+              <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 3 }}>≈ {fmtIDR(idrEquiv, true)}</div>
+              <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>Rate: {fmtIDR(rate, true)}/{a.currency}</div>
             </>
           ) : (
             <div style={{ fontSize: 24, fontWeight: 800, color: "#059669", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
@@ -715,7 +753,6 @@ function BankAccountCard({ account: a, ledger, accountCurrencies = [], fxRates =
 
 // ─── CASH ACCOUNT CARD ───────────────────────────────────────
 function CashAccountCard({ account: a, fxRates = {}, CURRENCIES: C = [], ledger, color, onEdit, onHistory, onStatement }) {
-  const txCount = ledger.filter(e => e.from_id === a.id || e.to_id === a.id).length;
   const bal = Number(a.current_balance || 0);
   const cur = C.find(c => c.code === (a.currency || "IDR"));
   const isForeign = a.currency && a.currency !== "IDR";
@@ -723,12 +760,13 @@ function CashAccountCard({ account: a, fxRates = {}, CURRENCIES: C = [], ledger,
   const idrEquiv = isForeign ? Math.round(bal * rate) : bal;
 
   return (
-    <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-      <div style={{ height: 3, background: color }} />
-      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
+    <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "row" }}>
+      {/* Left accent bar */}
+      <div style={{ width: 5, flexShrink: 0, background: color }} />
+      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, flex: 1, minWidth: 0 }}>
         {/* Flag + Name + edit */}
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: "#f0fdf4", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 8, background: (color || "#059669") + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>
             {cur?.flag || "💵"}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -752,12 +790,8 @@ function CashAccountCard({ account: a, fxRates = {}, CURRENCIES: C = [], ledger,
               <div style={{ fontSize: 22, fontWeight: 800, color: "#059669", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
                 {cur?.symbol || a.currency} {bal.toLocaleString("id-ID")}
               </div>
-              <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 3 }}>
-                ≈ {fmtIDR(idrEquiv, true)}
-              </div>
-              <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
-                Rate: {fmtIDR(rate, true)}/{a.currency}
-              </div>
+              <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 3 }}>≈ {fmtIDR(idrEquiv, true)}</div>
+              <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>Rate: {fmtIDR(rate, true)}/{a.currency}</div>
             </>
           ) : (
             <div style={{ fontSize: 24, fontWeight: 800, color: "#059669", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>

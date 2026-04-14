@@ -1,5 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { ledgerApi, installmentsApi, recurringApi, getTxFromToTypes, accountsApi } from "../api";
+import { supabase } from "../lib/supabase";
 import CCStatement from "./CCStatement";
 import { ENTITIES, BANKS_L, NETWORKS } from "../constants";
 import { fmtIDR, todayStr, ym, daysUntil } from "../utils";
@@ -64,11 +65,27 @@ export default function CreditCards({
   const [deleteInstId, setDeleteInstId] = useState(null);
 
   // Edit card state
-  const emptyEditCardForm = () => ({ name: "", bank_name: "", last4: "", network: "", card_limit: "", statement_day: "", due_day: "", color: "", shared_limit_on: false, shared_group_mode: "create", shared_limit_group_id: null, shared_limit: "", is_limit_group_master: false });
-  const [editCardModal, setEditCardModal] = useState(false);
-  const [editCardAcc,   setEditCardAcc]   = useState(null);
-  const [editCardForm,  setEditCardForm]  = useState(emptyEditCardForm());
+  const emptyEditCardForm = () => ({ name: "", bank_name: "", last4: "", network: "", card_limit: "", statement_day: "", due_day: "", color: "", shared_limit_on: false, shared_group_mode: "create", shared_limit_group_id: null, shared_limit: "", is_limit_group_master: false, card_image_url: "" });
+  const [editCardModal,    setEditCardModal]    = useState(false);
+  const [editCardAcc,      setEditCardAcc]      = useState(null);
+  const [editCardForm,     setEditCardForm]     = useState(emptyEditCardForm());
+  const [imageUploading,   setImageUploading]   = useState(false);
+  const imageInputRef = useRef();
   const setEC = (k, v) => setEditCardForm(f => ({ ...f, [k]: v }));
+
+  const handleCardImageUpload = async (file) => {
+    if (!file || !editCardAcc?.id) return;
+    setImageUploading(true);
+    try {
+      const ext  = file.name.slice(file.name.lastIndexOf(".")) || ".jpg";
+      const path = `${user.id}/${editCardAcc.id}-${Date.now()}${ext}`;
+      const { error } = await supabase.storage.from("card-images").upload(path, file, { upsert: true });
+      if (error) throw error;
+      const { data: { publicUrl } } = supabase.storage.from("card-images").getPublicUrl(path);
+      setEC("card_image_url", publicUrl);
+    } catch (e) { showToast(e.message || "Upload failed", "error"); }
+    setImageUploading(false);
+  };
 
   // Add CC form
   const emptyCardForm = () => ({ name: "", bank_name: "", last4: "", network: "", card_limit: "", monthly_target: "", statement_day: "", due_day: "" });
@@ -334,6 +351,7 @@ export default function CreditCards({
       statement_day:         cc.statement_day != null ? String(cc.statement_day) : "",
       due_day:               cc.due_day       != null ? String(cc.due_day)       : "",
       color:                 cc.color         || "",
+      card_image_url:        cc.card_image_url || "",
       shared_limit_on:       !!(cc.shared_limit_group_id || Number(cc.shared_limit || 0) > 0),
       shared_group_mode:     cc.shared_limit_group_id
                                ? (cc.is_limit_group_master ? "create" : "join")
@@ -359,6 +377,7 @@ export default function CreditCards({
         statement_day:         sn(editCardForm.statement_day),
         due_day:               sn(editCardForm.due_day),
         color:                 editCardForm.color          || null,
+        card_image_url:        editCardForm.card_image_url || null,
         ...(editCardForm.shared_limit_on
           ? editCardForm.shared_group_mode === "join"
             ? {
@@ -1073,6 +1092,39 @@ export default function CreditCards({
               ))}
             </div>
           </Field>
+
+          {/* Card Image Upload */}
+          <Field label="Card Image (optional)">
+            <input
+              ref={imageInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={e => { const f = e.target.files?.[0]; if (f) handleCardImageUpload(f); e.target.value = ""; }}
+            />
+            {editCardForm.card_image_url ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ position: "relative", width: "100%", height: 80, borderRadius: 10, overflow: "hidden", border: "1.5px solid #e5e7eb" }}>
+                  <img src={editCardForm.card_image_url} alt="card" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button type="button" onClick={() => imageInputRef.current?.click()} disabled={imageUploading}
+                    style={{ flex: 1, height: 32, borderRadius: 8, border: "1.5px solid #e5e7eb", background: "#f9fafb", color: "#374151", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "Figtree, sans-serif" }}>
+                    {imageUploading ? "Uploading…" : "Replace"}
+                  </button>
+                  <button type="button" onClick={() => setEC("card_image_url", "")}
+                    style={{ height: 32, padding: "0 14px", borderRadius: 8, border: "1.5px solid #fecaca", background: "#fff5f5", color: "#dc2626", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "Figtree, sans-serif" }}>
+                    Remove
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button type="button" onClick={() => imageInputRef.current?.click()} disabled={imageUploading}
+                style={{ width: "100%", height: 44, borderRadius: 10, border: "1.5px dashed #e5e7eb", background: "#f9fafb", color: "#6b7280", fontSize: 13, fontWeight: 500, cursor: "pointer", fontFamily: "Figtree, sans-serif" }}>
+                {imageUploading ? "Uploading…" : "Upload card photo"}
+              </button>
+            )}
+          </Field>
         </div>
       </Modal>
 
@@ -1201,42 +1253,95 @@ function SharedLimitGroupCard({ group, cardStats, paletteStart = 0, onPay, onTra
 }
 
 // ─── CC CARD (new compact design) ───────────────────────────
+// ─── NETWORK LOGO ─────────────────────────────────────────────
+function NetworkLogo({ network }) {
+  if (!network) return null;
+  if (network === "Visa") return (
+    <span style={{ fontSize: 15, fontWeight: 900, fontStyle: "italic", color: "#fff", fontFamily: "serif", letterSpacing: 1, textShadow: "0 1px 3px rgba(0,0,0,0.5)" }}>
+      VISA
+    </span>
+  );
+  if (network === "Mastercard") return (
+    <div style={{ position: "relative", width: 34, height: 22 }}>
+      <div style={{ position: "absolute", left: 0, top: 1, width: 20, height: 20, borderRadius: "50%", background: "#EB001B", opacity: 0.92 }} />
+      <div style={{ position: "absolute", right: 0, top: 1, width: 20, height: 20, borderRadius: "50%", background: "#F79E1B", opacity: 0.92 }} />
+    </div>
+  );
+  if (network === "Amex") return (
+    <span style={{ fontSize: 11, fontWeight: 800, color: "#fff", fontFamily: "Figtree, sans-serif", letterSpacing: 1.5, textShadow: "0 1px 3px rgba(0,0,0,0.5)" }}>
+      AMEX
+    </span>
+  );
+  if (network === "JCB") return (
+    <div style={{ display: "flex", gap: 2 }}>
+      {[["J","#00539F"],["C","#E31837"],["B","#007B5E"]].map(([l, bg]) => (
+        <div key={l} style={{ width: 14, height: 18, borderRadius: 2, background: bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <span style={{ fontSize: 8, fontWeight: 900, color: "#fff", fontFamily: "Figtree, sans-serif" }}>{l}</span>
+        </div>
+      ))}
+    </div>
+  );
+  return <span style={{ fontSize: 10, fontWeight: 700, color: "#fff", fontFamily: "Figtree, sans-serif" }}>{network}</span>;
+}
+
 function CCCard({ cc, color, onPay, onTransactions, onInstallments, onStatement, onEdit }) {
   const utilColor = cc.util > 80 ? "#dc2626" : cc.util > 60 ? "#d97706" : "#059669";
-  const netw      = NETWORK_STYLE[cc.network];
 
   return (
     <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-      {/* Color bar */}
-      <div style={{ height: 3, background: color || "#3b5bdb" }} />
+      {/* ── Hero ── */}
+      <div style={{ position: "relative", height: 110, overflow: "hidden", flexShrink: 0 }}>
+        {/* Background: photo or solid color */}
+        {cc.card_image_url ? (
+          <img src={cc.card_image_url} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", objectPosition: "center" }} />
+        ) : (
+          <div style={{ position: "absolute", inset: 0, background: color || "#3b5bdb" }}>
+            <div style={{ position: "absolute", top: -24, right: -18, width: 130, height: 130, borderRadius: "50%", background: "rgba(255,255,255,0.08)" }} />
+            <div style={{ position: "absolute", top: 18, right: 28, width: 82, height: 82, borderRadius: "50%", background: "rgba(255,255,255,0.06)" }} />
+            <div style={{ position: "absolute", bottom: -32, left: -18, width: 110, height: 110, borderRadius: "50%", background: "rgba(255,255,255,0.07)" }} />
+          </div>
+        )}
+        {/* Dark overlay for text readability */}
+        <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.25)" }} />
+
+        {/* Chip — top left */}
+        <div style={{ position: "absolute", top: 12, left: 14 }}>
+          <div style={{ width: 22, height: 16, borderRadius: 3, background: "linear-gradient(135deg, #F5D060, #C8901A)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ width: 14, height: 10, border: "0.5px solid rgba(0,0,0,0.25)", borderRadius: 2, background: "linear-gradient(135deg, #FFF5C0, #B8840A)" }} />
+          </div>
+        </div>
+
+        {/* Edit button — top right */}
+        <button
+          onClick={onEdit}
+          title="Edit card"
+          style={{ position: "absolute", top: 8, right: 10, border: "none", background: "rgba(0,0,0,0.3)", borderRadius: 6, cursor: "pointer", padding: "3px 6px", color: "#fff", lineHeight: 1, fontSize: 12 }}
+          onMouseEnter={e => e.currentTarget.style.background = "rgba(0,0,0,0.5)"}
+          onMouseLeave={e => e.currentTarget.style.background = "rgba(0,0,0,0.3)"}
+        >✏️</button>
+
+        {/* Bank name + card number — bottom left */}
+        <div style={{ position: "absolute", bottom: 10, left: 14 }}>
+          <div style={{ fontSize: 11, fontWeight: 500, color: "#fff", fontFamily: "Figtree, sans-serif", textShadow: "0 1px 3px rgba(0,0,0,0.5)", marginBottom: 2 }}>
+            {cc.bank_name && cc.bank_name !== "Other" ? cc.bank_name : cc.name}
+          </div>
+          {cc.last4 && (
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.85)", fontFamily: "monospace", letterSpacing: 1.5 }}>
+              ···· {cc.last4}
+            </div>
+          )}
+        </div>
+
+        {/* Network logo — bottom right */}
+        <div style={{ position: "absolute", bottom: 10, right: 14, display: "flex", alignItems: "center" }}>
+          <NetworkLogo network={cc.network} />
+        </div>
+      </div>
 
       <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 11, flex: 1 }}>
-        {/* Card name + last4 + network + edit */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {cc.name}
-            </div>
-            {(cc.bank_name && cc.bank_name !== "Other") || cc.last4 ? (
-              <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
-                {(cc.bank_name && cc.bank_name !== "Other") ? cc.bank_name : ""}{cc.last4 ? `${(cc.bank_name && cc.bank_name !== "Other") ? " · " : ""}···· ${cc.last4}` : ""}
-              </div>
-            ) : null}
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0, marginLeft: 8 }}>
-            {netw && (
-              <span style={{ fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif", ...netw.style }}>
-                {netw.text}
-              </span>
-            )}
-            <button
-              onClick={onEdit}
-              title="Edit card"
-              style={{ border: "none", background: "none", cursor: "pointer", padding: 2, color: "#d1d5db", lineHeight: 1, fontSize: 13 }}
-              onMouseEnter={e => e.currentTarget.style.color = "#6b7280"}
-              onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}
-            >✏️</button>
-          </div>
+        {/* Card name */}
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {cc.name}
         </div>
 
         {/* Debt + Available */}
