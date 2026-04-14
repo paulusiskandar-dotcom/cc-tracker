@@ -407,8 +407,12 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     }
     const { from_type, to_type } = getTxFromToTypes(r.tx_type);
     // Resolve category slug (from user selection or AI suggestion) to DB UUID + label
+    // reimburse_out never has a category
+    const isReimburseOut = r.tx_type === "reimburse_out";
     const catSlug = r.category_id || r.suggested_category_label || null;
-    const { category_id, category_name } = resolveCategoryIds(catSlug, categories);
+    const { category_id, category_name } = isReimburseOut
+      ? { category_id: null, category_name: null }
+      : resolveCategoryIds(catSlug, categories);
     return {
       tx_date:       r.tx_date,
       description:   desc,

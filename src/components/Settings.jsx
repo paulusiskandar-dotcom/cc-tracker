@@ -1914,7 +1914,9 @@ function EStatementTab({
     const amount     = Math.abs(Number(r.amount || 0));
     const amount_idr = Math.abs(Number(r.amount_idr || r.amount || 0));
 
-    const catResolved = resolveCategoryIds(r.category_id, categories);
+    const catResolved = txType === "reimburse_out"
+      ? { category_id: null, category_name: null }
+      : resolveCategoryIds(r.category_id, categories);
 
     const payload = {
       tx_date:       r.tx_date,

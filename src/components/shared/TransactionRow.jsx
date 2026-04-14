@@ -175,7 +175,7 @@ export default function TransactionRow({
     if (!isTwoDir || !tealLabel) {
       // Single-directional: plain text
       const accLabel = fromAcc?.name || toAcc?.name || "";
-      const textParts = [accLabel, catLabel, entry.entity !== "Personal" ? entry.entity : null].filter(Boolean);
+      const textParts = [accLabel, entry.tx_type !== "reimburse_out" ? catLabel : null, entry.entity !== "Personal" ? entry.entity : null].filter(Boolean);
       const textStr = textParts.join(" · ");
       if (!badgeEl && !textStr) return null;
       if (!badgeEl) return textStr;

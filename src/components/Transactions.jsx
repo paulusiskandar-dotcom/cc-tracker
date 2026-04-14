@@ -456,7 +456,7 @@ function TxRow({ entry: e, accounts, categories = [], onEdit, onDelete }) {
       const accLabel = isMove
         ? `${fromAcc?.name || "?"} → ${toAcc?.name || "?"}`
         : fromAcc?.name || toAcc?.name || "";
-      const textStr = [accLabel, catLabel, e.entity && e.entity !== "Personal" ? e.entity : null]
+      const textStr = [accLabel, e.tx_type !== "reimburse_out" ? catLabel : null, e.entity && e.entity !== "Personal" ? e.entity : null]
         .filter(Boolean).join(" · ");
       if (!badgeEl && !textStr) return null;
       if (!badgeEl) return textStr;
