@@ -42,35 +42,88 @@ const NO_CAT_TYPES    = new Set(["transfer","pay_cc","give_loan","collect_loan",
 const REIMBURSE_TYPES = new Set(["reimburse_in","reimburse_out"]);
 const INCOME_LIKE     = new Set(["income","collect_loan","reimburse_in","sell_asset"]);
 
-// ── Account groups ──────────────────────────────────────────────
-const ACCT_GROUPS = [
-  { type: "bank",        label: "🏦 Bank"         },
-  { type: "cash",        label: "💵 Cash"         },
-  { type: "credit_card", label: "💳 Credit Cards"  },
-  { type: "asset",       label: "📈 Assets"       },
-  { type: "receivable",  label: "📋 Receivables"  },
-  { type: "liability",   label: "📉 Liabilities"  },
+// ── Account type helpers ────────────────────────────────────────
+const isCashAcc = a => a.type === "cash" || a.subtype === "cash" || /-cash$/i.test(a.name || "");
+const isCCAcc   = a => a.type === "credit_card";
+const isBankAcc = a => a.type === "bank" && !isCashAcc(a);
+
+// Other account types (asset, receivable, liability) — not bank/cash/cc
+const OTHER_ACCT_GROUPS = [
+  { type: "asset",      label: "Assets"      },
+  { type: "receivable", label: "Receivables" },
+  { type: "liability",  label: "Liabilities" },
 ];
 
-function GroupedOpts({ accounts, placeholder = "— select —", showLast4 = false }) {
-  const sorted = [...accounts].sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+// ── Tabbed account select (Bank / Cash / CC tabs) ────────────────
+function TabbedAcctSelect({ accounts, value, onChange, placeholder = "Select…", showLast4 = false, T }) {
+  const bankAccs  = accounts.filter(isBankAcc);
+  const cashAccs  = accounts.filter(isCashAcc);
+  const ccAccs    = accounts.filter(isCCAcc);
+  const otherAccs = accounts.filter(a => !isBankAcc(a) && !isCashAcc(a) && !isCCAcc(a));
+
+  const tabs = [
+    bankAccs.length > 0 && { id: "bank", label: "Bank", accs: bankAccs },
+    cashAccs.length > 0 && { id: "cash", label: "Cash", accs: cashAccs },
+    ccAccs.length   > 0 && { id: "cc",   label: "CC",   accs: ccAccs   },
+  ].filter(Boolean);
+
+  const initTab = () => {
+    if (value) {
+      if (bankAccs.some(a => a.id === value)) return "bank";
+      if (cashAccs.some(a => a.id === value)) return "cash";
+      if (ccAccs.some(a   => a.id === value)) return "cc";
+    }
+    return tabs[0]?.id || "bank";
+  };
+  const [activeTab, setActiveTab] = useState(initTab);
+
+  const activeAccs = (tabs.find(t => t.id === activeTab)?.accs || accounts).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+  const tabBtn = (id, label) => (
+    <button key={id} type="button" onClick={() => setActiveTab(id)}
+      style={{
+        padding: "1px 7px", borderRadius: 4, border: "none", cursor: "pointer",
+        fontSize: 10, fontWeight: activeTab === id ? 700 : 500,
+        fontFamily: "Figtree, sans-serif",
+        background: activeTab === id ? "#3b5bdb" : "transparent",
+        color: activeTab === id ? "#fff" : "#9ca3af",
+      }}>
+      {label}
+    </button>
+  );
+
   return (
-    <>
-      <option value="">{placeholder}</option>
-      {ACCT_GROUPS.map(g => {
-        const grp = sorted.filter(a => a.type === g.type);
-        if (!grp.length) return null;
-        return (
-          <optgroup key={g.type} label={g.label}>
-            {grp.map(a => (
-              <option key={a.id} value={a.id}>
-                {a.name}{showLast4 && (a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
-              </option>
-            ))}
-          </optgroup>
-        );
-      })}
-    </>
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+      {tabs.length > 1 && (
+        <div style={{ display: "flex", gap: 1 }}>
+          {tabs.map(t => tabBtn(t.id, t.label))}
+        </div>
+      )}
+      <select style={{ ...inSel(T), width: "100%" }}
+        value={value || ""}
+        onChange={e => onChange(e.target.value)}>
+        <option value="">{placeholder}</option>
+        {activeAccs.map(a => (
+          <option key={a.id} value={a.id}>
+            {a.name}{showLast4 && (a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
+          </option>
+        ))}
+        {/* Non-bank/cash/cc accounts (assets, receivables, liabilities) always visible */}
+        {otherAccs.length > 0 && OTHER_ACCT_GROUPS.map(g => {
+          const grp = otherAccs.filter(a => a.type === g.type).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+          if (!grp.length) return null;
+          return (
+            <optgroup key={g.type} label={g.label}>
+              {grp.map(a => (
+                <option key={a.id} value={a.id}>
+                  {a.name}{showLast4 && (a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
+                </option>
+              ))}
+            </optgroup>
+          );
+        })}
+      </select>
+    </div>
   );
 }
 
@@ -161,34 +214,53 @@ const ACT_BTN = (extra = {}) => ({
 // ─── ACCOUNT CELL ───────────────────────────────────────────────
 function AccountCell({ r, onUpdate, T, accounts }) {
   const cfg = getAcctCfg(r.tx_type, accounts);
-  const sel = { ...inSel(T), width: "100%" };
 
   if (cfg.mode === "to") return (
-    <select style={sel} value={r.to_id || ""}
-      onChange={e => onUpdate({ to_id: e.target.value })}>
-      <GroupedOpts accounts={cfg.to} placeholder="To Account…" showLast4 />
-    </select>
+    <TabbedAcctSelect
+      accounts={cfg.to}
+      value={r.to_id || ""}
+      onChange={v => onUpdate({ to_id: v })}
+      placeholder="To Account…"
+      showLast4
+      T={T}
+    />
   );
 
   if (cfg.mode === "from_to") return (
-    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-      <select style={{ ...sel, flex: 1 }} value={r.from_id || ""}
-        onChange={e => onUpdate({ from_id: e.target.value })}>
-        <GroupedOpts accounts={cfg.from} placeholder="From…" showLast4 />
-      </select>
-      <span style={{ fontSize: 10, color: T.text3, flexShrink: 0 }}>→</span>
-      <select style={{ ...sel, flex: 1 }} value={r.to_id || ""}
-        onChange={e => onUpdate({ to_id: e.target.value })}>
-        <GroupedOpts accounts={cfg.to} placeholder="To…" showLast4 />
-      </select>
+    <div style={{ display: "flex", gap: 4, alignItems: "flex-start" }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <TabbedAcctSelect
+          accounts={cfg.from}
+          value={r.from_id || ""}
+          onChange={v => onUpdate({ from_id: v })}
+          placeholder="From…"
+          showLast4
+          T={T}
+        />
+      </div>
+      <span style={{ fontSize: 10, color: T.text3, flexShrink: 0, paddingTop: 18 }}>→</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <TabbedAcctSelect
+          accounts={cfg.to}
+          value={r.to_id || ""}
+          onChange={v => onUpdate({ to_id: v })}
+          placeholder="To…"
+          showLast4
+          T={T}
+        />
+      </div>
     </div>
   );
 
   return (
-    <select style={sel} value={r.from_id || ""}
-      onChange={e => onUpdate({ from_id: e.target.value })}>
-      <GroupedOpts accounts={cfg.from} placeholder="From Account…" showLast4 />
-    </select>
+    <TabbedAcctSelect
+      accounts={cfg.from}
+      value={r.from_id || ""}
+      onChange={v => onUpdate({ from_id: v })}
+      placeholder="From Account…"
+      showLast4
+      T={T}
+    />
   );
 }
 
