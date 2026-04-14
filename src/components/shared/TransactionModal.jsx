@@ -253,6 +253,15 @@ export default function TransactionModal({
 
     if ((mode === "edit" || mode === "confirm") && initialData) {
       const txType = initialData.tx_type || "expense";
+      // For loan types, the "borrower" field in the form uses employee_loan_id,
+      // not the account-level from_id/to_id stored in the ledger.
+      const formFromId = txType === "collect_loan"
+        ? (initialData.employee_loan_id || null)
+        : (initialData.from_id || null);
+      const formToId = txType === "give_loan"
+        ? (initialData.employee_loan_id || null)
+        : (initialData.to_id || null);
+
       setFormState({
         ...EMPTY(),
         tx_date:          initialData.tx_date     || todayStr(),
@@ -260,8 +269,8 @@ export default function TransactionModal({
         amount:           initialData.amount      || initialData.amount_idr || "",
         currency:         initialData.currency    || "IDR",
         tx_type:          txType,
-        from_id:          initialData.from_id     || null,
-        to_id:            initialData.to_id       || null,
+        from_id:          formFromId,
+        to_id:            formToId,
         from_type:        initialData.from_type   || getTxFromToTypes(txType).from_type,
         to_type:          initialData.to_type     || getTxFromToTypes(txType).to_type,
         category_id:      initialData.category_id || null,
@@ -277,11 +286,25 @@ export default function TransactionModal({
         fx_rate_used:     initialData.fx_rate_used || "",
       });
       setGroup(groupForType(txType));
+
+      // Set loanAccTab based on the relevant account's subtype
+      if (txType === "collect_loan" && initialData.to_id) {
+        const toAcc = accounts.find(a => a.id === initialData.to_id);
+        setLoanAccTab(toAcc?.subtype === "cash" ? "cash" : "bank");
+      } else if (txType === "give_loan" && initialData.from_id) {
+        const fromAcc = accounts.find(a => a.id === initialData.from_id);
+        setLoanAccTab(fromAcc?.subtype === "cash" ? "cash" : "bank");
+      }
     } else {
       // Add mode
       const txType = defaultTxType || "expense";
       const g      = defaultGroup  || groupForType(txType);
       const base   = EMPTY();
+      // Auto-fill amount for collect_loan when borrower is preset
+      if (txType === "collect_loan" && defaultAccount?.from_id) {
+        const presetLoan = employeeLoans.find(l => l.id === defaultAccount.from_id);
+        if (presetLoan?.monthly_installment) base.amount = String(presetLoan.monthly_installment);
+      }
       setFormState({
         ...base,
         tx_type: txType,

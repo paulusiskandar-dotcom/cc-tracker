@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { ledgerApi, employeeLoanApi, loanPaymentsApi, recalculateBalance } from "../api";
 import { supabase } from "../lib/supabase";
 import { fmtIDR, todayStr, agingLabel } from "../utils";
@@ -10,6 +10,7 @@ import {
   Select,
   EmptyState, showToast,
 } from "./shared/index";
+import TransactionModal from "./shared/TransactionModal";
 
 // ─── PROGRESS BAR ─────────────────────────────────────────────
 function ProgressBar({ value, max, color = "#059669", height = 6 }) {
@@ -106,6 +107,9 @@ export default function Receivables({
   loanPayments,  setLoanPayments,
   onRefresh, setAccounts, setLedger, dark,
   fxRates = {}, CURRENCIES = [],
+  bankAccounts: bankAccountsProp = [],
+  creditCards = [], assets = [], liabilities = [],
+  accountCurrencies = [], incomeSrcs = [],
 }) {
   const T = dark ? DARK : LIGHT;
 
@@ -141,11 +145,17 @@ export default function Receivables({
   // ── Employee Loan modals ──────────────────────────────────────
   const [addLoanModal,  setAddLoanModal]  = useState(false);
   const [editLoanModal, setEditLoanModal] = useState(false);
-  const [payModal,      setPayModal]      = useState(false);
   const [selectedLoan,  setSelectedLoan]  = useState(null);
+  const [loanForm,      setLoanForm]      = useState(EMPTY_LOAN);
 
-  const [loanForm, setLoanForm] = useState(EMPTY_LOAN);
-  const [payForm,  setPayForm]  = useState({ amount: "", pay_date: todayStr(), to_id: "", notes: "" });
+  // Statement modal
+  const [stmtOpen, setStmtOpen] = useState(false);
+  const [stmtLoan, setStmtLoan] = useState(null);
+  const stmtPrintRef = useRef(null);
+
+  // TransactionModal for + Payment
+  const [txModalOpen, setTxModalOpen] = useState(false);
+  const [txModalLoan, setTxModalLoan] = useState(null);
 
   // ── DERIVED ────────────────────────────────────────────────
   const receivables    = useMemo(() => accounts.filter(a => a.type === "receivable"), [accounts]);
@@ -187,15 +197,18 @@ export default function Receivables({
   // Per-loan: outstanding based on paid_months × monthly_installment
   const loansWithStats = useMemo(() => {
     return employeeLoans.map(loan => {
-      const payments     = loanPayments.filter(p => p.loan_id === loan.id);
       const paidMonths   = Number(loan.paid_months || 0);
       const monthly      = Number(loan.monthly_installment || 0);
       const total        = Number(loan.total_amount || 0);
       const paidSoFar    = paidMonths * monthly;
       const remaining    = Math.max(0, total - paidSoFar);
-      return { ...loan, paidSoFar, remaining, payments };
+      // Ledger-based payment history (employee_loan_id link)
+      const ledgerPays   = ledger
+        .filter(e => e.employee_loan_id === loan.id && e.tx_type === "collect_loan")
+        .sort((a, b) => (a.tx_date || "").localeCompare(b.tx_date || ""));
+      return { ...loan, paidSoFar, remaining, ledgerPays };
     });
-  }, [employeeLoans, loanPayments]);
+  }, [employeeLoans, ledger]);
 
   const totalLoanOutstanding = useMemo(
     () => loansWithStats.filter(l => l.status !== "settled").reduce((s, l) => s + l.remaining, 0),
@@ -532,60 +545,11 @@ export default function Receivables({
     } catch (e) { showToast(e.message, "error"); }
   };
 
-  const handleRecordPayment = async () => {
-    if (!selectedLoan || !payForm.amount || !payForm.to_id)
-      return showToast("Amount and destination account are required", "error");
-    setSaving(true);
-    try {
-      const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
-      const amt = sn(payForm.amount);
-      const newPaidMonths = (selectedLoan.paid_months || 0) + 1;
-
-      // 1. Create ledger entry
-      const entry = {
-        tx_date:          payForm.pay_date || todayStr(),
-        description:      `Loan repayment — ${selectedLoan.employee_name}`,
-        amount:           amt,
-        currency:         "IDR",
-        amount_idr:       amt,
-        tx_type:          "collect_loan",
-        from_type:        "employee_loan",
-        from_id:          null,
-        to_type:          "account",
-        to_id:            payForm.to_id,
-        entity:           "Personal",
-        category_id:      null,
-        notes:            payForm.notes || null,
-        employee_loan_id: selectedLoan.id,
-      };
-      const created = await ledgerApi.create(user.id, entry, accounts);
-      if (created) setLedger(prev => [created, ...prev]);
-      if (payForm.to_id) await recalculateBalance(payForm.to_id, user.id);
-
-      // 2. Also record in loan payments history
-      const pd = await loanPaymentsApi.create(user.id, {
-        loan_id:  selectedLoan.id,
-        pay_date: payForm.pay_date || todayStr(),
-        amount:   amt,
-        notes:    payForm.notes || null,
-      });
-      if (pd) setLoanPayments(prev => [pd, ...prev]);
-
-      // 3. Update paid_months + check fully settled
-      const loan     = loansWithStats.find(l => l.id === selectedLoan.id);
-      const total    = Number(loan?.total_amount || 0);
-      const monthly  = Number(loan?.monthly_installment || 0);
-      const totalMos = monthly > 0 ? Math.ceil(total / monthly) : 0;
-      const isFullyPaid = totalMos > 0 && newPaidMonths >= totalMos;
-      const updates = { paid_months: newPaidMonths, ...(isFullyPaid ? { status: "settled" } : {}) };
-      const updated = await employeeLoanApi.update(selectedLoan.id, updates);
-      if (updated) setEmployeeLoans(prev => prev.map(l => l.id === selectedLoan.id ? updated : l));
-
-      showToast(isFullyPaid ? "Payment recorded — loan fully settled! 🎉" : `Payment of ${fmtIDR(amt, true)} recorded`);
-      setPayModal(false);
-    } catch (e) { showToast(e.message, "error"); }
-    setSaving(false);
-  };
+  // bankAccounts for passing to TransactionModal (prefer prop, fallback to derived)
+  const allBankCashAccounts = useMemo(
+    () => bankAccountsProp.length ? bankAccountsProp : accounts.filter(a => a.type === "bank"),
+    [bankAccountsProp, accounts]
+  );
 
   // ── STYLES ────────────────────────────────────────────────
   const card = (borderColor) => ({
@@ -1105,22 +1069,25 @@ export default function Receivables({
                         <div style={{ fontSize: 11, color: "#9ca3af", fontStyle: "italic", fontFamily: "Figtree, sans-serif" }}>{loan.notes}</div>
                       )}
 
-                      {/* Payment history */}
+                      {/* Payment history from ledger */}
                       <div style={{ borderTop: "0.5px solid #f3f4f6", paddingTop: 8 }}>
                         <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif", marginBottom: 6 }}>
                           Payment History
                         </div>
-                        {loan.payments.length === 0 ? (
+                        {loan.ledgerPays.length === 0 ? (
                           <div style={{ fontSize: 11, color: "#d1d5db", fontFamily: "Figtree, sans-serif" }}>No payments recorded yet</div>
                         ) : (
-                          [...loan.payments].sort((a, b) => (b.pay_date || "").localeCompare(a.pay_date || "")).map(p => {
-                            const dateStr = p.pay_date
-                              ? new Date(p.pay_date + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
+                          [...loan.ledgerPays].sort((a, b) => (b.tx_date || "").localeCompare(a.tx_date || "")).map(p => {
+                            const toAcc = accounts.find(a => a.id === p.to_id);
+                            const dateStr = p.tx_date
+                              ? new Date(p.tx_date + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
                               : "—";
                             return (
                               <div key={p.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", fontSize: 11, marginBottom: 4, gap: 6 }}>
                                 <div style={{ color: "#6b7280", fontFamily: "Figtree, sans-serif", flex: 1, minWidth: 0 }}>
-                                  {dateStr}{p.notes ? <span style={{ color: "#9ca3af" }}> · {p.notes}</span> : null}
+                                  {dateStr}
+                                  {toAcc && <span style={{ color: "#9ca3af" }}> · {toAcc.name}</span>}
+                                  {p.notes && <span style={{ color: "#9ca3af" }}> · {p.notes}</span>}
                                 </div>
                                 <div style={{ fontWeight: 700, color: "#059669", flexShrink: 0, fontFamily: "Figtree, sans-serif" }}>
                                   +{fmtIDR(Number(p.amount || 0), true)}
@@ -1136,15 +1103,21 @@ export default function Receivables({
                     <div style={{ borderTop: "0.5px solid #f3f4f6", padding: "8px 14px", display: "flex", gap: 6 }}>
                       {!isSettled && (
                         <button
-                          onClick={() => { setSelectedLoan(loan); setPayForm({ amount: String(monthly || ""), pay_date: todayStr(), to_id: bankAccounts[0]?.id || "", notes: "" }); setPayModal(true); }}
+                          onClick={() => { setTxModalLoan(loan); setTxModalOpen(true); }}
                           style={{ flex: 1, height: 30, border: "none", borderRadius: 8, cursor: "pointer", background: "#fef3c7", color: "#d97706", fontSize: 12, fontWeight: 700, fontFamily: "Figtree, sans-serif" }}
                         >
                           + Payment
                         </button>
                       )}
                       <button
+                        onClick={() => { setStmtLoan(loan); setStmtOpen(true); }}
+                        style={{ height: 30, padding: "0 12px", border: "0.5px solid #e5e7eb", borderRadius: 8, cursor: "pointer", background: "#f9fafb", color: "#374151", fontSize: 12, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
+                      >
+                        Statement
+                      </button>
+                      <button
                         onClick={() => { setSelectedLoan(loan); setLoanForm({ employee_name: loan.employee_name, employee_dept: loan.employee_dept || "", total_amount: String(loan.total_amount || ""), monthly_installment: String(loan.monthly_installment || ""), start_date: loan.start_date || todayStr(), notes: loan.notes || "" }); setEditLoanModal(true); }}
-                        style={{ flex: 1, height: 30, border: "0.5px solid #e5e7eb", borderRadius: 8, cursor: "pointer", background: "#ffffff", color: "#374151", fontSize: 12, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
+                        style={{ height: 30, padding: "0 12px", border: "0.5px solid #e5e7eb", borderRadius: 8, cursor: "pointer", background: "#ffffff", color: "#374151", fontSize: 12, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
                       >
                         Edit
                       </button>
@@ -1305,52 +1278,151 @@ export default function Receivables({
         <LoanFormFields form={loanForm} setForm={setLoanForm} T={T} />
       </Modal>
 
-      {/* ── RECORD PAYMENT MODAL ─────────────────────────── */}
-      <Modal
-        isOpen={payModal && !!selectedLoan}
-        onClose={() => setPayModal(false)}
-        title={`Record Payment — ${selectedLoan?.employee_name || ""}`}
-        footer={
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-            <Button variant="secondary" size="md" onClick={() => setPayModal(false)}>Cancel</Button>
-            <Button variant="primary" size="md" busy={saving} disabled={!payForm.amount || !payForm.to_id} onClick={handleRecordPayment}>
-              Save
-            </Button>
-          </div>
-        }
-      >
-        {selectedLoan && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {/* Outstanding banner */}
-            <div style={{
-              background: T.sur2, borderRadius: 10, padding: "10px 14px",
-              display: "flex", justifyContent: "space-between", alignItems: "center",
-            }}>
-              <div style={{ fontSize: 12, color: T.text2 }}>Remaining</div>
-              <div style={{ fontSize: 16, fontWeight: 800, color: "#d97706" }}>
-                {fmtIDR(loansWithStats.find(l => l.id === selectedLoan.id)?.remaining || 0)}
+      {/* ── STATEMENT MODAL ──────────────────────────────────── */}
+      {stmtOpen && stmtLoan && (() => {
+        const loan         = stmtLoan;
+        const total        = Number(loan.total_amount || 0);
+        const payments     = ledger
+          .filter(e => e.employee_loan_id === loan.id && e.tx_type === "collect_loan")
+          .sort((a, b) => (a.tx_date || "").localeCompare(b.tx_date || ""));
+        const totalCollected = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
+        const outstanding    = Math.max(0, total - totalCollected);
+        const isSettledLoan  = loan.status === "settled" || outstanding <= 0;
+
+        let runBal = total;
+        const tableRows = payments.map(p => {
+          runBal = Math.max(0, runBal - Number(p.amount || 0));
+          return { ...p, sisa: runBal };
+        });
+
+        const exportPDF = () => {
+          const prev = document.title;
+          document.title = `${loan.employee_name}_LoanStatement`;
+          window.print();
+          document.title = prev;
+        };
+
+        const COL = "Figtree, sans-serif";
+        const TH = { fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em", padding: "6px 8px", borderBottom: "1.5px solid #e5e7eb", fontFamily: COL };
+        const TD = { fontSize: 12, padding: "8px 8px", borderBottom: "0.5px solid #f3f4f6", fontFamily: COL, verticalAlign: "top" };
+
+        return (
+          <Modal
+            isOpen={stmtOpen}
+            onClose={() => { setStmtOpen(false); setStmtLoan(null); }}
+            title="Loan Statement"
+            width={600}
+            footer={
+              <div className="no-print" style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <Button variant="secondary" size="md" onClick={() => { setStmtOpen(false); setStmtLoan(null); }}>Close</Button>
+                <Button variant="primary" size="md" onClick={exportPDF}>🖨 PDF</Button>
+              </div>
+            }
+          >
+            <div ref={stmtPrintRef} style={{ display: "flex", flexDirection: "column", gap: 16, fontFamily: COL }}>
+
+              {/* ── Header ── */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "#111827" }}>{loan.employee_name}</div>
+                  {loan.employee_dept && <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>{loan.employee_dept}</div>}
+                </div>
+                <span style={{
+                  display: "inline-flex", alignItems: "center",
+                  padding: "4px 12px", borderRadius: 99, fontSize: 11, fontWeight: 700,
+                  background: isSettledLoan ? "#dcfce7" : "#fef3c7",
+                  color:      isSettledLoan ? "#059669" : "#d97706",
+                }}>
+                  {isSettledLoan ? "Settled" : "Active"}
+                </span>
+              </div>
+
+              {/* ── Summary ── */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+                {[
+                  { label: "Total Loaned",     value: fmtIDR(total),          color: "#3b5bdb" },
+                  { label: "Total Collected",  value: fmtIDR(totalCollected), color: "#059669" },
+                  { label: "Outstanding",      value: fmtIDR(outstanding),    color: outstanding > 0 ? "#d97706" : "#059669" },
+                ].map(s => (
+                  <div key={s.label} style={{ background: s.color + "12", borderRadius: 10, padding: "12px 12px" }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, color: s.color, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: 4, opacity: 0.8 }}>{s.label}</div>
+                    <div style={{ fontSize: 14, fontWeight: 800, color: "#111827" }}>{s.value}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* ── Table ── */}
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...TH, textAlign: "left", width: 88 }}>Tanggal</th>
+                      <th style={{ ...TH, textAlign: "left" }}>Keterangan</th>
+                      <th style={{ ...TH, textAlign: "right", width: 100 }}>Pinjam</th>
+                      <th style={{ ...TH, textAlign: "right", width: 100 }}>Bayar</th>
+                      <th style={{ ...TH, textAlign: "right", width: 110 }}>Sisa Hutang</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {/* Opening row */}
+                    {loan.start_date && (
+                      <tr style={{ background: "#f0f9ff" }}>
+                        <td style={{ ...TD, color: "#6b7280" }}>{loan.start_date}</td>
+                        <td style={{ ...TD, fontWeight: 600, color: "#111827" }}>Initial Loan</td>
+                        <td style={{ ...TD, textAlign: "right", fontWeight: 700, color: "#3b5bdb" }}>{fmtIDR(total, true)}</td>
+                        <td style={{ ...TD, textAlign: "right" }}>—</td>
+                        <td style={{ ...TD, textAlign: "right", fontWeight: 700, color: "#374151" }}>{fmtIDR(total, true)}</td>
+                      </tr>
+                    )}
+                    {/* Payment rows */}
+                    {tableRows.map(row => (
+                      <tr key={row.id}>
+                        <td style={{ ...TD, color: "#6b7280" }}>{row.tx_date}</td>
+                        <td style={{ ...TD, color: "#374151" }}>{row.description || "Payment"}{row.notes ? <span style={{ color: "#9ca3af" }}> · {row.notes}</span> : null}</td>
+                        <td style={{ ...TD, textAlign: "right" }}>—</td>
+                        <td style={{ ...TD, textAlign: "right", fontWeight: 700, color: "#059669" }}>{fmtIDR(Number(row.amount || 0), true)}</td>
+                        <td style={{ ...TD, textAlign: "right", fontWeight: 700, color: row.sisa <= 0 ? "#059669" : "#374151" }}>
+                          {row.sisa <= 0 ? <span style={{ color: "#059669" }}>LUNAS</span> : fmtIDR(row.sisa, true)}
+                        </td>
+                      </tr>
+                    ))}
+                    {tableRows.length === 0 && (
+                      <tr><td colSpan={5} style={{ ...TD, textAlign: "center", color: "#9ca3af" }}>No payments recorded yet</td></tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
-            <FormRow>
-              <AmountInput label="Amount *" value={payForm.amount} onChange={v => setPayForm(f => ({ ...f, amount: v }))} currency="IDR" />
-              <Field label="Date">
-                <Input type="date" value={payForm.pay_date} onChange={e => setPayForm(f => ({ ...f, pay_date: e.target.value }))} />
-              </Field>
-            </FormRow>
-            <Field label="To Bank Account *">
-              <Select
-                value={payForm.to_id}
-                onChange={e => setPayForm(f => ({ ...f, to_id: e.target.value }))}
-                options={bankAccounts.map(a => ({ value: a.id, label: a.name }))}
-                placeholder="Select bank account…"
-              />
-            </Field>
-            <Field label="Notes">
-              <Input value={payForm.notes} onChange={e => setPayForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional" />
-            </Field>
-          </div>
-        )}
-      </Modal>
+          </Modal>
+        );
+      })()}
+
+      {/* ── TRANSACTION MODAL (+ Payment) ─────────────────────── */}
+      <TransactionModal
+        open={txModalOpen}
+        mode="add"
+        defaultGroup="loan"
+        defaultTxType="collect_loan"
+        defaultAccount={{ from_id: txModalLoan?.id || null }}
+        onSave={() => { setTxModalOpen(false); setTxModalLoan(null); onRefresh?.(); }}
+        onClose={() => { setTxModalOpen(false); setTxModalLoan(null); }}
+        user={user}
+        accounts={accounts}
+        setLedger={setLedger}
+        categories={categories || []}
+        fxRates={fxRates}
+        allCurrencies={CURRENCIES}
+        bankAccounts={allBankCashAccounts}
+        creditCards={creditCards}
+        assets={assets}
+        liabilities={liabilities}
+        receivables={[]}
+        incomeSrcs={incomeSrcs}
+        employeeLoans={employeeLoans}
+        setEmployeeLoans={setEmployeeLoans}
+        accountCurrencies={accountCurrencies}
+        onRefresh={onRefresh}
+      />
 
       {/* ── EDIT SETTLEMENT MODAL ───────────────────────── */}
       <Modal
