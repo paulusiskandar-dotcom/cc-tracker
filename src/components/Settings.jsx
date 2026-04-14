@@ -1485,6 +1485,7 @@ function EStatementTab({
           const rows = isExtracted ? buildRows(rawTxs, r.account_id || "", fetchedAcctCurrencies) : null;
           const sel = {};
           if (rows) rows.forEach(row => { sel[row._id] = row.status !== "duplicate" && row.status !== "possible_duplicate"; });
+          const detectedCurrency = rows?.find(row => row.currency && row.currency !== "IDR")?.currency || "IDR";
           return {
             id:         r.id,
             file:       null,
@@ -1492,6 +1493,7 @@ function EStatementTab({
             name:       r.filename,
             size:       r.file_size || 0,
             account_id: r.account_id || "",
+            currency:   detectedCurrency,
             status:     isExtracted ? "reviewed" : r.status,
             rows,
             selected:   sel,
@@ -1528,6 +1530,23 @@ function EStatementTab({
     }));
     supabase.from("estatement_pdfs").update({ account_id: accountId || null }).eq("id", itemId)
       .then(null, (e) => console.error("[setItemAccount]", e));
+  };
+
+  const setItemCurrency = (itemId, currency) => {
+    const cur = (currency || "IDR").toUpperCase();
+    const matchedAccountId = cur !== "IDR"
+      ? acctCurrencies.find(ac => ac.currency === cur)?.account_id || null
+      : null;
+    setQueue(prev => prev.map(i => {
+      if (i.id !== itemId) return i;
+      const rows = i.rows ? i.rows.map(r => {
+        const updated = { ...r, currency: cur };
+        if (matchedAccountId) return applyDefaultAccount(updated, matchedAccountId);
+        return updated;
+      }) : null;
+      const newAccountId = matchedAccountId || i.account_id;
+      return { ...i, currency: cur, account_id: newAccountId, rows };
+    }));
   };
 
   const readFileAsBase64 = (file) => new Promise((resolve, reject) => {
@@ -1829,8 +1848,9 @@ function EStatementTab({
       const rows = buildRows(result.transactions || [], item.account_id || "");
       const sel = {};
       rows.forEach(r => { sel[r._id] = r.status !== "duplicate" && r.status !== "possible_duplicate"; });
+      const detectedCurrency = rows.find(r => r.currency && r.currency !== "IDR")?.currency || "IDR";
       setQueue(prev => prev.map(i => i.id === itemId
-        ? { ...i, status: "reviewed", rows, selected: sel, skipped: new Set(), notesOpen: new Set(), file: null } : i
+        ? { ...i, status: "reviewed", rows, selected: sel, currency: detectedCurrency, skipped: new Set(), notesOpen: new Set(), file: null } : i
       ));
     } catch (e) {
       await supabase.from("estatement_pdfs").update({ status: "failed" }).eq("id", itemId);
@@ -2203,6 +2223,7 @@ function EStatementTab({
               employeeLoans={employeeLoans}
               onProcess={() => processFile(item.id)}
               onSetAccount={(accountId) => setItemAccount(item.id, accountId)}
+              onSetCurrency={(currency) => setItemCurrency(item.id, currency)}
               onUpdateRow={(rowId, patch) => updateRow(item.id, rowId, patch)}
               onToggleSel={(rowId) => setQueue(prev => prev.map(i => i.id === item.id
                 ? { ...i, selected: { ...i.selected, [rowId]: !i.selected[rowId] } } : i))}
@@ -2272,141 +2293,140 @@ function EStatementTab({
   );
 }
 
+const ESTMT_CURRENCIES = ["IDR","USD","EUR","JPY","SGD","GBP","AUD","HKD","CHF","MYR","CNY","KRW","THB"];
+
+const DD_STYLE = {
+  fontSize: 12, padding: "4px 6px", borderRadius: 6,
+  border: "1px solid #e5e7eb", background: "#fff", color: "#111827",
+  fontFamily: "Figtree, sans-serif", cursor: "pointer", height: 30,
+};
+const OUTLINE_BTN = {
+  fontSize: 11, padding: "0 10px", height: 26, borderRadius: 6,
+  border: "1px solid #d1d5db", background: "#fff", color: "#374151",
+  fontFamily: "Figtree, sans-serif", fontWeight: 600, cursor: "pointer",
+  display: "inline-flex", alignItems: "center", gap: 4, flexShrink: 0,
+};
+
 // ─── QUEUE FILE ITEM (card wrapper + preview) ─────────────────
 function EStmtQueueItem({
   item, T, card, accounts, employeeLoans = [],
-  onProcess, onSetAccount,
+  onProcess, onSetAccount, onSetCurrency,
   onUpdateRow, onToggleSel, onToggleAll,
   onSave, onSaveRow, onSkipRow, onCreateInstallment, onRemove,
   statusBadge, fmtSize,
 }) {
 
   const rows = item.rows || [];
+  const isReviewed = item.status === "reviewed";
+
+  // ── Account dropdown (shared across both pre/post-review rows) ──
+  const AccountSelect = ({ style = {} }) => (
+    <select value={item.account_id || ""} onChange={e => onSetAccount(e.target.value)}
+      style={{ ...DD_STYLE, ...style }}>
+      <option value="">— account —</option>
+      {[
+        { type: "bank",        label: "🏦 Bank"         },
+        { type: "cash",        label: "💵 Cash"         },
+        { type: "credit_card", label: "💳 Credit Cards" },
+      ].map(g => {
+        const grp = accounts.filter(a => a.type === g.type).sort((a,b) => (a.name||"").localeCompare(b.name||""));
+        if (!grp.length) return null;
+        return (
+          <optgroup key={g.type} label={g.label}>
+            {grp.map(a => (
+              <option key={a.id} value={a.id}>
+                {a.name}{(a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
+              </option>
+            ))}
+          </optgroup>
+        );
+      })}
+    </select>
+  );
+
+  const LBL = { fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" };
 
   return (
     <div style={{ ...card, padding: 0, overflow: "hidden" }}>
 
-      {/* ── File header row ── */}
+      {/* ── Row 1: icon · filename · meta  [Review] [Re-scan] [×] ── */}
       <div style={{
         display: "flex", alignItems: "center", gap: 10,
         padding: "10px 14px", background: T.sur2,
-        borderBottom: item.status === "reviewed" ? `1px solid ${T.border}` : "none",
+        borderBottom: `1px solid ${T.border}`,
       }}>
-        <span style={{ fontSize: 20, flexShrink: 0 }}>
-          {item._uploading ? "⏫" : "📄"}
-        </span>
+        <span style={{ fontSize: 18, flexShrink: 0 }}>{item._uploading ? "⏫" : "📄"}</span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{
+          <span style={{
             fontSize: 12, fontWeight: 600, color: T.text, fontFamily: "Figtree, sans-serif",
-            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "block",
           }}>
             {item.name}
-          </div>
-          <div style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
+          </span>
+          <span style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, sans-serif" }}>
             {fmtSize(item.size)}
-            {item._uploading                && " · uploading…"}
-            {item.status === "reviewed"     && rows.length > 0 && ` · ${rows.length} tx found`}
-            {item.status === "processing"   && " · scanning with AI…"}
-          </div>
+            {item._uploading              && " · uploading…"}
+            {isReviewed && rows.length > 0 && ` · ${rows.length} tx found`}
+            {item.status === "processing" && " · scanning with AI…"}
+          </span>
         </div>
-        {statusBadge(item.status)}
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-          {item.status === "queued" && !item._uploading && (
-            <Button variant="primary" size="sm"
-              onClick={() => {
-                if (!item.account_id) { showToast("Select an account first", "error"); return; }
-                onProcess();
-              }}>▶ Process</Button>
-          )}
-          {item.status === "failed" && (
-            <Button variant="secondary" size="sm" onClick={onProcess}>Retry</Button>
-          )}
-          {item.status === "reviewed" && (
-            <Button variant="secondary" size="sm" onClick={onProcess}>🔄 Re-scan</Button>
-          )}
-          {["queued","failed","reviewed"].includes(item.status) && !item._uploading && (
-            <button onClick={onRemove}
-              style={{ border: "none", background: "none", cursor: "pointer", fontSize: 16, color: "#d1d5db", padding: 2 }}
-              onMouseEnter={e => e.currentTarget.style.color = "#ef4444"}
-              onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}>
-              ×
-            </button>
-          )}
-        </div>
+
+        {/* Buttons */}
+        {isReviewed && (
+          <button style={OUTLINE_BTN} disabled>👁 Review</button>
+        )}
+        {item.status === "queued" && !item._uploading && (
+          <button style={{ ...OUTLINE_BTN, background: "#1d4ed8", color: "#fff", border: "none" }}
+            onClick={() => {
+              if (!item.account_id) { showToast("Select an account first", "error"); return; }
+              onProcess();
+            }}>▶ Process</button>
+        )}
+        {item.status === "failed" && (
+          <button style={OUTLINE_BTN} onClick={onProcess}>Retry</button>
+        )}
+        {isReviewed && (
+          <button style={OUTLINE_BTN} onClick={onProcess}>🔄 Re-scan</button>
+        )}
+        {["queued","failed","reviewed"].includes(item.status) && !item._uploading && (
+          <button onClick={onRemove}
+            style={{ border: "none", background: "none", cursor: "pointer", fontSize: 16, color: "#d1d5db", padding: "0 2px", flexShrink: 0 }}
+            onMouseEnter={e => e.currentTarget.style.color = "#ef4444"}
+            onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}>×</button>
+        )}
       </div>
 
-      {/* ── Account selector (queued / failed: full picker; reviewed: default banner) ── */}
-      {!item._uploading && ["queued","failed","reviewed"].includes(item.status) && (() => {
-        const isReviewed = item.status === "reviewed";
-        const selectedAcct = accounts.find(a => a.id === item.account_id);
-        const acctLabel = selectedAcct
-          ? `${selectedAcct.name}${selectedAcct.last4 || selectedAcct.card_last4 ? ` ···${selectedAcct.last4 || selectedAcct.card_last4}` : ""}`
-          : null;
-        const AccountSelect = () => (
-          <select
-            value={item.account_id || ""}
-            onChange={e => onSetAccount(e.target.value)}
-            style={{
-              fontSize: isReviewed ? 11 : 12,
-              padding: isReviewed ? "3px 5px" : "4px 6px",
-              borderRadius: 6,
-              border: `1px solid ${item.account_id ? (isReviewed ? "#bae6fd" : "#bbf7d0") : "#fcd34d"}`,
-              background: "white", color: "#111827",
-              fontFamily: "Figtree, sans-serif", cursor: "pointer",
-              ...(isReviewed && acctLabel ? { width: "auto" } : { flex: 1 }),
-            }}>
-            <option value="">{isReviewed && acctLabel ? "Change…" : "— pick an account —"}</option>
-            {[
-              { type: "bank",        label: "🏦 Bank"        },
-              { type: "cash",        label: "💵 Cash"        },
-              { type: "credit_card", label: "💳 Credit Cards" },
-            ].map(g => {
-              const grp = accounts.filter(a => a.type === g.type).sort((a,b) => (a.name||"").localeCompare(b.name||""));
-              if (!grp.length) return null;
-              return (
-                <optgroup key={g.type} label={g.label}>
-                  {grp.map(a => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}{(a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
-                    </option>
-                  ))}
-                </optgroup>
-              );
-            })}
+      {/* ── Row 2 (reviewed): Account + Currency dropdowns ── */}
+      {!item._uploading && isReviewed && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+          padding: "8px 14px", borderBottom: `1px solid ${T.border}`,
+          background: T.sur2,
+        }}>
+          <span style={LBL}>Account:</span>
+          <AccountSelect />
+          <span style={{ ...LBL, marginLeft: 4 }}>Currency:</span>
+          <select value={item.currency || "IDR"} onChange={e => onSetCurrency(e.target.value)}
+            style={DD_STYLE}>
+            {ESTMT_CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
-        );
-        if (isReviewed) return (
-          <div style={{
-            display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
-            padding: "7px 14px", borderBottom: `1px solid ${T.border}`,
-            background: item.account_id ? "#f0f9ff" : "#fefce8",
-          }}>
-            <span style={{ fontSize: 11, color: item.account_id ? "#0369a1" : "#92400e", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
-              All transactions default to:
-            </span>
-            {acctLabel
-              ? <span style={{ fontSize: 11, fontWeight: 700, color: "#0c4a6e", fontFamily: "Figtree, sans-serif", flex: 1 }}>{acctLabel}</span>
-              : <span style={{ fontSize: 11, color: "#92400e", fontFamily: "Figtree, sans-serif", flex: 1 }}>⚠ No account selected</span>
-            }
-            <AccountSelect />
-            <span style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
-              (applies to all rows)
-            </span>
-          </div>
-        );
-        return (
-          <div style={{
-            display: "flex", alignItems: "center", gap: 8,
-            padding: "8px 14px", borderBottom: `1px solid ${T.border}`,
-            background: item.account_id ? "#f0fdf4" : "#fefce8",
-          }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: item.account_id ? "#059669" : "#92400e", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
-              {item.account_id ? "📂 Statement account" : "⚠️ Select account"}
-            </span>
-            <AccountSelect />
-          </div>
-        );
-      })()}
+          <span style={{ ...LBL, marginLeft: 4 }}>(applies to all rows)</span>
+        </div>
+      )}
+
+      {/* ── Row 2 (queued / failed): account picker only ── */}
+      {!item._uploading && ["queued","failed"].includes(item.status) && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8,
+          padding: "8px 14px", borderBottom: `1px solid ${T.border}`,
+          background: item.account_id ? "#f0fdf4" : "#fefce8",
+        }}>
+          <span style={{ ...LBL, fontWeight: 700, color: item.account_id ? "#059669" : "#92400e" }}>
+            {item.account_id ? "📂 Statement account" : "⚠️ Select account"}
+          </span>
+          <AccountSelect style={{ flex: 1, border: `1px solid ${item.account_id ? "#bbf7d0" : "#fcd34d"}` }} />
+        </div>
+      )}
 
       {/* ── Error ── */}
       {item.error && (
