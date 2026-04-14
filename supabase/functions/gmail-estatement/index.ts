@@ -250,6 +250,13 @@ async function scanGmailForStatements(
 
 const EXTRACTION_PROMPT = `You are an expert at extracting transactions from Indonesian bank and credit card statements.
 
+STEP 1 — DETECT DOCUMENT CURRENCY:
+- Look at the statement header for a currency indicator. BCA foreign currency accounts show "MATA UANG : [CODE]" (e.g. "MATA UANG : JPY" or "MATA UANG : USD").
+- If found, the ENTIRE document is in that currency. Set currency="JPY" (or whatever code) on ALL transactions.
+- If no currency indicator is found, assume IDR. Set currency="IDR" on ALL transactions.
+- Do NOT assume IDR if another currency is detected.
+
+STEP 2 — EXTRACT TRANSACTIONS:
 IMPORTANT: This statement contains a TRANSACTION TABLE. Scan every single page for rows in the transaction table.
 Each row typically has: Date | Description/Keterangan | Debit amount | Kredit amount | Balance/Saldo.
 Extract ALL rows from ALL pages of the transaction table. Do not stop early.
@@ -290,6 +297,7 @@ FOR EACH TRANSACTION return:
   "description": "full description as written",
   "merchant": "cleaned merchant name (no codes, no installment suffix)",
   "amount": 150000,
+  "currency": "IDR",
   "direction": "out",
   "currency_original": "USD",
   "amount_original": 6.66,
@@ -305,9 +313,10 @@ FOR EACH TRANSACTION return:
 }
 
 Field notes:
-- amount: always positive number in IDR
+- currency: the document currency detected in STEP 1 — always set this (e.g. "IDR", "JPY", "USD")
+- amount: positive number in the document's currency (IDR for normal statements; JPY/USD/etc. for FCY accounts)
 - direction: "out" for expenses/debits, "in" for credits (income/transfers in)
-- currency_original / amount_original / rate_used: fill if foreign currency shown, else null
+- currency_original / amount_original / rate_used: ONLY for IDR statements where a transaction shows an original foreign currency amount alongside the IDR amount. Leave null for FCY account statements (where the whole document is already in foreign currency).
 - is_installment: true if CICILAN/INSTALLMENT row
 - installment_current / installment_total: CRITICAL — always extract both numbers from "X/Y" pattern.
   Example: "TOKOPEDIA_CYBS_CCL12 : 7/12" → installment_current=7, installment_total=12.
@@ -326,12 +335,14 @@ If no transactions found, return [].`;
 
 const FALLBACK_PROMPT = `This is a bank statement PDF. Extract every single transaction row from the transaction table.
 Look for a table with columns like: Tanggal/Date, Keterangan/Description, Debet/Debit, Kredit/Credit, Saldo/Balance.
+First, detect the document currency: look for "MATA UANG : [CODE]" in the header (e.g. "MATA UANG : JPY"). If found, use that currency for all transactions. Otherwise use "IDR".
 Return ONLY a JSON array — no markdown, no explanation. Each item:
 {
   "date": "YYYY-MM-DD",
   "description": "transaction description as written",
   "merchant": "merchant or payee name",
   "amount": 150000,
+  "currency": "IDR",
   "direction": "out",
   "is_installment": false,
   "installment_current": null,
@@ -345,8 +356,9 @@ Return ONLY a JSON array — no markdown, no explanation. Each item:
   "amount_original": null,
   "rate_used": null
 }
+currency: document currency detected above ("IDR", "JPY", "USD", etc.) — always set this.
 direction: "out" for debits/expenses, "in" for credits received.
-amount: positive number in IDR (no dots/commas formatting).
+amount: positive number in the document's currency (no dots/commas formatting).
 If no transactions found, return [].`;
 
 // ── HELPER: try to decrypt PDF with pdf-lib ────────────────────
