@@ -24,7 +24,7 @@ import { useState, useEffect } from "react";
 import {
   ledgerApi, merchantApi, getTxFromToTypes,
   accountCurrenciesApi, assetsApi,
-  installmentsApi, recalculateBalance, accountsApi,
+  installmentsApi, recalculateBalance, accountsApi, employeeLoanApi,
 } from "../../api";
 import { EXPENSE_CATEGORIES } from "../../constants";
 import { fmtIDR, todayStr, toIDR } from "../../utils";
@@ -235,14 +235,16 @@ export default function TransactionModal({
   const [saving,  setSaving]    = useState(false);
   const [confirm, setConfirm]   = useState(false); // delete confirm
   const [cicilan, setCicilan]   = useState(false);
-  const [newBorrowerName,  setNewBorrowerName]  = useState("");
-  const [creatingBorrower, setCreatingBorrower] = useState(false);
+  const [newBorrowerName,    setNewBorrowerName]    = useState("");
+  const [newMonthlyInstall,  setNewMonthlyInstall]  = useState("");
+  const [creatingBorrower,   setCreatingBorrower]   = useState(false);
 
   // ── Reset on open ──────────────────────────────────────────
   useEffect(() => {
     if (!open) return;
 
     setNewBorrowerName("");
+    setNewMonthlyInstall("");
     setCreatingBorrower(false);
 
     if ((mode === "edit" || mode === "confirm") && initialData) {
@@ -411,31 +413,91 @@ export default function TransactionModal({
       // ── Give Loan ─────────────────────────────────────────────
       if (type === "give_loan" && !isEdit) {
         if (!form.from_id) { showToast("Select from account", "error"); setSaving(false); return; }
-        let toId = uuid(form.to_id);
+        const amt = sn(form.amount);
+        let loanId;
+        let empName;
+
         if (creatingBorrower) {
-          if (!newBorrowerName.trim()) { showToast("Borrower name is required", "error"); setSaving(false); return; }
-          const newRecv = await accountsApi.create(user.id, {
-            name: newBorrowerName.trim(), type: "receivable",
-            current_balance: 0, is_active: true,
+          if (!newBorrowerName.trim()) { showToast("Employee name is required", "error"); setSaving(false); return; }
+          const newLoan = await employeeLoanApi.create(user.id, {
+            employee_name:        newBorrowerName.trim(),
+            total_amount:         amt,
+            monthly_installment:  sn(newMonthlyInstall) || 0,
+            start_date:           form.tx_date,
+            status:               "active",
+            paid_months:          0,
           });
-          toId = newRecv.id;
-          await onRefresh?.();
+          loanId  = newLoan.id;
+          empName = newLoan.employee_name;
+          setEmployeeLoans?.(p => [...p, newLoan]);
+        } else {
+          if (!form.to_id) { showToast("Select or create a borrower", "error"); setSaving(false); return; }
+          loanId = form.to_id;
+          const loan = employeeLoans.find(l => l.id === loanId);
+          empName = loan?.employee_name || "Employee";
+          const newTotal = Number(loan?.total_amount || 0) + amt;
+          const updated = await employeeLoanApi.update(loanId, { total_amount: newTotal });
+          setEmployeeLoans?.(p => p.map(l => l.id === loanId ? updated : l));
         }
-        if (!toId) { showToast("Select or create a borrower", "error"); setSaving(false); return; }
-        const desc = form.description?.trim() || "Loan";
+
+        const desc = form.description?.trim() || empName;
         const entry = {
           tx_date: form.tx_date, description: desc,
-          amount: sn(form.amount), currency: form.currency || "IDR", amount_idr: sn(form.amount),
-          tx_type: "give_loan", from_type: "account", to_type: "account",
-          from_id: uuid(form.from_id), to_id: toId,
-          entity: "Personal", is_reimburse: false, merchant_name: null, notes: form.notes || null,
+          amount: amt, currency: form.currency || "IDR", amount_idr: amt,
+          tx_type: "give_loan", from_type: "account", to_type: "employee_loan",
+          from_id: uuid(form.from_id), to_id: null,
+          entity: "Personal", employee_loan_id: loanId,
+          is_reimburse: false, merchant_name: null, notes: form.notes || null,
           attachment_url: null, ai_categorized: false, ai_confidence: null,
           installment_id: null, scan_batch_id: null, category_id: null, category_name: null,
         };
         const created = await ledgerApi.create(user.id, entry, accounts);
         setLedger?.(p => [created, ...p]);
-        await Promise.all([uuid(form.from_id), toId].filter(Boolean).map(id => recalculateBalance(id, user.id)));
-        showToast("Loan saved");
+        await recalculateBalance(uuid(form.from_id), user.id);
+        showToast("Loan given");
+        await onRefresh?.();
+        onSave?.(created);
+        onClose();
+        setSaving(false);
+        return;
+      }
+
+      // ── Collect Loan ──────────────────────────────────────────
+      if (type === "collect_loan" && !isEdit) {
+        if (!form.from_id) { showToast("Select borrower", "error"); setSaving(false); return; }
+        if (!form.to_id)   { showToast("Select destination account", "error"); setSaving(false); return; }
+        const amt  = sn(form.amount);
+        const loan = employeeLoans.find(l => l.id === form.from_id);
+        if (!loan) { showToast("Loan not found", "error"); setSaving(false); return; }
+
+        const newPaidMonths = Number(loan.paid_months || 0) + 1;
+        const totalMonths   = Number(loan.monthly_installment || 0) > 0
+          ? Math.ceil(Number(loan.total_amount || 0) / Number(loan.monthly_installment))
+          : 0;
+        const isFullyPaid = totalMonths > 0 && newPaidMonths >= totalMonths;
+        const updates     = { paid_months: newPaidMonths, ...(isFullyPaid ? { status: "settled" } : {}) };
+        const updated     = await employeeLoanApi.update(loan.id, updates);
+        setEmployeeLoans?.(p => p.map(l => l.id === loan.id ? updated : l));
+
+        const autoNotes = totalMonths > 0
+          ? `Payment ${newPaidMonths} of ${totalMonths}`
+          : `Payment ${newPaidMonths}`;
+        const desc = form.description?.trim() || loan.employee_name;
+        const entry = {
+          tx_date: form.tx_date, description: desc,
+          amount: amt, currency: form.currency || "IDR", amount_idr: amt,
+          tx_type: "collect_loan", from_type: "employee_loan", to_type: "account",
+          from_id: null, to_id: uuid(form.to_id),
+          entity: "Personal", employee_loan_id: loan.id,
+          is_reimburse: false, merchant_name: null,
+          notes: form.notes?.trim() || autoNotes,
+          attachment_url: null, ai_categorized: false, ai_confidence: null,
+          installment_id: null, scan_batch_id: null, category_id: null, category_name: null,
+        };
+        const created = await ledgerApi.create(user.id, entry, accounts);
+        setLedger?.(p => [created, ...p]);
+        await recalculateBalance(uuid(form.to_id), user.id);
+        showToast(isFullyPaid ? "Loan fully paid! 🎉" : `Payment ${newPaidMonths}${totalMonths > 0 ? ` of ${totalMonths}` : ""} recorded`);
         await onRefresh?.();
         onSave?.(created);
         onClose();
@@ -641,19 +703,32 @@ export default function TransactionModal({
     const banks   = bankAccs.sort(byName);
     const cash    = cashAccs.sort(byName);
     const ccs     = ccAccs.sort(byName);
-    const loanRecv = receivables
-      .filter(r => r.id?.length === 36 && !ENTITY_OPTS.includes(r.name))
-      .sort(byName);
-    const assts   = assetAccs.sort(byName);
+    const assts = assetAccs.sort(byName);
+
+    // collect_loan: render employee_loans dropdown directly (not via optgroup)
+    if (type === "collect_loan") {
+      const activeLoans = [...employeeLoans]
+        .filter(l => l.status !== "settled")
+        .sort((a, b) => (a.employee_name || "").localeCompare(b.employee_name || ""));
+      return (
+        <Field label={label}>
+          <select value={form.from_id || ""} onChange={e => set("from_id", e.target.value || null)} style={SEL}>
+            <option value="">Select borrower…</option>
+            {activeLoans.map(l => {
+              const outstanding = Math.max(0, Number(l.total_amount || 0) - Number(l.paid_months || 0) * Number(l.monthly_installment || 0));
+              return (
+                <option key={l.id} value={l.id}>
+                  {l.employee_name}{outstanding > 0 ? ` · ${fmtIDR(outstanding)} outstanding` : ""}
+                </option>
+              );
+            })}
+          </select>
+        </Field>
+      );
+    }
 
     let groups = [];
-    if (type === "collect_loan") {
-      const withBalance = loanRecv.filter(r => Number(r.current_balance || 0) > 0);
-      groups = [{ label: "RECEIVABLE", items: withBalance.length ? withBalance : loanRecv }];
-    } else if (type === "reimburse_in") {
-      // reimburse_in never shows FROM (showFrom excludes it), but keep branch for safety
-      groups = [{ label: "RECEIVABLE", items: loanRecv }];
-    } else if (type === "sell_asset") {
+    if (type === "sell_asset") {
       groups = [{ label: "ASSET", items: assts }];
     } else {
       groups = [
@@ -671,10 +746,7 @@ export default function TransactionModal({
             <optgroup key={g.label} label={g.label}>
               {g.items.map(a => {
                 let extra = "";
-                if (type === "collect_loan") {
-                  const bal = Number(a.current_balance || 0);
-                  if (bal > 0) extra = ` · ${fmtIDR(bal)} outstanding`;
-                } else if (type === "sell_asset" || g.label === "CREDIT CARD") {
+                if (type === "sell_asset" || g.label === "CREDIT CARD") {
                   extra = (a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : "";
                 } else {
                   extra = a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : "";
@@ -977,14 +1049,15 @@ export default function TransactionModal({
 
     // ── Give Loan ────────────────────────────────────────────────
     if (type === "give_loan") {
-      const byName   = (a, b) => (a.name || "").localeCompare(b.name || "");
-      const recvList = receivables.filter(r => r.id?.length === 36 && !ENTITY_OPTS.includes(r.name)).sort(byName);
+      const loanList = [...employeeLoans]
+        .filter(l => l.status !== "settled")
+        .sort((a, b) => (a.employee_name || "").localeCompare(b.employee_name || ""));
       return (
         <>
           {DIVIDER}
           {/* 3. FROM */}
           {renderFromSelect("From Account")}
-          {/* 4. TO / BORROWER */}
+          {/* 4. BORROWER */}
           <Field label="Borrower *">
             {!creatingBorrower ? (
               <select value={form.to_id || ""} onChange={e => {
@@ -992,23 +1065,31 @@ export default function TransactionModal({
                 else set("to_id", e.target.value || null);
               }} style={SEL}>
                 <option value="">Select borrower…</option>
-                {recvList.map(r => (
-                  <option key={r.id} value={r.id}>
-                    {r.name}{Number(r.current_balance || 0) > 0 ? ` · ${fmtIDR(r.current_balance)} outstanding` : ""}
-                  </option>
-                ))}
+                {loanList.map(l => {
+                  const outstanding = Math.max(0, Number(l.total_amount || 0) - Number(l.paid_months || 0) * Number(l.monthly_installment || 0));
+                  return (
+                    <option key={l.id} value={l.id}>
+                      {l.employee_name}{outstanding > 0 ? ` · ${fmtIDR(outstanding)} outstanding` : ""}
+                    </option>
+                  );
+                })}
                 <option value="__new__">+ Create New</option>
               </select>
             ) : (
-              <div style={{ display: "flex", gap: 8 }}>
-                <input autoFocus type="text" placeholder="Borrower name…"
-                  value={newBorrowerName} onChange={e => setNewBorrowerName(e.target.value)}
-                  style={{ ...SEL, flex: 1 }} />
-                <button type="button"
-                  onClick={() => { setCreatingBorrower(false); setNewBorrowerName(""); set("to_id", null); }}
-                  style={{ height: 44, padding: "0 12px", borderRadius: 10, border: "1.5px solid #e5e7eb", background: "#fff", color: "#6b7280", fontFamily: FF, fontSize: 13, cursor: "pointer" }}>
-                  ✕
-                </button>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input autoFocus type="text" placeholder="Employee name…"
+                    value={newBorrowerName} onChange={e => setNewBorrowerName(e.target.value)}
+                    style={{ ...SEL, flex: 1 }} />
+                  <button type="button"
+                    onClick={() => { setCreatingBorrower(false); setNewBorrowerName(""); setNewMonthlyInstall(""); set("to_id", null); }}
+                    style={{ height: 44, padding: "0 12px", borderRadius: 10, border: "1.5px solid #e5e7eb", background: "#fff", color: "#6b7280", fontFamily: FF, fontSize: 13, cursor: "pointer" }}>
+                    ✕
+                  </button>
+                </div>
+                <input type="number" min="0" placeholder="Monthly installment (Rp)…"
+                  value={newMonthlyInstall} onChange={e => setNewMonthlyInstall(e.target.value)}
+                  style={{ ...SEL }} />
               </div>
             )}
           </Field>
