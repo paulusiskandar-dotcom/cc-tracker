@@ -1335,9 +1335,9 @@ export default function Receivables({
       {stmtOpen && stmtLoan && (() => {
         const loan         = stmtLoan;
         const total        = Number(loan.total_amount || 0);
-        const payments     = ledger
-          .filter(e => e.employee_loan_id === loan.id && e.tx_type === "collect_loan")
-          .sort((a, b) => (a.tx_date || "").localeCompare(b.tx_date || ""));
+        const payments     = loanPayments
+          .filter(p => p.loan_id === loan.id)
+          .sort((a, b) => (a.pay_date || "").localeCompare(b.pay_date || ""));
         const totalCollected = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
         const outstanding    = Math.max(0, total - totalCollected);
         const isSettledLoan  = loan.status === "settled" || outstanding <= 0;
@@ -1430,8 +1430,8 @@ export default function Receivables({
                     {/* Payment rows */}
                     {tableRows.map(row => (
                       <tr key={row.id}>
-                        <td style={{ ...TD, color: "#6b7280" }}>{row.tx_date}</td>
-                        <td style={{ ...TD, color: "#374151" }}>{row.description || "Payment"}{row.notes ? <span style={{ color: "#9ca3af" }}> · {row.notes}</span> : null}</td>
+                        <td style={{ ...TD, color: "#6b7280" }}>{row.pay_date}</td>
+                        <td style={{ ...TD, color: "#374151" }}>{row.notes || "Payment"}</td>
                         <td style={{ ...TD, textAlign: "right" }}>—</td>
                         <td style={{ ...TD, textAlign: "right", fontWeight: 700, color: "#059669" }}>{fmtIDR(Number(row.amount || 0), true)}</td>
                         <td style={{ ...TD, textAlign: "right", fontWeight: 700, color: row.sisa <= 0 ? "#059669" : "#374151" }}>
