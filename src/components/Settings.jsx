@@ -1458,20 +1458,12 @@ function EStatementTab({
   const [dbLoading,      setDbLoading]      = useState(true);
   const [acctCurrencies, setAcctCurrencies] = useState([]);
 
-  // ── Fetch account_currencies for non-IDR account auto-select ─
-  useEffect(() => {
-    if (!user?.id) return;
-    supabase.from("account_currencies").select("account_id, currency")
-      .eq("user_id", user.id)
-      .then(({ data }) => { if (data) setAcctCurrencies(data); });
-  }, [user?.id]);
-
-  // ── Load persisted queue + history from DB on mount ───────
+  // ── Load persisted queue + history + account_currencies on mount ─
   useEffect(() => {
     (async () => {
       setDbLoading(true);
       const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
-      const [{ data: pending }, { data: done }] = await Promise.all([
+      const [{ data: pending }, { data: done }, { data: acCur }] = await Promise.all([
         supabase.from("estatement_pdfs").select("*")
           .eq("user_id", user.id).in("status", ["queued", "failed", "extracted"])
           .order("created_at", { ascending: false }),
@@ -1479,14 +1471,18 @@ function EStatementTab({
           .eq("user_id", user.id).eq("status", "done")
           .gte("processed_at", thirtyDaysAgo)
           .order("processed_at", { ascending: false }),
+        supabase.from("account_currencies").select("account_id, currency")
+          .eq("user_id", user.id),
       ]);
+      const fetchedAcctCurrencies = acCur || [];
+      if (fetchedAcctCurrencies.length) setAcctCurrencies(fetchedAcctCurrencies);
       if (pending) {
         setQueue(pending.map(r => {
           const isExtracted = r.status === "extracted" && r.ai_raw_result;
           const rawTxs = isExtracted
             ? (Array.isArray(r.ai_raw_result) ? r.ai_raw_result : r.ai_raw_result?.transactions || [])
             : [];
-          const rows = isExtracted ? buildRows(rawTxs, r.account_id || "") : null;
+          const rows = isExtracted ? buildRows(rawTxs, r.account_id || "", fetchedAcctCurrencies) : null;
           const sel = {};
           if (rows) rows.forEach(row => { sel[row._id] = row.status !== "duplicate" && row.status !== "possible_duplicate"; });
           return {
@@ -1602,7 +1598,8 @@ function EStatementTab({
   // ── Categorize AI output → internal shape ─────────────────
   // statementAccountId: the user-selected account for this statement — overrides
   // any AI-guessed account. Debit txs use it as from_id; credit txs as to_id.
-  const buildRows = (transactions, statementAccountId = "") => {
+  const buildRows = (transactions, statementAccountId = "", acctCurrenciesOverride = null) => {
+    const effectiveAcctCurrencies = acctCurrenciesOverride ?? acctCurrencies;
     return transactions.map((t, idx) => {
       // direction
       const isDebit = t.direction ? t.direction === "out"
@@ -1672,7 +1669,7 @@ function EStatementTab({
       // Currency-matched account: find account_id in account_currencies for this currency
       const txCurrencyUpper = (t.currency || "IDR").toUpperCase();
       const currencyMatchedId = txCurrencyUpper !== "IDR"
-        ? acctCurrencies.find(ac => ac.currency === txCurrencyUpper)?.account_id || null
+        ? effectiveAcctCurrencies.find(ac => ac.currency === txCurrencyUpper)?.account_id || null
         : null;
 
       let fromId, toId;
