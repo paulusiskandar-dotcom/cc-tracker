@@ -3,7 +3,7 @@
  * Used by both Transactions page (add + edit) and BankStatement (edit only).
  */
 import { useState } from "react";
-import { EXPENSE_CATEGORIES, ENTITIES } from "../../constants";
+import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST, ENTITIES } from "../../constants";
 import { fmtIDR, todayStr } from "../../utils";
 import Input, { Field, AmountInput, FormRow } from "./Input";
 import Select from "./Select";
@@ -396,14 +396,11 @@ export function TxForm({ form, set, fromOptions, toOptions, accounts, categories
     .filter(s => s.id && s.id.length === 36)
     .map(s => ({ value: s.id, label: s.name }));
 
-  const catOptions = categories.filter(c => c.is_active !== false)
-    .map(c => ({ value: c.id, label: `${c.icon || ""} ${c.name || c.label}` }));
-  if (!catOptions.length) {
-    EXPENSE_CATEGORIES.forEach(c => catOptions.push({ value: c.id, label: `${c.icon} ${c.label}` }));
-  }
+  const catList    = type === "income" ? INCOME_CATEGORIES_LIST : EXPENSE_CATEGORIES;
+  const catOptions = catList.map(c => ({ value: c.id, label: `${c.icon} ${c.label}` }));
 
   const needsTo     = toOptions.length > 0 && !["reimburse_out"].includes(type);
-  const needsCat    = ["expense"].includes(type);
+  const needsCat    = ["expense", "income"].includes(type);
   const needsEntity = ["reimburse_out", "reimburse_in"].includes(type);
 
   const ENTITY_OPTS = ["Hamasa", "SDC", "Travelio"];
@@ -636,9 +633,9 @@ export function TxForm({ form, set, fromOptions, toOptions, accounts, categories
           label="Category"
           value={form.category_id || ""}
           onChange={e => {
-            const found = categories.find(c => c.id === e.target.value);
+            const found = catList.find(c => c.id === e.target.value);
             set("category_id", e.target.value || null);
-            set("category_name", found?.name || null);
+            set("category_name", found?.label || null);
           }}
           options={catOptions}
           placeholder="Select category…"

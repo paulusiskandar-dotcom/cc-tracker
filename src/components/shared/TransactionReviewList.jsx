@@ -360,7 +360,7 @@ function TxReviewCard({
   const sign    = amtSign(r.tx_type);
   const isFX    = r.currency && r.currency !== "IDR";
   const showCat = !NO_CAT_TYPES.has(r.tx_type);
-  const cats    = INCOME_LIKE.has(r.tx_type) ? INCOME_CATEGORIES_LIST : EXPENSE_CATEGORIES;
+  const cats    = r.tx_type === "income" ? INCOME_CATEGORIES_LIST : EXPENSE_CATEGORIES;
   const typeColor = TX_REVIEW_TYPES.find(t => t.value === r.tx_type)?.color || T.text;
 
   const amtStr = isFX
