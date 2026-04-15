@@ -620,12 +620,7 @@ export default function TransactionModal({
 
       // ── General path ──────────────────────────────────────────
       const { from_type, to_type } = getTxFromToTypes(type);
-      const AUTO_DESC = {
-        transfer: "Transfer", pay_cc: "CC Payment", give_loan: "Employee Loan",
-        collect_loan: "Loan Collection", reimburse_in: "Reimburse Received",
-        pay_liability: "Liability Payment",
-      };
-      const desc = form.description?.trim() || AUTO_DESC[type] || "Transaction";
+      const desc = form.description?.trim() || null;
       const cat  = categories.find(c => c.id === form.category_id);
 
       let computedAmtIDR = sn(amtIDR);
