@@ -563,7 +563,8 @@ export default function BankStatement({
                   );
                 })}
               </div>
-            ))}
+            );
+            })}
 
             {/* Closing balance row */}
             {(() => { const b = fmtBalCur(data.closingBal); return (
