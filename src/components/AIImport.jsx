@@ -70,7 +70,6 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
   const T = dark ? DARK : LIGHT;
   const fileRef = useRef();
 
-  const [scanBankId,       setScanBankId]       = useState("");
   const [defaultAccountId, setDefaultAccountId] = useState("");
   const [scanning,         setScanning]         = useState(false);
   const [retrySonnet,      setRetrySonnet]      = useState(false);
@@ -317,8 +316,8 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       } catch { /* non-critical */ }
 
       // 3. Scan with AI
-      const bankAcc  = scanBankId ? bankAccounts.find(a => a.id === scanBankId) : null;
-      const bankHint = bankAcc?.bank_name || "";
+      const bankAcc  = defaultAccountId ? bankCashAccounts.find(a => a.id === defaultAccountId) : null;
+      const bankHint = bankAcc?.bank_name || bankAcc?.name || "";
       const parsed = await scanApi.scan(user.id, file, { accounts, bankHint });
       console.log(`[AIImport] total transactions from AI: ${parsed.length}`);
       const items  = buildRows(parsed, defaultAccountId);
@@ -353,8 +352,8 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       const { data: blob, error } = await supabase.storage.from("ai-scan-uploads").download(batchFilePath);
       if (error || !blob) throw new Error("Could not download file");
       const file = new File([blob], "rescan.jpg", { type: blob.type || "image/jpeg" });
-      const bankAccR  = scanBankId ? bankAccounts.find(a => a.id === scanBankId) : null;
-      const bankHintR = bankAccR?.bank_name || "";
+      const bankAccR  = defaultAccountId ? bankCashAccounts.find(a => a.id === defaultAccountId) : null;
+      const bankHintR = bankAccR?.bank_name || bankAccR?.name || "";
       const parsed = await scanApi.scan(user.id, file, { accounts, bankHint: bankHintR });
       console.log(`[AIImport refresh] total transactions from AI: ${parsed.length}`);
       let items = buildRows(parsed, defaultAccountId);
@@ -382,8 +381,8 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       const { data: blob, error } = await supabase.storage.from("ai-scan-uploads").download(batchFilePath);
       if (error || !blob) throw new Error("Could not download file");
       const file = new File([blob], "rescan.jpg", { type: blob.type || "image/jpeg" });
-      const bankAccR  = scanBankId ? bankAccounts.find(a => a.id === scanBankId) : null;
-      const bankHintR = bankAccR?.bank_name || "";
+      const bankAccR  = defaultAccountId ? bankCashAccounts.find(a => a.id === defaultAccountId) : null;
+      const bankHintR = bankAccR?.bank_name || bankAccR?.name || "";
       const parsed = await scanApi.scan(user.id, file, { accounts, bankHint: bankHintR, model: "claude-sonnet-4-20250514" });
       let items = buildRows(parsed, defaultAccountId);
       if (skippedFPs.size > 0) {
@@ -544,57 +543,6 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
-      {/* Header selectors */}
-      <div style={{
-        display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
-        padding: "8px 14px", borderRadius: 8, border: `1px solid ${T.border}`,
-        background: T.sur2,
-      }}>
-        {/* Account selector — default account for all rows */}
-        <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
-          Account:
-        </span>
-        <select
-          value={defaultAccountId}
-          onChange={e => handleDefaultAccountChange(e.target.value)}
-          style={{
-            fontSize: 12, padding: "4px 6px", borderRadius: 6,
-            border: "1px solid #e5e7eb", background: "#fff", color: "#111827",
-            fontFamily: "Figtree, sans-serif", cursor: "pointer", height: 30,
-          }}>
-          <option value="">— account —</option>
-          {bankCashAccounts.map(a => (
-            <option key={a.id} value={a.id}>
-              {a.name}{a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : ""}
-            </option>
-          ))}
-        </select>
-
-        {/* Bank hint selector — for AI parsing */}
-        <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", marginLeft: 8 }}>
-          Bank hint:
-        </span>
-        <select
-          value={scanBankId}
-          onChange={e => setScanBankId(e.target.value)}
-          style={{
-            fontSize: 12, padding: "4px 6px", borderRadius: 6,
-            border: "1px solid #e5e7eb", background: "#fff", color: "#111827",
-            fontFamily: "Figtree, sans-serif", cursor: "pointer", height: 30,
-          }}>
-          <option value="">Auto-detect</option>
-          {bankAccounts.map(a => (
-            <option key={a.id} value={a.id}>
-              {a.name}{a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : ""}
-            </option>
-          ))}
-        </select>
-
-        <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", marginLeft: 4 }}>
-          (applies to all rows)
-        </span>
-      </div>
-
       {/* Drop zone */}
       <div
         onClick={() => fileRef.current?.click()}
@@ -620,6 +568,37 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
             </div>
         }
       </div>
+
+      {/* Account selector — shown below drop zone once results exist */}
+      {results.length > 0 && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+          padding: "8px 14px", borderRadius: 8, border: `1px solid ${T.border}`,
+          background: T.sur2,
+        }}>
+          <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
+            Account:
+          </span>
+          <select
+            value={defaultAccountId}
+            onChange={e => handleDefaultAccountChange(e.target.value)}
+            style={{
+              fontSize: 12, padding: "4px 6px", borderRadius: 6,
+              border: "1px solid #e5e7eb", background: "#fff", color: "#111827",
+              fontFamily: "Figtree, sans-serif", cursor: "pointer", height: 30,
+            }}>
+            <option value="">— account —</option>
+            {bankCashAccounts.map(a => (
+              <option key={a.id} value={a.id}>
+                {a.name}{a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : ""}
+              </option>
+            ))}
+          </select>
+          <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
+            (applies to all rows)
+          </span>
+        </div>
+      )}
 
       {/* Results */}
       {results.length > 0 && (
