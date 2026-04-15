@@ -241,6 +241,18 @@ export default function TransactionModal({
   const [newTotalMonths,     setNewTotalMonths]     = useState("");
   const [creatingBorrower,   setCreatingBorrower]   = useState(false);
   const [loanAccTab,         setLoanAccTab]         = useState("bank");
+  const [fetchedLoans,       setFetchedLoans]       = useState([]);
+
+  // ── Fetch employee loans when needed but not provided ─────────
+  const type = form.tx_type;
+  useEffect(() => {
+    const needsLoans = type === "give_loan" || type === "collect_loan";
+    if (!needsLoans || employeeLoans.length > 0) return;
+    if (!user?.id) return;
+    employeeLoanApi.getAll(user.id).then(setFetchedLoans).catch(() => {});
+  }, [type, employeeLoans.length, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const effectiveLoans = employeeLoans.length > 0 ? employeeLoans : fetchedLoans;
 
   // ── Reset on open ──────────────────────────────────────────
   useEffect(() => {
@@ -302,7 +314,7 @@ export default function TransactionModal({
       const base   = EMPTY();
       // Auto-fill amount for collect_loan when borrower is preset
       if (txType === "collect_loan" && defaultAccount?.from_id) {
-        const presetLoan = employeeLoans.find(l => l.id === defaultAccount.from_id);
+        const presetLoan = effectiveLoans.find(l => l.id === defaultAccount.from_id);
         if (presetLoan?.monthly_installment) base.amount = String(presetLoan.monthly_installment);
       }
       setFormState({
@@ -346,8 +358,6 @@ export default function TransactionModal({
   const cashAccs  = bankAccounts.filter(a => a.is_active !== false && a.subtype === "cash");
   const ccAccs    = creditCards.filter(a => a.is_active !== false);
   const assetAccs = assets.filter(a => a.is_active !== false);
-
-  const type = form.tx_type;
 
   // FX stuff
   const fxCurrencies = [...new Set(
@@ -474,7 +484,7 @@ export default function TransactionModal({
         } else {
           if (!form.to_id) { showToast("Select or create a borrower", "error"); setSaving(false); return; }
           loanId = form.to_id;
-          const loan = employeeLoans.find(l => l.id === loanId);
+          const loan = effectiveLoans.find(l => l.id === loanId);
           empName = loan?.employee_name || "Employee";
           const newTotal = Number(loan?.total_amount || 0) + amt;
           const updated = await employeeLoanApi.update(loanId, { total_amount: newTotal });
@@ -508,7 +518,7 @@ export default function TransactionModal({
         if (!form.from_id) { showToast("Select borrower", "error"); setSaving(false); return; }
         if (!form.to_id)   { showToast("Select destination account", "error"); setSaving(false); return; }
         const amt  = sn(form.amount);
-        const loan = employeeLoans.find(l => l.id === form.from_id);
+        const loan = effectiveLoans.find(l => l.id === form.from_id);
         if (!loan) { showToast("Loan not found", "error"); setSaving(false); return; }
 
         const newPaidMonths = Number(loan.paid_months || 0) + 1;
@@ -1065,7 +1075,7 @@ export default function TransactionModal({
     // ── Give Loan ────────────────────────────────────────────────
     if (type === "give_loan") {
       const loanFromAccs = loanAccTab === "bank" ? bankAccs : cashAccs;
-      const loanList     = [...employeeLoans]
+      const loanList     = [...effectiveLoans]
         .filter(l => l.status !== "settled")
         .sort((a, b) => (a.employee_name || "").localeCompare(b.employee_name || ""));
       const prevMonthly  = sn(newMonthlyInstall);
@@ -1147,7 +1157,7 @@ export default function TransactionModal({
 
     // ── Collect Loan ─────────────────────────────────────────────
     if (type === "collect_loan") {
-      const activeLoans = [...employeeLoans]
+      const activeLoans = [...effectiveLoans]
         .filter(l => l.status !== "settled")
         .sort((a, b) => (a.employee_name || "").localeCompare(b.employee_name || ""));
       const loanToAccs  = loanAccTab === "bank" ? bankAccs : cashAccs;
@@ -1169,7 +1179,7 @@ export default function TransactionModal({
               const id = e.target.value || null;
               set("from_id", id);
               if (id) {
-                const loan = employeeLoans.find(l => l.id === id);
+                const loan = effectiveLoans.find(l => l.id === id);
                 if (loan?.monthly_installment) set("amount", String(loan.monthly_installment));
               } else {
                 set("amount", "");
