@@ -57,6 +57,13 @@ export default function CreditCards({
   setAccounts, setLedger, setInstallments, setRecurTemplates,
   onRefresh, bankAccounts: propBankAccounts,
 }) {
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
+  useEffect(() => {
+    const handler = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+
   const [subTab,           setSubTab]           = useState("overview");
   const [selectedCard,     setSelectedCard]     = useState(null);
   const [ccStatementAcc,   setCcStatementAcc]   = useState(null);
@@ -583,16 +590,31 @@ export default function CreditCards({
                     />
                   </div>
 
-                  {/* Apple Wallet stack */}
-                  <WalletStack
-                    cards={sortedCC}
-                    getColor={(i) => sortedCC[i]?.color || CARD_PALETTE[i % CARD_PALETTE.length]}
-                    onPay={(cc) => { setPayForm(f => ({ ...f, cardId: cc.id, amount: cc.debt })); setModal("pay"); }}
-                    onTransactions={(cc) => { setSelectedCard(cc.id); setSubTab("transactions"); }}
-                    onInstallments={() => setSubTab("installments")}
-                    onStatement={(cc) => setCcStatementAcc(cc)}
-                    onEdit={(cc) => openEditCard(cc)}
-                  />
+                  {/* Mobile: Apple Wallet stack — Desktop: original grid */}
+                  {isMobile ? (
+                    <WalletStack
+                      cards={sortedCC}
+                      getColor={(i) => sortedCC[i]?.color || CARD_PALETTE[i % CARD_PALETTE.length]}
+                      onPay={(cc) => { setPayForm(f => ({ ...f, cardId: cc.id, amount: cc.debt })); setModal("pay"); }}
+                      onTransactions={(cc) => { setSelectedCard(cc.id); setSubTab("transactions"); }}
+                      onInstallments={() => setSubTab("installments")}
+                      onStatement={(cc) => setCcStatementAcc(cc)}
+                      onEdit={(cc) => openEditCard(cc)}
+                    />
+                  ) : (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
+                      {sortedCC.map((cc, i) => (
+                        <CCCard key={cc.id} cc={cc}
+                          color={cc.color || CARD_PALETTE[i % CARD_PALETTE.length]}
+                          onPay={() => { setPayForm(f => ({ ...f, cardId: cc.id, amount: cc.debt })); setModal("pay"); }}
+                          onTransactions={() => { setSelectedCard(cc.id); setSubTab("transactions"); }}
+                          onInstallments={() => setSubTab("installments")}
+                          onStatement={() => setCcStatementAcc(cc)}
+                          onEdit={() => openEditCard(cc)}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })()
@@ -1281,6 +1303,104 @@ function NetworkLogo({ network }) {
     </div>
   );
   return <span style={{ fontSize: 10, fontWeight: 700, color: "#fff", fontFamily: "Figtree, sans-serif" }}>{network}</span>;
+}
+
+// ─── CC CARD (desktop grid) ───────────────────────────────────
+function CCCard({ cc, color, onPay, onTransactions, onInstallments, onStatement, onEdit }) {
+  const utilColor = cc.util > 80 ? "#dc2626" : cc.util > 60 ? "#d97706" : "#059669";
+
+  return (
+    <div style={{ background: "#fff", borderRadius: 16, outline: "0.5px solid #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      {/* ── Hero peek strip ── */}
+      <div style={{ position: "relative", width: "100%", height: 90, overflow: "hidden", flexShrink: 0, margin: 0 }}>
+        {cc.card_image_url ? (
+          <img src={cc.card_image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "top center", display: "block" }} />
+        ) : (
+          <div style={{ position: "absolute", inset: 0, background: color || "#3b5bdb" }}>
+            <div style={{ position: "absolute", top: -24, right: -18, width: 130, height: 130, borderRadius: "50%", background: "rgba(255,255,255,0.08)" }} />
+            <div style={{ position: "absolute", top: 18, right: 28, width: 82, height: 82, borderRadius: "50%", background: "rgba(255,255,255,0.06)" }} />
+            <div style={{ position: "absolute", bottom: -32, left: -18, width: 110, height: 110, borderRadius: "50%", background: "rgba(255,255,255,0.07)" }} />
+          </div>
+        )}
+        {/* Bottom fade overlay */}
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.10) 100%)" }} />
+        {/* Edit button — top right */}
+        <button
+          onClick={onEdit}
+          title="Edit card"
+          style={{ position: "absolute", top: 8, right: 10, border: "none", background: "rgba(0,0,0,0.28)", borderRadius: 6, cursor: "pointer", padding: "3px 6px", color: "#fff", lineHeight: 1, fontSize: 12 }}
+          onMouseEnter={e => e.currentTarget.style.background = "rgba(0,0,0,0.5)"}
+          onMouseLeave={e => e.currentTarget.style.background = "rgba(0,0,0,0.28)"}
+        >✏️</button>
+        {/* Network logo — bottom right */}
+        <div style={{ position: "absolute", bottom: 8, right: 12, display: "flex", alignItems: "center" }}>
+          <NetworkLogo network={cc.network} />
+        </div>
+      </div>
+
+      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 11, flex: 1 }}>
+        {/* Card name */}
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {cc.name}
+        </div>
+        {/* Debt + Available */}
+        <div style={{ display: "flex", gap: 10 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>Debt</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: cc.debt > 0 ? "#dc2626" : "#9ca3af", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
+              {fmtIDR(cc.debt, true)}
+            </div>
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>Available</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#059669", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
+              {fmtIDR(cc.avail, true)}
+            </div>
+          </div>
+        </div>
+        {/* Utilization bar */}
+        {cc.limit > 0 && (
+          <div>
+            <div style={{ height: 4, background: "#f3f4f6", borderRadius: 4, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${Math.min(cc.util, 100)}%`, background: utilColor, borderRadius: 4, transition: "width 0.3s" }} />
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
+              <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>Limit {fmtIDR(cc.limit, true)}</span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: utilColor, fontFamily: "Figtree, sans-serif" }}>{cc.util.toFixed(0)}%</span>
+            </div>
+          </div>
+        )}
+        {/* Due + Statement badges */}
+        {(cc.dueIn !== null || cc.stmtIn !== null) && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {cc.dueIn !== null && (
+              <span style={{
+                fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 6,
+                fontFamily: "Figtree, sans-serif",
+                background: cc.dueIn <= 3 ? "#fee2e2" : cc.dueIn <= 7 ? "#fef3c7" : "#f9fafb",
+                color: cc.dueIn <= 3 ? "#dc2626" : cc.dueIn <= 7 ? "#d97706" : "#6b7280",
+                border: `1px solid ${cc.dueIn <= 3 ? "#fecaca" : cc.dueIn <= 7 ? "#fde68a" : "#f3f4f6"}`,
+              }}>
+                Due {cc.dueIn}d
+              </span>
+            )}
+            {cc.stmtIn !== null && (
+              <span style={{ fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 6, fontFamily: "Figtree, sans-serif", background: "#f9fafb", color: "#6b7280", border: "1px solid #f3f4f6" }}>
+                Stmt {cc.stmtIn}d
+              </span>
+            )}
+          </div>
+        )}
+        {/* Action buttons */}
+        <div style={{ display: "flex", gap: 6, marginTop: "auto", flexWrap: "wrap" }}>
+          <button onClick={onPay}          style={CC_BTN("#fde8e8", "#dc2626", "#fecaca")}>💳 Pay</button>
+          <button onClick={onTransactions} style={CC_BTN("#f3f4f6", "#374151", "#e5e7eb")}>Txns</button>
+          <button onClick={onInstallments} style={CC_BTN("#f3f4f6", "#374151", "#e5e7eb")}>Install.</button>
+          <button onClick={onStatement}    style={CC_BTN("#f0f9ff", "#0369a1", "#bae6fd")}>Statement</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─── WALLET CARD (Apple Wallet expanded/collapsed item) ──────
