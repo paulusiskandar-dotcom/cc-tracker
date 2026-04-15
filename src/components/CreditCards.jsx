@@ -1310,17 +1310,25 @@ function CCCard({ cc, color, onPay, onTransactions, onInstallments, onStatement,
   const utilColor = cc.util > 80 ? "#dc2626" : cc.util > 60 ? "#d97706" : "#059669";
 
   return (
-    <div style={{ background: "#fff", borderRadius: 16, boxShadow: "0 0 0 0.5px #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+    <div style={{ background: "#fff", borderRadius: 16, boxShadow: "0 0 0 0.5px #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "column", WebkitMaskImage: "-webkit-radial-gradient(white, black)" }}>
       {/* ── Hero peek strip ── */}
-      <div style={{ position: "relative", width: "100%", height: 90, overflow: "hidden", flexShrink: 0, margin: 0, padding: 0 }}>
-        {cc.card_image_url ? (
-          <img src={cc.card_image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "top center", display: "block" }} />
-        ) : (
-          <div style={{ position: "absolute", inset: 0, background: color || "#3b5bdb" }}>
+      <div style={{
+        position: "relative",
+        width: "100%",
+        height: 90,
+        flexShrink: 0,
+        backgroundImage: cc.card_image_url ? `url(${cc.card_image_url})` : "none",
+        backgroundSize: "cover",
+        backgroundPosition: "top center",
+        backgroundColor: cc.card_image_url ? undefined : (color || "#3b5bdb"),
+      }}>
+        {/* Decorative circles for solid-color fallback */}
+        {!cc.card_image_url && (
+          <>
             <div style={{ position: "absolute", top: -24, right: -18, width: 130, height: 130, borderRadius: "50%", background: "rgba(255,255,255,0.08)" }} />
             <div style={{ position: "absolute", top: 18, right: 28, width: 82, height: 82, borderRadius: "50%", background: "rgba(255,255,255,0.06)" }} />
             <div style={{ position: "absolute", bottom: -32, left: -18, width: 110, height: 110, borderRadius: "50%", background: "rgba(255,255,255,0.07)" }} />
-          </div>
+          </>
         )}
         {/* Bottom fade overlay */}
         <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.10) 100%)" }} />
