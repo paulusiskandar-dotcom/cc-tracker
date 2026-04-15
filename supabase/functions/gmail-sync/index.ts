@@ -171,6 +171,13 @@ Rules:
 - CRITICAL — CC debit rule: if card_last4 is present (i.e. the transaction comes from a credit card account like BCA Krisflyer, CIMB, Mandiri CC, etc.) AND the description/merchant is a business/store name → suggested_tx_type MUST be "expense", NOT "transfer". Transfer only applies when money moves between two of the user's own bank accounts with no merchant name.
 - For Mandiri "Pembayaran Berhasil": ALWAYS extract even if layout is unusual — Penerima = recipient/merchant, Nominal Transaksi = amount (remove "Rp" and dots).
 - Return ONLY valid JSON array, no markdown.
+
+IMPORTANT - Year detection rules:
+- If the email clearly shows a year, use that year
+- If no year is visible or it is ambiguous, use the current year (2026)
+- Never use years before 2026 unless explicitly stated in the email
+- For transaction notifications without a year, assume 2026
+- Double-check: if a transaction date would result in a year before 2024, it is likely wrong — default to 2026
 `;
 
 // Extract the visible (unmasked) trailing digits from a masked account/card string.

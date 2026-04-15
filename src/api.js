@@ -793,7 +793,14 @@ Return ONLY a JSON array, no other text:
 [{"no":1,"date":"YYYY-MM-DD","description":"full description here","amount":123456,"balance":9876543}]
 
 Amount rules: positive = money IN, negative = money OUT.
-Dates format: convert DD-MMM-YYYY or DD/MM/YYYY to YYYY-MM-DD.`;
+Dates format: convert DD-MMM-YYYY or DD/MM/YYYY to YYYY-MM-DD.
+
+IMPORTANT - Year detection rules:
+- If the document clearly shows a year, use that year
+- If no year is visible or it is ambiguous, use the current year (2026)
+- Never use years before 2026 unless explicitly stated in the document
+- For bank statements dated Jan-Dec without a year, assume 2026
+- Double-check: if a transaction date would result in a year before 2024, it is likely wrong — default to 2026`;
 
           // Normalize Mandiri row → generic AI transaction shape
           const normMandiri = (tx) => {
@@ -853,7 +860,14 @@ Return ONLY valid JSON — no markdown, no explanation:
 Each transaction (use minimal field values, max 60 chars for description):
 {"date":"YYYY-MM-DD","description":"short desc","amount":123456,"currency":"IDR","amount_idr":123456,"type":"income|expense|transfer|pay_cc|collect_loan|give_loan|reimburse_in|reimburse_out","category":"other","entity":"Personal"}
 
-Omit from_account_id and to_account_id unless you can match them to known accounts above.`;
+Omit from_account_id and to_account_id unless you can match them to known accounts above.
+
+IMPORTANT - Year detection rules:
+- If the document clearly shows a year, use that year
+- If no year is visible or it is ambiguous, use the current year (2026)
+- Never use years before 2026 unless explicitly stated in the document
+- For bank statements dated Jan-Dec without a year, assume 2026
+- Double-check: if a transaction date would result in a year before 2024, it is likely wrong — default to 2026`;
 
           let _aiPass = 0;
           const callAI = async (prompt) => {

@@ -330,6 +330,13 @@ Field notes:
 - card_last4: last 4 digits of card if shown next to the transaction, else null
 - account_hint: account number from section header if applicable, else null
 
+IMPORTANT - Year detection rules:
+- If the document clearly shows a year, use that year
+- If no year is visible or it is ambiguous, use the current year (2026)
+- Never use years before 2026 unless explicitly stated in the document
+- For bank statements dated Jan-Dec without a year, assume 2026
+- Double-check: if a transaction date would result in a year before 2024, it is likely wrong — default to 2026
+
 Return ONLY valid JSON array. No markdown, no explanation.
 If no transactions found, return [].`;
 
@@ -359,6 +366,12 @@ Return ONLY a JSON array — no markdown, no explanation. Each item:
 currency: document currency detected above ("IDR", "JPY", "USD", etc.) — always set this.
 direction: "out" for debits/expenses, "in" for credits received.
 amount: positive number in the document's currency (no dots/commas formatting).
+IMPORTANT - Year detection rules:
+- If the document clearly shows a year, use that year
+- If no year is visible or it is ambiguous, use the current year (2026)
+- Never use years before 2026 unless explicitly stated in the document
+- For bank statements dated Jan-Dec without a year, assume 2026
+- Double-check: if a transaction date would result in a year before 2024, it is likely wrong — default to 2026
 If no transactions found, return [].`;
 
 // ── HELPER: try to decrypt PDF with pdf-lib ────────────────────
