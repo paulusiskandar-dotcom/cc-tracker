@@ -1290,7 +1290,7 @@ function CCCard({ cc, color, onPay, onTransactions, onInstallments, onStatement,
   return (
     <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       {/* ── Hero peek strip ── */}
-      <div style={{ position: "relative", width: "100%", height: 90, overflow: "hidden", flexShrink: 0, borderRadius: "16px 16px 0 0" }}>
+      <div style={{ position: "relative", width: "100%", height: 90, overflow: "hidden", flexShrink: 0 }}>
         {cc.card_image_url ? (
           <img src={cc.card_image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "top center", display: "block" }} />
         ) : (
