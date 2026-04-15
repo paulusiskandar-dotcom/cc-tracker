@@ -471,22 +471,11 @@ export default function BankStatement({
 
             {/* Grouped transaction rows */}
             {grouped.map(([date, txs]) => {
-              // Daily net in IDR — convert non-IDR amounts using fxRates
-              const dayNetIDR = txs.reduce((sum, tx) => {
-                const cur = tx.currency && tx.currency !== "IDR" ? tx.currency : null;
-                const amtIDR = cur
-                  ? Number(tx.amount || 0) * Number(fxRates[cur] || 0)
-                  : Number(tx.amount_idr || tx.amount || 0);
-                return sum + (tx._dir === "credit" ? amtIDR : -amtIDR);
-              }, 0);
               return (
               <div key={date}>
                 {/* Date separator */}
-                <div style={{ background: "#f3f4f6", borderBottom: "0.5px solid #e5e7eb", padding: "5px 20px", fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span>{fmtDateLabel(date)}</span>
-                  <span style={{ color: dayNetIDR >= 0 ? "#3B6D11" : "#A32D2D", fontWeight: 700 }}>
-                    {dayNetIDR >= 0 ? "+" : "−"}{fmtIDR(Math.abs(dayNetIDR))}
-                  </span>
+                <div style={{ background: "#f3f4f6", borderBottom: "0.5px solid #e5e7eb", padding: "5px 20px", fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF }}>
+                  {fmtDateLabel(date)}
                 </div>
 
                 {txs.map(tx => {

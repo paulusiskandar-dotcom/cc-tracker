@@ -347,13 +347,10 @@ export default function TransactionRow({
 }
 
 // ─── DATE GROUP HEADER ────────────────────────────────────────
-export function DateGroupHeader({ dateStr, total, style = {} }) {
+export function DateGroupHeader({ dateStr, style = {} }) {
   return (
     <div style={{
-      display:        "flex",
-      justifyContent: "space-between",
-      alignItems:     "center",
-      padding:        "14px 0 6px",
+      padding: "14px 0 6px",
       ...style,
     }}>
       <div style={{
@@ -366,16 +363,6 @@ export function DateGroupHeader({ dateStr, total, style = {} }) {
       }}>
         {fmtDateLabel(dateStr)}
       </div>
-      {total != null && (
-        <div style={{
-          fontSize:   11,
-          fontWeight: 600,
-          color:      total >= 0 ? "#059669" : "#dc2626",
-          fontFamily: "Figtree, sans-serif",
-        }}>
-          {total >= 0 ? "+" : ""}{fmtIDR(total)}
-        </div>
-      )}
     </div>
   );
 }
@@ -387,16 +374,9 @@ export function GroupedTransactionList({ groups, accounts, onRowClick, compact =
   return (
     <div>
       {groups.map(([date, entries]) => {
-        const dayNet = entries.reduce((sum, e) => {
-          const a = Number(e.amount_idr || e.amount || 0);
-          if (["income","reimburse_in","collect_loan","sell_asset"].includes(e.tx_type)) return sum + a;
-          if (["transfer","pay_cc","fx_exchange","opening_balance"].includes(e.tx_type)) return sum;
-          return sum - a;
-        }, 0);
-
         return (
           <div key={date}>
-            <DateGroupHeader dateStr={date} total={dayNet} />
+            <DateGroupHeader dateStr={date} />
             {entries.map(e => (
               <TransactionRow
                 key={e.id}

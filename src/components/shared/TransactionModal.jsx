@@ -1318,16 +1318,16 @@ export default function TransactionModal({
       <Modal isOpen={open} onClose={onClose} title={title} width={520} footer={footer}>
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
-          {/* Group tabs + type pills — only in add mode (edit/confirm lock the type) */}
-          {mode === "add" && (
+          {/* Group tabs + type pills — in add and edit mode */}
+          {(mode === "add" || mode === "edit") && (
             <>
               <GroupTabs active={group} onChange={handleGroupChange} disabled={saving} />
               <TypePills group={group} active={type} onChange={handleTypeChange} disabled={saving} />
             </>
           )}
 
-          {/* In edit/confirm mode, show type badge */}
-          {mode !== "add" && (() => {
+          {/* In confirm mode, show type badge */}
+          {mode === "confirm" && (() => {
             const m = TYPE_META[type] || { label: type, color: "#6b7280" };
             return (
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1339,9 +1339,7 @@ export default function TransactionModal({
                 }}>
                   {m.icon} {m.label}
                 </span>
-                {mode === "confirm" && (
-                  <span style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF }}>Review and confirm</span>
-                )}
+                <span style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF }}>Review and confirm</span>
               </div>
             );
           })()}
