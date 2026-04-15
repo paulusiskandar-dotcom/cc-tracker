@@ -83,12 +83,13 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
   const [skippedFPs,  setSkippedFPs]  = useState(new Set());
 
   const spendAccounts = accounts.filter(a => ["bank","cash","credit_card"].includes(a.type));
+  const bankCashAccounts = accounts.filter(a => ["bank","cash"].includes(a.type));
   const bankAccounts  = accounts.filter(a => a.type === "bank");
 
   // Initialise defaultAccountId to first bank account once accounts load
   useEffect(() => {
-    if (!defaultAccountId && spendAccounts.length > 0) {
-      setDefaultAccountId(spendAccounts[0].id);
+    if (!defaultAccountId && bankCashAccounts.length > 0) {
+      setDefaultAccountId(bankCashAccounts[0].id);
     }
   }, [spendAccounts.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -544,52 +545,54 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
       {/* Header selectors */}
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+      <div style={{
+        display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+        padding: "8px 14px", borderRadius: 8, border: `1px solid ${T.border}`,
+        background: T.sur2,
+      }}>
         {/* Account selector — default account for all rows */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "1 1 180px" }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: T.text2, fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
-            Account:
-          </span>
-          <select
-            value={defaultAccountId}
-            onChange={e => handleDefaultAccountChange(e.target.value)}
-            style={{
-              flex: 1, height: 36, padding: "0 10px", border: `1.5px solid ${T.border}`,
-              borderRadius: 8, fontFamily: "Figtree, sans-serif", fontSize: 13,
-              fontWeight: 500, color: T.text, background: T.sur, outline: "none",
-              cursor: "pointer", boxSizing: "border-box",
-            }}>
-            <option value="">Select account…</option>
-            {spendAccounts.map(a => (
-              <option key={a.id} value={a.id}>
-                {a.name}{a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : ""}
-              </option>
-            ))}
-          </select>
-        </div>
+        <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
+          Account:
+        </span>
+        <select
+          value={defaultAccountId}
+          onChange={e => handleDefaultAccountChange(e.target.value)}
+          style={{
+            fontSize: 12, padding: "4px 6px", borderRadius: 6,
+            border: "1px solid #e5e7eb", background: "#fff", color: "#111827",
+            fontFamily: "Figtree, sans-serif", cursor: "pointer", height: 30,
+          }}>
+          <option value="">— account —</option>
+          {bankCashAccounts.map(a => (
+            <option key={a.id} value={a.id}>
+              {a.name}{a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : ""}
+            </option>
+          ))}
+        </select>
 
         {/* Bank hint selector — for AI parsing */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "1 1 180px" }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: T.text2, fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
-            Bank hint:
-          </span>
-          <select
-            value={scanBankId}
-            onChange={e => setScanBankId(e.target.value)}
-            style={{
-              flex: 1, height: 36, padding: "0 10px", border: `1.5px solid ${T.border}`,
-              borderRadius: 8, fontFamily: "Figtree, sans-serif", fontSize: 13,
-              fontWeight: 500, color: T.text, background: T.sur, outline: "none",
-              cursor: "pointer", boxSizing: "border-box",
-            }}>
-            <option value="">Auto-detect</option>
-            {bankAccounts.map(a => (
-              <option key={a.id} value={a.id}>
-                {a.name}{a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : ""}
-              </option>
-            ))}
-          </select>
-        </div>
+        <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", marginLeft: 8 }}>
+          Bank hint:
+        </span>
+        <select
+          value={scanBankId}
+          onChange={e => setScanBankId(e.target.value)}
+          style={{
+            fontSize: 12, padding: "4px 6px", borderRadius: 6,
+            border: "1px solid #e5e7eb", background: "#fff", color: "#111827",
+            fontFamily: "Figtree, sans-serif", cursor: "pointer", height: 30,
+          }}>
+          <option value="">Auto-detect</option>
+          {bankAccounts.map(a => (
+            <option key={a.id} value={a.id}>
+              {a.name}{a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : ""}
+            </option>
+          ))}
+        </select>
+
+        <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", marginLeft: 4 }}>
+          (applies to all rows)
+        </span>
       </div>
 
       {/* Drop zone */}
