@@ -1289,11 +1289,10 @@ function CCCard({ cc, color, onPay, onTransactions, onInstallments, onStatement,
 
   return (
     <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-      {/* ── Hero ── */}
-      <div style={{ position: "relative", width: "100%", aspectRatio: "8/5", overflow: "hidden", flexShrink: 0 }}>
-        {/* Background: photo or solid color */}
+      {/* ── Hero peek strip ── */}
+      <div style={{ position: "relative", width: "100%", height: 90, overflow: "hidden", flexShrink: 0, borderRadius: "16px 16px 0 0" }}>
         {cc.card_image_url ? (
-          <img src={cc.card_image_url} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover", objectPosition: "center" }} />
+          <img src={cc.card_image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "top center", display: "block" }} />
         ) : (
           <div style={{ position: "absolute", inset: 0, background: color || "#3b5bdb" }}>
             <div style={{ position: "absolute", top: -24, right: -18, width: 130, height: 130, borderRadius: "50%", background: "rgba(255,255,255,0.08)" }} />
@@ -1301,39 +1300,20 @@ function CCCard({ cc, color, onPay, onTransactions, onInstallments, onStatement,
             <div style={{ position: "absolute", bottom: -32, left: -18, width: 110, height: 110, borderRadius: "50%", background: "rgba(255,255,255,0.07)" }} />
           </div>
         )}
-        {/* Dark overlay for text readability */}
-        <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.25)" }} />
-
-        {/* Chip — top left */}
-        <div style={{ position: "absolute", top: 12, left: 14 }}>
-          <div style={{ width: 22, height: 16, borderRadius: 3, background: "linear-gradient(135deg, #F5D060, #C8901A)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ width: 14, height: 10, border: "0.5px solid rgba(0,0,0,0.25)", borderRadius: 2, background: "linear-gradient(135deg, #FFF5C0, #B8840A)" }} />
-          </div>
-        </div>
+        {/* Bottom fade overlay */}
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.10) 100%)" }} />
 
         {/* Edit button — top right */}
         <button
           onClick={onEdit}
           title="Edit card"
-          style={{ position: "absolute", top: 8, right: 10, border: "none", background: "rgba(0,0,0,0.3)", borderRadius: 6, cursor: "pointer", padding: "3px 6px", color: "#fff", lineHeight: 1, fontSize: 12 }}
+          style={{ position: "absolute", top: 8, right: 10, border: "none", background: "rgba(0,0,0,0.28)", borderRadius: 6, cursor: "pointer", padding: "3px 6px", color: "#fff", lineHeight: 1, fontSize: 12 }}
           onMouseEnter={e => e.currentTarget.style.background = "rgba(0,0,0,0.5)"}
-          onMouseLeave={e => e.currentTarget.style.background = "rgba(0,0,0,0.3)"}
+          onMouseLeave={e => e.currentTarget.style.background = "rgba(0,0,0,0.28)"}
         >✏️</button>
 
-        {/* Bank name + card number — bottom left */}
-        <div style={{ position: "absolute", bottom: 10, left: 14 }}>
-          <div style={{ fontSize: 11, fontWeight: 500, color: "#fff", fontFamily: "Figtree, sans-serif", textShadow: "0 1px 3px rgba(0,0,0,0.5)", marginBottom: 2 }}>
-            {cc.bank_name && cc.bank_name !== "Other" ? cc.bank_name : cc.name}
-          </div>
-          {cc.last4 && (
-            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.85)", fontFamily: "monospace", letterSpacing: 1.5 }}>
-              ···· {cc.last4}
-            </div>
-          )}
-        </div>
-
         {/* Network logo — bottom right */}
-        <div style={{ position: "absolute", bottom: 10, right: 14, display: "flex", alignItems: "center" }}>
+        <div style={{ position: "absolute", bottom: 8, right: 12, display: "flex", alignItems: "center" }}>
           <NetworkLogo network={cc.network} />
         </div>
       </div>
