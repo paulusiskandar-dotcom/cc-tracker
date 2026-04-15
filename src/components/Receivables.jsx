@@ -169,7 +169,7 @@ export default function Receivables({
 
   const recStats = useMemo(() => receivables.map(r => {
     const entries = ledger
-      .filter(e => e.from_id === r.id || e.to_id === r.id)
+      .filter(e => r.entity && e.entity === r.entity && (e.tx_type === "reimburse_out" || e.tx_type === "reimburse_in"))
       .sort((a, b) => b.tx_date.localeCompare(a.tx_date));
     const firstEntry = entries[entries.length - 1];
     const aging = firstEntry ? agingLabel(firstEntry.tx_date) : null;

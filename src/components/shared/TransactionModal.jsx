@@ -397,9 +397,6 @@ export default function TransactionModal({
     if (type !== "fx_exchange" && (!form.amount || sn(form.amount) <= 0)) {
       showToast("Amount is required", "error"); return;
     }
-    if (type === "income" && !form.description?.trim()) {
-      showToast("Description is required", "error"); return;
-    }
 
     setSaving(true);
     try {
