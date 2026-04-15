@@ -1,463 +1,419 @@
 import { useState, useMemo } from "react";
 import { fmtIDR, ym, mlShort } from "../utils";
-import { EXPENSE_CATEGORIES, ENTITIES } from "../constants";
+import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
 import { LIGHT, DARK } from "../theme";
-import { SectionHeader, EmptyState, showToast } from "./shared/index";
+import { SectionHeader, EmptyState } from "./shared/index";
 import {
-  BarChart, Bar, AreaChart, Area,
-  XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
 } from "recharts";
 
-const SUBTABS = [
-  { id: "cashflow",  label: "Cash Flow"    },
-  { id: "expenses",  label: "Expenses"     },
-  { id: "networth",  label: "Net Worth"    },
-  { id: "aging",     label: "Receivables"  },
-];
+// ── Helpers ─────────────────────────────────────────────────────
 
-const MONTHS_BACK = 12;
-
-function monthRange(n) {
-  return Array.from({ length: n }, (_, i) => {
+function last6Months() {
+  return Array.from({ length: 6 }, (_, i) => {
     const d = new Date();
     d.setDate(1);
-    d.setMonth(d.getMonth() - (n - 1 - i));
+    d.setMonth(d.getMonth() - (5 - i));
     return d.toISOString().slice(0, 7);
   });
 }
 
-// ── Pure-div horizontal bar ─────────────────────────────────────
-function HBar({ value, max, color, label, pct }) {
+function navigatePeriod(period, dir) {
+  const [y, m] = period.split("-").map(Number);
+  const d = new Date(y, m - 1 + dir, 1);
+  return d.toISOString().slice(0, 7);
+}
+
+function periodLabel(p) {
+  const [y, m] = p.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "short", year: "numeric" });
+}
+
+// ── Sub-components ───────────────────────────────────────────────
+
+function MetricCard({ label, value, color, sub, T }) {
+  return (
+    <div style={{
+      background: T.sur2, borderRadius: 14, padding: "14px 16px",
+      display: "flex", flexDirection: "column", gap: 4,
+    }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: T.text3, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 18, fontWeight: 900, color, lineHeight: 1.2, fontFamily: "Figtree, sans-serif" }}>
+        {value}
+      </div>
+      {sub && <div style={{ fontSize: 10, color: T.text3 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function HBar({ label, value, max, color, pct, T }) {
   const w = max > 0 ? Math.min(100, (value / max) * 100) : 0;
   return (
-    <div style={{ marginBottom: 8 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
-        <span style={{ fontSize: 11, color: "#374151" }}>{label}</span>
-        <span style={{ fontSize: 11, fontWeight: 700, color: "#111827" }}>
-          {fmtIDR(value, true)} <span style={{ color: "#9ca3af", fontWeight: 400 }}>({pct}%)</span>
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <span style={{ fontSize: 12, color: T.text2, fontFamily: "Figtree, sans-serif" }}>{label}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>
+          {fmtIDR(value, true)}&nbsp;
+          <span style={{ color: T.text3, fontWeight: 400 }}>{pct}%</span>
         </span>
       </div>
-      <div style={{ background: "#e5e7eb", borderRadius: 99, height: 6 }}>
+      <div style={{ background: T.border, borderRadius: 99, height: 5 }}>
         <div style={{ width: `${w}%`, height: "100%", background: color, borderRadius: 99, transition: "width .4s" }} />
       </div>
     </div>
   );
 }
 
+// ── Main Component ───────────────────────────────────────────────
+
 export default function Reports({ user, ledger, accounts, dark }) {
   const T = dark ? DARK : LIGHT;
 
-  const [subTab, setSubTab]         = useState("cashflow");
-  const [entityFilter, setEntityFilter] = useState("All");
-  const [months] = useState(() => monthRange(MONTHS_BACK));
+  const [period, setPeriod]         = useState(() => new Date().toISOString().slice(0, 7));
+  const [accountFilter, setAccountFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [personalOnly, setPersonalOnly] = useState(false);
 
-  // ── Cash Flow ───────────────────────────────────────────────
-  const cashFlowData = useMemo(() => months.map(mo => {
-    const entries = ledger.filter(e => e.tx_date?.slice(0, 7) === mo);
-    const filt    = entityFilter === "All" ? entries : entries.filter(e => e.entity === entityFilter);
-    const income  = filt.filter(e => e.tx_type === "income").reduce((s, e) => s + Number(e.amount_idr || 0), 0);
-    const expense = filt.filter(e => e.tx_type === "expense").reduce((s, e) => s + Number(e.amount_idr || 0), 0);
-    return { month: mlShort(mo), income, expense, surplus: income - expense };
-  }), [ledger, months, entityFilter]);
+  const TREND_MONTHS = useMemo(() => last6Months(), []);
+  const bankCashAccounts = useMemo(
+    () => accounts.filter(a => ["bank", "cash"].includes(a.type)),
+    [accounts]
+  );
 
-  const totalIncome  = cashFlowData.reduce((s, r) => s + r.income, 0);
-  const totalExpense = cashFlowData.reduce((s, r) => s + r.expense, 0);
-  const totalSurplus = totalIncome - totalExpense;
-  const avgMonthly   = totalExpense / MONTHS_BACK;
+  // ── Period-filtered ledger ────────────────────────────────────
+  const periodLedger = useMemo(() => ledger.filter(e => {
+    if (e.tx_date?.slice(0, 7) !== period) return false;
+    if (personalOnly && e.entity !== "Personal") return false;
+    if (accountFilter !== "all" && e.from_id !== accountFilter && e.to_id !== accountFilter) return false;
+    return true;
+  }), [ledger, period, personalOnly, accountFilter]);
 
-  // ── Expense by category ─────────────────────────────────────
-  const catData = useMemo(() => {
-    const filtered = entityFilter === "All" ? ledger : ledger.filter(e => e.entity === entityFilter);
-    const expEntries = filtered.filter(e => e.tx_type === "expense");
+  // ── Expense/income for period ─────────────────────────────────
+  const periodExpenses = useMemo(() => periodLedger.filter(e =>
+    e.tx_type === "expense" &&
+    (categoryFilter === "all" || e.category === categoryFilter)
+  ), [periodLedger, categoryFilter]);
+
+  const periodIncome = useMemo(() =>
+    periodLedger.filter(e => e.tx_type === "income"),
+    [periodLedger]
+  );
+
+  // ── Metrics ───────────────────────────────────────────────────
+  const totalExpense = periodExpenses.reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+  const totalIncome  = periodIncome.reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+  const netSurplus   = totalIncome - totalExpense;
+  const savingsRate  = totalIncome > 0 ? Math.round((netSurplus / totalIncome) * 100) : null;
+
+  // ── 6-month trend ─────────────────────────────────────────────
+  const trendData = useMemo(() => TREND_MONTHS.map(mo => {
+    const moEntries = ledger.filter(e => {
+      if (e.tx_date?.slice(0, 7) !== mo) return false;
+      if (personalOnly && e.entity !== "Personal") return false;
+      return true;
+    });
+    const income  = moEntries.filter(e => e.tx_type === "income").reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+    const expense = moEntries.filter(e => e.tx_type === "expense").reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+    return { month: mlShort(mo), mo, income, expense, surplus: income - expense };
+  }), [ledger, TREND_MONTHS, personalOnly]);
+
+  // ── Category breakdown ────────────────────────────────────────
+  const catBreakdown = useMemo(() => {
     const map = {};
-    expEntries.forEach(e => {
+    periodExpenses.forEach(e => {
       const cat = e.category || "other";
       map[cat] = (map[cat] || 0) + Number(e.amount_idr || 0);
     });
     return Object.entries(map).map(([id, value]) => {
-      const def = EXPENSE_CATEGORIES.find(c => c.id === id) || EXPENSE_CATEGORIES[EXPENSE_CATEGORIES.length - 1];
-      return { id, name: def?.label || id, value, color: def?.color || "#9ca3af", icon: def?.icon || "❓" };
+      const def = EXPENSE_CATEGORIES.find(c => c.id === id) || { label: id, icon: "❓", color: "#9ca3af" };
+      return { id, label: def.label, icon: def.icon, color: def.color, value };
     }).sort((a, b) => b.value - a.value);
-  }, [ledger, entityFilter]);
+  }, [periodExpenses]);
 
-  const catTotal = catData.reduce((s, c) => s + c.value, 0);
+  const catTotal = catBreakdown.reduce((s, c) => s + c.value, 0);
 
-  // ── Net worth trend ─────────────────────────────────────────
-  const netWorthData = useMemo(() => {
-    const bankNow  = accounts.filter(a => a.type === "bank").reduce((s, a) => s + Number(a.current_balance || 0), 0);
-    const assetNow = accounts.filter(a => a.type === "asset").reduce((s, a) => s + Number(a.current_value || 0), 0);
-    const ccNow    = accounts.filter(a => a.type === "credit_card").reduce((s, a) => s + Number(a.current_balance || 0), 0);
-    const liabNow  = accounts.filter(a => a.type === "liability").reduce((s, a) => s + Number(a.outstanding_amount || 0), 0);
-    const recvNow  = accounts.filter(a => a.type === "receivable").reduce((s, a) => s + Number(a.receivable_outstanding || 0), 0);
-
-    return months.map(mo => {
-      const futureEntries = ledger.filter(e => e.tx_date?.slice(0, 7) > mo);
-      let bankAdj = 0, ccAdj = 0;
-      futureEntries.forEach(e => {
-        const amt = Number(e.amount_idr || 0);
-        if (e.tx_type === "income")  bankAdj -= amt;
-        if (e.tx_type === "expense") bankAdj += amt;
-        if (e.tx_type === "pay_cc")  { bankAdj += amt; ccAdj += amt; }
-      });
-      const net = (bankNow + bankAdj) + assetNow + recvNow - Math.max(0, ccNow + ccAdj) - liabNow;
-      return { month: mlShort(mo), net: Math.max(0, net) };
+  // ── Income breakdown ─────────────────────────────────────────
+  const incomeBreakdown = useMemo(() => {
+    const map = {};
+    periodIncome.forEach(e => {
+      const cat = e.category || "other_income";
+      map[cat] = (map[cat] || 0) + Number(e.amount_idr || 0);
     });
-  }, [accounts, ledger, months]);
+    return Object.entries(map).map(([id, value]) => {
+      const def = INCOME_CATEGORIES_LIST.find(c => c.id === id) || { label: id, icon: "💰", color: "#059669" };
+      return { id, label: def.label, icon: def.icon, color: def.color, value };
+    }).sort((a, b) => b.value - a.value);
+  }, [periodIncome]);
 
-  // ── Receivables aging ───────────────────────────────────────
-  const agingData = useMemo(() => {
-    const recvAccts = accounts.filter(a => a.type === "receivable" && Number(a.receivable_outstanding || 0) > 0);
-    return recvAccts.map(r => {
-      const lastEntry = ledger.filter(e =>
-        (e.from_id === r.id || e.to_id === r.id) &&
-        ["reimburse_out", "give_loan"].includes(e.tx_type)
-      ).sort((a, b) => b.tx_date.localeCompare(a.tx_date))[0];
-      const daysSince = lastEntry
-        ? Math.floor((Date.now() - new Date(lastEntry.tx_date).getTime()) / 86400000)
-        : null;
-      return { ...r, daysSince, lastDate: lastEntry?.tx_date };
-    }).sort((a, b) => Number(b.receivable_outstanding || 0) - Number(a.receivable_outstanding || 0));
-  }, [accounts, ledger]);
+  // ── Top merchants ─────────────────────────────────────────────
+  const topMerchants = useMemo(() => {
+    const map = {};
+    periodExpenses.forEach(e => {
+      const name = (e.merchant_name || e.description || "Unknown").trim();
+      if (!name) return;
+      map[name] = (map[name] || 0) + Number(e.amount_idr || 0);
+    });
+    return Object.entries(map)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 6);
+  }, [periodExpenses]);
 
-  const totalReceivable = agingData.reduce((s, r) => s + Number(r.receivable_outstanding || 0), 0);
+  const topMerchantMax = topMerchants[0]?.value || 1;
 
-  // ── CSV Export ──────────────────────────────────────────────
-  const exportCSV = (type) => {
-    let csv = "";
-    if (type === "cashflow") {
-      csv = "Month,Income,Expense,Surplus\n";
-      cashFlowData.forEach(r => { csv += `${r.month},${r.income},${r.expense},${r.surplus}\n`; });
-    } else if (type === "expenses") {
-      csv = "Category,Amount,% of Total\n";
-      catData.forEach(c => { csv += `${c.name},${c.value},${catTotal > 0 ? ((c.value / catTotal) * 100).toFixed(1) : 0}%\n`; });
-    } else {
-      csv = "Date,Type,Description,Category,Entity,Amount IDR,Currency\n";
-      const src = entityFilter === "All" ? ledger : ledger.filter(e => e.entity === entityFilter);
-      src.forEach(e => {
-        csv += `${e.tx_date},${e.tx_type},"${(e.description || "").replace(/"/g, '""')}",${e.category || ""},${e.entity || ""},${e.amount_idr || e.amount || 0},${e.currency || "IDR"}\n`;
-      });
-    }
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `paulus-finance-${type}-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showToast(`Exported ${type} CSV`);
-  };
-
-  // ── Styles ──────────────────────────────────────────────────
+  // ── Styles ────────────────────────────────────────────────────
   const card = {
     background: T.surface, border: `1px solid ${T.border}`,
     borderRadius: 16, padding: "16px 18px",
   };
   const tooltipStyle = {
     background: T.surface, border: `1px solid ${T.border}`,
-    borderRadius: 8, fontSize: 11,
+    borderRadius: 8, fontSize: 11, fontFamily: "Figtree, sans-serif",
+  };
+  const filterLabel = {
+    fontSize: 11, fontWeight: 600, color: T.text3,
+    fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap",
+  };
+  const filterSelect = {
+    fontSize: 12, padding: "5px 8px", borderRadius: 8,
+    border: `1px solid ${T.border}`, background: T.surface,
+    color: T.text, fontFamily: "Figtree, sans-serif", cursor: "pointer", height: 32,
   };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
-      {/* ── HEADER ─────────────────────────────────────── */}
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+      {/* ── FILTERS ──────────────────────────────────────────── */}
+      <div style={{
+        display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+        padding: "12px 14px", borderRadius: 12, background: T.sur2,
+      }}>
+        {/* Period picker */}
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <button
+            onClick={() => setPeriod(p => navigatePeriod(p, -1))}
+            style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 6, width: 28, height: 28, cursor: "pointer", color: T.text2, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}
+          >‹</button>
+          <span style={{ fontSize: 13, fontWeight: 700, color: T.text, minWidth: 80, textAlign: "center", fontFamily: "Figtree, sans-serif" }}>
+            {periodLabel(period)}
+          </span>
+          <button
+            onClick={() => setPeriod(p => navigatePeriod(p, +1))}
+            style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 6, width: 28, height: 28, cursor: "pointer", color: T.text2, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}
+          >›</button>
+        </div>
+
+        <div style={{ width: 1, height: 20, background: T.border }} />
+
+        {/* Account filter */}
+        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={filterLabel}>Account</span>
+          <select value={accountFilter} onChange={e => setAccountFilter(e.target.value)} style={filterSelect}>
+            <option value="all">All</option>
+            {bankCashAccounts.map(a => (
+              <option key={a.id} value={a.id}>{a.name}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Category filter */}
+        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <span style={filterLabel}>Category</span>
+          <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} style={filterSelect}>
+            <option value="all">All</option>
+            {EXPENSE_CATEGORIES.map(c => (
+              <option key={c.id} value={c.id}>{c.icon} {c.label}</option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ width: 1, height: 20, background: T.border }} />
+
+        {/* Personal only toggle */}
         <button
-          onClick={() => exportCSV("transactions")}
+          onClick={() => setPersonalOnly(v => !v)}
           style={{
-            padding: "6px 14px", borderRadius: 8, border: `1px solid ${T.border}`,
-            background: T.surface, color: T.text2, fontSize: 12, fontWeight: 600,
-            cursor: "pointer", fontFamily: "Figtree, sans-serif",
+            display: "flex", alignItems: "center", gap: 5,
+            padding: "5px 10px", borderRadius: 8, cursor: "pointer",
+            border: `1px solid ${personalOnly ? "#3b5bdb" : T.border}`,
+            background: personalOnly ? "#3b5bdb" : "transparent",
+            color: personalOnly ? "#fff" : T.text2,
+            fontSize: 11, fontWeight: 600, fontFamily: "Figtree, sans-serif",
+            transition: "all .15s",
           }}
         >
-          ⬇ Export CSV
+          <span style={{ fontSize: 13 }}>👤</span> Personal only
         </button>
       </div>
 
-      {/* ── SUB-TABS ─────────────────────────────────────── */}
-      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-        {SUBTABS.map(t => (
-          <button
-            key={t.id}
-            onClick={() => setSubTab(t.id)}
-            style={{
-              padding: "7px 16px", borderRadius: 99, border: "none",
-              cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "Figtree, sans-serif",
-              background: subTab === t.id ? T.text    : T.sur2,
-              color:      subTab === t.id ? T.darkText : T.text2,
-              transition: "background .15s, color .15s",
-            }}
-          >
-            {t.label}
-          </button>
-        ))}
+      {/* ── METRIC CARDS ─────────────────────────────────────── */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
+        <MetricCard
+          T={T}
+          label="Total Expenses"
+          value={fmtIDR(totalExpense, true)}
+          color="#E24B4A"
+          sub={`${periodExpenses.length} transactions`}
+        />
+        <MetricCard
+          T={T}
+          label="Total Income"
+          value={fmtIDR(totalIncome, true)}
+          color="#1D9E75"
+          sub={`${periodIncome.length} transactions`}
+        />
+        <MetricCard
+          T={T}
+          label="Net Surplus"
+          value={(netSurplus >= 0 ? "+" : "") + fmtIDR(netSurplus, true)}
+          color={netSurplus >= 0 ? "#3b5bdb" : "#E24B4A"}
+        />
+        <MetricCard
+          T={T}
+          label="Savings Rate"
+          value={savingsRate !== null ? `${savingsRate}%` : "—"}
+          color={savingsRate !== null && savingsRate >= 20 ? "#1D9E75" : savingsRate !== null && savingsRate < 0 ? "#E24B4A" : "#d97706"}
+          sub={savingsRate === null ? "No income this month" : savingsRate >= 20 ? "Great!" : savingsRate < 0 ? "Overspending" : "Keep saving"}
+        />
       </div>
 
-      {/* Entity filter */}
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {["All", ...ENTITIES].map(e => (
-          <button
-            key={e}
-            onClick={() => setEntityFilter(e)}
-            style={{
-              padding: "4px 10px", borderRadius: 20, fontSize: 11, fontWeight: 600,
-              cursor: "pointer", fontFamily: "Figtree, sans-serif",
-              background:  entityFilter === e ? T.ac    : "transparent",
-              color:       entityFilter === e ? "#fff"  : T.text3,
-              border:      `1px solid ${entityFilter === e ? T.ac : T.border}`,
-            }}
-          >
-            {e}
-          </button>
-        ))}
-      </div>
-
-      {/* ══════════════════════════════════════════════════ */}
-      {/* ── CASH FLOW ────────────────────────────────── */}
-      {/* ══════════════════════════════════════════════════ */}
-      {subTab === "cashflow" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-            {[
-              { label: "Total Income",  value: totalIncome,  color: "#059669" },
-              { label: "Total Expense", value: totalExpense, color: "#dc2626" },
-              { label: "Net Surplus",   value: totalSurplus, color: totalSurplus >= 0 ? "#059669" : "#dc2626" },
-            ].map(s => (
-              <div key={s.label} style={{ ...card, background: T.sur2, border: "none" }}>
-                <div style={{ fontSize: 9, fontWeight: 700, color: T.text3, letterSpacing: "0.05em" }}>
-                  {s.label.toUpperCase()}
-                </div>
-                <div style={{ fontSize: 14, fontWeight: 900, color: s.color, marginTop: 4 }}>
-                  {fmtIDR(Math.abs(s.value), true)}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div style={card}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <SectionHeader title="12-Month Cash Flow" />
-              <button onClick={() => exportCSV("cashflow")} style={{
-                background: "none", border: `1px solid ${T.border}`, borderRadius: 6,
-                padding: "3px 8px", fontSize: 10, color: T.text3, cursor: "pointer",
-                fontFamily: "Figtree, sans-serif",
-              }}>CSV</button>
-            </div>
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={cashFlowData} barSize={7} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                <XAxis dataKey="month" tick={{ fontSize: 9, fill: T.text3 }} axisLine={false} tickLine={false} />
-                <YAxis hide />
-                <Tooltip contentStyle={tooltipStyle} formatter={v => fmtIDR(v, true)} />
-                <Legend wrapperStyle={{ fontSize: 10 }} />
-                <Bar dataKey="income"  name="Income"  fill="#059669" radius={[3, 3, 0, 0]} />
-                <Bar dataKey="expense" name="Expense" fill="#dc2626" radius={[3, 3, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-
-          <div style={{ ...card, overflowX: "auto" }}>
-            <SectionHeader title="Monthly Detail" />
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, marginTop: 10 }}>
-              <thead>
-                <tr>
-                  {["Month", "Income", "Expense", "Surplus"].map(h => (
-                    <th key={h} style={{
-                      textAlign: h === "Month" ? "left" : "right",
-                      padding: "5px 8px", color: T.text3, fontWeight: 600,
-                      borderBottom: `1px solid ${T.border}`,
-                    }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {[...cashFlowData].reverse().map((r, i) => (
-                  <tr key={i}>
-                    <td style={{ padding: "5px 8px", color: T.text }}>{r.month}</td>
-                    <td style={{ padding: "5px 8px", textAlign: "right", color: "#059669", fontWeight: 700 }}>{fmtIDR(r.income, true)}</td>
-                    <td style={{ padding: "5px 8px", textAlign: "right", color: "#dc2626", fontWeight: 700 }}>{fmtIDR(r.expense, true)}</td>
-                    <td style={{ padding: "5px 8px", textAlign: "right", color: r.surplus >= 0 ? "#059669" : "#dc2626", fontWeight: 800 }}>
-                      {r.surplus >= 0 ? "+" : ""}{fmtIDR(r.surplus, true)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr style={{ borderTop: `2px solid ${T.border}` }}>
-                  <td style={{ padding: "6px 8px", color: T.text, fontWeight: 800 }}>Total</td>
-                  <td style={{ padding: "6px 8px", textAlign: "right", color: "#059669", fontWeight: 800 }}>{fmtIDR(totalIncome, true)}</td>
-                  <td style={{ padding: "6px 8px", textAlign: "right", color: "#dc2626", fontWeight: 800 }}>{fmtIDR(totalExpense, true)}</td>
-                  <td style={{ padding: "6px 8px", textAlign: "right", color: totalSurplus >= 0 ? "#059669" : "#dc2626", fontWeight: 800 }}>
-                    {totalSurplus >= 0 ? "+" : ""}{fmtIDR(totalSurplus, true)}
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
-            <div style={{ fontSize: 11, color: T.text3, marginTop: 8 }}>
-              Monthly avg expense: <span style={{ color: T.text, fontWeight: 700 }}>{fmtIDR(avgMonthly, true)}</span>
-            </div>
-          </div>
+      {/* ── 6-MONTH TREND ────────────────────────────────────── */}
+      <div style={card}>
+        <div style={{ marginBottom: 14 }}>
+          <SectionHeader title="6-Month Trend" />
+          <div style={{ fontSize: 11, color: T.text3, marginTop: 2 }}>Click a month to view details</div>
         </div>
-      )}
+        <ResponsiveContainer width="100%" height={200}>
+          <BarChart
+            data={trendData}
+            barSize={10}
+            barGap={2}
+            margin={{ top: 4, right: 4, bottom: 0, left: 0 }}
+            onClick={d => d?.activePayload?.[0]?.payload?.mo && setPeriod(d.activePayload[0].payload.mo)}
+            style={{ cursor: "pointer" }}
+          >
+            <XAxis dataKey="month" tick={{ fontSize: 10, fill: T.text3, fontFamily: "Figtree, sans-serif" }} axisLine={false} tickLine={false} />
+            <YAxis hide />
+            <Tooltip
+              contentStyle={tooltipStyle}
+              formatter={(v, name) => [fmtIDR(v, true), name]}
+              cursor={{ fill: dark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.04)" }}
+            />
+            <Bar dataKey="income" name="Income" fill="#1D9E75" radius={[3, 3, 0, 0]}>
+              {trendData.map(d => (
+                <Cell key={d.mo} fill={d.mo === period ? "#1D9E75" : "#1D9E7566"} />
+              ))}
+            </Bar>
+            <Bar dataKey="expense" name="Expense" fill="#E24B4A" radius={[3, 3, 0, 0]}>
+              {trendData.map(d => (
+                <Cell key={d.mo} fill={d.mo === period ? "#E24B4A" : "#E24B4A66"} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
 
-      {/* ══════════════════════════════════════════════════ */}
-      {/* ── EXPENSES ─────────────────────────────────── */}
-      {/* ══════════════════════════════════════════════════ */}
-      {subTab === "expenses" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {catData.length === 0 ? (
-            <EmptyState icon="📊" message="No expense data yet." />
+        {/* Surplus row below chart */}
+        <div style={{ display: "flex", justifyContent: "space-around", marginTop: 6, borderTop: `1px solid ${T.border}`, paddingTop: 8 }}>
+          {trendData.map(d => (
+            <div key={d.mo} style={{ textAlign: "center", flex: 1 }}>
+              <div style={{
+                fontSize: 9, fontWeight: 700,
+                color: d.surplus >= 0 ? "#1D9E75" : "#E24B4A",
+                fontFamily: "Figtree, sans-serif",
+              }}>
+                {d.surplus >= 0 ? "+" : ""}{fmtIDR(d.surplus, true)}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── EXPENSE BY CATEGORY + TOP MERCHANTS ──────────────── */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+
+        {/* Expense by category */}
+        <div style={card}>
+          <div style={{ marginBottom: 12 }}>
+            <SectionHeader title="Expense by Category" />
+            <div style={{ fontSize: 11, color: T.text3, marginTop: 2 }}>
+              Total: <span style={{ color: T.text, fontWeight: 700 }}>{fmtIDR(catTotal, true)}</span>
+            </div>
+          </div>
+          {catBreakdown.length === 0 ? (
+            <EmptyState icon="📊" message="No expenses this month." />
           ) : (
+            catBreakdown.map(c => (
+              <HBar
+                key={c.id}
+                T={T}
+                label={`${c.icon} ${c.label}`}
+                value={c.value}
+                max={catTotal}
+                color={c.color}
+                pct={catTotal > 0 ? ((c.value / catTotal) * 100).toFixed(1) : "0"}
+              />
+            ))
+          )}
+        </div>
+
+        {/* Right column: top merchants + income breakdown */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+
+          {/* Top merchants */}
+          <div style={card}>
+            <div style={{ marginBottom: 12 }}>
+              <SectionHeader title="Top Merchants" />
+            </div>
+            {topMerchants.length === 0 ? (
+              <EmptyState icon="🏪" message="No merchant data." />
+            ) : (
+              topMerchants.map((m, i) => (
+                <div key={i} style={{ marginBottom: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+                    <span style={{
+                      fontSize: 11, color: T.text2, fontFamily: "Figtree, sans-serif",
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "60%",
+                    }} title={m.name}>
+                      {m.name}
+                    </span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>
+                      {fmtIDR(m.value, true)}
+                    </span>
+                  </div>
+                  <div style={{ background: T.border, borderRadius: 99, height: 4 }}>
+                    <div style={{
+                      width: `${Math.min(100, (m.value / topMerchantMax) * 100)}%`,
+                      height: "100%", background: "#E24B4A", borderRadius: 99, transition: "width .4s",
+                    }} />
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Income by category */}
+          {incomeBreakdown.length > 0 && (
             <div style={card}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-                <SectionHeader title="Expense by Category" />
-                <button onClick={() => exportCSV("expenses")} style={{
-                  background: "none", border: `1px solid ${T.border}`, borderRadius: 6,
-                  padding: "3px 8px", fontSize: 10, color: T.text3, cursor: "pointer",
-                  fontFamily: "Figtree, sans-serif",
-                }}>CSV</button>
+              <div style={{ marginBottom: 12 }}>
+                <SectionHeader title="Income Sources" />
               </div>
-              <div style={{ fontSize: 11, color: T.text3, marginBottom: 10 }}>
-                Total: <span style={{ color: T.text, fontWeight: 700 }}>{fmtIDR(catTotal, true)}</span>
-              </div>
-              {catData.map(c => (
+              {incomeBreakdown.map(c => (
                 <HBar
                   key={c.id}
-                  label={`${c.icon} ${c.name}`}
+                  T={T}
+                  label={`${c.icon} ${c.label}`}
                   value={c.value}
-                  max={catTotal}
+                  max={totalIncome}
                   color={c.color}
-                  pct={catTotal > 0 ? ((c.value / catTotal) * 100).toFixed(1) : 0}
+                  pct={totalIncome > 0 ? ((c.value / totalIncome) * 100).toFixed(1) : "0"}
                 />
               ))}
             </div>
           )}
         </div>
-      )}
-
-      {/* ══════════════════════════════════════════════════ */}
-      {/* ── NET WORTH ────────────────────────────────── */}
-      {/* ══════════════════════════════════════════════════ */}
-      {subTab === "networth" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={card}>
-            <SectionHeader title="Net Worth Trend (12 months)" />
-            {netWorthData.every(d => d.net === 0) ? (
-              <EmptyState icon="📈" message="Not enough data to show trend." />
-            ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <AreaChart data={netWorthData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                  <defs>
-                    <linearGradient id="netGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="#3b5bdb" stopOpacity={0.2} />
-                      <stop offset="95%" stopColor="#3b5bdb" stopOpacity={0}   />
-                    </linearGradient>
-                  </defs>
-                  <XAxis dataKey="month" tick={{ fontSize: 9, fill: T.text3 }} axisLine={false} tickLine={false} />
-                  <YAxis hide />
-                  <Tooltip contentStyle={tooltipStyle} formatter={v => fmtIDR(v, true)} />
-                  <Area type="monotone" dataKey="net" name="Net Worth" stroke="#3b5bdb" strokeWidth={2} fill="url(#netGrad)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-
-          <div style={card}>
-            <SectionHeader title="Current Portfolio Breakdown" />
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
-              {[
-                { label: "Bank Accounts", value: accounts.filter(a => a.type === "bank").reduce((s, a) => s + Number(a.current_balance || 0), 0), color: "#3b5bdb" },
-                { label: "Assets",        value: accounts.filter(a => a.type === "asset").reduce((s, a) => s + Number(a.current_value || 0), 0), color: "#059669" },
-                { label: "Receivables",   value: accounts.filter(a => a.type === "receivable").reduce((s, a) => s + Number(a.receivable_outstanding || 0), 0), color: "#0891b2" },
-                { label: "CC Debt",       value: -accounts.filter(a => a.type === "credit_card").reduce((s, a) => s + Math.max(0, Number(a.current_balance || 0)), 0), color: "#e67700" },
-                { label: "Liabilities",   value: -accounts.filter(a => a.type === "liability").reduce((s, a) => s + Number(a.outstanding_amount || 0), 0), color: "#dc2626" },
-              ].map((item, i) => (
-                <div key={i} style={{
-                  display: "flex", justifyContent: "space-between", alignItems: "center",
-                  padding: "8px 12px", background: T.sur2, borderRadius: 10,
-                }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ width: 10, height: 10, borderRadius: 3, background: item.color }} />
-                    <span style={{ fontSize: 12, color: T.text2 }}>{item.label}</span>
-                  </div>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: item.value >= 0 ? T.text : "#dc2626" }}>
-                    {item.value < 0 ? "−" : ""}{fmtIDR(Math.abs(item.value), true)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ══════════════════════════════════════════════════ */}
-      {/* ── RECEIVABLES AGING ────────────────────────── */}
-      {/* ══════════════════════════════════════════════════ */}
-      {subTab === "aging" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={card}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <SectionHeader title="Receivables Aging" />
-              <span style={{ fontSize: 13, fontWeight: 800, color: "#e67700" }}>{fmtIDR(totalReceivable, true)}</span>
-            </div>
-            {agingData.length === 0 ? (
-              <EmptyState icon="📋" message="No outstanding receivables." />
-            ) : (
-              agingData.map(r => {
-                const days = r.daysSince;
-                const agingColor = days == null ? T.text3 : days > 90 ? "#dc2626" : days > 30 ? "#e67700" : "#059669";
-                return (
-                  <div key={r.id} style={{
-                    padding: "12px 14px", background: T.sur2, borderRadius: 10, marginBottom: 8,
-                  }}>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{r.name}</div>
-                        <div style={{ fontSize: 11, color: T.text3, marginTop: 2 }}>
-                          {r.entity !== "Personal" && r.entity} {r.subtype && ` · ${r.subtype}`}
-                        </div>
-                      </div>
-                      <div style={{ textAlign: "right" }}>
-                        <div style={{ fontSize: 14, fontWeight: 800, color: "#e67700" }}>
-                          {fmtIDR(Number(r.receivable_outstanding || 0), true)}
-                        </div>
-                        {days != null && (
-                          <div style={{ fontSize: 10, color: agingColor, fontWeight: 700, marginTop: 2 }}>
-                            {days === 0 ? "Today" : `${days}d ago`}
-                            {days > 90 ? " ⚠️ Overdue" : days > 30 ? " ⚡ Follow up" : ""}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    {r.lastDate && <div style={{ fontSize: 10, color: T.text3, marginTop: 6 }}>Last: {r.lastDate}</div>}
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-          {/* Aging buckets */}
-          {agingData.length > 0 && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              {[
-                { label: "< 30 days",  color: "#059669", filter: r => (r.daysSince || 0) <= 30 },
-                { label: "30–60 days", color: "#e67700", filter: r => (r.daysSince || 0) > 30 && (r.daysSince || 0) <= 60 },
-                { label: "60–90 days", color: "#dc2626", filter: r => (r.daysSince || 0) > 60 && (r.daysSince || 0) <= 90 },
-                { label: "> 90 days",  color: "#9f1239", filter: r => (r.daysSince || 0) > 90 },
-              ].map((b, i) => {
-                const items = agingData.filter(b.filter);
-                const total = items.reduce((s, r) => s + Number(r.receivable_outstanding || 0), 0);
-                return (
-                  <div key={i} style={{ ...card, background: T.sur2, border: "none", textAlign: "center" }}>
-                    <div style={{ fontSize: 10, color: T.text3, marginBottom: 4 }}>{b.label}</div>
-                    <div style={{ fontSize: 13, fontWeight: 800, color: b.color }}>{fmtIDR(total, true)}</div>
-                    <div style={{ fontSize: 10, color: T.text3, marginTop: 2 }}>{items.length} items</div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
+      </div>
 
     </div>
   );
