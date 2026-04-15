@@ -26,7 +26,7 @@ import {
   accountCurrenciesApi, assetsApi,
   installmentsApi, recalculateBalance, accountsApi, employeeLoanApi,
 } from "../../api";
-import { EXPENSE_CATEGORIES } from "../../constants";
+import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../../constants";
 import { fmtIDR, todayStr, toIDR } from "../../utils";
 import Modal from "./Modal";
 import { showToast } from "./Card";
@@ -365,10 +365,16 @@ export default function TransactionModal({
   // IDR equivalent for non-IDR amounts
   const amtIDR = toIDR ? toIDR(Number(form.amount || 0), form.currency || "IDR", fxRates, allCurrencies) : Number(form.amount || 0);
 
-  // Categories
-  const catOptions = categories.filter(c => c.is_active !== false).map(c => ({ value: c.id, label: `${c.icon || ""} ${c.name || c.label}` }));
-  if (!catOptions.length) {
-    EXPENSE_CATEGORIES.forEach(c => catOptions.push({ value: c.id, label: `${c.icon} ${c.label}` }));
+  // Categories — income uses static list; expense uses DB categories (falling back to static)
+  const isIncome = type === "income";
+  let catOptions;
+  if (isIncome) {
+    catOptions = INCOME_CATEGORIES_LIST.map(c => ({ value: c.id, label: `${c.icon} ${c.label}` }));
+  } else {
+    catOptions = categories.filter(c => c.is_active !== false).map(c => ({ value: c.id, label: `${c.icon || ""} ${c.name || c.label}` }));
+    if (!catOptions.length) {
+      EXPENSE_CATEGORIES.forEach(c => catOptions.push({ value: c.id, label: `${c.icon} ${c.label}` }));
+    }
   }
 
   // ── UUID sanitizer ────────────────────────────────────────────
@@ -1207,7 +1213,7 @@ export default function TransactionModal({
     // ── General (expense, income, transfer, pay_cc, pay_liability, reimburse_out, reimburse_in) ──
     const showFrom    = !["income", "reimburse_in"].includes(type);
     const showTo      = ["income","transfer","pay_cc","pay_liability","reimburse_in"].includes(type);
-    const showCat     = type === "expense";
+    const showCat     = type === "expense" || type === "income";
     const showEntity  = ["reimburse_out","reimburse_in"].includes(type);
     const showCicilan = type === "expense";
 
