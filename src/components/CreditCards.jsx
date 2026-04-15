@@ -1310,9 +1310,9 @@ function CCCard({ cc, color, onPay, onTransactions, onInstallments, onStatement,
   const utilColor = cc.util > 80 ? "#dc2626" : cc.util > 60 ? "#d97706" : "#059669";
 
   return (
-    <div style={{ background: "#fff", borderRadius: 16, outline: "0.5px solid #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+    <div style={{ background: "#fff", borderRadius: 16, boxShadow: "0 0 0 0.5px #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       {/* ── Hero peek strip ── */}
-      <div style={{ position: "relative", width: "100%", height: 90, overflow: "hidden", flexShrink: 0, margin: 0 }}>
+      <div style={{ position: "relative", width: "100%", height: 90, overflow: "hidden", flexShrink: 0, margin: 0, padding: 0 }}>
         {cc.card_image_url ? (
           <img src={cc.card_image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "top center", display: "block" }} />
         ) : (
