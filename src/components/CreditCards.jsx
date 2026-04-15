@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { ledgerApi, installmentsApi, recurringApi, getTxFromToTypes, accountsApi } from "../api";
 import { supabase } from "../lib/supabase";
 import CCStatement from "./CCStatement";
@@ -38,6 +38,9 @@ const CC_BTN = (bg, color, border = "transparent") => ({
   background: bg, color, fontSize: 11, fontWeight: 700, cursor: "pointer",
   fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap",
 });
+
+// ─── PEEK HEIGHT ─────────────────────────────────────────────
+const PEEK_H = 70;
 
 // Derive a darker accent from hex color
 function darkenHex(hex, amount = 40) {
@@ -580,19 +583,16 @@ export default function CreditCards({
                     />
                   </div>
 
-                  {/* All cards grid */}
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
-                    {sortedCC.map((cc, i) => (
-                      <CCCard key={cc.id} cc={cc}
-                        color={cc.color || CARD_PALETTE[i % CARD_PALETTE.length]}
-                        onPay={() => { setPayForm(f => ({ ...f, cardId: cc.id, amount: cc.debt })); setModal("pay"); }}
-                        onTransactions={() => { setSelectedCard(cc.id); setSubTab("transactions"); }}
-                        onInstallments={() => setSubTab("installments")}
-                        onStatement={() => setCcStatementAcc(cc)}
-                        onEdit={() => openEditCard(cc)}
-                      />
-                    ))}
-                  </div>
+                  {/* Apple Wallet stack */}
+                  <WalletStack
+                    cards={sortedCC}
+                    getColor={(i) => sortedCC[i]?.color || CARD_PALETTE[i % CARD_PALETTE.length]}
+                    onPay={(cc) => { setPayForm(f => ({ ...f, cardId: cc.id, amount: cc.debt })); setModal("pay"); }}
+                    onTransactions={(cc) => { setSelectedCard(cc.id); setSubTab("transactions"); }}
+                    onInstallments={() => setSubTab("installments")}
+                    onStatement={(cc) => setCcStatementAcc(cc)}
+                    onEdit={(cc) => openEditCard(cc)}
+                  />
                 </div>
               );
             })()
@@ -1252,7 +1252,6 @@ function SharedLimitGroupCard({ group, cardStats, paletteStart = 0, onPay, onTra
   );
 }
 
-// ─── CC CARD (new compact design) ───────────────────────────
 // ─── NETWORK LOGO ─────────────────────────────────────────────
 function NetworkLogo({ network }) {
   if (!network) return null;
@@ -1284,45 +1283,86 @@ function NetworkLogo({ network }) {
   return <span style={{ fontSize: 10, fontWeight: 700, color: "#fff", fontFamily: "Figtree, sans-serif" }}>{network}</span>;
 }
 
-function CCCard({ cc, color, onPay, onTransactions, onInstallments, onStatement, onEdit }) {
-  const utilColor = cc.util > 80 ? "#dc2626" : cc.util > 60 ? "#d97706" : "#059669";
+// ─── WALLET CARD (Apple Wallet expanded/collapsed item) ──────
+function WalletCard({ cc, color, isActive, onPay, onTransactions, onInstallments, onStatement, onEdit }) {
+  const utilColor = cc.util > 80 ? "#dc2626" : cc.util > 50 ? "#d97706" : "#059669";
 
   return (
-    <div style={{ background: "#fff", borderRadius: 16, outline: "0.5px solid #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-      {/* ── Hero peek strip ── */}
-      <div style={{ position: "relative", width: "100%", height: 90, overflow: "hidden", flexShrink: 0, margin: 0 }}>
-        {cc.card_image_url ? (
-          <img src={cc.card_image_url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "top center", display: "block" }} />
-        ) : (
-          <div style={{ position: "absolute", inset: 0, background: color || "#3b5bdb" }}>
-            <div style={{ position: "absolute", top: -24, right: -18, width: 130, height: 130, borderRadius: "50%", background: "rgba(255,255,255,0.08)" }} />
-            <div style={{ position: "absolute", top: 18, right: 28, width: 82, height: 82, borderRadius: "50%", background: "rgba(255,255,255,0.06)" }} />
-            <div style={{ position: "absolute", bottom: -32, left: -18, width: 110, height: 110, borderRadius: "50%", background: "rgba(255,255,255,0.07)" }} />
-          </div>
+    <div style={{ borderRadius: 16, overflow: "hidden", background: "#fff" }}>
+
+      {/* ── Card image area — full credit card aspect ratio (1.586:1) ── */}
+      <div
+        style={{
+          position: "relative",
+          width: "100%",
+          aspectRatio: "1.586",
+          overflow: "hidden",
+          flexShrink: 0,
+          ...(cc.card_image_url
+            ? { backgroundImage: `url(${cc.card_image_url})`, backgroundSize: "cover", backgroundPosition: "center top" }
+            : { background: color || "#3b5bdb" }
+          ),
+        }}
+      >
+        {/* Decorative circles for solid-color fallback */}
+        {!cc.card_image_url && (
+          <>
+            <div style={{ position: "absolute", top: -40, right: -30, width: 200, height: 200, borderRadius: "50%", background: "rgba(255,255,255,0.08)" }} />
+            <div style={{ position: "absolute", top: 50,  right: 55,  width: 130, height: 130, borderRadius: "50%", background: "rgba(255,255,255,0.06)" }} />
+            <div style={{ position: "absolute", bottom: -55, left: -30, width: 180, height: 180, borderRadius: "50%", background: "rgba(255,255,255,0.07)" }} />
+          </>
         )}
-        {/* Bottom fade overlay */}
-        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.10) 100%)" }} />
 
-        {/* Edit button — top right */}
-        <button
-          onClick={onEdit}
-          title="Edit card"
-          style={{ position: "absolute", top: 8, right: 10, border: "none", background: "rgba(0,0,0,0.28)", borderRadius: 6, cursor: "pointer", padding: "3px 6px", color: "#fff", lineHeight: 1, fontSize: 12 }}
-          onMouseEnter={e => e.currentTarget.style.background = "rgba(0,0,0,0.5)"}
-          onMouseLeave={e => e.currentTarget.style.background = "rgba(0,0,0,0.28)"}
-        >✏️</button>
+        {/* Gradient overlay */}
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, rgba(0,0,0,0.22) 0%, transparent 38%, rgba(0,0,0,0.28) 100%)" }} />
 
-        {/* Network logo — bottom right */}
-        <div style={{ position: "absolute", bottom: 8, right: 12, display: "flex", alignItems: "center" }}>
-          <NetworkLogo network={cc.network} />
-        </div>
-      </div>
-
-      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 11, flex: 1 }}>
-        {/* Card name */}
-        <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {/* Card name — top left, always in peek zone (first 70px) */}
+        <div style={{
+          position: "absolute", top: 20, left: 16, right: 58,
+          fontFamily: "Figtree, sans-serif", fontWeight: 700, fontSize: 14,
+          color: "#fff", textShadow: "0 1px 4px rgba(0,0,0,0.6)",
+          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1,
+        }}>
           {cc.name}
         </div>
+
+        {/* Network logo — top right, always in peek zone */}
+        <div style={{ position: "absolute", top: 14, right: 14, display: "flex", alignItems: "center" }}>
+          <NetworkLogo network={cc.network} />
+        </div>
+
+        {/* Edit button — fades in on expand, hidden when collapsed */}
+        <button
+          onClick={(e) => { e.stopPropagation(); onEdit(); }}
+          title="Edit card"
+          style={{
+            position: "absolute", top: 8, right: 10,
+            border: "none", background: "rgba(0,0,0,0.30)", borderRadius: 6,
+            cursor: "pointer", padding: "3px 6px", color: "#fff", lineHeight: 1, fontSize: 12,
+            opacity: isActive ? 1 : 0,
+            pointerEvents: isActive ? "auto" : "none",
+            transition: "opacity 0.2s ease",
+            zIndex: 2,
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = "rgba(0,0,0,0.55)"}
+          onMouseLeave={e => e.currentTarget.style.background = "rgba(0,0,0,0.30)"}
+        >✏️</button>
+
+        {/* Last4 — bottom left, only visible when image fully shows */}
+        {cc.last4 && (
+          <div style={{
+            position: "absolute", bottom: 16, left: 16,
+            fontFamily: "Figtree, sans-serif", fontSize: 12,
+            color: "rgba(255,255,255,0.88)", letterSpacing: 3, fontWeight: 600,
+            textShadow: "0 1px 3px rgba(0,0,0,0.45)",
+          }}>
+            ···· {cc.last4}
+          </div>
+        )}
+      </div>
+
+      {/* ── Info section — always rendered; outer max-height clip controls visibility ── */}
+      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 11, background: "#fff" }}>
 
         {/* Debt + Available */}
         <div style={{ display: "flex", gap: 10 }}>
@@ -1340,7 +1380,7 @@ function CCCard({ cc, color, onPay, onTransactions, onInstallments, onStatement,
           </div>
         </div>
 
-        {/* Utilization bar (4px) */}
+        {/* Utilization bar */}
         {cc.limit > 0 && (
           <div>
             <div style={{ height: 4, background: "#f3f4f6", borderRadius: 4, overflow: "hidden" }}>
@@ -1361,7 +1401,7 @@ function CCCard({ cc, color, onPay, onTransactions, onInstallments, onStatement,
                 fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 6,
                 fontFamily: "Figtree, sans-serif",
                 background: cc.dueIn <= 3 ? "#fee2e2" : cc.dueIn <= 7 ? "#fef3c7" : "#f9fafb",
-                color: cc.dueIn <= 3 ? "#dc2626" : cc.dueIn <= 7 ? "#d97706" : "#6b7280",
+                color:      cc.dueIn <= 3 ? "#dc2626" : cc.dueIn <= 7 ? "#d97706" : "#6b7280",
                 border: `1px solid ${cc.dueIn <= 3 ? "#fecaca" : cc.dueIn <= 7 ? "#fde68a" : "#f3f4f6"}`,
               }}>
                 Due {cc.dueIn}d
@@ -1375,14 +1415,78 @@ function CCCard({ cc, color, onPay, onTransactions, onInstallments, onStatement,
           </div>
         )}
 
-        {/* Action buttons */}
-        <div style={{ display: "flex", gap: 6, marginTop: "auto", flexWrap: "wrap" }}>
-          <button onClick={onPay}          style={CC_BTN("#fde8e8", "#dc2626", "#fecaca")}>💳 Pay</button>
-          <button onClick={onTransactions} style={CC_BTN("#f3f4f6", "#374151", "#e5e7eb")}>Txns</button>
-          <button onClick={onInstallments} style={CC_BTN("#f3f4f6", "#374151", "#e5e7eb")}>Install.</button>
-          <button onClick={onStatement}    style={CC_BTN("#f0f9ff", "#0369a1", "#bae6fd")}>Statement</button>
+        {/* Action buttons — exact same styles as before */}
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <button onClick={(e) => { e.stopPropagation(); onPay();          }} style={CC_BTN("#fde8e8", "#dc2626", "#fecaca")}>💳 Pay</button>
+          <button onClick={(e) => { e.stopPropagation(); onTransactions(); }} style={CC_BTN("#f3f4f6", "#374151", "#e5e7eb")}>Txns</button>
+          <button onClick={(e) => { e.stopPropagation(); onInstallments(); }} style={CC_BTN("#f3f4f6", "#374151", "#e5e7eb")}>Install.</button>
+          <button onClick={(e) => { e.stopPropagation(); onStatement();    }} style={CC_BTN("#f0f9ff", "#0369a1", "#bae6fd")}>Statement</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ─── APPLE WALLET STACK ───────────────────────────────────────
+function WalletStack({ cards, getColor, onPay, onTransactions, onInstallments, onStatement, onEdit }) {
+  const [activeId, setActiveId] = useState(null);
+
+  return (
+    <div style={{ paddingBottom: 4 }}>
+      {cards.map((cc, i) => {
+        const isActive = cc.id === activeId;
+        return (
+          <div
+            key={cc.id}
+            style={{
+              maxHeight: isActive ? 900 : PEEK_H,
+              overflow: "hidden",
+              transition: "max-height 0.3s ease",
+              // overlap: each card after the first tucks 14px under the card above
+              marginTop: i === 0 ? 0 : -14,
+              position: "relative",
+              // active card always on top; otherwise first card has highest z (like a real deck)
+              zIndex: isActive ? cards.length + 10 : cards.length - i,
+              borderRadius: 16,
+              boxShadow: "0 2px 10px rgba(0,0,0,0.14)",
+              cursor: "pointer",
+            }}
+            onClick={() => setActiveId(isActive ? null : cc.id)}
+          >
+            <WalletCard
+              cc={cc}
+              color={getColor(i)}
+              isActive={isActive}
+              onPay={() => onPay(cc)}
+              onTransactions={() => onTransactions(cc)}
+              onInstallments={() => onInstallments()}
+              onStatement={() => onStatement(cc)}
+              onEdit={() => onEdit(cc)}
+            />
+          </div>
+        );
+      })}
+
+      {/* Dot indicators */}
+      {cards.length > 1 && (
+        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 6, marginTop: 18 }}>
+          {cards.map(cc => (
+            <div
+              key={cc.id}
+              onClick={(e) => { e.stopPropagation(); setActiveId(prev => prev === cc.id ? null : cc.id); }}
+              style={{
+                width: cc.id === activeId ? 16 : 6,
+                height: 6,
+                borderRadius: 3,
+                background: cc.id === activeId ? "#374151" : "#d1d5db",
+                transition: "all 0.3s ease",
+                cursor: "pointer",
+                flexShrink: 0,
+              }}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
