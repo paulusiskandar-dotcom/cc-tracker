@@ -465,29 +465,48 @@ export default function ReconcileModal({
     setDelTarget(null);
   };
 
-  // ── Build unified row list for side-by-side view ───────────
-  const sortedResults = useMemo(() => {
-    const order = { match: 0, missing: 1, extra: 2, kept: 3 };
-    return [...results].sort((a, b) => {
-      const oa = order[a.type] ?? 4, ob = order[b.type] ?? 4;
-      if (oa !== ob) return oa - ob;
-      const da = a.stmt?.date || a.ledger?.tx_date || "";
-      const db = b.stmt?.date || b.ledger?.tx_date || "";
-      return da.localeCompare(db);
+  // ── Filter + sort ───────────────────────────────────────────
+  const [viewFilter, setViewFilter] = useState("all"); // all | missing | extra | match
+  const [expandedId, setExpandedId] = useState(null);  // _id of expanded missing row
+
+  const sortedResults = useMemo(() =>
+    [...results]
+      .filter(r => viewFilter === "all" || r.type === viewFilter || (viewFilter === "match" && r.type === "kept"))
+      .sort((a, b) => {
+        const da = a.stmt?.date || a.ledger?.tx_date || "";
+        const db = b.stmt?.date || b.ledger?.tx_date || "";
+        return da.localeCompare(db);
+      }),
+  [results, viewFilter]);
+
+  // Running balance for display rows
+  const balanceMap = useMemo(() => {
+    const map = {};
+    let bal = 0;
+    sortedResults.forEach((r, i) => {
+      const amt = Math.abs(Number(r.stmt?.amount || r.ledger?.amount_idr || r.ledger?.amount || 0));
+      const dir = r.stmt?.direction || (r.ledger?.tx_type === "income" ? "in" : "out");
+      bal += dir === "in" ? amt : -amt;
+      map[i] = bal;
     });
-  }, [results]);
+    return map;
+  }, [sortedResults]);
 
   if (!account) return null;
 
   const hasSomething = stmtRows.length > 0 || periodLedger.length > 0;
-
-  // ── Styles ─────────────────────────────────────────────────
+  const totalRows = stmtRows.length + periodLedger.length;
   const F = "Figtree, sans-serif";
-  const COL_HDR = { fontSize: 9, fontWeight: 800, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.04em", fontFamily: F, padding: "6px 8px", borderBottom: "1px solid #e5e7eb", background: "#fafafa" };
-  const CELL    = { fontSize: 11, fontFamily: F, padding: "6px 8px", borderBottom: "1px solid #f3f4f6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
-  const BORDER  = { match: "3px solid #059669", missing: "3px solid #d97706", extra: "3px solid #dc2626", kept: "3px solid #d1d5db" };
-  const BG      = { match: "#f0fdf4", missing: "#fffbeb", extra: "#fef2f2", kept: "#f9fafb" };
-  const btnS    = (color, border) => ({ fontSize: 10, fontWeight: 700, color, background: "none", border: `1px solid ${border}`, borderRadius: 4, padding: "2px 7px", cursor: "pointer", fontFamily: F, whiteSpace: "nowrap" });
+  const btnS = (color, border) => ({ fontSize: 10, fontWeight: 700, color, background: "none", border: `1px solid ${border}`, borderRadius: 4, padding: "2px 7px", cursor: "pointer", fontFamily: F, whiteSpace: "nowrap" });
+  const filterPill = (id, label) => {
+    const active = viewFilter === id;
+    return (
+      <button key={id} onClick={() => setViewFilter(id)}
+        style={{ fontSize: 10, fontWeight: 700, padding: "3px 10px", borderRadius: 20, border: active ? "none" : "1px solid #e5e7eb", cursor: "pointer", fontFamily: F, background: active ? "#111827" : "#fff", color: active ? "#fff" : "#6b7280" }}>
+        {label}
+      </button>
+    );
+  };
 
   const footer = (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
@@ -503,15 +522,18 @@ export default function ReconcileModal({
     </div>
   );
 
+  const BORDER_L = { match: "3px solid #059669", missing: "3px solid #d97706", extra: "3px solid #dc2626", kept: "3px solid #d1d5db" };
+  const ROW_BG   = { match: "#f0fdf4", missing: "#fffbeb", extra: "#fef2f2", kept: "#f9fafb" };
+  const BADGE_S  = { match: { bg: "#dcfce7", color: "#059669", label: "✓" }, missing: { bg: "#fef3c7", color: "#d97706", label: "!" }, extra: { bg: "#fee2e2", color: "#dc2626", label: "?" }, kept: { bg: "#e5e7eb", color: "#6b7280", label: "◦" } };
+
   return (
     <>
-      <Modal isOpen={isOpen} onClose={onClose} title={`Reconcile — ${account.name}`} footer={footer} width={960}>
-        {/* Subtitle */}
+      <Modal isOpen={isOpen} onClose={onClose} title={`Reconcile — ${account.name}`} footer={footer} width={900}>
         <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 12, fontFamily: F }}>
           {periodLabel}{pdfSource ? ` · ${pdfSource}` : ""}
         </div>
 
-        {/* Statement-from-email banner */}
+        {/* Email banner */}
         {stmtRows.length === 0 && emailStmt && (
           <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontFamily: F }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
@@ -523,173 +545,147 @@ export default function ReconcileModal({
                 </div>
               </div>
             </div>
-            {needsPassword && (
-              <input type="password" placeholder="Password PDF" value={emailPassword}
-                onChange={e => setEmailPassword(e.target.value)}
-                style={{ fontSize: 12, padding: "6px 10px", border: "1px solid #cbd5e1", borderRadius: 8, fontFamily: F, width: "100%", marginBottom: 8, boxSizing: "border-box" }} />
-            )}
+            {needsPassword && <input type="password" placeholder="Password PDF" value={emailPassword} onChange={e => setEmailPassword(e.target.value)} style={{ fontSize: 12, padding: "6px 10px", border: "1px solid #cbd5e1", borderRadius: 8, fontFamily: F, width: "100%", marginBottom: 8, boxSizing: "border-box" }} />}
             <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={handleDownloadFromEmail} disabled={processing}
-                style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: processing ? "#93c5fd" : "#3b5bdb", padding: "6px 16px", borderRadius: 8, border: "none", cursor: processing ? "default" : "pointer", fontFamily: F }}>
+              <button onClick={handleDownloadFromEmail} disabled={processing} style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: processing ? "#93c5fd" : "#3b5bdb", padding: "6px 16px", borderRadius: 8, border: "none", cursor: processing ? "default" : "pointer", fontFamily: F }}>
                 {processing ? "Processing…" : (needsPassword ? "Retry with Password" : "Download & Process")}
               </button>
-              {!needsPassword && (
-                <button onClick={() => setNeedsPassword(true)} style={{ fontSize: 11, fontWeight: 600, color: "#475569", background: "transparent", padding: "6px 10px", border: "1px solid #cbd5e1", borderRadius: 8, cursor: "pointer", fontFamily: F }}>
-                  PDF terenkripsi?
-                </button>
-              )}
+              {!needsPassword && <button onClick={() => setNeedsPassword(true)} style={{ fontSize: 11, fontWeight: 600, color: "#475569", background: "transparent", padding: "6px 10px", border: "1px solid #cbd5e1", borderRadius: 8, cursor: "pointer", fontFamily: F }}>PDF terenkripsi?</button>}
             </div>
           </div>
         )}
 
-        {/* Upload controls */}
+        {/* Upload */}
         {stmtRows.length === 0 && (
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14 }}>
-            <input type="password" placeholder="PDF password (optional)" value={pdfPassword} onChange={e => setPdfPassword(e.target.value)}
-              style={{ fontSize: 12, padding: "6px 10px", border: "1px solid #e5e7eb", borderRadius: 8, fontFamily: F, width: 200 }} />
+            <input type="password" placeholder="PDF password (optional)" value={pdfPassword} onChange={e => setPdfPassword(e.target.value)} style={{ fontSize: 12, padding: "6px 10px", border: "1px solid #e5e7eb", borderRadius: 8, fontFamily: F, width: 200 }} />
             <label style={{ cursor: "pointer" }}>
               <input type="file" accept=".pdf" onChange={handleUpload} onClick={e => { e.target.value = ""; }} style={{ display: "none" }} />
-              <span style={{ display: "inline-block", fontSize: 12, fontWeight: 700, color: "#fff", background: "#3b5bdb", padding: "6px 16px", borderRadius: 8, cursor: "pointer", fontFamily: F }}>
-                {processing ? "Processing…" : "Upload PDF"}
-              </span>
+              <span style={{ display: "inline-block", fontSize: 12, fontWeight: 700, color: "#fff", background: "#3b5bdb", padding: "6px 16px", borderRadius: 8, cursor: "pointer", fontFamily: F }}>{processing ? "Processing…" : "Upload PDF"}</span>
             </label>
           </div>
         )}
 
-        {processing && (
-          <div style={{ textAlign: "center", padding: "20px 0", fontSize: 12, color: "#6b7280", fontFamily: F }}>Extracting transactions from PDF…</div>
-        )}
+        {processing && <div style={{ textAlign: "center", padding: "20px 0", fontSize: 12, color: "#6b7280", fontFamily: F }}>Extracting transactions from PDF…</div>}
 
-        {/* ── Stats + bulk action bar ── */}
+        {/* ── Top bar: stats + filters + bulk ── */}
         {hasSomething && (
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <span style={PILL("#dcfce7", "#059669")}>✓ {matchCount} Match</span>
-              <span style={PILL("#fef3c7", "#d97706")}>! {missingCount} Missing</span>
-              <span style={PILL("#fee2e2", "#dc2626")}>? {extraCount} Extra</span>
-              {keptCount > 0 && <span style={PILL("#e5e7eb", "#6b7280")}>◦ {keptCount} Kept</span>}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={PILL("#dcfce7", "#059669")}>✓ {matchCount}</span>
+              <span style={PILL("#fef3c7", "#d97706")}>! {missingCount}</span>
+              <span style={PILL("#fee2e2", "#dc2626")}>? {extraCount}</span>
+              {keptCount > 0 && <span style={PILL("#e5e7eb", "#6b7280")}>◦ {keptCount}</span>}
+              <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: F }}>{totalRows} total</span>
+              <span style={{ width: 1, height: 16, background: "#e5e7eb" }} />
+              {filterPill("all", "All")}
+              {filterPill("missing", "Missing")}
+              {filterPill("extra", "Extra")}
+              {filterPill("match", "Match")}
             </div>
+            {missingCount > 0 && (
+              <button onClick={() => confirmMissingAll(missingRowsFinal)} disabled={missingImporting}
+                style={{ fontSize: 11, fontWeight: 700, padding: "5px 14px", borderRadius: 8, border: "none", cursor: missingImporting ? "default" : "pointer", fontFamily: F, background: "#3b5bdb", color: "#fff", opacity: missingImporting ? 0.6 : 1 }}>
+                {missingImporting ? "Importing…" : `Accept All Missing (${missingCount})`}
+              </button>
+            )}
           </div>
         )}
 
-        {/* ── Side-by-side panels ── */}
+        {/* ── Statement table ── */}
         {hasSomething && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden", maxHeight: 440, overflowY: "auto" }}>
-            {/* Column headers */}
-            <div style={{ ...COL_HDR, borderRight: "1px solid #e5e7eb" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 70px" }}>
-                <span>Tanggal</span><span>Keterangan</span><span style={{ textAlign: "right" }}>Jumlah</span>
-              </div>
-            </div>
-            <div style={COL_HDR}>
-              <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 70px" }}>
-                <span>Tanggal</span><span>Keterangan</span><span style={{ textAlign: "right" }}>Jumlah</span>
-              </div>
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
+            {/* Header */}
+            <div style={{ display: "grid", gridTemplateColumns: "58px 1fr 80px 80px 90px 48px", background: "#fafafa", borderBottom: "1px solid #e5e7eb", padding: "6px 8px", fontSize: 9, fontWeight: 800, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.04em", fontFamily: F }}>
+              <span>Tanggal</span><span>Keterangan</span><span style={{ textAlign: "right" }}>Debit</span><span style={{ textAlign: "right" }}>Kredit</span><span style={{ textAlign: "right" }}>Saldo</span><span style={{ textAlign: "center" }}>Status</span>
             </div>
 
-            {/* Rows */}
-            {sortedResults.map((r, i) => {
-              const type = r.type;
-              const s = r.stmt;
-              const l = r.ledger;
+            {/* Scrollable rows */}
+            <div style={{ maxHeight: 420, overflowY: "auto" }}>
+              {sortedResults.map((r, i) => {
+                const type = r.type;
+                const s = r.stmt;
+                const l = r.ledger;
+                const date = s?.date || l?.tx_date || "";
+                const desc = s ? (s.description || s.merchant || "") : (l?.description || "");
+                const amt  = Math.abs(Number(s?.amount || l?.amount_idr || l?.amount || 0));
+                const dir  = s?.direction || (l?.tx_type === "income" ? "in" : "out");
+                const badge = BADGE_S[type];
+                const isExpanded = expandedId === (s?._id || l?.id || i);
+                const missRow = type === "missing" ? missingRowsFinal.find(mr => mr._id === s?._id) : null;
+                const isOdd = i % 2 === 1;
 
-              // Left cell (statement side)
-              const leftContent = s ? (
-                <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 70px", alignItems: "center" }}>
-                  <span style={{ fontSize: 10, color: "#6b7280" }}>{(s.date || "").slice(5)}</span>
-                  <span style={{ ...CELL, padding: 0, fontWeight: 600, color: "#111827" }}>{s.description || s.merchant || "—"}</span>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: "#111827", textAlign: "right" }}>{fmtIDR(Math.abs(Number(s.amount || 0)), true)}</span>
-                </div>
-              ) : (
-                <span style={{ fontSize: 10, color: type === "extra" ? "#dc2626" : "#9ca3af", fontStyle: "italic" }}>
-                  {type === "extra" ? "Not in statement" : "—"}
-                </span>
-              );
-
-              // Right cell (ledger side)
-              let rightContent;
-              if (type === "match" && l) {
-                rightContent = (
-                  <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 70px", alignItems: "center" }}>
-                    <span style={{ fontSize: 10, color: "#6b7280" }}>{(l.tx_date || "").slice(5)}</span>
-                    <span style={{ ...CELL, padding: 0, fontWeight: 600, color: "#111827" }}>{l.description || "—"}</span>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#111827", textAlign: "right" }}>{fmtIDR(Number(l.amount_idr || l.amount || 0), true)}</span>
-                  </div>
-                );
-              } else if (type === "missing") {
-                rightContent = (
-                  <span style={{ fontSize: 10, color: "#d97706", fontStyle: "italic" }}>Not in ledger</span>
-                );
-              } else if ((type === "extra" || type === "kept") && l) {
-                rightContent = (
-                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                    <div style={{ flex: 1, minWidth: 0, display: "grid", gridTemplateColumns: "60px 1fr 70px", alignItems: "center" }}>
-                      <span style={{ fontSize: 10, color: "#6b7280" }}>{(l.tx_date || "").slice(5)}</span>
-                      <span style={{ ...CELL, padding: 0, fontWeight: 600, color: type === "kept" ? "#6b7280" : "#111827" }}>{l.description || "—"}</span>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: type === "kept" ? "#6b7280" : "#111827", textAlign: "right" }}>{fmtIDR(Number(l.amount_idr || l.amount || 0), true)}</span>
+                return (
+                  <div key={s?._id || l?.id || i}>
+                    <div style={{
+                      display: "grid", gridTemplateColumns: "58px 1fr 80px 80px 90px 48px",
+                      padding: "6px 8px", borderLeft: BORDER_L[type],
+                      background: isOdd ? (ROW_BG[type] || "#fafafa") : ROW_BG[type],
+                      borderBottom: "1px solid #f3f4f6", alignItems: "center",
+                      opacity: type === "kept" ? 0.55 : 1,
+                      fontFamily: F, fontSize: 11,
+                    }}>
+                      <span style={{ fontSize: 10, color: "#6b7280" }}>{date.slice(5)}</span>
+                      <span style={{ fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: 4 }}>{desc || "—"}</span>
+                      <span style={{ textAlign: "right", fontWeight: 600, color: dir === "out" ? "#dc2626" : "transparent" }}>{dir === "out" ? fmtIDR(amt, true) : ""}</span>
+                      <span style={{ textAlign: "right", fontWeight: 600, color: dir === "in" ? "#059669" : "transparent" }}>{dir === "in" ? fmtIDR(amt, true) : ""}</span>
+                      <span style={{ textAlign: "right", fontSize: 10, color: "#6b7280" }}>{fmtIDR(Math.abs(balanceMap[i] || 0), true)}</span>
+                      <div style={{ display: "flex", justifyContent: "center" }}>
+                        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: 4, background: badge.bg, color: badge.color, fontSize: 10, fontWeight: 800 }}>{badge.label}</span>
+                      </div>
                     </div>
+
+                    {/* Action row for missing */}
+                    {type === "missing" && !isExpanded && (
+                      <div style={{ display: "flex", gap: 6, padding: "4px 8px 6px 64px", background: "#fffbeb", borderBottom: "1px solid #fde68a", borderLeft: "3px solid #d97706" }}>
+                        <button onClick={() => setExpandedId(s?._id)} style={btnS("#3b5bdb", "#bfdbfe")}>Add</button>
+                      </div>
+                    )}
+
+                    {/* Expanded inline editor for missing (AI scan style) */}
+                    {type === "missing" && isExpanded && missRow && (
+                      <div style={{ background: "#fffbeb", borderBottom: "1px solid #fde68a", borderLeft: "3px solid #d97706", padding: "8px 10px" }}>
+                        <TransactionReviewList
+                          rows={[missRow]}
+                          selected={{ [missRow._id]: true }}
+                          onUpdateRow={updateMissingRow}
+                          onConfirmRow={async (row) => { await confirmMissingOne(row); setExpandedId(null); }}
+                          onSkipRow={() => setExpandedId(null)}
+                          onConfirmAll={async (rows) => { await confirmMissingAll(rows); setExpandedId(null); }}
+                          onToggleSelect={() => {}}
+                          onToggleAll={() => {}}
+                          source="reconcile"
+                          accounts={accounts}
+                          T={T}
+                          busy={missingImporting}
+                        />
+                      </div>
+                    )}
+
+                    {/* Action row for extra */}
                     {type === "extra" && (
-                      <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
-                        <button onClick={() => openEditFromLedger(l)} style={btnS("#3b5bdb", "#bfdbfe")}>Edit</button>
+                      <div style={{ display: "flex", gap: 4, padding: "4px 8px 6px 64px", background: "#fef2f2", borderBottom: "1px solid #fecaca", borderLeft: "3px solid #dc2626" }}>
                         <button onClick={() => markKept(l.id)} style={btnS("#059669", "#bbf7d0")}>Keep</button>
+                        <button onClick={() => openEditFromLedger(l)} style={btnS("#3b5bdb", "#bfdbfe")}>Edit</button>
                         <button onClick={() => setDelTarget(l)} style={btnS("#dc2626", "#fecaca")}>Hapus</button>
                       </div>
                     )}
+
+                    {/* Action row for kept */}
                     {type === "kept" && (
-                      <button onClick={() => setKeptIds(prev => { const n = new Set(prev); n.delete(l.id); return n; })}
-                        style={btnS("#6b7280", "#e5e7eb")}>Undo</button>
+                      <div style={{ display: "flex", gap: 4, padding: "4px 8px 6px 64px", background: "#f9fafb", borderBottom: "1px solid #e5e7eb", borderLeft: "3px solid #d1d5db", opacity: 0.55 }}>
+                        <button onClick={() => setKeptIds(prev => { const n = new Set(prev); n.delete(l.id); return n; })} style={btnS("#6b7280", "#e5e7eb")}>Undo Keep</button>
+                      </div>
                     )}
                   </div>
                 );
-              } else {
-                rightContent = <span style={{ fontSize: 10, color: "#9ca3af" }}>—</span>;
-              }
-
-              return (
-                <React.Fragment key={i}>
-                  <div style={{ ...CELL, borderLeft: BORDER[type], background: BG[type], borderRight: "1px solid #e5e7eb", opacity: type === "kept" ? 0.6 : 1 }}>
-                    {leftContent}
-                  </div>
-                  <div style={{ ...CELL, background: BG[type], opacity: type === "kept" ? 0.6 : 1 }}>
-                    {rightContent}
-                  </div>
-                </React.Fragment>
-              );
-            })}
-          </div>
-        )}
-
-        {/* ── Missing rows — AI-scan-style review list ── */}
-        {missingRowsFinal.length > 0 && (
-          <div style={{ marginTop: 14 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#d97706", fontFamily: F, marginBottom: 6 }}>
-              Add Missing Transactions ({missingRowsFinal.length})
+              })}
             </div>
-            <TransactionReviewList
-              rows={missingRowsFinal}
-              selected={missingSelected}
-              skipped={missingSkipped}
-              onUpdateRow={updateMissingRow}
-              onConfirmRow={confirmMissingOne}
-              onSkipRow={skipMissing}
-              onConfirmAll={confirmMissingAll}
-              onToggleSelect={id => setMissingSelected(s => ({ ...s, [id]: !s[id] }))}
-              onToggleAll={() => {
-                const allSel = missingRowsFinal.every(r => missingSelected[r._id]);
-                const next = {};
-                missingRowsFinal.forEach(r => { next[r._id] = !allSel; });
-                setMissingSelected(next);
-              }}
-              source="reconcile"
-              accounts={accounts}
-              T={T}
-              busy={missingImporting}
-            />
           </div>
         )}
 
         {/* Empty state */}
-        {!processing && stmtRows.length === 0 && periodLedger.length === 0 && (
+        {!processing && !hasSomething && (
           <div style={{ textAlign: "center", padding: "30px 0", color: "#9ca3af", fontSize: 12, fontFamily: F }}>
             Upload a bank statement PDF to start reconciling
           </div>
@@ -699,26 +695,15 @@ export default function ReconcileModal({
       {/* Edit Transaction Modal */}
       {txModalMode && txInitial && (
         <TransactionModal
-          open={!!txModalMode}
-          mode={txModalMode}
-          initialData={txInitial}
+          open={!!txModalMode} mode={txModalMode} initialData={txInitial}
           onSave={() => { onRefresh?.(); setTxModalMode(null); setTxInitial(null); }}
           onDelete={() => { onRefresh?.(); setTxModalMode(null); setTxInitial(null); }}
           onClose={() => { setTxModalMode(null); setTxInitial(null); }}
-          user={user}
-          accounts={accounts}
-          setLedger={setLedger}
-          categories={categories}
-          fxRates={fxRates}
-          allCurrencies={allCurrencies}
-          bankAccounts={bankAccounts}
-          creditCards={creditCards}
-          assets={assets}
-          liabilities={liabilities}
-          receivables={receivables}
-          incomeSrcs={incomeSrcs}
-          accountCurrencies={accountCurrencies}
-          onRefresh={onRefresh}
+          user={user} accounts={accounts} setLedger={setLedger} categories={categories}
+          fxRates={fxRates} allCurrencies={allCurrencies}
+          bankAccounts={bankAccounts} creditCards={creditCards}
+          assets={assets} liabilities={liabilities} receivables={receivables}
+          incomeSrcs={incomeSrcs} accountCurrencies={accountCurrencies} onRefresh={onRefresh}
         />
       )}
 
@@ -726,12 +711,7 @@ export default function ReconcileModal({
       {delTarget && (
         <Modal isOpen={!!delTarget} onClose={() => setDelTarget(null)}
           title={`Hapus transaksi ${delTarget.description ? `"${delTarget.description}"` : ""}?`} width={420}
-          footer={
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", width: "100%" }}>
-              <Button variant="ghost" onClick={() => setDelTarget(null)}>Batal</Button>
-              <Button variant="danger" onClick={handleDelete}>Hapus</Button>
-            </div>
-          }>
+          footer={<div style={{ display: "flex", gap: 8, justifyContent: "flex-end", width: "100%" }}><Button variant="ghost" onClick={() => setDelTarget(null)}>Batal</Button><Button variant="danger" onClick={handleDelete}>Hapus</Button></div>}>
           <div style={{ fontSize: 12, color: "#374151", fontFamily: F }}>
             <strong>{delTarget.description || "—"}</strong> · {delTarget.tx_date} · {fmtIDR(Number(delTarget.amount_idr || delTarget.amount || 0), true)}
           </div>
