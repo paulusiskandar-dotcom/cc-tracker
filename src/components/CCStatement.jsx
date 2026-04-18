@@ -77,6 +77,7 @@ export default function CCStatement({
   const [accountId, setAccountId] = useState(initialAccount?.id || "");
   const [fromDate,  setFromDate]  = useState(firstOfMonthStr());
   const [toDate,    setToDate]    = useState(todayStr());
+  const [selectedMonth, setSelectedMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [loading,   setLoading]   = useState(false);
   const [data,      setData]      = useState(null);
 
@@ -89,6 +90,26 @@ export default function CCStatement({
   const openEdit = (tx) => setEditEntry(tx);
 
   const selectedAccount = accounts.find(a => a.id === accountId) || null;
+
+  // Auto-compute billing cycle dates when month picker changes
+  useEffect(() => {
+    if (!selectedMonth || !selectedAccount) return;
+    const [y, m] = selectedMonth.split("-").map(Number);
+    const stDay = Number(selectedAccount.statement_day);
+    if (stDay > 0) {
+      // Billing cycle: (stDay+1) of prev month → stDay of selected month
+      const endDate = new Date(y, m - 1, stDay);
+      const startDate = new Date(endDate);
+      startDate.setMonth(startDate.getMonth() - 1);
+      startDate.setDate(startDate.getDate() + 1);
+      setFromDate(startDate.toISOString().slice(0, 10));
+      setToDate(endDate.toISOString().slice(0, 10));
+    } else {
+      // No statement_day: use calendar month
+      setFromDate(`${y}-${String(m).padStart(2, "0")}-01`);
+      setToDate(new Date(y, m, 0).toISOString().slice(0, 10));
+    }
+  }, [selectedMonth, selectedAccount]);
 
   const load = async () => {
     if (!accountId) return;
@@ -267,16 +288,22 @@ export default function CCStatement({
           </select>
         </div>
 
-        {/* From date */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: "1 1 130px" }}>
-          <label style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF }}>From</label>
-          <input type="date" style={SEL_STYLE} value={fromDate} onChange={e => setFromDate(e.target.value)} />
+        {/* Month picker */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: "1 1 160px" }}>
+          <label style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF }}>Period</label>
+          <select style={SEL_STYLE} value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)}>
+            {Array.from({ length: 24 }).map((_, i) => {
+              const d = new Date(); d.setMonth(d.getMonth() - i);
+              const m = d.toISOString().slice(0, 7);
+              return <option key={m} value={m}>{d.toLocaleDateString("en-US", { month: "short", year: "numeric" })}</option>;
+            })}
+          </select>
         </div>
-
-        {/* To date */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: "1 1 130px" }}>
-          <label style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF }}>To</label>
-          <input type="date" style={SEL_STYLE} value={toDate} onChange={e => setToDate(e.target.value)} />
+        {/* Show computed date range */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: "1 1 160px", justifyContent: "flex-end" }}>
+          <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: FF, padding: "8px 0" }}>
+            {fmtDateShort(fromDate)} – {fmtDateShort(toDate)}
+          </div>
         </div>
 
         {/* Apply */}
