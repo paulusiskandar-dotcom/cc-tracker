@@ -31,6 +31,12 @@ export default function Reconcile({
       .map(s => `${s.account_id}-${s.period_year}-${s.period_month}`)
   ), [reconSessions]);
 
+  // Sessions that exist but not completed (in_progress or have PDF processed)
+  const inProgressSet = useMemo(() => new Set(
+    reconSessions.filter(s => s.status !== "completed")
+      .map(s => `${s.account_id}-${s.period_year}-${s.period_month}`)
+  ), [reconSessions]);
+
   const totalPending = reconAccounts.reduce((cnt, a) =>
     cnt + months.filter(m => !completedSet.has(`${a.id}-${curYear}-${m}`)).length, 0
   );
@@ -173,20 +179,25 @@ export default function Reconcile({
                 {/* Month pills */}
                 <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                   {months.map(m => {
-                    const done = completedSet.has(`${a.id}-${curYear}-${m}`);
+                    const key = `${a.id}-${curYear}-${m}`;
+                    const done = completedSet.has(key);
+                    const inProg = inProgressSet.has(key);
                     const isHighlighted = monthFilter === m;
                     const session = reconSessions.find(s =>
-                      s.account_id === a.id && s.period_year === curYear && s.period_month === m && s.status === "completed"
+                      s.account_id === a.id && s.period_year === curYear && s.period_month === m
                     );
                     // Build tooltip with billing cycle for CC
-                    let tooltip = done && session ? `${session.total_match || 0} match, ${session.total_missing || 0} missing, ${session.total_extra || 0} extra` : "Not reconciled";
+                    let tooltip = done ? `${session?.total_match || 0} match, ${session?.total_missing || 0} missing, ${session?.total_extra || 0} extra` : inProg ? "In progress — click to continue" : "Not reconciled";
                     if (isCC && a.statement_day) {
                       const stDay = Number(a.statement_day);
                       const endD = new Date(curYear, m - 1, stDay);
                       const startD = new Date(endD); startD.setMonth(startD.getMonth() - 1); startD.setDate(startD.getDate() + 1);
                       const fmt = d => d.toLocaleDateString("en-US", { day: "numeric", month: "short" });
-                      tooltip = `${fmt(startD)} – ${fmt(endD)}${done ? ` · ${tooltip}` : ""}`;
+                      tooltip = `${fmt(startD)} – ${fmt(endD)} · ${tooltip}`;
                     }
+                    // 4 states: green=completed, amber=in_progress, blue=highlighted, gray=none
+                    const pillBg = done ? "#dcfce7" : inProg ? "#fef3c7" : isHighlighted ? "#dbeafe" : "#f3f4f6";
+                    const pillColor = done ? "#059669" : inProg ? "#d97706" : isHighlighted ? "#3b5bdb" : "#9ca3af";
                     return (
                       <button key={m}
                         onClick={() => setModal({ account: a, year: curYear, month: m })}
@@ -195,12 +206,12 @@ export default function Reconcile({
                           fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6,
                           border: isHighlighted ? "1.5px solid #3b5bdb" : "none",
                           cursor: "pointer", fontFamily: "Figtree, sans-serif",
-                          background: done ? "#dcfce7" : isHighlighted ? "#dbeafe" : "#f3f4f6",
-                          color: done ? "#059669" : isHighlighted ? "#3b5bdb" : "#9ca3af",
+                          background: pillBg,
+                          color: pillColor,
                           transition: "all .15s",
                         }}>
                         {MO_LABELS[m - 1]}
-                        {done && " ✓"}
+                        {done ? " ✓" : inProg ? " ●" : ""}
                       </button>
                     );
                   })}

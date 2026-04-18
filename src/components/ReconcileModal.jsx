@@ -220,6 +220,7 @@ export default function ReconcileModal({
       });
       return {
         _id:           s._id || `miss-${s.date}-${amt}`,
+        _reconTxId:    s._reconTxId || null,
         tx_date:       s.date || todayStr(),
         description:   s.description || s.merchant || "",
         amount:        amt,
@@ -264,6 +265,93 @@ export default function ReconcileModal({
   const missingRowsFinal = useMemo(() =>
     missingReviewRows.map(r => ({ ...r, ...(missingOverrides[r._id] || {}) })),
   [missingReviewRows, missingOverrides]);
+
+  // ── Load existing session + saved transactions on modal open ────
+  useEffect(() => {
+    if (!isOpen || !account || !user) return;
+    let cancelled = false;
+    (async () => {
+      // Find existing session for this account + period
+      const { data: sessions } = await supabase
+        .from("reconcile_sessions")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("account_id", account.id)
+        .eq("period_year", year)
+        .eq("period_month", month)
+        .order("created_at", { ascending: false })
+        .limit(1);
+      const existing = sessions?.[0];
+      if (cancelled) return;
+      if (existing) {
+        setSession(existing.id);
+        setPdfSource(existing.pdf_filename || "");
+        // Load saved reconcile_transactions
+        const { data: savedTxs } = await supabase
+          .from("reconcile_transactions")
+          .select("*")
+          .eq("session_id", existing.id)
+          .order("tx_date", { ascending: true });
+        if (cancelled) return;
+        if (savedTxs?.length) {
+          // Convert DB rows back to stmtRows format
+          setStmtRows(savedTxs.map((t, i) => ({
+            _id:         t.id,
+            _reconTxId:  t.id,
+            date:        t.tx_date,
+            description: t.description,
+            amount:      Number(t.amount || 0),
+            direction:   t.tx_direction === "credit" ? "in" : "out",
+            matched_ledger_id: t.matched_ledger_id,
+            _savedStatus: t.status, // 'match' | 'missing' | 'kept'
+          })));
+          // Restore kept IDs from saved status
+          const kept = savedTxs.filter(t => t.status === "kept").map(t => t.matched_ledger_id).filter(Boolean);
+          if (kept.length) setKeptIds(new Set(kept));
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isOpen, account, user, year, month]);
+
+  // ── Helper: ensure session exists (create if needed) ────────
+  const ensureSession = useCallback(async () => {
+    if (session) return session;
+    const created = await reconcileApi.create(user.id, {
+      account_id: account.id,
+      period_year: year,
+      period_month: month,
+      status: "in_progress",
+      pdf_filename: pdfSource || null,
+    });
+    setSession(created.id);
+    return created.id;
+  }, [session, user, account, year, month, pdfSource]);
+
+  // ── Helper: save extracted rows to reconcile_transactions ───
+  const saveExtractedTxs = useCallback(async (sid, transactions, ledgerRows) => {
+    const matchResults = matchTransactions(transactions, ledgerRows);
+    const rows = matchResults
+      .filter(r => r.type === "match" || r.type === "missing")
+      .map(r => {
+        const s = r.stmt;
+        if (!s) return null;
+        return {
+          session_id:        sid,
+          user_id:           user.id,
+          tx_date:           s.date || null,
+          description:       s.description || s.merchant || "",
+          amount:            Math.abs(Number(s.amount || 0)),
+          tx_direction:      s.direction === "in" ? "credit" : "debit",
+          matched_ledger_id: r.ledger?.id || null,
+          status:            r.type, // 'match' or 'missing'
+        };
+      })
+      .filter(Boolean);
+    if (rows.length) {
+      await supabase.from("reconcile_transactions").insert(rows);
+    }
+  }, [user]);
 
   // ── Look up statement PDF flagged from Gmail for this account+period ────
   useEffect(() => {
@@ -330,8 +418,14 @@ export default function ReconcileModal({
         return;
       }
       if (data.success && Array.isArray(data.transactions)) {
-        setStmtRows(data.transactions.map((t, i) => ({ ...t, _id: `stmt-${i}` })));
+        const rows = data.transactions.map((t, i) => ({ ...t, _id: `stmt-${i}` }));
+        setStmtRows(rows);
         setNeedsPassword(false);
+        // Persist to DB
+        const sid = await ensureSession();
+        await supabase.from("reconcile_sessions").update({ pdf_filename: emailStmt.filename || "statement.pdf" }).eq("id", sid);
+        await supabase.from("reconcile_transactions").delete().eq("session_id", sid);
+        await saveExtractedTxs(sid, rows, periodLedger);
         showToast(`${data.transactions.length} transactions extracted`);
       } else {
         showToast(data.error || "No transactions found", "error");
@@ -341,7 +435,7 @@ export default function ReconcileModal({
     } finally {
       setProcessing(false);
     }
-  }, [emailStmt, emailPassword, user]);
+  }, [emailStmt, emailPassword, user, ensureSession, saveExtractedTxs, periodLedger]);
 
   // ── Upload & process PDF ────────────────────────────────────
   const handleUpload = useCallback(async (e) => {
@@ -373,7 +467,13 @@ export default function ReconcileModal({
       });
       const data = await res.json();
       if (data.transactions?.length) {
-        setStmtRows(data.transactions.map((t, i) => ({ ...t, _id: `stmt-${i}` })));
+        const rows = data.transactions.map((t, i) => ({ ...t, _id: `stmt-${i}` }));
+        setStmtRows(rows);
+        // Persist to DB
+        const sid = await ensureSession();
+        await supabase.from("reconcile_sessions").update({ pdf_filename: pdfSource }).eq("id", sid);
+        await supabase.from("reconcile_transactions").delete().eq("session_id", sid);
+        await saveExtractedTxs(sid, rows, periodLedger);
         showToast(`${data.transactions.length} transactions extracted`);
       } else {
         showToast(data.error || "No transactions found", "error");
@@ -383,36 +483,20 @@ export default function ReconcileModal({
     } finally {
       setProcessing(false);
     }
-  }, [user, pdfPassword]);
+  }, [user, pdfPassword, pdfSource, ensureSession, saveExtractedTxs, periodLedger]);
 
   // ── Complete reconcile ──────────────────────────────────────
   const handleComplete = async () => {
     setCompleting(true);
     try {
-      let sid = session;
-      if (!sid) {
-        const created = await reconcileApi.create(user.id, {
-          account_id: account.id,
-          period_year: year,
-          period_month: month,
-          status: "completed",
-          pdf_filename: pdfSource || null,
-          total_statement: stmtRows.length,
-          total_match: matchCount,
-          total_missing: missingCount,
-          total_extra: extraCount,
-          completed_at: new Date().toISOString(),
-        });
-        sid = created.id;
-      } else {
-        await reconcileApi.complete(sid, {
-          total_statement: stmtRows.length,
-          total_match: matchCount,
-          total_missing: missingCount,
-          total_extra: extraCount,
-        });
-      }
-      setSession(sid);
+      const sid = await ensureSession();
+      await reconcileApi.complete(sid, {
+        total_statement: stmtRows.length,
+        total_match: matchCount,
+        total_missing: missingCount,
+        total_extra: extraCount,
+        pdf_filename: pdfSource || null,
+      });
       showToast("Reconcile completed");
       onRefresh?.();
       onClose();
@@ -451,6 +535,10 @@ export default function ReconcileModal({
       if (created) {
         setLedger?.(prev => [created, ...prev]);
         refetchLedger();
+        // Update reconcile_transactions status
+        if (row._reconTxId) {
+          supabase.from("reconcile_transactions").update({ status: "match", matched_ledger_id: created.id }).eq("id", row._reconTxId).then(null, e => console.error("[recon tx update]", e));
+        }
         if (row._cicilan && row._cicilanMonths >= 2) {
           installmentsApi.createFromImport(user.id, {
             ledgerId: created.id, description: row.description || "", accountId: row.from_id,
@@ -509,6 +597,20 @@ export default function ReconcileModal({
       next.add(ledgerId);
       return next;
     });
+    // Persist kept status — save a reconcile_transaction entry for this extra row
+    if (session) {
+      const entry = periodLedger.find(e => e.id === ledgerId);
+      supabase.from("reconcile_transactions").upsert({
+        session_id:        session,
+        user_id:           user.id,
+        tx_date:           entry?.tx_date || null,
+        description:       entry?.description || "",
+        amount:            Math.abs(Number(entry?.amount_idr || entry?.amount || 0)),
+        tx_direction:      "debit",
+        matched_ledger_id: ledgerId,
+        status:            "kept",
+      }, { onConflict: "session_id,matched_ledger_id" }).then(null, e => console.error("[recon kept]", e));
+    }
   };
 
   // ── Delete extra transaction ────────────────────────────────
@@ -518,6 +620,12 @@ export default function ReconcileModal({
       await supabase.from("ledger").delete().eq("id", delTarget.id);
       setLedger?.(prev => prev.filter(e => e.id !== delTarget.id));
       refetchLedger();
+      // Update any reconcile_transaction that was matched to this ledger entry
+      if (session) {
+        supabase.from("reconcile_transactions").update({ status: "missing", matched_ledger_id: null })
+          .eq("session_id", session).eq("matched_ledger_id", delTarget.id)
+          .then(null, e => console.error("[recon tx update]", e));
+      }
       showToast("Transaksi dihapus");
       onRefresh?.();
     } catch (err) {
