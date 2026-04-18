@@ -429,6 +429,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       from_id:        r.from_id || null,
       to_id:          r.to_id   || null,
       entity:         REIMBURSE_TYPES.has(r.tx_type) ? (r.entity || "Hamasa") : "Personal",
+      is_reimburse:   r.tx_type === "reimburse_out" || r.tx_type === "reimburse_in",
       ...(r.tx_type === "reimburse_out" ? { category_id: null, category_name: null } : resolveCategoryIds(r.category_id, categories)),
       notes:          r.notes || "",
       source:         "ai_scan",

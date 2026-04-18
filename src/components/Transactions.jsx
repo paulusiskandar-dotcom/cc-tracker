@@ -626,6 +626,7 @@ function PendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, user,
       category_id:   catMatch?.id || null,
       category_name: catMatch?.name || null,
       entity:        sync.entity || "Personal",
+      is_reimburse:  sync.tx_type === "reimburse_out" || sync.tx_type === "reimburse_in",
       notes:         `Imported from Gmail: ${sync.subject || ""}`,
     };
   };
