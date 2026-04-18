@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { supabase } from "../lib/supabase";
-import { ledgerApi, scanApi, merchantApi, getTxFromToTypes, loanPaymentsApi } from "../api";
+import { ledgerApi, scanApi, merchantApi, getTxFromToTypes, loanPaymentsApi, installmentsApi } from "../api";
 import { fmtIDR, todayStr, checkDuplicateTransaction, resolveCategoryIds } from "../utils";
 import { LIGHT, DARK } from "../theme";
 import { Button, EmptyState, Spinner, showToast, TransactionReviewList } from "./shared/index";
@@ -457,6 +457,13 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
               notes: r.description || "Collected via import",
             }).catch(e => console.error("[collect_loan payment]", e));
           }
+          if (r._cicilan && r._cicilanMonths >= 2) {
+            installmentsApi.createFromImport(user.id, {
+              ledgerId: created.id, description: r.description || "", accountId: r.from_id,
+              amount: Number(r.amount_idr || r.amount || 0), totalMonths: r._cicilanMonths,
+              currency: r.currency || "IDR", txDate: r.tx_date, categoryId: r.category_id || null,
+            }).catch(e => console.error("[cicilan import]", e));
+          }
         }
       } catch { /* continue */ }
     }
@@ -487,6 +494,13 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
             amount: Number(r.amount_idr || r.amount || 0),
             notes: r.description || "Collected via import",
           }).catch(e => console.error("[collect_loan payment]", e));
+        }
+        if (r._cicilan && r._cicilanMonths >= 2) {
+          installmentsApi.createFromImport(user.id, {
+            ledgerId: created.id, description: r.description || "", accountId: r.from_id,
+            amount: Number(r.amount_idr || r.amount || 0), totalMonths: r._cicilanMonths,
+            currency: r.currency || "IDR", txDate: r.tx_date, categoryId: r.category_id || null,
+          }).catch(e => console.error("[cicilan import]", e));
         }
         setResults(prev => prev.filter(x => x._id !== r._id));
         setSelected(s => { const ns = { ...s }; delete ns[r._id]; return ns; });

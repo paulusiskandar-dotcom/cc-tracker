@@ -1962,6 +1962,13 @@ function EStatementTab({
           notes: row.description || "Collected via import",
         }).catch(e => console.error("[collect_loan payment saveRow]", e));
       }
+      if (row._cicilan && row._cicilanMonths >= 2 && inserted?.id) {
+        installmentsApi.createFromImport(user.id, {
+          ledgerId: inserted.id, description: row.description || "", accountId: row.from_id,
+          amount: Math.abs(Number(row.amount_idr || row.amount || 0)), totalMonths: row._cicilanMonths,
+          currency: row.currency || "IDR", txDate: row.tx_date, categoryId: row.category_id || null,
+        }).catch(e => console.error("[cicilan import saveRow]", e));
+      }
       removeRow(itemId, row._id);
       showToast(`Saved: ${row.description || "transaction"}`);
     } catch (e) {
@@ -2003,6 +2010,13 @@ function EStatementTab({
             amount: Math.abs(Number(r.amount_idr || r.amount || 0)),
             notes: r.description || "Collected via import",
           }).catch(e => console.error("[collect_loan payment saveFile]", e));
+        }
+        if (r._cicilan && r._cicilanMonths >= 2 && inserted?.id) {
+          installmentsApi.createFromImport(user.id, {
+            ledgerId: inserted.id, description: r.description || "", accountId: r.from_id,
+            amount: Math.abs(Number(r.amount_idr || r.amount || 0)), totalMonths: r._cicilanMonths,
+            currency: r.currency || "IDR", txDate: r.tx_date, categoryId: r.category_id || null,
+          }).catch(e => console.error("[cicilan import saveFile]", e));
         }
       } catch (e) {
         console.error("[saveFile] row error", e);

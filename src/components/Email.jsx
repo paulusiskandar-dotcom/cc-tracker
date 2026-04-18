@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { gmailApi, settingsApi, ledgerApi, getTxFromToTypes, flattenEmailSync, loanPaymentsApi } from "../api";
+import { gmailApi, settingsApi, ledgerApi, getTxFromToTypes, flattenEmailSync, loanPaymentsApi, installmentsApi } from "../api";
 import { todayStr, resolveCategoryIds } from "../utils";
 import { LIGHT, DARK } from "../theme";
 import {
@@ -443,6 +443,13 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
           notes: r.description || "Collected via import",
         }).catch(e => console.error("[collect_loan payment]", e));
       }
+      if (r._cicilan && r._cicilanMonths >= 2 && created?.id) {
+        installmentsApi.createFromImport(user.id, {
+          ledgerId: created.id, description: r.description || "", accountId: r.from_id,
+          amount: Number(r.amount_idr || r.amount || 0), totalMonths: r._cicilanMonths,
+          currency: r.currency || "IDR", txDate: r.tx_date, categoryId: r.category_id || null,
+        }).catch(e => console.error("[cicilan import]", e));
+      }
       await gmailApi.updateSync(r.email_sync_id, { status: "confirmed" });
       removeRow(r._id);
       showToast("Imported");
@@ -474,6 +481,13 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
             amount: Number(r.amount_idr || r.amount || 0),
             notes: r.description || "Collected via import",
           }).catch(e => console.error("[collect_loan payment]", e));
+        }
+        if (r._cicilan && r._cicilanMonths >= 2 && created?.id) {
+          installmentsApi.createFromImport(user.id, {
+            ledgerId: created.id, description: r.description || "", accountId: r.from_id,
+            amount: Number(r.amount_idr || r.amount || 0), totalMonths: r._cicilanMonths,
+            currency: r.currency || "IDR", txDate: r.tx_date, categoryId: r.category_id || null,
+          }).catch(e => console.error("[cicilan import]", e));
         }
         await gmailApi.updateSync(r.email_sync_id, { status: "confirmed" });
         removeRow(r._id);

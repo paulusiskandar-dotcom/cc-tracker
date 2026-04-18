@@ -446,6 +446,43 @@ export const installmentsApi = {
     const { error } = await supabase.from("installments").delete().eq("id", id);
     if (error) throw new Error(error.message);
   },
+
+  // Create installment + recurring template from an import row, link to ledger entry
+  createFromImport: async (userId, { ledgerId, description, accountId, amount, totalMonths, currency, txDate, categoryId }) => {
+    const monthlyAmount = Number(amount);
+    const inst = await installmentsApi.create(userId, {
+      description,
+      purchase_ledger_id: ledgerId,
+      account_id:    accountId,
+      total_amount:  monthlyAmount * totalMonths,
+      monthly_amount: monthlyAmount,
+      total_months:  totalMonths,
+      paid_months:   1,
+      start_date:    txDate,
+      currency:      currency || "IDR",
+      status:        "active",
+    });
+    // Link ledger entry to installment
+    await supabase.from("ledger").update({ installment_id: inst.id }).eq("id", ledgerId);
+    // Create recurring template
+    const day = txDate ? new Date(txDate + "T00:00:00").getDate() : 1;
+    await recurringApi.createTemplate(userId, {
+      name:        description,
+      description: `Cicilan ${description} ${totalMonths}x`,
+      amount:      monthlyAmount,
+      currency:    currency || "IDR",
+      tx_type:     "expense",
+      from_type:   "account",
+      from_id:     accountId,
+      to_type:     "expense_category",
+      to_id:       categoryId || null,
+      category_id: categoryId || null,
+      frequency:   "monthly",
+      day_of_month: day,
+      is_active:   true,
+    });
+    return inst;
+  },
 };
 
 // ─── RECURRING ────────────────────────────────────────────────
