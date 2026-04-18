@@ -80,7 +80,7 @@ export default function Reconcile({
 
   const filteredAccounts = useMemo(() => {
     let list = reconAccounts;
-    if (typeFilter === "bank") list = list.filter(a => a.type === "bank" || a.type === "cash");
+    if (typeFilter === "bank") list = list.filter(a => a.type === "bank");
     else if (typeFilter === "cc") list = list.filter(a => a.type === "credit_card");
     return list;
   }, [reconAccounts, typeFilter]);
