@@ -82,13 +82,12 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
   const [skippedFPs,  setSkippedFPs]  = useState(new Set());
 
   const spendAccounts = accounts.filter(a => ["bank","cash","credit_card"].includes(a.type));
-  const bankCashAccounts = accounts.filter(a => ["bank","cash"].includes(a.type));
   const bankAccounts  = accounts.filter(a => a.type === "bank");
 
-  // Initialise defaultAccountId to first bank account once accounts load
+  // Initialise defaultAccountId to first spend account once accounts load
   useEffect(() => {
-    if (!defaultAccountId && bankCashAccounts.length > 0) {
-      setDefaultAccountId(bankCashAccounts[0].id);
+    if (!defaultAccountId && spendAccounts.length > 0) {
+      setDefaultAccountId(spendAccounts[0].id);
     }
   }, [spendAccounts.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -316,7 +315,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       } catch { /* non-critical */ }
 
       // 3. Scan with AI
-      const bankAcc  = defaultAccountId ? bankCashAccounts.find(a => a.id === defaultAccountId) : null;
+      const bankAcc  = defaultAccountId ? spendAccounts.find(a => a.id === defaultAccountId) : null;
       const bankHint = bankAcc?.bank_name || bankAcc?.name || "";
       const parsed = await scanApi.scan(user.id, file, { accounts, bankHint });
       console.log(`[AIImport] total transactions from AI: ${parsed.length}`);
@@ -352,7 +351,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       const { data: blob, error } = await supabase.storage.from("ai-scan-uploads").download(batchFilePath);
       if (error || !blob) throw new Error("Could not download file");
       const file = new File([blob], "rescan.jpg", { type: blob.type || "image/jpeg" });
-      const bankAccR  = defaultAccountId ? bankCashAccounts.find(a => a.id === defaultAccountId) : null;
+      const bankAccR  = defaultAccountId ? spendAccounts.find(a => a.id === defaultAccountId) : null;
       const bankHintR = bankAccR?.bank_name || bankAccR?.name || "";
       const parsed = await scanApi.scan(user.id, file, { accounts, bankHint: bankHintR });
       console.log(`[AIImport refresh] total transactions from AI: ${parsed.length}`);
@@ -381,7 +380,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       const { data: blob, error } = await supabase.storage.from("ai-scan-uploads").download(batchFilePath);
       if (error || !blob) throw new Error("Could not download file");
       const file = new File([blob], "rescan.jpg", { type: blob.type || "image/jpeg" });
-      const bankAccR  = defaultAccountId ? bankCashAccounts.find(a => a.id === defaultAccountId) : null;
+      const bankAccR  = defaultAccountId ? spendAccounts.find(a => a.id === defaultAccountId) : null;
       const bankHintR = bankAccR?.bank_name || bankAccR?.name || "";
       const parsed = await scanApi.scan(user.id, file, { accounts, bankHint: bankHintR, model: "claude-sonnet-4-20250514" });
       let items = buildRows(parsed, defaultAccountId);
@@ -589,11 +588,23 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
               fontFamily: "Figtree, sans-serif", cursor: "pointer", height: 30,
             }}>
             <option value="">— account —</option>
-            {bankCashAccounts.map(a => (
-              <option key={a.id} value={a.id}>
-                {a.name}{a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : ""}
-              </option>
-            ))}
+            {[
+              { type: "bank",        label: "Bank"         },
+              { type: "cash",        label: "Cash"         },
+              { type: "credit_card", label: "Credit Card"  },
+            ].map(g => {
+              const grp = spendAccounts.filter(a => g.type === "bank" ? (a.type === "bank" && !/cash/i.test(a.subtype || "")) : g.type === "cash" ? (a.type === "cash" || a.subtype === "cash") : a.type === g.type);
+              if (!grp.length) return null;
+              return (
+                <optgroup key={g.type} label={g.label}>
+                  {grp.map(a => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}{a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : ""}{(a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
+                    </option>
+                  ))}
+                </optgroup>
+              );
+            })}
           </select>
           <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
             (applies to all rows)
