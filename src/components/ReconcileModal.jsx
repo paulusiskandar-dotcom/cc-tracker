@@ -1,5 +1,5 @@
 // ReconcileModal.jsx — Full reconcile flow: PDF extraction → match → review
-import React, { useState, useMemo, useCallback, useEffect } from "react";
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { reconcileApi, ledgerApi, installmentsApi, getTxFromToTypes } from "../api";
 import { supabase } from "../lib/supabase";
 import { fmtIDR, todayStr, checkDuplicateTransaction, resolveCategoryIds } from "../utils";
@@ -111,6 +111,7 @@ export default function ReconcileModal({
   const [missingSkipped,  setMissingSkipped]  = useState(() => new Set());
   const [missingImporting, setMissingImporting] = useState(false);
 
+  const fileRef = useRef(null);
   const T = dark ? DARK : LIGHT;
 
   // ── Period date range (bank = calendar month, CC = billing cycle) ──
@@ -438,8 +439,8 @@ export default function ReconcileModal({
   }, [emailStmt, emailPassword, user, ensureSession, saveExtractedTxs, periodLedger]);
 
   // ── Upload & process PDF ────────────────────────────────────
-  const handleUpload = useCallback(async (e) => {
-    const file = e.target.files?.[0];
+  const handleUpload = useCallback(async (eOrFile) => {
+    const file = eOrFile instanceof File ? eOrFile : eOrFile?.target?.files?.[0];
     if (!file) return;
     setPdfSource(file.name);
     setProcessing(true);
@@ -724,18 +725,46 @@ export default function ReconcileModal({
           </div>
         )}
 
-        {/* Upload */}
-        {stmtRows.length === 0 && (
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14 }}>
-            <input type="password" placeholder="PDF password (optional)" value={pdfPassword} onChange={e => setPdfPassword(e.target.value)} style={{ fontSize: 12, padding: "6px 10px", border: "1px solid #e5e7eb", borderRadius: 8, fontFamily: F, width: 200 }} />
-            <label style={{ cursor: "pointer" }}>
-              <input type="file" accept=".pdf" onChange={handleUpload} onClick={e => { e.target.value = ""; }} style={{ display: "none" }} />
-              <span style={{ display: "inline-block", fontSize: 12, fontWeight: 700, color: "#fff", background: "#3b5bdb", padding: "6px 16px", borderRadius: 8, cursor: "pointer", fontFamily: F }}>{processing ? "Processing…" : "Upload PDF"}</span>
-            </label>
+        {/* Drop zone */}
+        {stmtRows.length === 0 && !processing && (
+          <div>
+            <div
+              onClick={() => fileRef.current?.click()}
+              onDragOver={e => e.preventDefault()}
+              onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleUpload(f); }}
+              style={{
+                border: "2px dashed #e5e7eb", borderRadius: 16, padding: "28px 24px",
+                textAlign: "center", cursor: "pointer", background: "#fafafa",
+                marginBottom: 10,
+              }}>
+              <div style={{ fontSize: 28, marginBottom: 6 }}>📄</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: F, marginBottom: 4 }}>
+                Drop PDF statements here or click to browse
+              </div>
+              <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: F }}>
+                Upload bank or credit card statements (PDF)
+              </div>
+              <input ref={fileRef} type="file" accept=".pdf" style={{ display: "none" }}
+                onChange={e => { handleUpload(e); e.target.value = ""; }} />
+              <div style={{ marginTop: 12 }}>
+                <Button variant="primary" size="sm">Choose File</Button>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input type="password" placeholder="PDF password (if encrypted)" value={pdfPassword} onChange={e => setPdfPassword(e.target.value)}
+                style={{ fontSize: 12, padding: "6px 10px", border: "1px solid #e5e7eb", borderRadius: 8, fontFamily: F, flex: 1 }} />
+              <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: F, whiteSpace: "nowrap" }}>Kosongkan jika PDF tidak terenkripsi</span>
+            </div>
           </div>
         )}
 
-        {processing && <div style={{ textAlign: "center", padding: "20px 0", fontSize: 12, color: "#6b7280", fontFamily: F }}>Extracting transactions from PDF…</div>}
+        {processing && (
+          <div style={{ border: "2px dashed #bfdbfe", borderRadius: 16, padding: "28px 24px", textAlign: "center", background: "#eff6ff", marginBottom: 10 }}>
+            <div style={{ fontSize: 28, marginBottom: 6 }}>⏳</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#1e3a8a", fontFamily: F }}>Extracting transactions from PDF…</div>
+            <div style={{ fontSize: 12, color: "#475569", fontFamily: F, marginTop: 4 }}>This may take a moment for large statements</div>
+          </div>
+        )}
 
         {/* ── Top bar: stats + filters + bulk ── */}
         {hasSomething && (
