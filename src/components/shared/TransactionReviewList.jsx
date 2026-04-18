@@ -583,19 +583,26 @@ function TxReviewCard({
 
       {/* ── Cicilan toggle (expense + CC account) ── */}
       {r.tx_type === "expense" && !r._isInstallment && accounts.some(a => a.id === r.from_id && a.type === "credit_card") && (
-        <div style={{ borderTop: `1px solid ${T.border}`, background: T.sur2, padding: "5px 10px 5px 32px", display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ borderTop: `1px solid ${T.border}`, background: T.sur2, padding: "5px 10px 5px 32px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 11, color: T.text2, fontFamily: "Figtree, sans-serif", fontWeight: 600, userSelect: "none" }}>
             <input type="checkbox" checked={!!r._cicilan}
-              onChange={e => onUpdate({ _cicilan: e.target.checked, ...(!e.target.checked ? { _cicilanMonths: null } : { _cicilanMonths: r._cicilanMonths || 3 }) })}
+              onChange={e => onUpdate({ _cicilan: e.target.checked, ...(!e.target.checked ? { _cicilanKe: null, _cicilanMonths: null } : { _cicilanKe: r._cicilanKe || 1, _cicilanMonths: r._cicilanMonths || 3 }) })}
               style={{ accentColor: "#3b5bdb", width: 13, height: 13 }} />
             🔄 Cicilan
           </label>
           {r._cicilan && (
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span style={{ fontSize: 10, color: T.text2, fontFamily: "Figtree, sans-serif" }}>ke-</span>
+              <input type="number" min={1} max={r._cicilanMonths || 60}
+                value={r._cicilanKe || 1}
+                onChange={e => onUpdate({ _cicilanKe: Math.max(1, Math.min(r._cicilanMonths || 60, Number(e.target.value) || 1)) })}
+                style={{ width: 36, fontSize: 11, padding: "2px 4px", border: `1px solid ${T.border}`, borderRadius: 4, background: T.surface, color: T.text, fontFamily: "Figtree, sans-serif", textAlign: "center" }}
+              />
+              <span style={{ fontSize: 10, color: T.text2, fontFamily: "Figtree, sans-serif" }}>dari</span>
               <input type="number" min={2} max={60}
                 value={r._cicilanMonths || ""}
                 onChange={e => onUpdate({ _cicilanMonths: Math.max(2, Math.min(60, Number(e.target.value) || 2)) })}
-                style={{ width: 42, fontSize: 11, padding: "2px 4px", border: `1px solid ${T.border}`, borderRadius: 4, background: T.surface, color: T.text, fontFamily: "Figtree, sans-serif", textAlign: "center" }}
+                style={{ width: 36, fontSize: 11, padding: "2px 4px", border: `1px solid ${T.border}`, borderRadius: 4, background: T.surface, color: T.text, fontFamily: "Figtree, sans-serif", textAlign: "center" }}
               />
               <span style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, sans-serif" }}>bulan</span>
               <span style={{ fontSize: 10, color: "#3b5bdb", fontFamily: "Figtree, sans-serif", fontWeight: 600 }}>

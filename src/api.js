@@ -448,8 +448,16 @@ export const installmentsApi = {
   },
 
   // Create installment + recurring template from an import row, link to ledger entry
-  createFromImport: async (userId, { ledgerId, description, accountId, amount, totalMonths, currency, txDate, categoryId }) => {
+  createFromImport: async (userId, { ledgerId, description, accountId, amount, totalMonths, paidMonths, currency, txDate, categoryId }) => {
     const monthlyAmount = Number(amount);
+    const paid = Number(paidMonths) || 1;
+    // Compute start_date: txDate minus (paidMonths - 1) months
+    let startDate = txDate;
+    if (txDate && paid > 1) {
+      const d = new Date(txDate + "T00:00:00");
+      d.setMonth(d.getMonth() - (paid - 1));
+      startDate = d.toISOString().slice(0, 10);
+    }
     const inst = await installmentsApi.create(userId, {
       description,
       purchase_ledger_id: ledgerId,
@@ -457,10 +465,10 @@ export const installmentsApi = {
       total_amount:  monthlyAmount * totalMonths,
       monthly_amount: monthlyAmount,
       total_months:  totalMonths,
-      paid_months:   1,
-      start_date:    txDate,
+      paid_months:   paid,
+      start_date:    startDate,
       currency:      currency || "IDR",
-      status:        "active",
+      status:        paid >= totalMonths ? "settled" : "active",
     });
     // Link ledger entry to installment
     await supabase.from("ledger").update({ installment_id: inst.id }).eq("id", ledgerId);
@@ -479,7 +487,7 @@ export const installmentsApi = {
       category_id: categoryId || null,
       frequency:   "monthly",
       day_of_month: day,
-      is_active:   true,
+      is_active:   paid < totalMonths,
     });
     return inst;
   },

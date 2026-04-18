@@ -1966,6 +1966,7 @@ function EStatementTab({
         installmentsApi.createFromImport(user.id, {
           ledgerId: inserted.id, description: row.description || "", accountId: row.from_id,
           amount: Math.abs(Number(row.amount_idr || row.amount || 0)), totalMonths: row._cicilanMonths,
+          paidMonths: row._cicilanKe || 1,
           currency: row.currency || "IDR", txDate: row.tx_date, categoryId: row.category_id || null,
         }).catch(e => console.error("[cicilan import saveRow]", e));
       }
@@ -2015,6 +2016,7 @@ function EStatementTab({
           installmentsApi.createFromImport(user.id, {
             ledgerId: inserted.id, description: r.description || "", accountId: r.from_id,
             amount: Math.abs(Number(r.amount_idr || r.amount || 0)), totalMonths: r._cicilanMonths,
+            paidMonths: r._cicilanKe || 1,
             currency: r.currency || "IDR", txDate: r.tx_date, categoryId: r.category_id || null,
           }).catch(e => console.error("[cicilan import saveFile]", e));
         }

@@ -447,6 +447,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
         installmentsApi.createFromImport(user.id, {
           ledgerId: created.id, description: r.description || "", accountId: r.from_id,
           amount: Number(r.amount_idr || r.amount || 0), totalMonths: r._cicilanMonths,
+          paidMonths: r._cicilanKe || 1,
           currency: r.currency || "IDR", txDate: r.tx_date, categoryId: r.category_id || null,
         }).catch(e => console.error("[cicilan import]", e));
       }
@@ -486,6 +487,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
           installmentsApi.createFromImport(user.id, {
             ledgerId: created.id, description: r.description || "", accountId: r.from_id,
             amount: Number(r.amount_idr || r.amount || 0), totalMonths: r._cicilanMonths,
+            paidMonths: r._cicilanKe || 1,
             currency: r.currency || "IDR", txDate: r.tx_date, categoryId: r.category_id || null,
           }).catch(e => console.error("[cicilan import]", e));
         }
