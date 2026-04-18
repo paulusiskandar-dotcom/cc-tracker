@@ -3,6 +3,7 @@ import {
   Home, ArrowUpDown, Landmark, Wallet, CreditCard,
   TrendingUp, ClipboardList, ArrowDown, BarChart2,
   Calendar as CalendarIcon, Settings as SettingsIcon, LayoutGrid,
+  CheckSquare,
 } from "lucide-react";
 import PILogo from "./components/PILogo";
 import { supabase } from "./lib/supabase";
@@ -29,6 +30,7 @@ import Calendar     from "./components/Calendar";
 import Settings     from "./components/Settings";
 import AIImport     from "./components/AIImport";
 import Email        from "./components/Email";
+import Reconcile    from "./components/Reconcile";
 
 // ─── AUTH GATE ────────────────────────────────────────────────
 function AuthGate({ children }) {
@@ -380,6 +382,7 @@ function Finance({ user, signOut }) {
       case "receivables":  return <Receivables  {...shared} />;
       case "income":       return <Income       {...shared} />;
       case "reports":      return <Reports      {...shared} />;
+      case "reconcile":   return <Reconcile    {...shared} />;
       case "calendar":     return <Calendar     {...shared} />;
       case "settings":     return <Settings     {...shared} signOut={signOut} initialTab={settingsInitialTab} />;
       case "scan":         return <AIImport     {...shared} />;
@@ -428,6 +431,9 @@ function Finance({ user, signOut }) {
                 )}
                 {t.id === "cards" && reconPending.cards > 0 && (
                   <span style={{ ...S.badge, background: "#fef3c7", color: "#d97706" }}>{reconPending.cards}</span>
+                )}
+                {t.id === "reconcile" && (reconPending.bank + reconPending.cards) > 0 && (
+                  <span style={{ ...S.badge, background: "#fef3c7", color: "#d97706" }}>{reconPending.bank + reconPending.cards}</span>
                 )}
               </button>
             );
@@ -568,6 +574,7 @@ function NAV_ICON({ id }) {
     case "receivables":  return <ClipboardList {...LUCIDE_PROPS} />;
     case "income":       return <ArrowDown      {...LUCIDE_PROPS} />;
     case "reports":      return <BarChart2     {...LUCIDE_PROPS} />;
+    case "reconcile":    return <CheckSquare   {...LUCIDE_PROPS} />;
     case "calendar":     return <CalendarIcon  {...LUCIDE_PROPS} />;
     case "settings":     return <SettingsIcon  {...LUCIDE_PROPS} />;
     case "more":         return <LayoutGrid    {...LUCIDE_PROPS} />;
