@@ -124,6 +124,7 @@ export default function ReconcileModal({
 
   // Derive current step from state
   // 1=period, 2=upload, 3=processing, 4=results
+  // Step only advances to 4 (results) when PDF has been processed and stmtRows populated
   const step = stmtRows.length > 0 ? 4 : processing ? 3 : periodSelected ? 2 : 1;
 
   // ── Generate period pills ──────────────────────────────────
@@ -473,9 +474,9 @@ export default function ReconcileModal({
       });
       const data = await res.json();
 
-      if (data.needs_password) {
+      if (data.needs_password || data.encrypted) {
         setNeedsPassword(true);
-        showToast(data.error || "Password required", "error");
+        showToast("Password salah atau PDF tidak dapat dibuka", "error");
         return;
       }
       if (data.success && Array.isArray(data.transactions)) {
@@ -533,8 +534,8 @@ export default function ReconcileModal({
         }),
       });
       const data = await res.json();
-      if (data.needs_password) {
-        showToast("PDF is encrypted — enter the password and try again", "error");
+      if (data.needs_password || data.encrypted) {
+        showToast("Password salah atau PDF tidak dapat dibuka", "error");
         setProcessing(false);
         return;
       }
@@ -547,7 +548,12 @@ export default function ReconcileModal({
         await saveExtractedTxs(sid, rows, periodLedger);
         showToast(`${data.transactions.length} transactions extracted`);
       } else {
-        showToast(data.error || "No transactions found", "error");
+        // Replace technical AES/encryption messages with user-friendly text
+        const rawErr = data.error || "";
+        const userMsg = /aes|encrypt|decrypt|password/i.test(rawErr)
+          ? "Password salah atau PDF tidak dapat dibuka"
+          : rawErr || "No transactions found";
+        showToast(userMsg, "error");
       }
     } catch (err) {
       showToast(`Error: ${err.message}`, "error");
@@ -734,7 +740,7 @@ export default function ReconcileModal({
 
   if (!account) return null;
 
-  const hasSomething = stmtRows.length > 0 || periodLedger.length > 0;
+  const hasSomething = stmtRows.length > 0;
   const totalRows = stmtRows.length + periodLedger.length;
   const F = "Figtree, sans-serif";
   const btnS = (color, border) => ({ fontSize: 10, fontWeight: 700, color, background: "none", border: `1px solid ${border}`, borderRadius: 4, padding: "2px 7px", cursor: "pointer", fontFamily: F, whiteSpace: "nowrap" });
