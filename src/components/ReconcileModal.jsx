@@ -119,7 +119,12 @@ export default function ReconcileModal({
   const [missingImporting, setMissingImporting] = useState(false);
 
   const fileRef = useRef(null);
+  const [pdfFile, setPdfFile] = useState(null); // File object for staged upload
   const T = dark ? DARK : LIGHT;
+
+  // Derive current step from state
+  // 1=period, 2=upload, 3=processing, 4=results
+  const step = stmtRows.length > 0 ? 4 : processing ? 3 : periodSelected ? 2 : 1;
 
   // ── Generate period pills ──────────────────────────────────
   const now = new Date();
@@ -128,10 +133,12 @@ export default function ReconcileModal({
 
   const periodPills = useMemo(() => {
     let startY, startM;
-    if (earliestTxDate) {
-      startY = Number(earliestTxDate.slice(0, 4));
-      startM = Number(earliestTxDate.slice(5, 7));
+    if (earliestTxDate && earliestTxDate.length >= 7) {
+      startY = Number(earliestTxDate.slice(0, 4)) || curYear;
+      startM = Number(earliestTxDate.slice(5, 7)) || 1;
     } else { startY = curYear; startM = 1; }
+    // Safety: don't go further back than 3 years
+    if (startY < curYear - 3) { startY = curYear - 3; startM = 1; }
     const pills = [];
     let y = startY, m = startM;
     while (y < curYear || (y === curYear && m <= curMo)) {
@@ -172,7 +179,7 @@ export default function ReconcileModal({
   const stmtDay = isCC ? (Number(account?.statement_day) || 25) : 0;
 
   const { periodStart, periodEnd, periodLabel } = useMemo(() => {
-    if (!account) return { periodStart: "", periodEnd: "", periodLabel: "" };
+    if (!account || !year || !month) return { periodStart: "", periodEnd: "", periodLabel: "" };
     if (!isCC) {
       // Bank: calendar month
       const start = `${year}-${String(month).padStart(2, "0")}-01`;
@@ -491,18 +498,24 @@ export default function ReconcileModal({
     }
   }, [emailStmt, emailPassword, user, ensureSession, saveExtractedTxs, periodLedger]);
 
-  // ── Upload & process PDF ────────────────────────────────────
-  const handleUpload = useCallback(async (eOrFile) => {
+  // ── Stage file (step 2) ─────────────────────────────────────
+  const stageFile = useCallback((eOrFile) => {
     const file = eOrFile instanceof File ? eOrFile : eOrFile?.target?.files?.[0];
     if (!file) return;
+    setPdfFile(file);
     setPdfSource(file.name);
+  }, []);
+
+  // ── Process staged PDF (step 2→3→4) ────────────────────────
+  const processFile = useCallback(async () => {
+    if (!pdfFile) return;
     setProcessing(true);
     try {
       const reader = new FileReader();
       const base64 = await new Promise((resolve, reject) => {
         reader.onload = () => resolve(reader.result.split(",")[1]);
         reader.onerror = reject;
-        reader.readAsDataURL(file);
+        reader.readAsDataURL(pdfFile);
       });
 
       const res = await fetch(EDGE_URL, {
@@ -520,10 +533,14 @@ export default function ReconcileModal({
         }),
       });
       const data = await res.json();
+      if (data.needs_password) {
+        showToast("PDF is encrypted — enter the password and try again", "error");
+        setProcessing(false);
+        return;
+      }
       if (data.transactions?.length) {
         const rows = data.transactions.map((t, i) => ({ ...t, _id: `stmt-${i}` }));
         setStmtRows(rows);
-        // Persist to DB
         const sid = await ensureSession();
         await supabase.from("reconcile_sessions").update({ pdf_filename: pdfSource }).eq("id", sid);
         await supabase.from("reconcile_transactions").delete().eq("session_id", sid);
@@ -537,7 +554,7 @@ export default function ReconcileModal({
     } finally {
       setProcessing(false);
     }
-  }, [user, pdfPassword, pdfSource, ensureSession, saveExtractedTxs, periodLedger]);
+  }, [pdfFile, user, pdfPassword, pdfSource, ensureSession, saveExtractedTxs, periodLedger]);
 
   // ── Complete reconcile ──────────────────────────────────────
   const handleComplete = async () => {
@@ -731,19 +748,13 @@ export default function ReconcileModal({
     );
   };
 
-  const footer = (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
-      <label style={{ cursor: "pointer" }}>
-        <input type="file" accept=".pdf" onChange={handleUpload} onClick={e => { e.target.value = ""; }} style={{ display: "none" }} />
-        <span style={{ fontSize: 12, fontWeight: 600, color: "#3b5bdb", fontFamily: F, cursor: "pointer" }}>
-          {pdfSource ? "Upload PDF lain" : "Upload PDF"}
-        </span>
-      </label>
+  const footer = step === 4 ? (
+    <div style={{ display: "flex", justifyContent: "flex-end", width: "100%" }}>
       <Button onClick={handleComplete} disabled={completing || !hasSomething}>
         {completing ? "Saving…" : "Selesai ✓"}
       </Button>
     </div>
-  );
+  ) : null;
 
   const BORDER_L = { match: "3px solid #059669", missing: "3px solid #d97706", extra: "3px solid #dc2626", kept: "3px solid #d1d5db" };
   const ROW_BG   = { match: "#f0fdf4", missing: "#fffbeb", extra: "#fef2f2", kept: "#f9fafb" };
@@ -752,15 +763,34 @@ export default function ReconcileModal({
   return (
     <>
       <Modal isOpen={isOpen} onClose={onClose} title={`Reconcile — ${account.name}`} footer={footer} width={900}>
-        {/* Period subtitle */}
-        {periodSelected && (
-          <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 8, fontFamily: F }}>
-            {periodLabel}{pdfSource ? ` · ${pdfSource}` : ""}
-          </div>
-        )}
 
-        {/* Period selector pills */}
-        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 14, alignItems: "center" }}>
+        {/* ── Step indicator ── */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 14 }}>
+          {[
+            { n: 1, label: "Periode" },
+            { n: 2, label: "Upload" },
+            { n: 3, label: "Process" },
+            { n: 4, label: "Review" },
+          ].map((s, i) => {
+            const done = step > s.n;
+            const active = step === s.n;
+            return (
+              <React.Fragment key={s.n}>
+                {i > 0 && <span style={{ width: 16, height: 1, background: done ? "#059669" : "#e5e7eb" }} />}
+                <span style={{
+                  fontSize: 10, fontWeight: 700, fontFamily: F, padding: "2px 8px", borderRadius: 10,
+                  background: done ? "#dcfce7" : active ? "#dbeafe" : "#f3f4f6",
+                  color: done ? "#059669" : active ? "#3b5bdb" : "#9ca3af",
+                }}>
+                  {done ? "✓" : s.n}. {s.label}
+                </span>
+              </React.Fragment>
+            );
+          })}
+        </div>
+
+        {/* ── STEP 1: Period selector ── */}
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: step === 1 ? 0 : 14, alignItems: "center" }}>
           <span style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", fontFamily: F, marginRight: 4 }}>Period</span>
           {periodPills.map(p => {
             const key = `${p.year}-${p.month}`;
@@ -772,8 +802,7 @@ export default function ReconcileModal({
               <button key={key}
                 onClick={() => {
                   setYear(p.year); setMonth(p.month);
-                  // Reset results when switching period
-                  setStmtRows([]); setSession(null); setPdfSource("");
+                  setStmtRows([]); setSession(null); setPdfSource(""); setPdfFile(null);
                   setKeptIds(new Set()); setMissingOverrides({});
                 }}
                 style={{
@@ -789,72 +818,80 @@ export default function ReconcileModal({
             );
           })}
         </div>
-
-        {/* Email banner */}
-        {periodSelected && stmtRows.length === 0 && emailStmt && (
-          <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontFamily: F }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-              <span style={{ fontSize: 14 }}>📎</span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#1e3a8a" }}>Statement tersedia dari email</div>
-                <div style={{ fontSize: 11, color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {emailStmt.filename || "statement.pdf"}{emailStmt.sender_email ? ` · ${emailStmt.sender_email}` : ""}
-                </div>
-              </div>
-            </div>
-            {needsPassword && <input type="password" placeholder="Password PDF" value={emailPassword} onChange={e => setEmailPassword(e.target.value)} style={{ fontSize: 12, padding: "6px 10px", border: "1px solid #cbd5e1", borderRadius: 8, fontFamily: F, width: "100%", marginBottom: 8, boxSizing: "border-box" }} />}
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={handleDownloadFromEmail} disabled={processing} style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: processing ? "#93c5fd" : "#3b5bdb", padding: "6px 16px", borderRadius: 8, border: "none", cursor: processing ? "default" : "pointer", fontFamily: F }}>
-                {processing ? "Processing…" : (needsPassword ? "Retry with Password" : "Download & Process")}
-              </button>
-              {!needsPassword && <button onClick={() => setNeedsPassword(true)} style={{ fontSize: 11, fontWeight: 600, color: "#475569", background: "transparent", padding: "6px 10px", border: "1px solid #cbd5e1", borderRadius: 8, cursor: "pointer", fontFamily: F }}>PDF terenkripsi?</button>}
-            </div>
+        {periodSelected && step < 4 && (
+          <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 12, fontFamily: F }}>
+            {periodLabel}
           </div>
         )}
 
-        {/* Drop zone */}
-        {periodSelected && stmtRows.length === 0 && !processing && (
+        {/* ── STEP 2: Upload PDF ── */}
+        {step === 2 && (
           <div>
+            {/* Email banner */}
+            {emailStmt && (
+              <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontFamily: F }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <span style={{ fontSize: 14 }}>📎</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#1e3a8a" }}>Statement tersedia dari email</div>
+                    <div style={{ fontSize: 11, color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {emailStmt.filename || "statement.pdf"}{emailStmt.sender_email ? ` · ${emailStmt.sender_email}` : ""}
+                    </div>
+                  </div>
+                </div>
+                <button onClick={handleDownloadFromEmail} disabled={processing} style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: "#3b5bdb", padding: "6px 16px", borderRadius: 8, border: "none", cursor: "pointer", fontFamily: F }}>
+                  Download & Process
+                </button>
+              </div>
+            )}
+
+            {/* Drop zone */}
             <div
               onClick={() => fileRef.current?.click()}
               onDragOver={e => e.preventDefault()}
-              onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleUpload(f); }}
+              onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) stageFile(f); }}
               style={{
-                border: "2px dashed #e5e7eb", borderRadius: 16, padding: "28px 24px",
-                textAlign: "center", cursor: "pointer", background: "#fafafa",
+                border: `2px dashed ${pdfFile ? "#3b5bdb" : "#e5e7eb"}`, borderRadius: 16, padding: "28px 24px",
+                textAlign: "center", cursor: "pointer", background: pdfFile ? "#eff6ff" : "#fafafa",
                 marginBottom: 10,
               }}>
-              <div style={{ fontSize: 28, marginBottom: 6 }}>📄</div>
+              <div style={{ fontSize: 28, marginBottom: 6 }}>{pdfFile ? "✅" : "📄"}</div>
               <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: F, marginBottom: 4 }}>
-                Drop PDF statements here or click to browse
+                {pdfFile ? pdfSource : "Drop PDF statements here or click to browse"}
               </div>
               <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: F }}>
-                Upload bank or credit card statements (PDF)
+                {pdfFile ? "Click to change file" : "Upload bank or credit card statements (PDF)"}
               </div>
               <input ref={fileRef} type="file" accept=".pdf" style={{ display: "none" }}
-                onChange={e => { handleUpload(e); e.target.value = ""; }} />
-              <div style={{ marginTop: 12 }}>
-                <Button variant="primary" size="sm">Choose File</Button>
-              </div>
+                onChange={e => { stageFile(e); e.target.value = ""; }} />
+              {!pdfFile && <div style={{ marginTop: 12 }}><Button variant="primary" size="sm">Choose File</Button></div>}
             </div>
+
+            {/* Password + Process button */}
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <input type="password" placeholder="PDF password (if encrypted)" value={pdfPassword} onChange={e => setPdfPassword(e.target.value)}
                 style={{ fontSize: 12, padding: "6px 10px", border: "1px solid #e5e7eb", borderRadius: 8, fontFamily: F, flex: 1 }} />
-              <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: F, whiteSpace: "nowrap" }}>Kosongkan jika PDF tidak terenkripsi</span>
+              <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: F, whiteSpace: "nowrap" }}>Kosongkan jika tidak terenkripsi</span>
             </div>
+            {pdfFile && (
+              <div style={{ marginTop: 12, textAlign: "right" }}>
+                <Button onClick={processFile}>Process →</Button>
+              </div>
+            )}
           </div>
         )}
 
-        {processing && (
-          <div style={{ border: "2px dashed #bfdbfe", borderRadius: 16, padding: "28px 24px", textAlign: "center", background: "#eff6ff", marginBottom: 10 }}>
-            <div style={{ fontSize: 28, marginBottom: 6 }}>⏳</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#1e3a8a", fontFamily: F }}>Extracting transactions from PDF…</div>
+        {/* ── STEP 3: Processing ── */}
+        {step === 3 && (
+          <div style={{ border: "2px dashed #bfdbfe", borderRadius: 16, padding: "40px 24px", textAlign: "center", background: "#eff6ff" }}>
+            <div style={{ fontSize: 28, marginBottom: 8 }}>⏳</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#1e3a8a", fontFamily: F }}>Menganalisis statement dengan AI...</div>
             <div style={{ fontSize: 12, color: "#475569", fontFamily: F, marginTop: 4 }}>This may take a moment for large statements</div>
           </div>
         )}
 
-        {/* ── Top bar: stats + filters + bulk ── */}
-        {hasSomething && (
+        {/* ── STEP 4: Results ── */}
+        {step === 4 && hasSomething && (
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
               <span style={PILL("#dcfce7", "#059669")}>✓ {matchCount}</span>
@@ -878,7 +915,7 @@ export default function ReconcileModal({
         )}
 
         {/* ── Statement table ── */}
-        {hasSomething && (
+        {step === 4 && hasSomething && (
           <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
             {/* Header */}
             <div style={{ display: "grid", gridTemplateColumns: "58px 1fr 80px 80px 90px 48px", background: "#fafafa", borderBottom: "1px solid #e5e7eb", padding: "6px 8px", fontSize: 9, fontWeight: 800, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.04em", fontFamily: F }}>
@@ -969,15 +1006,13 @@ export default function ReconcileModal({
           </div>
         )}
 
-        {/* Empty state */}
-        {!processing && !hasSomething && periodSelected && (
-          <div style={{ textAlign: "center", padding: "30px 0", color: "#9ca3af", fontSize: 12, fontFamily: F }}>
-            Upload a bank statement PDF to start reconciling
-          </div>
-        )}
-        {!periodSelected && (
-          <div style={{ textAlign: "center", padding: "30px 0", color: "#9ca3af", fontSize: 12, fontFamily: F }}>
-            Select a period above to begin
+        {/* Step 4: "Upload PDF lain" link */}
+        {step === 4 && (
+          <div style={{ marginTop: 8, textAlign: "left" }}>
+            <button onClick={() => { setStmtRows([]); setPdfFile(null); setPdfSource(""); }}
+              style={{ fontSize: 11, fontWeight: 600, color: "#3b5bdb", background: "none", border: "none", cursor: "pointer", fontFamily: F, padding: 0 }}>
+              Upload PDF lain
+            </button>
           </div>
         )}
       </Modal>
