@@ -517,7 +517,7 @@ export default function ReconcileModal({
                       <span style={{ fontSize: 10, color: "#d97706", fontStyle: "italic" }}>Not in ledger</span>
                       <button onClick={() => openAddFromStmt(s)}
                         style={{ fontSize: 10, fontWeight: 700, color: "#3b5bdb", background: "none", border: "1px solid #bfdbfe", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontFamily: "Figtree, sans-serif" }}>
-                        Tambah
+                        Add
                       </button>
                     </div>
                   </div>
