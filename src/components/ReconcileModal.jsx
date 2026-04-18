@@ -139,9 +139,12 @@ export default function ReconcileModal({
     return { periodStart: start, periodEnd: end, periodLabel: label };
   }, [account, year, month, isCC, stmtDay]);
 
-  // Filter ledger for this account + period date range (with ±5 day buffer for boundary matching)
-  const periodLedger = useMemo(() => {
-    if (!account || !ledger || !periodStart) return [];
+  // Fetch ledger directly from Supabase for this account + period (no 500-row cap)
+  const [periodLedger, setPeriodLedger] = useState([]);
+  const [ledgerLoading, setLedgerLoading] = useState(false);
+  useEffect(() => {
+    if (!isOpen || !account || !user || !periodStart) { setPeriodLedger([]); return; }
+    let cancelled = false;
     const BUFFER_DAYS = 5;
     const bufStart = new Date(periodStart + "T00:00:00");
     bufStart.setDate(bufStart.getDate() - BUFFER_DAYS);
@@ -149,11 +152,47 @@ export default function ReconcileModal({
     bufEnd.setDate(bufEnd.getDate() + BUFFER_DAYS);
     const startStr = bufStart.toISOString().slice(0, 10);
     const endStr   = bufEnd.toISOString().slice(0, 10);
-    return ledger.filter(e => {
-      const d = e.tx_date || "";
-      return d >= startStr && d <= endStr && (e.from_id === account.id || e.to_id === account.id);
-    });
-  }, [ledger, account, periodStart, periodEnd]);
+
+    setLedgerLoading(true);
+    supabase
+      .from("ledger")
+      .select("*")
+      .eq("user_id", user.id)
+      .or(`from_id.eq.${account.id},to_id.eq.${account.id}`)
+      .gte("tx_date", startStr)
+      .lte("tx_date", endStr)
+      .order("tx_date", { ascending: true })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) console.error("[reconcile] ledger fetch error:", error.message);
+        setPeriodLedger(data || []);
+        setLedgerLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [isOpen, account, user, periodStart, periodEnd]);
+
+  // Re-fetch after a ledger mutation (add/delete) — bump this counter to trigger
+  const [ledgerVersion, setLedgerVersion] = useState(0);
+  const refetchLedger = useCallback(() => setLedgerVersion(v => v + 1), []);
+  useEffect(() => {
+    if (!ledgerVersion || !isOpen || !account || !user || !periodStart) return;
+    let cancelled = false;
+    const BUFFER_DAYS = 5;
+    const bufStart = new Date(periodStart + "T00:00:00");
+    bufStart.setDate(bufStart.getDate() - BUFFER_DAYS);
+    const bufEnd = new Date(periodEnd + "T00:00:00");
+    bufEnd.setDate(bufEnd.getDate() + BUFFER_DAYS);
+    supabase
+      .from("ledger")
+      .select("*")
+      .eq("user_id", user.id)
+      .or(`from_id.eq.${account.id},to_id.eq.${account.id}`)
+      .gte("tx_date", bufStart.toISOString().slice(0, 10))
+      .lte("tx_date", bufEnd.toISOString().slice(0, 10))
+      .order("tx_date", { ascending: true })
+      .then(({ data }) => { if (!cancelled) setPeriodLedger(data || []); });
+    return () => { cancelled = true; };
+  }, [ledgerVersion, isOpen, account, user, periodStart, periodEnd]);
 
   const results = useMemo(() => {
     const raw = matchTransactions(stmtRows, periodLedger);
@@ -411,6 +450,7 @@ export default function ReconcileModal({
       const created = await ledgerApi.create(user.id, buildEntry(row), accounts);
       if (created) {
         setLedger?.(prev => [created, ...prev]);
+        refetchLedger();
         if (row._cicilan && row._cicilanMonths >= 2) {
           installmentsApi.createFromImport(user.id, {
             ledgerId: created.id, description: row.description || "", accountId: row.from_id,
@@ -443,6 +483,7 @@ export default function ReconcileModal({
         }
       } catch { /* continue */ }
     }
+    if (ok > 0) refetchLedger();
     showToast(`Imported ${ok} of ${validRows.length} transactions`);
     setMissingImporting(false);
   };
@@ -476,6 +517,7 @@ export default function ReconcileModal({
     try {
       await supabase.from("ledger").delete().eq("id", delTarget.id);
       setLedger?.(prev => prev.filter(e => e.id !== delTarget.id));
+      refetchLedger();
       showToast("Transaksi dihapus");
       onRefresh?.();
     } catch (err) {
@@ -715,8 +757,8 @@ export default function ReconcileModal({
       {txModalMode && txInitial && (
         <TransactionModal
           open={!!txModalMode} mode={txModalMode} initialData={txInitial}
-          onSave={() => { onRefresh?.(); setTxModalMode(null); setTxInitial(null); }}
-          onDelete={() => { onRefresh?.(); setTxModalMode(null); setTxInitial(null); }}
+          onSave={() => { refetchLedger(); onRefresh?.(); setTxModalMode(null); setTxInitial(null); }}
+          onDelete={() => { refetchLedger(); onRefresh?.(); setTxModalMode(null); setTxInitial(null); }}
           onClose={() => { setTxModalMode(null); setTxInitial(null); }}
           user={user} accounts={accounts} setLedger={setLedger} categories={categories}
           fxRates={fxRates} allCurrencies={allCurrencies}
