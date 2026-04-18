@@ -156,60 +156,33 @@ export default function Reconcile({
                   )}
                 </div>
 
-                {/* Name + last4 */}
-                <div style={{ minWidth: 100, flexShrink: 0 }}>
+                {/* Name + details */}
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: "#111827", fontFamily: F }}>{a.name}</div>
-                  {(a.bank_name || last4) && (
-                    <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: F }}>
-                      {a.bank_name && a.bank_name !== a.name ? a.bank_name : ""}{last4 ? `${a.bank_name && a.bank_name !== a.name ? " · " : ""}···${last4}` : ""}
-                    </div>
-                  )}
-                </div>
-
-                {/* Month pills */}
-                <div style={{ flex: 1, display: "flex", gap: 3, flexWrap: "wrap", minWidth: 0 }}>
-                  {acctMonths.map(p => {
-                    const key = `${a.id}-${p.year}-${p.month}`;
-                    const done = completedSet.has(key);
-                    const inProg = inProgressSet.has(key);
-                    const isHL = monthFilter === p.month && p.year === curYear;
-                    const session = reconSessions.find(s => s.account_id === a.id && s.period_year === p.year && s.period_month === p.month);
-
-                    let tip = done ? `${session?.total_match || 0} match, ${session?.total_missing || 0} missing` : inProg ? "In progress" : "Not reconciled";
-                    if (isCC && a.statement_day) {
-                      const stDay = Number(a.statement_day);
-                      const endD = new Date(p.year, p.month - 1, stDay);
-                      const startD = new Date(endD); startD.setMonth(startD.getMonth() - 1); startD.setDate(startD.getDate() + 1);
-                      const fmt = d => d.toLocaleDateString("en-US", { day: "numeric", month: "short" });
-                      tip = `${fmt(startD)} – ${fmt(endD)} · ${tip}`;
-                    }
-                    const shortYr = p.year !== curYear ? `'${String(p.year).slice(2)}` : "";
-                    const bg = done ? "#111827" : inProg ? "transparent" : isHL ? "#dbeafe" : "transparent";
-                    const fg = done ? "#fff" : inProg ? "#d97706" : isHL ? "#3b5bdb" : "#9ca3af";
-                    const bd = done ? "none" : inProg ? "1px solid #d97706" : isHL ? "1px solid #3b5bdb" : "0.5px solid #e5e7eb";
-
-                    return (
-                      <button key={`${p.year}-${p.month}`}
-                        onClick={() => setModal({ account: a, year: p.year, month: p.month })}
-                        title={tip}
-                        style={{
-                          fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
-                          border: bd, cursor: "pointer", fontFamily: F,
-                          background: bg, color: fg, transition: "all .15s", lineHeight: 1.4,
-                        }}>
-                        {MO_LABELS[p.month - 1]}{shortYr ? ` ${shortYr}` : ""}
-                        {done ? " ✓" : inProg ? " ●" : ""}
-                      </button>
-                    );
-                  })}
+                  <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: F, display: "flex", gap: 6, flexWrap: "wrap", marginTop: 1 }}>
+                    {a.bank_name && a.bank_name !== a.name && <span>{a.bank_name}</span>}
+                    {last4 && <span>···{last4}</span>}
+                    <span style={{ color: isCC ? "#7c3aed" : "#3b5bdb" }}>{isCC ? "Credit Card" : "Bank"}</span>
+                    {acctMonths.length > 0 && (
+                      <span>
+                        {MO_LABELS[acctMonths[0].month - 1]} {acctMonths[0].year !== curYear ? acctMonths[0].year : ""}
+                        {" – "}
+                        {MO_LABELS[acctMonths[acctMonths.length - 1].month - 1]} {acctMonths[acctMonths.length - 1].year}
+                      </span>
+                    )}
+                    {completedSet.size > 0 && (() => {
+                      const done = acctMonths.filter(p => completedSet.has(`${a.id}-${p.year}-${p.month}`)).length;
+                      return done > 0 ? <span style={{ color: "#059669", fontWeight: 600 }}>{done} ✓</span> : null;
+                    })()}
+                    {pendingMonths.length > 0 && (
+                      <span style={{ color: "#d97706", fontWeight: 600 }}>{pendingMonths.length} pending</span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Reconcile button */}
                 <button
-                  onClick={() => {
-                    const fp = pendingMonths[0] || { year: curYear, month: curMo };
-                    setModal({ account: a, year: fp.year, month: fp.month });
-                  }}
+                  onClick={() => setModal({ account: a })}
                   style={{
                     fontSize: 11, fontWeight: 700, padding: "5px 14px", borderRadius: 8,
                     cursor: "pointer", fontFamily: F, flexShrink: 0,
@@ -231,8 +204,6 @@ export default function Reconcile({
           isOpen={!!modal}
           onClose={() => { setModal(null); onRefresh?.(); }}
           account={modal.account}
-          year={modal.year}
-          month={modal.month}
           user={user}
           accounts={accounts}
           categories={categories}
@@ -248,6 +219,8 @@ export default function Reconcile({
           fxRates={fxRates}
           allCurrencies={CURRENCIES}
           accountCurrencies={accountCurrencies}
+          reconSessions={reconSessions}
+          earliestTxDate={earliestByAccount[modal.account?.id]}
         />
       )}
     </div>

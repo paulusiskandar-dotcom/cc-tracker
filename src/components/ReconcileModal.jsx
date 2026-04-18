@@ -79,14 +79,21 @@ function matchTransactions(stmtRows, ledgerRows) {
 }
 
 // ── Main component ───────────────────────────────────────────
+const MO_LABELS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
 export default function ReconcileModal({
   isOpen, onClose, account, user, accounts, categories,
-  ledger, setLedger, onRefresh, year, month, sessionId,
+  ledger, setLedger, onRefresh, sessionId,
   dark,
-  // Data props forwarded to TransactionModal (Add / Edit flows).
   bankAccounts, creditCards, assets, liabilities, receivables,
   incomeSrcs, fxRates, allCurrencies, accountCurrencies,
+  reconSessions = [], earliestTxDate,
 }) {
+  // Period selection (managed internally)
+  const [year,  setYear]  = useState(null);
+  const [month, setMonth] = useState(null);
+  const periodSelected = year != null && month != null;
+
   const [stmtRows,    setStmtRows]    = useState([]);
   const [processing,  setProcessing]  = useState(false);
   const [pdfPassword, setPdfPassword] = useState("");
@@ -113,6 +120,52 @@ export default function ReconcileModal({
 
   const fileRef = useRef(null);
   const T = dark ? DARK : LIGHT;
+
+  // ── Generate period pills ──────────────────────────────────
+  const now = new Date();
+  const curYear = now.getFullYear();
+  const curMo   = now.getMonth() + 1;
+
+  const periodPills = useMemo(() => {
+    let startY, startM;
+    if (earliestTxDate) {
+      startY = Number(earliestTxDate.slice(0, 4));
+      startM = Number(earliestTxDate.slice(5, 7));
+    } else { startY = curYear; startM = 1; }
+    const pills = [];
+    let y = startY, m = startM;
+    while (y < curYear || (y === curYear && m <= curMo)) {
+      pills.push({ year: y, month: m });
+      m++; if (m > 12) { m = 1; y++; }
+    }
+    return pills;
+  }, [earliestTxDate, curYear, curMo]);
+
+  const completedKeys = useMemo(() => new Set(
+    reconSessions.filter(s => s.status === "completed" && s.account_id === account?.id)
+      .map(s => `${s.period_year}-${s.period_month}`)
+  ), [reconSessions, account]);
+  const inProgressKeys = useMemo(() => new Set(
+    reconSessions.filter(s => s.status !== "completed" && s.account_id === account?.id)
+      .map(s => `${s.period_year}-${s.period_month}`)
+  ), [reconSessions, account]);
+
+  // Auto-select most recent unreconciled month on open
+  useEffect(() => {
+    if (!isOpen || !account || periodSelected) return;
+    const unrecon = periodPills.filter(p => !completedKeys.has(`${p.year}-${p.month}`));
+    const pick = unrecon.length > 0 ? unrecon[unrecon.length - 1] : periodPills[periodPills.length - 1];
+    if (pick) { setYear(pick.year); setMonth(pick.month); }
+  }, [isOpen, account]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reset state when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      setYear(null); setMonth(null); setStmtRows([]); setSession(null);
+      setPdfSource(""); setPdfPassword(""); setKeptIds(new Set());
+      setMissingOverrides({}); setMissingSelected({}); setMissingSkipped(new Set());
+    }
+  }, [isOpen]);
 
   // ── Period date range (bank = calendar month, CC = billing cycle) ──
   const isCC = account?.type === "credit_card";
@@ -699,12 +752,46 @@ export default function ReconcileModal({
   return (
     <>
       <Modal isOpen={isOpen} onClose={onClose} title={`Reconcile — ${account.name}`} footer={footer} width={900}>
-        <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 12, fontFamily: F }}>
-          {periodLabel}{pdfSource ? ` · ${pdfSource}` : ""}
+        {/* Period subtitle */}
+        {periodSelected && (
+          <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 8, fontFamily: F }}>
+            {periodLabel}{pdfSource ? ` · ${pdfSource}` : ""}
+          </div>
+        )}
+
+        {/* Period selector pills */}
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 14, alignItems: "center" }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", fontFamily: F, marginRight: 4 }}>Period</span>
+          {periodPills.map(p => {
+            const key = `${p.year}-${p.month}`;
+            const done = completedKeys.has(key);
+            const inProg = inProgressKeys.has(key);
+            const active = year === p.year && month === p.month;
+            const shortYr = p.year !== curYear ? ` '${String(p.year).slice(2)}` : "";
+            return (
+              <button key={key}
+                onClick={() => {
+                  setYear(p.year); setMonth(p.month);
+                  // Reset results when switching period
+                  setStmtRows([]); setSession(null); setPdfSource("");
+                  setKeptIds(new Set()); setMissingOverrides({});
+                }}
+                style={{
+                  fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6,
+                  cursor: "pointer", fontFamily: F, transition: "all .15s",
+                  border: active ? "1.5px solid #3b5bdb" : done ? "none" : inProg ? "1px solid #d97706" : "0.5px solid #e5e7eb",
+                  background: active ? "#dbeafe" : done ? "#111827" : "transparent",
+                  color: active ? "#3b5bdb" : done ? "#fff" : inProg ? "#d97706" : "#9ca3af",
+                }}>
+                {MO_LABELS[p.month - 1]}{shortYr}
+                {done ? " ✓" : inProg ? " ●" : ""}
+              </button>
+            );
+          })}
         </div>
 
         {/* Email banner */}
-        {stmtRows.length === 0 && emailStmt && (
+        {periodSelected && stmtRows.length === 0 && emailStmt && (
           <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontFamily: F }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
               <span style={{ fontSize: 14 }}>📎</span>
@@ -726,7 +813,7 @@ export default function ReconcileModal({
         )}
 
         {/* Drop zone */}
-        {stmtRows.length === 0 && !processing && (
+        {periodSelected && stmtRows.length === 0 && !processing && (
           <div>
             <div
               onClick={() => fileRef.current?.click()}
@@ -883,9 +970,14 @@ export default function ReconcileModal({
         )}
 
         {/* Empty state */}
-        {!processing && !hasSomething && (
+        {!processing && !hasSomething && periodSelected && (
           <div style={{ textAlign: "center", padding: "30px 0", color: "#9ca3af", fontSize: 12, fontFamily: F }}>
             Upload a bank statement PDF to start reconciling
+          </div>
+        )}
+        {!periodSelected && (
+          <div style={{ textAlign: "center", padding: "30px 0", color: "#9ca3af", fontSize: 12, fontFamily: F }}>
+            Select a period above to begin
           </div>
         )}
       </Modal>
