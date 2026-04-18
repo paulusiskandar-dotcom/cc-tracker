@@ -1,5 +1,5 @@
 // ReconcileModal.jsx — Full reconcile flow: PDF extraction → match → review
-import { useState, useMemo, useCallback, useEffect } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { reconcileApi, ledgerApi, installmentsApi, getTxFromToTypes } from "../api";
 import { supabase } from "../lib/supabase";
 import { fmtIDR, todayStr, checkDuplicateTransaction, resolveCategoryIds } from "../utils";
@@ -441,22 +441,35 @@ export default function ReconcileModal({
     setDelTarget(null);
   };
 
+  // ── Build unified row list for side-by-side view ───────────
+  const sortedResults = useMemo(() => {
+    const order = { match: 0, missing: 1, extra: 2, kept: 3 };
+    return [...results].sort((a, b) => {
+      const oa = order[a.type] ?? 4, ob = order[b.type] ?? 4;
+      if (oa !== ob) return oa - ob;
+      const da = a.stmt?.date || a.ledger?.tx_date || "";
+      const db = b.stmt?.date || b.ledger?.tx_date || "";
+      return da.localeCompare(db);
+    });
+  }, [results]);
+
   if (!account) return null;
 
-  const ROW_STYLE = {
-    display: "flex", alignItems: "center", gap: 8, padding: "8px 10px",
-    borderRadius: 8, marginBottom: 4, fontFamily: "Figtree, sans-serif",
-  };
-
   const hasSomething = stmtRows.length > 0 || periodLedger.length > 0;
+
+  // ── Styles ─────────────────────────────────────────────────
+  const F = "Figtree, sans-serif";
+  const COL_HDR = { fontSize: 9, fontWeight: 800, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.04em", fontFamily: F, padding: "6px 8px", borderBottom: "1px solid #e5e7eb", background: "#fafafa" };
+  const CELL    = { fontSize: 11, fontFamily: F, padding: "6px 8px", borderBottom: "1px solid #f3f4f6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
+  const BORDER  = { match: "3px solid #059669", missing: "3px solid #d97706", extra: "3px solid #dc2626", kept: "3px solid #d1d5db" };
+  const BG      = { match: "#f0fdf4", missing: "#fffbeb", extra: "#fef2f2", kept: "#f9fafb" };
+  const btnS    = (color, border) => ({ fontSize: 10, fontWeight: 700, color, background: "none", border: `1px solid ${border}`, borderRadius: 4, padding: "2px 7px", cursor: "pointer", fontFamily: F, whiteSpace: "nowrap" });
+
   const footer = (
-    <div style={{ display: "flex", justifyContent: "space-between", width: "100%" }}>
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
       <label style={{ cursor: "pointer" }}>
-        {/* value reset lets the user pick the SAME file twice in a row */}
-        <input type="file" accept=".pdf" onChange={handleUpload}
-          onClick={e => { e.target.value = ""; }}
-          style={{ display: "none" }} />
-        <span style={{ fontSize: 12, fontWeight: 600, color: "#3b5bdb", fontFamily: "Figtree, sans-serif", cursor: "pointer" }}>
+        <input type="file" accept=".pdf" onChange={handleUpload} onClick={e => { e.target.value = ""; }} style={{ display: "none" }} />
+        <span style={{ fontSize: 12, fontWeight: 600, color: "#3b5bdb", fontFamily: F, cursor: "pointer" }}>
           {pdfSource ? "Upload PDF lain" : "Upload PDF"}
         </span>
       </label>
@@ -468,70 +481,36 @@ export default function ReconcileModal({
 
   return (
     <>
-      <Modal isOpen={isOpen} onClose={onClose} title={`Reconcile — ${account.name}`} footer={footer} width={720}>
+      <Modal isOpen={isOpen} onClose={onClose} title={`Reconcile — ${account.name}`} footer={footer} width={960}>
         {/* Subtitle */}
-        <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 12, fontFamily: "Figtree, sans-serif" }}>
+        <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 12, fontFamily: F }}>
           {periodLabel}{pdfSource ? ` · ${pdfSource}` : ""}
         </div>
 
         {/* Statement-from-email banner */}
         {stmtRows.length === 0 && emailStmt && (
-          <div style={{
-            background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10,
-            padding: "10px 14px", marginBottom: 14, fontFamily: "Figtree, sans-serif",
-          }}>
+          <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontFamily: F }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
               <span style={{ fontSize: 14 }}>📎</span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#1e3a8a" }}>
-                  Statement tersedia dari email
-                </div>
-                <div style={{
-                  fontSize: 11, color: "#475569",
-                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                }}>
-                  {emailStmt.filename || "statement.pdf"}
-                  {emailStmt.sender_email ? ` · ${emailStmt.sender_email}` : ""}
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#1e3a8a" }}>Statement tersedia dari email</div>
+                <div style={{ fontSize: 11, color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {emailStmt.filename || "statement.pdf"}{emailStmt.sender_email ? ` · ${emailStmt.sender_email}` : ""}
                 </div>
               </div>
             </div>
             {needsPassword && (
-              <input
-                type="password"
-                placeholder="Password PDF (jika terenkripsi)"
-                value={emailPassword}
+              <input type="password" placeholder="Password PDF" value={emailPassword}
                 onChange={e => setEmailPassword(e.target.value)}
-                style={{
-                  fontSize: 12, padding: "6px 10px", border: "1px solid #cbd5e1",
-                  borderRadius: 8, fontFamily: "Figtree, sans-serif",
-                  width: "100%", marginBottom: 8, boxSizing: "border-box",
-                }}
-              />
+                style={{ fontSize: 12, padding: "6px 10px", border: "1px solid #cbd5e1", borderRadius: 8, fontFamily: F, width: "100%", marginBottom: 8, boxSizing: "border-box" }} />
             )}
             <div style={{ display: "flex", gap: 8 }}>
-              <button
-                onClick={handleDownloadFromEmail}
-                disabled={processing}
-                style={{
-                  fontSize: 12, fontWeight: 700, color: "#fff",
-                  background: processing ? "#93c5fd" : "#3b5bdb",
-                  padding: "6px 16px", borderRadius: 8, border: "none",
-                  cursor: processing ? "default" : "pointer",
-                  fontFamily: "Figtree, sans-serif",
-                }}
-              >
+              <button onClick={handleDownloadFromEmail} disabled={processing}
+                style={{ fontSize: 12, fontWeight: 700, color: "#fff", background: processing ? "#93c5fd" : "#3b5bdb", padding: "6px 16px", borderRadius: 8, border: "none", cursor: processing ? "default" : "pointer", fontFamily: F }}>
                 {processing ? "Processing…" : (needsPassword ? "Retry with Password" : "Download & Process")}
               </button>
               {!needsPassword && (
-                <button
-                  onClick={() => setNeedsPassword(true)}
-                  style={{
-                    fontSize: 11, fontWeight: 600, color: "#475569",
-                    background: "transparent", padding: "6px 10px",
-                    border: "1px solid #cbd5e1", borderRadius: 8, cursor: "pointer",
-                    fontFamily: "Figtree, sans-serif",
-                  }}
-                >
+                <button onClick={() => setNeedsPassword(true)} style={{ fontSize: 11, fontWeight: 600, color: "#475569", background: "transparent", padding: "6px 10px", border: "1px solid #cbd5e1", borderRadius: 8, cursor: "pointer", fontFamily: F }}>
                   PDF terenkripsi?
                 </button>
               )}
@@ -539,139 +518,128 @@ export default function ReconcileModal({
           </div>
         )}
 
-        {/* Password input */}
+        {/* Upload controls */}
         {stmtRows.length === 0 && (
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14 }}>
-            <input
-              type="password" placeholder="PDF password (optional)"
-              value={pdfPassword} onChange={e => setPdfPassword(e.target.value)}
-              style={{ fontSize: 12, padding: "6px 10px", border: "1px solid #e5e7eb", borderRadius: 8, fontFamily: "Figtree, sans-serif", width: 200 }}
-            />
+            <input type="password" placeholder="PDF password (optional)" value={pdfPassword} onChange={e => setPdfPassword(e.target.value)}
+              style={{ fontSize: 12, padding: "6px 10px", border: "1px solid #e5e7eb", borderRadius: 8, fontFamily: F, width: 200 }} />
             <label style={{ cursor: "pointer" }}>
-              <input type="file" accept=".pdf" onChange={handleUpload}
-                onClick={e => { e.target.value = ""; }}
-                style={{ display: "none" }} />
-              <span style={{
-                display: "inline-block", fontSize: 12, fontWeight: 700, color: "#fff",
-                background: "#3b5bdb", padding: "6px 16px", borderRadius: 8, cursor: "pointer",
-                fontFamily: "Figtree, sans-serif",
-              }}>
+              <input type="file" accept=".pdf" onChange={handleUpload} onClick={e => { e.target.value = ""; }} style={{ display: "none" }} />
+              <span style={{ display: "inline-block", fontSize: 12, fontWeight: 700, color: "#fff", background: "#3b5bdb", padding: "6px 16px", borderRadius: 8, cursor: "pointer", fontFamily: F }}>
                 {processing ? "Processing…" : "Upload PDF"}
               </span>
             </label>
           </div>
         )}
 
-        {/* Processing spinner */}
         {processing && (
-          <div style={{ textAlign: "center", padding: "20px 0", fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
-            Extracting transactions from PDF…
+          <div style={{ textAlign: "center", padding: "20px 0", fontSize: 12, color: "#6b7280", fontFamily: F }}>Extracting transactions from PDF…</div>
+        )}
+
+        {/* ── Stats + bulk action bar ── */}
+        {hasSomething && (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <span style={PILL("#dcfce7", "#059669")}>✓ {matchCount} Match</span>
+              <span style={PILL("#fef3c7", "#d97706")}>! {missingCount} Missing</span>
+              <span style={PILL("#fee2e2", "#dc2626")}>? {extraCount} Extra</span>
+              {keptCount > 0 && <span style={PILL("#e5e7eb", "#6b7280")}>◦ {keptCount} Kept</span>}
+            </div>
           </div>
         )}
 
-        {/* Stats bar */}
-        {stmtRows.length > 0 && (
-          <div style={{ display: "flex", gap: 12, marginBottom: 14 }}>
-            <span style={PILL("#dcfce7", "#059669")}>✓ {matchCount} Match</span>
-            <span style={PILL("#fef3c7", "#d97706")}>! {missingCount} Missing</span>
-            <span style={PILL("#fee2e2", "#dc2626")}>? {extraCount} Extra</span>
-            {keptCount > 0 && <span style={PILL("#e5e7eb", "#6b7280")}>◦ {keptCount} Kept</span>}
-            <span style={PILL("#f3f4f6", "#374151")}>{stmtRows.length} Total</span>
-          </div>
-        )}
-
-        {/* Results */}
-        {stmtRows.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 420, overflowY: "auto" }}>
+        {/* ── Side-by-side panels ── */}
+        {hasSomething && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden", maxHeight: 440, overflowY: "auto" }}>
             {/* Column headers */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 32px 1fr", gap: 4, padding: "4px 10px", fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", fontFamily: "Figtree, sans-serif" }}>
-              <span>Statement</span>
-              <span />
-              <span>Ledger</span>
+            <div style={{ ...COL_HDR, borderRight: "1px solid #e5e7eb" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 70px" }}>
+                <span>Tanggal</span><span>Keterangan</span><span style={{ textAlign: "right" }}>Jumlah</span>
+              </div>
+            </div>
+            <div style={COL_HDR}>
+              <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 70px" }}>
+                <span>Tanggal</span><span>Keterangan</span><span style={{ textAlign: "right" }}>Jumlah</span>
+              </div>
             </div>
 
-            {results.filter(r => r.type !== "missing").map((r, i) => {
-              if (r.type === "match") {
-                const s = r.stmt;
-                const l = r.ledger;
-                return (
-                  <div key={i} style={{ ...ROW_STYLE, background: "#f0fdf4", border: "1px solid #bbf7d0" }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {s.description || s.merchant || "—"}
-                      </div>
-                      <div style={{ fontSize: 10, color: "#6b7280" }}>{s.date} · {fmtIDR(Math.abs(Number(s.amount || 0)), true)}</div>
-                    </div>
-                    <div style={{ width: 32, textAlign: "center", fontSize: 14 }}>✓</div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {l.description || "—"}
-                      </div>
-                      <div style={{ fontSize: 10, color: "#6b7280" }}>{l.tx_date} · {fmtIDR(Number(l.amount_idr || l.amount || 0), true)}</div>
-                    </div>
-                  </div>
-                );
-              }
-
-              if (r.type === "kept") {
-                const l = r.ledger;
-                return (
-                  <div key={i} style={{ ...ROW_STYLE, background: "#f9fafb", border: "1px solid #e5e7eb", opacity: 0.75 }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ fontSize: 10, color: "#9ca3af", fontStyle: "italic" }}>Kept (intentional)</span>
-                    </div>
-                    <div style={{ width: 32, textAlign: "center", fontSize: 14, color: "#9ca3af" }}>◦</div>
-                    <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6 }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {l.description || "—"}
-                        </div>
-                        <div style={{ fontSize: 10, color: "#9ca3af" }}>{l.tx_date} · {fmtIDR(Number(l.amount_idr || l.amount || 0), true)}</div>
-                      </div>
-                      <button onClick={() => setKeptIds(prev => { const n = new Set(prev); n.delete(l.id); return n; })}
-                        style={{ fontSize: 10, fontWeight: 600, color: "#6b7280", background: "none", border: "1px solid #e5e7eb", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
-                        Undo
-                      </button>
-                    </div>
-                  </div>
-                );
-              }
-
-              // extra
+            {/* Rows */}
+            {sortedResults.map((r, i) => {
+              const type = r.type;
+              const s = r.stmt;
               const l = r.ledger;
-              const btnStyle = (color, border) => ({
-                fontSize: 10, fontWeight: 700, color, background: "none",
-                border: `1px solid ${border}`, borderRadius: 4, padding: "2px 8px",
-                cursor: "pointer", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap",
-              });
-              return (
-                <div key={i} style={{ ...ROW_STYLE, background: "#fef2f2", border: "1px solid #fecaca" }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ fontSize: 10, color: "#dc2626", fontStyle: "italic" }}>Not in statement</span>
-                  </div>
-                  <div style={{ width: 32, textAlign: "center", fontSize: 14 }}>?</div>
-                  <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 4 }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {l.description || "—"}
-                      </div>
-                      <div style={{ fontSize: 10, color: "#6b7280" }}>{l.tx_date} · {fmtIDR(Number(l.amount_idr || l.amount || 0), true)}</div>
-                    </div>
-                    <button onClick={() => openEditFromLedger(l)} style={btnStyle("#3b5bdb", "#bfdbfe")}>Edit</button>
-                    <button onClick={() => markKept(l.id)}       style={btnStyle("#059669", "#bbf7d0")}>Keep</button>
-                    <button onClick={() => setDelTarget(l)}      style={btnStyle("#dc2626", "#fecaca")}>Hapus</button>
-                  </div>
+
+              // Left cell (statement side)
+              const leftContent = s ? (
+                <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 70px", alignItems: "center" }}>
+                  <span style={{ fontSize: 10, color: "#6b7280" }}>{(s.date || "").slice(5)}</span>
+                  <span style={{ ...CELL, padding: 0, fontWeight: 600, color: "#111827" }}>{s.description || s.merchant || "—"}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#111827", textAlign: "right" }}>{fmtIDR(Math.abs(Number(s.amount || 0)), true)}</span>
                 </div>
+              ) : (
+                <span style={{ fontSize: 10, color: type === "extra" ? "#dc2626" : "#9ca3af", fontStyle: "italic" }}>
+                  {type === "extra" ? "Not in statement" : "—"}
+                </span>
+              );
+
+              // Right cell (ledger side)
+              let rightContent;
+              if (type === "match" && l) {
+                rightContent = (
+                  <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 70px", alignItems: "center" }}>
+                    <span style={{ fontSize: 10, color: "#6b7280" }}>{(l.tx_date || "").slice(5)}</span>
+                    <span style={{ ...CELL, padding: 0, fontWeight: 600, color: "#111827" }}>{l.description || "—"}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#111827", textAlign: "right" }}>{fmtIDR(Number(l.amount_idr || l.amount || 0), true)}</span>
+                  </div>
+                );
+              } else if (type === "missing") {
+                rightContent = (
+                  <span style={{ fontSize: 10, color: "#d97706", fontStyle: "italic" }}>Not in ledger</span>
+                );
+              } else if ((type === "extra" || type === "kept") && l) {
+                rightContent = (
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <div style={{ flex: 1, minWidth: 0, display: "grid", gridTemplateColumns: "60px 1fr 70px", alignItems: "center" }}>
+                      <span style={{ fontSize: 10, color: "#6b7280" }}>{(l.tx_date || "").slice(5)}</span>
+                      <span style={{ ...CELL, padding: 0, fontWeight: 600, color: type === "kept" ? "#6b7280" : "#111827" }}>{l.description || "—"}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: type === "kept" ? "#6b7280" : "#111827", textAlign: "right" }}>{fmtIDR(Number(l.amount_idr || l.amount || 0), true)}</span>
+                    </div>
+                    {type === "extra" && (
+                      <div style={{ display: "flex", gap: 3, flexShrink: 0 }}>
+                        <button onClick={() => openEditFromLedger(l)} style={btnS("#3b5bdb", "#bfdbfe")}>Edit</button>
+                        <button onClick={() => markKept(l.id)} style={btnS("#059669", "#bbf7d0")}>Keep</button>
+                        <button onClick={() => setDelTarget(l)} style={btnS("#dc2626", "#fecaca")}>Hapus</button>
+                      </div>
+                    )}
+                    {type === "kept" && (
+                      <button onClick={() => setKeptIds(prev => { const n = new Set(prev); n.delete(l.id); return n; })}
+                        style={btnS("#6b7280", "#e5e7eb")}>Undo</button>
+                    )}
+                  </div>
+                );
+              } else {
+                rightContent = <span style={{ fontSize: 10, color: "#9ca3af" }}>—</span>;
+              }
+
+              return (
+                <React.Fragment key={i}>
+                  <div style={{ ...CELL, borderLeft: BORDER[type], background: BG[type], borderRight: "1px solid #e5e7eb", opacity: type === "kept" ? 0.6 : 1 }}>
+                    {leftContent}
+                  </div>
+                  <div style={{ ...CELL, background: BG[type], opacity: type === "kept" ? 0.6 : 1 }}>
+                    {rightContent}
+                  </div>
+                </React.Fragment>
               );
             })}
           </div>
         )}
 
-        {/* Missing rows — full AI-scan-style review list */}
+        {/* ── Missing rows — AI-scan-style review list ── */}
         {missingRowsFinal.length > 0 && (
-          <div style={{ marginTop: 8 }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#d97706", fontFamily: "Figtree, sans-serif", marginBottom: 6 }}>
-              Missing from Ledger ({missingRowsFinal.length})
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#d97706", fontFamily: F, marginBottom: 6 }}>
+              Add Missing Transactions ({missingRowsFinal.length})
             </div>
             <TransactionReviewList
               rows={missingRowsFinal}
@@ -697,14 +665,14 @@ export default function ReconcileModal({
         )}
 
         {/* Empty state */}
-        {!processing && stmtRows.length === 0 && (
-          <div style={{ textAlign: "center", padding: "30px 0", color: "#9ca3af", fontSize: 12, fontFamily: "Figtree, sans-serif" }}>
+        {!processing && stmtRows.length === 0 && periodLedger.length === 0 && (
+          <div style={{ textAlign: "center", padding: "30px 0", color: "#9ca3af", fontSize: 12, fontFamily: F }}>
             Upload a bank statement PDF to start reconciling
           </div>
         )}
       </Modal>
 
-      {/* Add / Edit Transaction Modal */}
+      {/* Edit Transaction Modal */}
       {txModalMode && txInitial && (
         <TransactionModal
           open={!!txModalMode}
@@ -732,18 +700,15 @@ export default function ReconcileModal({
 
       {/* Delete confirmation */}
       {delTarget && (
-        <Modal
-          isOpen={!!delTarget}
-          onClose={() => setDelTarget(null)}
-          title={`Hapus transaksi ${delTarget.description ? `"${delTarget.description}"` : ""}?`}
-          width={420}
+        <Modal isOpen={!!delTarget} onClose={() => setDelTarget(null)}
+          title={`Hapus transaksi ${delTarget.description ? `"${delTarget.description}"` : ""}?`} width={420}
           footer={
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", width: "100%" }}>
               <Button variant="ghost" onClick={() => setDelTarget(null)}>Batal</Button>
               <Button variant="danger" onClick={handleDelete}>Hapus</Button>
             </div>
           }>
-          <div style={{ fontSize: 12, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
+          <div style={{ fontSize: 12, color: "#374151", fontFamily: F }}>
             <strong>{delTarget.description || "—"}</strong> · {delTarget.tx_date} · {fmtIDR(Number(delTarget.amount_idr || delTarget.amount || 0), true)}
           </div>
         </Modal>
