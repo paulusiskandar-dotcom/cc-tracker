@@ -538,8 +538,9 @@ export default function ReconcileModal({
       });
       const data = await res.json();
       if (data.needs_password || data.encrypted) {
-        showToast("Password salah atau PDF tidak dapat dibuka", "error");
+        showToast("PDF terenkripsi. Silakan hapus password terlebih dahulu menggunakan Chrome Print to PDF atau ilovepdf.com, lalu upload ulang.", "error");
         setProcessing(false);
+        setPdfFile(null); setPdfSource("");
         return;
       }
       if (data.transactions?.length) {
@@ -878,14 +879,8 @@ export default function ReconcileModal({
               {!pdfFile && <div style={{ marginTop: 12 }}><Button variant="primary" size="sm">Choose File</Button></div>}
             </div>
 
-            {/* Password + Process button */}
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input type="password" placeholder="PDF password (if encrypted)" value={pdfPassword} onChange={e => setPdfPassword(e.target.value)}
-                style={{ fontSize: 12, padding: "6px 10px", border: "1px solid #e5e7eb", borderRadius: 8, fontFamily: F, flex: 1 }} />
-              <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: F, whiteSpace: "nowrap" }}>Kosongkan jika tidak terenkripsi</span>
-            </div>
             {pdfFile && (
-              <div style={{ marginTop: 12, textAlign: "right" }}>
+              <div style={{ marginTop: 4, textAlign: "right" }}>
                 <Button onClick={processFile}>Process →</Button>
               </div>
             )}
@@ -1031,15 +1026,6 @@ export default function ReconcileModal({
           </div>
         )}
 
-        {/* Step 4: "Upload PDF lain" link */}
-        {step === 4 && (
-          <div style={{ marginTop: 8, textAlign: "left" }}>
-            <button onClick={() => { setStmtRows([]); setPdfFile(null); setPdfSource(""); }}
-              style={{ fontSize: 11, fontWeight: 600, color: "#3b5bdb", background: "none", border: "none", cursor: "pointer", fontFamily: F, padding: 0 }}>
-              Upload PDF lain
-            </button>
-          </div>
-        )}
       </Modal>
 
       {/* Edit Transaction Modal */}
