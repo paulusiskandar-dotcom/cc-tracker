@@ -1361,6 +1361,67 @@ export const reimburseSettlementsApi = {
   },
 };
 
+// ─── RECONCILE SESSIONS ──────────────────────────────────────
+export const reconcileApi = {
+  getAll: async (userId) => {
+    const { data, error } = await supabase
+      .from("reconcile_sessions")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    return data || [];
+  },
+
+  getForAccount: async (userId, accountId) => {
+    const { data, error } = await supabase
+      .from("reconcile_sessions")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("account_id", accountId)
+      .order("period_year", { ascending: false })
+      .order("period_month", { ascending: false });
+    if (error) throw new Error(error.message);
+    return data || [];
+  },
+
+  create: async (userId, d) => {
+    const { data, error } = await supabase
+      .from("reconcile_sessions")
+      .insert([{ ...d, user_id: userId }])
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return data;
+  },
+
+  update: async (id, d) => {
+    const { data, error } = await supabase
+      .from("reconcile_sessions")
+      .update(d)
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return data;
+  },
+
+  complete: async (id, stats) => {
+    const { data, error } = await supabase
+      .from("reconcile_sessions")
+      .update({
+        status: "completed",
+        completed_at: new Date().toISOString(),
+        ...stats,
+      })
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return data;
+  },
+};
+
 const AI_MODEL = "claude-haiku-4-5-20251001";
 
 // ─── AI PROXY ─────────────────────────────────────────────────

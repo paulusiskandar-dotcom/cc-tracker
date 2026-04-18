@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect } from "react";
 import { ledgerApi, recurringApi, reimburseSettlementsApi, settingsApi, loanPaymentsApi, employeeLoanApi } from "../api";
+import ReconcileModal from "./ReconcileModal";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
 import { fmtIDR, ym, mlShort, getGreeting, todayStr, groupByDate, checkDuplicateTransaction } from "../utils";
 import { showToast, EmptyState, Modal, Button, AmountInput, Field, Input, FormRow } from "./shared/index";
@@ -16,6 +17,7 @@ export default function Dashboard({
   employeeLoans = [], loanPayments = [],
   setLoanPayments, setEmployeeLoans,
   reimburseSettlements = [], setReimburseSettlements,
+  reconSessions: reconSessionsProp = [], setReconSessions: setReconSessionsProp,
 }) {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
   useEffect(() => {
@@ -47,6 +49,9 @@ export default function Dashboard({
   const [payLoan,       setPayLoan]       = useState(null);
   const [payForm,       setPayForm]       = useState({ amount: "", pay_date: todayStr(), notes: "" });
   const [paySaving,     setPaySaving]     = useState(false);
+  // ─── RECONCILE STATE ─────────────────────────────────────────
+  const reconSessions = reconSessionsProp;
+  const [reconModal,    setReconModal]    = useState(null); // { account, year, month }
   // ─── DERIVED STATS ───────────────────────────────────────────
   const nw = netWorth || { total: 0, bank: 0, assets: 0, receivables: 0, ccDebt: 0, liabilities: 0, reimburseOutstanding: 0 };
 
@@ -846,7 +851,71 @@ export default function Dashboard({
           onClick={() => setTab?.("receivables")}
         />
 
-        {/* [6] Cash Flow — spans 2 cols on desktop, full width on mobile */}
+        {/* [6] Reconcile Status — spans full width */}
+        {(() => {
+          const reconAccounts = accounts.filter(a => ["bank","credit_card"].includes(a.type) && a.is_active);
+          const now = new Date();
+          const curYear = now.getFullYear();
+          const curMo   = now.getMonth() + 1;
+          const months = [];
+          for (let m = 1; m <= curMo; m++) months.push(m);
+          const completedSet = new Set(
+            reconSessions.filter(s => s.status === "completed")
+              .map(s => `${s.account_id}-${s.period_year}-${s.period_month}`)
+          );
+          const readyCount = reconAccounts.reduce((cnt, a) =>
+            cnt + months.filter(m => !completedSet.has(`${a.id}-${curYear}-${m}`)).length, 0
+          );
+          const MO_LABELS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+          return (
+            <div style={{ ...BENTO_WHITE, gridColumn: isMobile ? "span 1" : "span 3" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif" }}>Reconcile Status</span>
+                  {readyCount > 0 && (
+                    <span style={{ fontSize: 9, fontWeight: 700, background: "#fef3c7", color: "#d97706", padding: "2px 8px", borderRadius: 20, fontFamily: "Figtree, sans-serif" }}>
+                      {readyCount} to reconcile
+                    </span>
+                  )}
+                </div>
+              </div>
+              {reconAccounts.length === 0 ? (
+                <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>No accounts</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {reconAccounts.map(a => {
+                    const isCC = a.type === "credit_card";
+                    return (
+                      <div key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <div style={{ width: isMobile ? "100%" : 140, fontSize: 11, fontWeight: 600, color: "#374151", fontFamily: "Figtree, sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 0 }}>
+                          {isCC ? "💳" : "🏦"} {a.name}
+                        </div>
+                        <div style={{ display: "flex", gap: 3, flexWrap: "wrap", flex: 1 }}>
+                          {months.map(m => {
+                            const done = completedSet.has(`${a.id}-${curYear}-${m}`);
+                            return (
+                              <button key={m} onClick={() => setReconModal({ account: a, year: curYear, month: m })}
+                                style={{
+                                  fontSize: 9, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
+                                  border: "none", cursor: "pointer", fontFamily: "Figtree, sans-serif",
+                                  background: done ? "#dcfce7" : "#f3f4f6",
+                                  color: done ? "#059669" : "#9ca3af",
+                                }}>
+                                {MO_LABELS[m - 1]}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* [7] Cash Flow — spans 2 cols on desktop, full width on mobile */}
         <div style={{ ...BENTO_WHITE, gridColumn: isMobile ? "span 1" : "span 2" }}>
           <div style={{
             ...CARD_ROW,
@@ -1179,6 +1248,22 @@ export default function Dashboard({
       </Modal>
 
 
+      {/* Reconcile Modal */}
+      {reconModal && (
+        <ReconcileModal
+          isOpen={!!reconModal}
+          onClose={() => { setReconModal(null); onRefresh?.(); }}
+          account={reconModal.account}
+          year={reconModal.year}
+          month={reconModal.month}
+          user={user}
+          accounts={accounts}
+          categories={categories}
+          ledger={ledger}
+          setLedger={setLedger}
+          onRefresh={onRefresh}
+        />
+      )}
     </div>
   );
 }

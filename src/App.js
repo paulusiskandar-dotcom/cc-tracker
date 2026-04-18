@@ -11,7 +11,7 @@ import {
   accountsApi, ledgerApi, categoriesApi, incomeSrcApi,
   installmentsApi, recurringApi, merchantApi, fxApi,
   settingsApi, gmailApi, employeeLoanApi, loanPaymentsApi,
-  accountCurrenciesApi, reimburseSettlementsApi,
+  accountCurrenciesApi, reimburseSettlementsApi, reconcileApi,
   flattenEmailSync,
 } from "./api";
 import { calcNetWorth, fmtIDR, todayStr, ym } from "./utils";
@@ -206,6 +206,7 @@ function Finance({ user, signOut }) {
   const [employeeLoans,     setEmployeeLoans]     = useState([]);
   const [loanPayments,      setLoanPayments]      = useState([]);
   const [accountCurrencies, setAccountCurrencies] = useState([]);
+  const [reconSessions,     setReconSessions]     = useState([]);
 
   const curMonth = ym(todayStr());
 
@@ -213,7 +214,7 @@ function Finance({ user, signOut }) {
   const loadData = useCallback(async () => {
     const safe = (p, fallback) => p.catch(e => { console.warn("[loadData]", e.message); return fallback; });
 
-    const [acc, led, cats, inc, inst, rtempl, rem, merch, fx, dark, pending, loans, payments, accs, reimburse] = await Promise.all([
+    const [acc, led, cats, inc, inst, rtempl, rem, merch, fx, dark, pending, loans, payments, accs, reimburse, recon] = await Promise.all([
       safe(accountsApi.getAll(user.id),                      []),
       safe(ledgerApi.getAll(user.id, { limit: 500 }),        []),
       safe(categoriesApi.getAll(user.id),                    []),
@@ -229,6 +230,7 @@ function Finance({ user, signOut }) {
       safe(loanPaymentsApi.getAll(user.id),                  []),
       safe(accountCurrenciesApi.getAll(user.id),             []),
       safe(reimburseSettlementsApi.getPending(user.id),      []),
+      safe(reconcileApi.getAll(user.id),                     []),
     ]);
 
     console.log("[loadData] accounts:", acc.length, "ledger:", led.length);
@@ -271,6 +273,7 @@ function Finance({ user, signOut }) {
     setEmployeeLoans(loans);
     setLoanPayments(payments);
     setAccountCurrencies(accs);
+    setReconSessions(recon);
     setLoading(false);
   }, [user.id]);
 
@@ -319,11 +322,32 @@ function Finance({ user, signOut }) {
     reimburseSettlements, setReimburseSettlements,
     employeeLoans, setEmployeeLoans, loanPayments, setLoanPayments,
     accountCurrencies, setAccountCurrencies,
+    reconSessions, setReconSessions,
     setAccounts, setLedger, setCategories, setIncomeSrcs,
     setInstallments, setRecurTemplates, setReminders,
     setMerchantMaps, setFxRates,
     onRefresh: loadData,
   };
+
+  // Pending reconcile count per tab
+  const reconPending = useMemo(() => {
+    const now = new Date();
+    const curYear = now.getFullYear(), curMo = now.getMonth() + 1;
+    const completedSet = new Set(
+      reconSessions.filter(s => s.status === "completed")
+        .map(s => `${s.account_id}-${s.period_year}-${s.period_month}`)
+    );
+    let bankPending = 0, ccPending = 0;
+    for (const a of accounts.filter(x => x.is_active)) {
+      for (let m = 1; m <= curMo; m++) {
+        if (!completedSet.has(`${a.id}-${curYear}-${m}`)) {
+          if (a.type === "bank") bankPending++;
+          else if (a.type === "credit_card") ccPending++;
+        }
+      }
+    }
+    return { bank: bankPending, cards: ccPending };
+  }, [reconSessions, accounts]);
 
   if (loading) return (
     <div style={S.loadScreen}>
@@ -398,6 +422,12 @@ function Finance({ user, signOut }) {
                 <span style={{ fontSize: 13 }}>{t.label}</span>
                 {isReminders && overdueReminders.length > 0 && (
                   <span style={S.badge}>{overdueReminders.length}</span>
+                )}
+                {t.id === "bank" && reconPending.bank > 0 && (
+                  <span style={{ ...S.badge, background: "#fef3c7", color: "#d97706" }}>{reconPending.bank}</span>
+                )}
+                {t.id === "cards" && reconPending.cards > 0 && (
+                  <span style={{ ...S.badge, background: "#fef3c7", color: "#d97706" }}>{reconPending.cards}</span>
                 )}
               </button>
             );
