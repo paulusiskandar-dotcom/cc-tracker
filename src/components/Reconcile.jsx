@@ -178,10 +178,19 @@ export default function Reconcile({
                     const session = reconSessions.find(s =>
                       s.account_id === a.id && s.period_year === curYear && s.period_month === m && s.status === "completed"
                     );
+                    // Build tooltip with billing cycle for CC
+                    let tooltip = done && session ? `${session.total_match || 0} match, ${session.total_missing || 0} missing, ${session.total_extra || 0} extra` : "Not reconciled";
+                    if (isCC && a.statement_day) {
+                      const stDay = Number(a.statement_day);
+                      const endD = new Date(curYear, m - 1, stDay);
+                      const startD = new Date(endD); startD.setMonth(startD.getMonth() - 1); startD.setDate(startD.getDate() + 1);
+                      const fmt = d => d.toLocaleDateString("en-US", { day: "numeric", month: "short" });
+                      tooltip = `${fmt(startD)} – ${fmt(endD)}${done ? ` · ${tooltip}` : ""}`;
+                    }
                     return (
                       <button key={m}
                         onClick={() => setModal({ account: a, year: curYear, month: m })}
-                        title={done && session ? `${session.total_match || 0} match, ${session.total_missing || 0} missing, ${session.total_extra || 0} extra` : "Not reconciled"}
+                        title={tooltip}
                         style={{
                           fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6,
                           border: isHighlighted ? "1.5px solid #3b5bdb" : "none",

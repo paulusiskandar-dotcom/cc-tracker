@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { ledgerApi, installmentsApi, recurringApi, getTxFromToTypes, accountsApi } from "../api";
 import { supabase } from "../lib/supabase";
 import CCStatement from "./CCStatement";
@@ -166,21 +166,52 @@ export default function CreditCards({
     }
     const target = Number(cc.monthly_target || 0);
     const monthSpent = ledger
-      .filter(e => ym(e.tx_date) === filterMonth && e.from_id === cc.id && e.tx_type === "expense")
+      .filter(e => {
+        if (e.from_id !== cc.id || e.tx_type !== "expense") return false;
+        if (!filterMonth) return ym(e.tx_date) === ym(todayStr());
+        if (cc.statement_day) {
+          const range = getBillingRange(cc, filterMonth);
+          if (range) return (e.tx_date || "") >= range.start && (e.tx_date || "") <= range.end;
+        }
+        return ym(e.tx_date) === filterMonth;
+      })
       .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
     const dueIn  = cc.due_day       ? daysUntil(cc.due_day)       : null;
     const stmtIn = cc.statement_day ? daysUntil(cc.statement_day) : null;
     return { ...cc, debt, limit, avail, util, target, monthSpent, dueIn, stmtIn };
   }), [creditCards, groupMap, ledger, filterMonth]);
 
+  // Billing cycle date range for a CC card + month (YYYY-MM)
+  const getBillingRange = useCallback((cc, monthStr) => {
+    if (!monthStr || !cc?.statement_day) return null;
+    const [y, m] = monthStr.split("-").map(Number);
+    const stDay = Number(cc.statement_day);
+    const endDate = new Date(y, m - 1, stDay);
+    const startDate = new Date(endDate);
+    startDate.setMonth(startDate.getMonth() - 1);
+    startDate.setDate(startDate.getDate() + 1);
+    return { start: startDate.toISOString().slice(0, 10), end: endDate.toISOString().slice(0, 10) };
+  }, []);
+
   const ccLedger = useMemo(() =>
     ledger.filter(e => {
       const isCC   = creditCards.some(c => c.id === e.from_id || c.id === e.to_id);
-      const inMon  = !filterMonth || ym(e.tx_date) === filterMonth;
-      const forCard= !selectedCard || e.from_id === selectedCard || e.to_id === selectedCard;
-      return isCC && inMon && forCard;
+      if (!isCC) return false;
+      const forCard = !selectedCard || e.from_id === selectedCard || e.to_id === selectedCard;
+      if (!forCard) return false;
+      if (!filterMonth) return true;
+      // Use billing cycle if a specific card is selected and has statement_day
+      const cc = selectedCard ? creditCards.find(c => c.id === selectedCard) : null;
+      if (cc?.statement_day) {
+        const range = getBillingRange(cc, filterMonth);
+        if (range) {
+          const d = e.tx_date || "";
+          return d >= range.start && d <= range.end;
+        }
+      }
+      return ym(e.tx_date) === filterMonth;
     }),
-  [ledger, creditCards, filterMonth, selectedCard]);
+  [ledger, creditCards, filterMonth, selectedCard, getBillingRange]);
 
   const ccInstallments = useMemo(() =>
     installments.filter(i => creditCards.some(c => c.id === i.account_id)),
