@@ -113,6 +113,7 @@ export default function ReconcileModal({
   const [delTarget,    setDelTarget]    = useState(null);
   // Kept extras — user marked these as intentional so they aren't flagged anymore
   const [keptIds,      setKeptIds]      = useState(() => new Set());
+  const [ignoredIds,   setIgnoredIds]   = useState(() => new Set());
   // Missing-row review state (TransactionReviewList)
   const [missingSelected, setMissingSelected] = useState({});
   const [missingSkipped,  setMissingSkipped]  = useState(() => new Set());
@@ -170,7 +171,7 @@ export default function ReconcileModal({
   useEffect(() => {
     if (!isOpen) {
       setYear(null); setMonth(null); setStmtRows([]); setSession(null);
-      setPdfSource(""); setPdfPassword(""); setKeptIds(new Set());
+      setPdfSource(""); setPdfPassword(""); setKeptIds(new Set()); setIgnoredIds(new Set());
       setMissingOverrides({}); setMissingSelected({}); setMissingSkipped(new Set());
     }
   }, [isOpen]);
@@ -258,16 +259,18 @@ export default function ReconcileModal({
 
   const results = useMemo(() => {
     const raw = matchTransactions(stmtRows, periodLedger);
-    // Rewrite "extra" rows that the user has marked kept into a distinct type.
-    return raw.map(r =>
-      r.type === "extra" && keptIds.has(r.ledger?.id) ? { ...r, type: "kept" } : r
-    );
-  }, [stmtRows, periodLedger, keptIds]);
+    return raw.map(r => {
+      if (r.type === "extra" && keptIds.has(r.ledger?.id)) return { ...r, type: "kept" };
+      if (r.type === "missing" && ignoredIds.has(r.stmt?._id)) return { ...r, type: "ignored" };
+      return r;
+    });
+  }, [stmtRows, periodLedger, keptIds, ignoredIds]);
   const matchCount   = results.filter(r => r.type === "match").length;
   const missingRaw   = results.filter(r => r.type === "missing");
   const missingCount = missingRaw.length;
   const extraCount   = results.filter(r => r.type === "extra").length;
   const keptCount    = results.filter(r => r.type === "kept").length;
+  const ignoredCount = results.filter(r => r.type === "ignored").length;
 
   // Convert missing stmt rows into editable review rows for TransactionReviewList
   const missingReviewRows = useMemo(() => {
@@ -717,7 +720,7 @@ export default function ReconcileModal({
 
   const sortedResults = useMemo(() =>
     [...results]
-      .filter(r => viewFilter === "all" || r.type === viewFilter || (viewFilter === "match" && r.type === "kept"))
+      .filter(r => viewFilter === "all" || r.type === viewFilter || (viewFilter === "match" && (r.type === "kept" || r.type === "ignored")))
       .sort((a, b) => {
         const da = a.stmt?.date || a.ledger?.tx_date || "";
         const db = b.stmt?.date || b.ledger?.tx_date || "";
@@ -764,7 +767,9 @@ export default function ReconcileModal({
 
   const BORDER_L = { match: "3px solid #059669", missing: "3px solid #d97706", extra: "3px solid #dc2626", kept: "3px solid #d1d5db" };
   const ROW_BG   = { match: "#f0fdf4", missing: "#fffbeb", extra: "#fef2f2", kept: "#f9fafb" };
-  const BADGE_S  = { match: { bg: "#dcfce7", color: "#059669", label: "✓" }, missing: { bg: "#fef3c7", color: "#d97706", label: "!" }, extra: { bg: "#fee2e2", color: "#dc2626", label: "?" }, kept: { bg: "#e5e7eb", color: "#6b7280", label: "◦" } };
+  const BADGE_S  = { match: { bg: "#dcfce7", color: "#059669", label: "✓" }, missing: { bg: "#fef3c7", color: "#d97706", label: "!" }, extra: { bg: "#fee2e2", color: "#dc2626", label: "?" }, kept: { bg: "#e5e7eb", color: "#6b7280", label: "◦" }, ignored: { bg: "#f3f4f6", color: "#9ca3af", label: "–" } };
+  const BORDER_L_MAP = { ...BORDER_L, ignored: "3px solid #d1d5db" };
+  const ROW_BG_MAP   = { ...ROW_BG, ignored: "#f9fafb" };
 
   return (
     <>
@@ -809,7 +814,7 @@ export default function ReconcileModal({
                 onClick={() => {
                   setYear(p.year); setMonth(p.month);
                   setStmtRows([]); setSession(null); setPdfSource(""); setPdfFile(null);
-                  setKeptIds(new Set()); setMissingOverrides({});
+                  setKeptIds(new Set()); setIgnoredIds(new Set()); setMissingOverrides({});
                 }}
                 style={{
                   fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6,
@@ -904,6 +909,7 @@ export default function ReconcileModal({
               <span style={PILL("#fef3c7", "#d97706")}>! {missingCount}</span>
               <span style={PILL("#fee2e2", "#dc2626")}>? {extraCount}</span>
               {keptCount > 0 && <span style={PILL("#e5e7eb", "#6b7280")}>◦ {keptCount}</span>}
+              {ignoredCount > 0 && <span style={PILL("#f3f4f6", "#9ca3af")}>– {ignoredCount}</span>}
               <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: F }}>{totalRows} total</span>
               <span style={{ width: 1, height: 16, background: "#e5e7eb" }} />
               {filterPill("all", "All")}
@@ -943,21 +949,26 @@ export default function ReconcileModal({
                 const missRow = type === "missing" ? missingRowsFinal.find(mr => mr._id === s?._id) : null;
                 const isOdd = i % 2 === 1;
 
+                const isMuted = type === "kept" || type === "ignored";
+
                 return (
                   <div key={s?._id || l?.id || i}>
                     <div style={{
                       display: "grid", gridTemplateColumns: "58px 1fr 80px 80px 90px 48px",
-                      padding: "6px 8px", borderLeft: BORDER_L[type],
-                      background: isOdd ? (ROW_BG[type] || "#fafafa") : ROW_BG[type],
+                      padding: "6px 8px", borderLeft: (BORDER_L_MAP[type] || BORDER_L[type]),
+                      background: isOdd ? (ROW_BG_MAP[type] || ROW_BG[type] || "#fafafa") : (ROW_BG_MAP[type] || ROW_BG[type]),
                       borderBottom: "1px solid #f3f4f6", alignItems: "center",
-                      opacity: type === "kept" ? 0.55 : 1,
+                      opacity: isMuted ? 0.55 : 1,
                       fontFamily: F, fontSize: 11,
                     }}>
                       <span style={{ fontSize: 10, color: "#6b7280" }}>{date.slice(5)}</span>
-                      <span style={{ fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: 4 }}>{desc || "—"}</span>
-                      <span style={{ textAlign: "right", fontWeight: 600, color: dir === "out" ? "#dc2626" : "transparent" }}>{dir === "out" ? fmtIDR(amt, true) : ""}</span>
-                      <span style={{ textAlign: "right", fontWeight: 600, color: dir === "in" ? "#059669" : "transparent" }}>{dir === "in" ? fmtIDR(amt, true) : ""}</span>
-                      <span style={{ textAlign: "right", fontSize: 10, color: "#6b7280" }}>{fmtIDR(Math.abs(balanceMap[i] || 0), true)}</span>
+                      <span style={{ fontWeight: 600, color: isMuted ? "#9ca3af" : "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: 4 }}>
+                        {desc || "—"}
+                        {type === "ignored" && <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, color: "#9ca3af", background: "#f3f4f6", padding: "1px 5px", borderRadius: 3 }}>Ignored</span>}
+                      </span>
+                      <span style={{ textAlign: "right", fontWeight: 600, color: dir === "out" ? "#dc2626" : "transparent" }}>{dir === "out" ? fmtIDR(amt) : ""}</span>
+                      <span style={{ textAlign: "right", fontWeight: 600, color: dir === "in" ? "#059669" : "transparent" }}>{dir === "in" ? fmtIDR(amt) : ""}</span>
+                      <span style={{ textAlign: "right", fontSize: 10, color: "#6b7280" }}>{fmtIDR(Math.abs(balanceMap[i] || 0))}</span>
                       <div style={{ display: "flex", justifyContent: "center" }}>
                         <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: 4, background: badge.bg, color: badge.color, fontSize: 10, fontWeight: 800 }}>{badge.label}</span>
                       </div>
@@ -967,6 +978,14 @@ export default function ReconcileModal({
                     {type === "missing" && !isExpanded && (
                       <div style={{ display: "flex", gap: 6, padding: "4px 8px 6px 64px", background: "#fffbeb", borderBottom: "1px solid #fde68a", borderLeft: "3px solid #d97706" }}>
                         <button onClick={() => setExpandedId(s?._id)} style={btnS("#3b5bdb", "#bfdbfe")}>Add</button>
+                        <button onClick={() => setIgnoredIds(prev => { const n = new Set(prev); n.add(s?._id); return n; })} style={btnS("#6b7280", "#e5e7eb")}>Ignore</button>
+                      </div>
+                    )}
+
+                    {/* Undo ignore */}
+                    {type === "ignored" && (
+                      <div style={{ display: "flex", gap: 6, padding: "4px 8px 6px 64px", background: "#f9fafb", borderBottom: "1px solid #e5e7eb", borderLeft: "3px solid #d1d5db", opacity: 0.55 }}>
+                        <button onClick={() => setIgnoredIds(prev => { const n = new Set(prev); n.delete(s?._id); return n; })} style={btnS("#6b7280", "#e5e7eb")}>Undo Ignore</button>
                       </div>
                     )}
 
@@ -1044,7 +1063,7 @@ export default function ReconcileModal({
           title={`Hapus transaksi ${delTarget.description ? `"${delTarget.description}"` : ""}?`} width={420}
           footer={<div style={{ display: "flex", gap: 8, justifyContent: "flex-end", width: "100%" }}><Button variant="ghost" onClick={() => setDelTarget(null)}>Batal</Button><Button variant="danger" onClick={handleDelete}>Hapus</Button></div>}>
           <div style={{ fontSize: 12, color: "#374151", fontFamily: F }}>
-            <strong>{delTarget.description || "—"}</strong> · {delTarget.tx_date} · {fmtIDR(Number(delTarget.amount_idr || delTarget.amount || 0), true)}
+            <strong>{delTarget.description || "—"}</strong> · {delTarget.tx_date} · {fmtIDR(Number(delTarget.amount_idr || delTarget.amount || 0))}
           </div>
         </Modal>
       )}
