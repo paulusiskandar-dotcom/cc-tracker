@@ -1,10 +1,11 @@
 // ReconcileModal.jsx — Full reconcile flow: PDF extraction → match → review
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { reconcileApi } from "../api";
+import { reconcileApi, ledgerApi, installmentsApi, getTxFromToTypes } from "../api";
 import { supabase } from "../lib/supabase";
-import { fmtIDR, todayStr } from "../utils";
+import { fmtIDR, todayStr, checkDuplicateTransaction, resolveCategoryIds } from "../utils";
+import { LIGHT, DARK } from "../theme";
 import Modal from "./shared/Modal";
-import { Button, showToast } from "./shared/index";
+import { Button, showToast, TransactionReviewList } from "./shared/index";
 import TransactionModal from "./shared/TransactionModal";
 
 const EDGE_URL          = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/gmail-estatement`;
@@ -93,7 +94,12 @@ export default function ReconcileModal({
   const [delTarget,    setDelTarget]    = useState(null);
   // Kept extras — user marked these as intentional so they aren't flagged anymore
   const [keptIds,      setKeptIds]      = useState(() => new Set());
+  // Missing-row review state (TransactionReviewList)
+  const [missingSelected, setMissingSelected] = useState({});
+  const [missingSkipped,  setMissingSkipped]  = useState(() => new Set());
+  const [missingImporting, setMissingImporting] = useState(false);
 
+  const T = dark ? DARK : LIGHT;
   const periodStr = account ? `${year}-${String(month).padStart(2, "0")}` : "";
   const periodLabel = account ? new Date(year, month - 1).toLocaleDateString("en-US", { month: "long", year: "numeric" }) : "";
 
@@ -114,9 +120,68 @@ export default function ReconcileModal({
     );
   }, [stmtRows, periodLedger, keptIds]);
   const matchCount   = results.filter(r => r.type === "match").length;
-  const missingCount = results.filter(r => r.type === "missing").length;
+  const missingRaw   = results.filter(r => r.type === "missing");
+  const missingCount = missingRaw.length;
   const extraCount   = results.filter(r => r.type === "extra").length;
   const keptCount    = results.filter(r => r.type === "kept").length;
+
+  // Convert missing stmt rows into editable review rows for TransactionReviewList
+  const missingReviewRows = useMemo(() => {
+    return missingRaw.map(r => {
+      const s = r.stmt;
+      const isIncome = s.direction === "in";
+      const amt = Math.abs(Number(s.amount || 0));
+      const txType = isIncome ? "income" : "expense";
+      const dup = checkDuplicateTransaction(ledger, {
+        tx_date: s.date, amount_idr: amt, description: s.description || s.merchant || "",
+        from_id: isIncome ? null : account?.id,
+      });
+      return {
+        _id:           s._id || `miss-${s.date}-${amt}`,
+        tx_date:       s.date || todayStr(),
+        description:   s.description || s.merchant || "",
+        amount:        amt,
+        amount_idr:    amt,
+        currency:      s.currency || "IDR",
+        tx_type:       txType,
+        from_id:       isIncome ? null : account?.id,
+        to_id:         isIncome ? account?.id : null,
+        category_id:   s.category_id || null,
+        category_name: null,
+        entity:        "Personal",
+        notes:         "",
+        source:        "reconcile",
+        status:        dup?.level === 3 ? "duplicate" : dup?.level === 2 ? "possible_duplicate" : dup?.level === 1 ? "review" : null,
+        _dupEntry:     dup?.matchEntry || null,
+        _dupReasons:   dup?.reasons || [],
+      };
+    });
+  }, [missingRaw, ledger, account]);
+
+  // Auto-select non-duplicate missing rows when they first appear
+  useEffect(() => {
+    if (missingReviewRows.length === 0) return;
+    setMissingSelected(prev => {
+      const next = { ...prev };
+      let changed = false;
+      missingReviewRows.forEach(r => {
+        if (!(r._id in next)) { next[r._id] = r.status !== "duplicate"; changed = true; }
+      });
+      return changed ? next : prev;
+    });
+  }, [missingReviewRows]);
+
+  // Missing row handlers
+  const updateMissingRow = useCallback((_id, patch) => {
+    // We can't mutate the results memo, so we track overrides in a ref-like state
+    setMissingOverrides(prev => ({ ...prev, [_id]: { ...(prev[_id] || {}), ...patch } }));
+  }, []);
+  const [missingOverrides, setMissingOverrides] = useState({});
+
+  // Apply overrides to review rows
+  const missingRowsFinal = useMemo(() =>
+    missingReviewRows.map(r => ({ ...r, ...(missingOverrides[r._id] || {}) })),
+  [missingReviewRows, missingOverrides]);
 
   // ── Look up statement PDF flagged from Gmail for this account+period ────
   useEffect(() => {
@@ -276,29 +341,75 @@ export default function ReconcileModal({
     }
   };
 
-  // ── Add missing transaction ─────────────────────────────────
-  // TransactionModal only honours `initialData` in 'edit' or 'confirm' mode —
-  // 'add' mode resets to EMPTY(). We use 'confirm' so the form is pre-filled
-  // from the statement row but saves as a new ledger insert (not an update).
-  const openAddFromStmt = (s) => {
-    const isIncome = s.direction === "in";
-    const amt      = Math.abs(Number(s.amount || 0));
-    setTxInitial({
-      tx_date:     s.date || todayStr(),
-      description: s.description || s.merchant || "",
-      amount:      amt,
-      amount_idr:  amt,
-      currency:    s.currency || "IDR",
-      tx_type:     isIncome ? "income" : "expense",
-      from_id:     isIncome ? null : account.id,
-      to_id:       isIncome ? account.id : null,
-      from_type:   isIncome ? "income"  : "account",
-      to_type:     isIncome ? "account" : "expense",
-      category_id: s.category_id || null,
-      entity:      "Personal",
-      notes:       "",
+  // ── Import one missing row (inline confirm from TransactionReviewList) ──
+  const buildEntry = (r) => {
+    const txType = r.tx_type || "expense";
+    const { from_type, to_type } = getTxFromToTypes(txType);
+    const catResolved = resolveCategoryIds(r.category_id, categories);
+    return {
+      tx_date:     r.tx_date,
+      description: r.description || "",
+      amount:      Number(r.amount || 0),
+      currency:    r.currency || "IDR",
+      amount_idr:  Number(r.amount_idr || r.amount || 0),
+      tx_type:     txType, from_type, to_type,
+      from_id:     r.from_id || null,
+      to_id:       r.to_id || null,
+      category_id: catResolved.category_id,
+      category_name: catResolved.category_name,
+      entity:      r.entity || "Personal",
+      is_reimburse: txType === "reimburse_out" || txType === "reimburse_in",
+      notes:       r.notes || "",
+    };
+  };
+
+  const confirmMissingOne = async (row) => {
+    try {
+      const created = await ledgerApi.create(user.id, buildEntry(row), accounts);
+      if (created) {
+        setLedger?.(prev => [created, ...prev]);
+        if (row._cicilan && row._cicilanMonths >= 2) {
+          installmentsApi.createFromImport(user.id, {
+            ledgerId: created.id, description: row.description || "", accountId: row.from_id,
+            amount: Number(row.amount_idr || row.amount || 0), totalMonths: row._cicilanMonths,
+            paidMonths: row._cicilanKe || 1,
+            currency: row.currency || "IDR", txDate: row.tx_date, categoryId: row.category_id || null,
+          }).catch(e => console.error("[cicilan reconcile]", e));
+        }
+        showToast(`Imported: ${row.description || "transaction"}`);
+      }
+    } catch (e) { showToast(e.message, "error"); }
+  };
+
+  const confirmMissingAll = async (validRows) => {
+    setMissingImporting(true);
+    let ok = 0;
+    for (const r of validRows) {
+      try {
+        const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
+        if (created) {
+          setLedger?.(prev => [created, ...prev]); ok++;
+          if (r._cicilan && r._cicilanMonths >= 2) {
+            installmentsApi.createFromImport(user.id, {
+              ledgerId: created.id, description: r.description || "", accountId: r.from_id,
+              amount: Number(r.amount_idr || r.amount || 0), totalMonths: r._cicilanMonths,
+              paidMonths: r._cicilanKe || 1,
+              currency: r.currency || "IDR", txDate: r.tx_date, categoryId: r.category_id || null,
+            }).catch(e => console.error("[cicilan reconcile]", e));
+          }
+        }
+      } catch { /* continue */ }
+    }
+    showToast(`Imported ${ok} of ${validRows.length} transactions`);
+    setMissingImporting(false);
+  };
+
+  const skipMissing = (id) => {
+    setMissingSkipped(prev => {
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
     });
-    setTxModalMode("confirm");
   };
 
   // ── Edit extra ledger row (opens TransactionModal in 'edit') ───
@@ -479,7 +590,7 @@ export default function ReconcileModal({
               <span>Ledger</span>
             </div>
 
-            {results.map((r, i) => {
+            {results.filter(r => r.type !== "missing").map((r, i) => {
               if (r.type === "match") {
                 const s = r.stmt;
                 const l = r.ledger;
@@ -497,28 +608,6 @@ export default function ReconcileModal({
                         {l.description || "—"}
                       </div>
                       <div style={{ fontSize: 10, color: "#6b7280" }}>{l.tx_date} · {fmtIDR(Number(l.amount_idr || l.amount || 0), true)}</div>
-                    </div>
-                  </div>
-                );
-              }
-
-              if (r.type === "missing") {
-                const s = r.stmt;
-                return (
-                  <div key={i} style={{ ...ROW_STYLE, background: "#fffbeb", border: "1px solid #fde68a" }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 11, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {s.description || s.merchant || "—"}
-                      </div>
-                      <div style={{ fontSize: 10, color: "#6b7280" }}>{s.date} · {fmtIDR(Math.abs(Number(s.amount || 0)), true)}</div>
-                    </div>
-                    <div style={{ width: 32, textAlign: "center", fontSize: 14 }}>!</div>
-                    <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ fontSize: 10, color: "#d97706", fontStyle: "italic" }}>Not in ledger</span>
-                      <button onClick={() => openAddFromStmt(s)}
-                        style={{ fontSize: 10, fontWeight: 700, color: "#3b5bdb", background: "none", border: "1px solid #bfdbfe", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontFamily: "Figtree, sans-serif" }}>
-                        Add
-                      </button>
                     </div>
                   </div>
                 );
@@ -575,6 +664,35 @@ export default function ReconcileModal({
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* Missing rows — full AI-scan-style review list */}
+        {missingRowsFinal.length > 0 && (
+          <div style={{ marginTop: 8 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#d97706", fontFamily: "Figtree, sans-serif", marginBottom: 6 }}>
+              Missing from Ledger ({missingRowsFinal.length})
+            </div>
+            <TransactionReviewList
+              rows={missingRowsFinal}
+              selected={missingSelected}
+              skipped={missingSkipped}
+              onUpdateRow={updateMissingRow}
+              onConfirmRow={confirmMissingOne}
+              onSkipRow={skipMissing}
+              onConfirmAll={confirmMissingAll}
+              onToggleSelect={id => setMissingSelected(s => ({ ...s, [id]: !s[id] }))}
+              onToggleAll={() => {
+                const allSel = missingRowsFinal.every(r => missingSelected[r._id]);
+                const next = {};
+                missingRowsFinal.forEach(r => { next[r._id] = !allSel; });
+                setMissingSelected(next);
+              }}
+              source="reconcile"
+              accounts={accounts}
+              T={T}
+              busy={missingImporting}
+            />
           </div>
         )}
 
