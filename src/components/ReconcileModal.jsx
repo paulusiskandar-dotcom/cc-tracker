@@ -276,10 +276,13 @@ export default function ReconcileModal({
     }
   };
 
-  // ── Add missing transaction (opens TransactionModal in 'add') ──
+  // ── Add missing transaction ─────────────────────────────────
+  // TransactionModal only honours `initialData` in 'edit' or 'confirm' mode —
+  // 'add' mode resets to EMPTY(). We use 'confirm' so the form is pre-filled
+  // from the statement row but saves as a new ledger insert (not an update).
   const openAddFromStmt = (s) => {
     const isIncome = s.direction === "in";
-    const amt = Math.abs(Number(s.amount || 0));
+    const amt      = Math.abs(Number(s.amount || 0));
     setTxInitial({
       tx_date:     s.date || todayStr(),
       description: s.description || s.merchant || "",
@@ -295,7 +298,7 @@ export default function ReconcileModal({
       entity:      "Personal",
       notes:       "",
     });
-    setTxModalMode("add");
+    setTxModalMode("confirm");
   };
 
   // ── Edit extra ledger row (opens TransactionModal in 'edit') ───
