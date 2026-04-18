@@ -1,5 +1,5 @@
 // ReconcileModal.jsx — Full reconcile flow: PDF extraction → match → review
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { reconcileApi, ledgerApi } from "../api";
 import { supabase } from "../lib/supabase";
 import { fmtIDR, todayStr } from "../utils";
@@ -7,7 +7,8 @@ import Modal from "./shared/Modal";
 import { Button, showToast } from "./shared/index";
 import TransactionModal from "./shared/TransactionModal";
 
-const EDGE_URL = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/gmail-estatement`;
+const EDGE_URL          = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/gmail-estatement`;
+const RECONCILE_PDF_URL = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/reconcile-pdf`;
 
 const PILL = (bg, color) => ({
   display: "inline-flex", alignItems: "center", gap: 4,
@@ -77,6 +78,11 @@ export default function ReconcileModal({
   const [completing,  setCompleting]  = useState(false);
   const [session,     setSession]     = useState(sessionId || null);
 
+  // Statement PDF detected from Gmail (flagged by gmail-sync)
+  const [emailStmt,      setEmailStmt]      = useState(null); // row from statement_attachments
+  const [emailPassword,  setEmailPassword]  = useState("");
+  const [needsPassword,  setNeedsPassword]  = useState(false);
+
   // Add transaction modal
   const [addModal,    setAddModal]    = useState(false);
   const [addPreFill,  setAddPreFill]  = useState(null);
@@ -99,6 +105,84 @@ export default function ReconcileModal({
   const matchCount   = results.filter(r => r.type === "match").length;
   const missingCount = results.filter(r => r.type === "missing").length;
   const extraCount   = results.filter(r => r.type === "extra").length;
+
+  // ── Look up statement PDF flagged from Gmail for this account+period ────
+  useEffect(() => {
+    if (!isOpen || !account || !user) { setEmailStmt(null); return; }
+    let cancelled = false;
+    (async () => {
+      // Prefer an exact account+period match; fall back to any statement from the
+      // same bank matching the period (account_id may be null if gmail-sync couldn't
+      // disambiguate multiple accounts on the same bank).
+      const { data: exact } = await supabase
+        .from("statement_attachments")
+        .select("*")
+        .eq("user_id", user.id)
+        .eq("account_id", account.id)
+        .eq("period_year", year)
+        .eq("period_month", month)
+        .order("received_at", { ascending: false })
+        .limit(1);
+      let row = exact?.[0] || null;
+
+      if (!row && account.bank_name) {
+        const { data: byBank } = await supabase
+          .from("statement_attachments")
+          .select("*")
+          .eq("user_id", user.id)
+          .is("account_id", null)
+          .eq("period_year", year)
+          .eq("period_month", month)
+          .ilike("bank_name", `%${account.bank_name}%`)
+          .order("received_at", { ascending: false })
+          .limit(1);
+        row = byBank?.[0] || null;
+      }
+      if (!cancelled) setEmailStmt(row);
+    })();
+    return () => { cancelled = true; };
+  }, [isOpen, account, user, year, month]);
+
+  // ── Download & process PDF from Gmail ───────────────────────
+  const handleDownloadFromEmail = useCallback(async () => {
+    if (!emailStmt) return;
+    setProcessing(true);
+    setPdfSource(emailStmt.filename || "statement.pdf");
+    try {
+      const res = await fetch(RECONCILE_PDF_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
+          apikey: process.env.REACT_APP_SUPABASE_ANON_KEY,
+        },
+        body: JSON.stringify({
+          user_id:       user.id,
+          email_id:      emailStmt.gmail_message_id,
+          attachment_id: emailStmt.attachment_id,
+          password:      emailPassword || undefined,
+        }),
+      });
+      const data = await res.json();
+
+      if (data.needs_password) {
+        setNeedsPassword(true);
+        showToast(data.error || "Password required", "error");
+        return;
+      }
+      if (data.success && Array.isArray(data.transactions)) {
+        setStmtRows(data.transactions.map((t, i) => ({ ...t, _id: `stmt-${i}` })));
+        setNeedsPassword(false);
+        showToast(`${data.transactions.length} transactions extracted`);
+      } else {
+        showToast(data.error || "No transactions found", "error");
+      }
+    } catch (err) {
+      showToast(`Error: ${err.message}`, "error");
+    } finally {
+      setProcessing(false);
+    }
+  }, [emailStmt, emailPassword, user]);
 
   // ── Upload & process PDF ────────────────────────────────────
   const handleUpload = useCallback(async (e) => {
@@ -237,6 +321,71 @@ export default function ReconcileModal({
         <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 12, fontFamily: "Figtree, sans-serif" }}>
           {periodLabel}{pdfSource ? ` · ${pdfSource}` : ""}
         </div>
+
+        {/* Statement-from-email banner */}
+        {stmtRows.length === 0 && emailStmt && (
+          <div style={{
+            background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10,
+            padding: "10px 14px", marginBottom: 14, fontFamily: "Figtree, sans-serif",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+              <span style={{ fontSize: 14 }}>📎</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#1e3a8a" }}>
+                  Statement tersedia dari email
+                </div>
+                <div style={{
+                  fontSize: 11, color: "#475569",
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>
+                  {emailStmt.filename || "statement.pdf"}
+                  {emailStmt.sender_email ? ` · ${emailStmt.sender_email}` : ""}
+                </div>
+              </div>
+            </div>
+            {needsPassword && (
+              <input
+                type="password"
+                placeholder="Password PDF (jika terenkripsi)"
+                value={emailPassword}
+                onChange={e => setEmailPassword(e.target.value)}
+                style={{
+                  fontSize: 12, padding: "6px 10px", border: "1px solid #cbd5e1",
+                  borderRadius: 8, fontFamily: "Figtree, sans-serif",
+                  width: "100%", marginBottom: 8, boxSizing: "border-box",
+                }}
+              />
+            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={handleDownloadFromEmail}
+                disabled={processing}
+                style={{
+                  fontSize: 12, fontWeight: 700, color: "#fff",
+                  background: processing ? "#93c5fd" : "#3b5bdb",
+                  padding: "6px 16px", borderRadius: 8, border: "none",
+                  cursor: processing ? "default" : "pointer",
+                  fontFamily: "Figtree, sans-serif",
+                }}
+              >
+                {processing ? "Processing…" : (needsPassword ? "Retry with Password" : "Download & Process")}
+              </button>
+              {!needsPassword && (
+                <button
+                  onClick={() => setNeedsPassword(true)}
+                  style={{
+                    fontSize: 11, fontWeight: 600, color: "#475569",
+                    background: "transparent", padding: "6px 10px",
+                    border: "1px solid #cbd5e1", borderRadius: 8, cursor: "pointer",
+                    fontFamily: "Figtree, sans-serif",
+                  }}
+                >
+                  PDF terenkripsi?
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Password input */}
         {stmtRows.length === 0 && (

@@ -59,6 +59,38 @@ const BANK_DOMAINS = [
   "notifikasi.bankmandiri.co.id",
 ];
 
+// Keywords (case-insensitive) in the subject that mark an email as likely carrying
+// a bank statement PDF. Used by the statement_attachments detector.
+const STATEMENT_SUBJECT_KEYWORDS = ["statement", "rekening", "mutasi", "tagihan", "e-statement"];
+
+// Map sender domain → canonical bank name (shared with gmail-estatement).
+function bankNameFromDomain(senderEmail: string): string {
+  const domain = senderEmail.split("@")[1]?.toLowerCase() || "";
+  if (domain.includes("bca"))       return "BCA";
+  if (domain.includes("mandiri"))   return "Mandiri";
+  if (domain.includes("bni"))       return "BNI";
+  if (domain.includes("bri"))       return "BRI";
+  if (domain.includes("cimb"))      return "CIMB Niaga";
+  if (domain.includes("jenius") || domain.includes("smbci") || domain.includes("btpn")) return "Jenius";
+  if (domain.includes("ocbc"))      return "OCBC";
+  if (domain.includes("danamon"))   return "Danamon";
+  if (domain.includes("maybank"))   return "Maybank";
+  if (domain.includes("uob"))       return "UOB";
+  if (domain.includes("citibank"))  return "Citibank";
+  if (domain.includes("hsbc"))      return "HSBC";
+  if (domain.includes("permata"))   return "Permata";
+  if (domain.includes("mega"))      return "Bank Mega";
+  if (domain.includes("btn"))       return "BTN";
+  if (domain.includes("superbank")) return "Superbank";
+  if (domain.includes("blu"))       return "Blu";
+  return domain;
+}
+
+const MONTH_LOOKUP: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
+  jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+};
+
 // Keywords that indicate non-transactional emails to skip.
 // NOTE: Bracketed subject prefixes like [RAHASIA], [INFO], [WARNING] are intentionally
 // NOT in this list — Indonesian banks use these brackets on real transaction emails
@@ -373,11 +405,77 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
     // Strip HTML tags for plain text
     const plainBody = rawBody.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 
-    // Check for PDF attachment
-    const hasPdf = (msgData.payload?.parts || []).some((p: any) =>
-      p.filename?.toLowerCase().endsWith(".pdf") || p.mimeType === "application/pdf"
+    // Walk the full MIME tree — PDF attachments can live inside multipart/mixed
+    // or multipart/related wrappers, not just top-level payload.parts.
+    const allParts: any[] = [];
+    const collectParts = (part: any) => {
+      if (!part) return;
+      allParts.push(part);
+      if (part.parts) part.parts.forEach(collectParts);
+    };
+    collectParts(msgData.payload);
+
+    const pdfAttachments = allParts.filter((p: any) =>
+      (p.filename?.toLowerCase().endsWith(".pdf") || p.mimeType === "application/pdf")
+      && p.body?.attachmentId
     );
+    const hasPdf    = pdfAttachments.length > 0;
     const emailType = hasPdf ? "monthly_statement" : "transaction_notification";
+
+    // ── Flag statement PDFs (do NOT download) ──────────────────
+    // If the subject looks like a bank statement AND there are PDF attachments,
+    // save attachment metadata so the Reconcile UI can fetch them on demand.
+    const subjectLower   = subject.toLowerCase();
+    const isStatementSubj = STATEMENT_SUBJECT_KEYWORDS.some(k => subjectLower.includes(k));
+    if (hasPdf && isStatementSubj) {
+      const bankName = bankNameFromDomain(senderEmail);
+
+      // Try to match a single account by bank name (best-effort — user can reassign).
+      const poolAccounts = userAccounts.filter((a: any) =>
+        a.bank_name && a.bank_name.toLowerCase().includes(bankName.toLowerCase())
+      );
+      const matchedAccountId = poolAccounts.length === 1 ? poolAccounts[0].id : null;
+
+      // Period: "Jan 2026" / "January 2026" in subject wins, else fall back to received date.
+      let periodYear:  number | null = null;
+      let periodMonth: number | null = null;
+      const monthMatch = (subject + " " + receivedAt).match(
+        /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s\-,]*(\d{4})\b/i
+      );
+      if (monthMatch) {
+        periodMonth = MONTH_LOOKUP[monthMatch[1].toLowerCase().slice(0, 3)] || null;
+        periodYear  = parseInt(monthMatch[2], 10);
+      } else if (receivedAt) {
+        const d = new Date(receivedAt);
+        if (!isNaN(d.getTime())) {
+          periodYear  = d.getFullYear();
+          periodMonth = d.getMonth() + 1;
+        }
+      }
+
+      for (const pdfPart of pdfAttachments) {
+        try {
+          await supabase.from("statement_attachments").upsert(
+            {
+              user_id:          userId,
+              gmail_message_id: msg.id,
+              attachment_id:    pdfPart.body.attachmentId,
+              filename:         pdfPart.filename || "statement.pdf",
+              sender_email:     senderEmail,
+              bank_name:        bankName,
+              account_id:       matchedAccountId,
+              period_year:      periodYear,
+              period_month:     periodMonth,
+              subject,
+              received_at:      receivedAt ? new Date(receivedAt).toISOString() : new Date().toISOString(),
+            },
+            { onConflict: "user_id,gmail_message_id,attachment_id" }
+          );
+        } catch (e) {
+          console.warn("[gmail-sync] statement_attachments upsert failed:", e);
+        }
+      }
+    }
 
     // AI extraction
     let aiResult = null;
