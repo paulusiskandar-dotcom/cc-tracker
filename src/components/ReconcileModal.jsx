@@ -1,6 +1,6 @@
 // ReconcileModal.jsx — Full reconcile flow: PDF extraction → match → review
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { reconcileApi, ledgerApi } from "../api";
+import { reconcileApi } from "../api";
 import { supabase } from "../lib/supabase";
 import { fmtIDR, todayStr } from "../utils";
 import Modal from "./shared/Modal";
@@ -70,6 +70,9 @@ export default function ReconcileModal({
   isOpen, onClose, account, user, accounts, categories,
   ledger, setLedger, onRefresh, year, month, sessionId,
   dark,
+  // Data props forwarded to TransactionModal (Add / Edit flows).
+  bankAccounts, creditCards, assets, liabilities, receivables,
+  incomeSrcs, fxRates, allCurrencies, accountCurrencies,
 }) {
   const [stmtRows,    setStmtRows]    = useState([]);
   const [processing,  setProcessing]  = useState(false);
@@ -83,11 +86,13 @@ export default function ReconcileModal({
   const [emailPassword,  setEmailPassword]  = useState("");
   const [needsPassword,  setNeedsPassword]  = useState(false);
 
-  // Add transaction modal
-  const [addModal,    setAddModal]    = useState(false);
-  const [addPreFill,  setAddPreFill]  = useState(null);
-  // Delete confirmation
-  const [delTarget,   setDelTarget]   = useState(null);
+  // Add-from-missing / Edit-extra transaction modal
+  const [txModalMode,  setTxModalMode]  = useState(null); // 'add' | 'edit' | null
+  const [txInitial,    setTxInitial]    = useState(null);
+  // Delete confirmation (for extra ledger rows)
+  const [delTarget,    setDelTarget]    = useState(null);
+  // Kept extras — user marked these as intentional so they aren't flagged anymore
+  const [keptIds,      setKeptIds]      = useState(() => new Set());
 
   const periodStr = account ? `${year}-${String(month).padStart(2, "0")}` : "";
   const periodLabel = account ? new Date(year, month - 1).toLocaleDateString("en-US", { month: "long", year: "numeric" }) : "";
@@ -101,10 +106,17 @@ export default function ReconcileModal({
     });
   }, [ledger, account, periodStr]);
 
-  const results = useMemo(() => matchTransactions(stmtRows, periodLedger), [stmtRows, periodLedger]);
+  const results = useMemo(() => {
+    const raw = matchTransactions(stmtRows, periodLedger);
+    // Rewrite "extra" rows that the user has marked kept into a distinct type.
+    return raw.map(r =>
+      r.type === "extra" && keptIds.has(r.ledger?.id) ? { ...r, type: "kept" } : r
+    );
+  }, [stmtRows, periodLedger, keptIds]);
   const matchCount   = results.filter(r => r.type === "match").length;
   const missingCount = results.filter(r => r.type === "missing").length;
   const extraCount   = results.filter(r => r.type === "extra").length;
+  const keptCount    = results.filter(r => r.type === "kept").length;
 
   // ── Look up statement PDF flagged from Gmail for this account+period ────
   useEffect(() => {
@@ -264,19 +276,41 @@ export default function ReconcileModal({
     }
   };
 
-  // ── Add missing transaction ─────────────────────────────────
+  // ── Add missing transaction (opens TransactionModal in 'add') ──
   const openAddFromStmt = (s) => {
-    setAddPreFill({
-      tx_date: s.date || todayStr(),
+    const isIncome = s.direction === "in";
+    const amt = Math.abs(Number(s.amount || 0));
+    setTxInitial({
+      tx_date:     s.date || todayStr(),
       description: s.description || s.merchant || "",
-      amount: Math.abs(Number(s.amount || 0)),
-      currency: s.currency || "IDR",
-      amount_idr: Math.abs(Number(s.amount || 0)),
-      tx_type: (s.direction === "in") ? "income" : "expense",
-      from_id: (s.direction !== "in") ? account.id : null,
-      to_id: (s.direction === "in") ? account.id : null,
+      amount:      amt,
+      amount_idr:  amt,
+      currency:    s.currency || "IDR",
+      tx_type:     isIncome ? "income" : "expense",
+      from_id:     isIncome ? null : account.id,
+      to_id:       isIncome ? account.id : null,
+      from_type:   isIncome ? "income"  : "account",
+      to_type:     isIncome ? "account" : "expense",
+      category_id: s.category_id || null,
+      entity:      "Personal",
+      notes:       "",
     });
-    setAddModal(true);
+    setTxModalMode("add");
+  };
+
+  // ── Edit extra ledger row (opens TransactionModal in 'edit') ───
+  const openEditFromLedger = (l) => {
+    setTxInitial(l);
+    setTxModalMode("edit");
+  };
+
+  // ── Keep extra row (mark as intentional — stops showing as problem) ──
+  const markKept = (ledgerId) => {
+    setKeptIds(prev => {
+      const next = new Set(prev);
+      next.add(ledgerId);
+      return next;
+    });
   };
 
   // ── Delete extra transaction ────────────────────────────────
@@ -285,7 +319,7 @@ export default function ReconcileModal({
     try {
       await supabase.from("ledger").delete().eq("id", delTarget.id);
       setLedger?.(prev => prev.filter(e => e.id !== delTarget.id));
-      showToast("Deleted");
+      showToast("Transaksi dihapus");
       onRefresh?.();
     } catch (err) {
       showToast(`Error: ${err.message}`, "error");
@@ -300,15 +334,19 @@ export default function ReconcileModal({
     borderRadius: 8, marginBottom: 4, fontFamily: "Figtree, sans-serif",
   };
 
+  const hasSomething = stmtRows.length > 0 || periodLedger.length > 0;
   const footer = (
     <div style={{ display: "flex", justifyContent: "space-between", width: "100%" }}>
       <label style={{ cursor: "pointer" }}>
-        <input type="file" accept=".pdf" onChange={handleUpload} style={{ display: "none" }} />
+        {/* value reset lets the user pick the SAME file twice in a row */}
+        <input type="file" accept=".pdf" onChange={handleUpload}
+          onClick={e => { e.target.value = ""; }}
+          style={{ display: "none" }} />
         <span style={{ fontSize: 12, fontWeight: 600, color: "#3b5bdb", fontFamily: "Figtree, sans-serif", cursor: "pointer" }}>
           {pdfSource ? "Upload PDF lain" : "Upload PDF"}
         </span>
       </label>
-      <Button onClick={handleComplete} disabled={completing || stmtRows.length === 0}>
+      <Button onClick={handleComplete} disabled={completing || !hasSomething}>
         {completing ? "Saving…" : "Selesai ✓"}
       </Button>
     </div>
@@ -396,7 +434,9 @@ export default function ReconcileModal({
               style={{ fontSize: 12, padding: "6px 10px", border: "1px solid #e5e7eb", borderRadius: 8, fontFamily: "Figtree, sans-serif", width: 200 }}
             />
             <label style={{ cursor: "pointer" }}>
-              <input type="file" accept=".pdf" onChange={handleUpload} style={{ display: "none" }} />
+              <input type="file" accept=".pdf" onChange={handleUpload}
+                onClick={e => { e.target.value = ""; }}
+                style={{ display: "none" }} />
               <span style={{
                 display: "inline-block", fontSize: 12, fontWeight: 700, color: "#fff",
                 background: "#3b5bdb", padding: "6px 16px", borderRadius: 8, cursor: "pointer",
@@ -421,6 +461,7 @@ export default function ReconcileModal({
             <span style={PILL("#dcfce7", "#059669")}>✓ {matchCount} Match</span>
             <span style={PILL("#fef3c7", "#d97706")}>! {missingCount} Missing</span>
             <span style={PILL("#fee2e2", "#dc2626")}>? {extraCount} Extra</span>
+            {keptCount > 0 && <span style={PILL("#e5e7eb", "#6b7280")}>◦ {keptCount} Kept</span>}
             <span style={PILL("#f3f4f6", "#374151")}>{stmtRows.length} Total</span>
           </div>
         )}
@@ -480,25 +521,53 @@ export default function ReconcileModal({
                 );
               }
 
+              if (r.type === "kept") {
+                const l = r.ledger;
+                return (
+                  <div key={i} style={{ ...ROW_STYLE, background: "#f9fafb", border: "1px solid #e5e7eb", opacity: 0.75 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontSize: 10, color: "#9ca3af", fontStyle: "italic" }}>Kept (intentional)</span>
+                    </div>
+                    <div style={{ width: 32, textAlign: "center", fontSize: 14, color: "#9ca3af" }}>◦</div>
+                    <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {l.description || "—"}
+                        </div>
+                        <div style={{ fontSize: 10, color: "#9ca3af" }}>{l.tx_date} · {fmtIDR(Number(l.amount_idr || l.amount || 0), true)}</div>
+                      </div>
+                      <button onClick={() => setKeptIds(prev => { const n = new Set(prev); n.delete(l.id); return n; })}
+                        style={{ fontSize: 10, fontWeight: 600, color: "#6b7280", background: "none", border: "1px solid #e5e7eb", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
+                        Undo
+                      </button>
+                    </div>
+                  </div>
+                );
+              }
+
               // extra
               const l = r.ledger;
+              const btnStyle = (color, border) => ({
+                fontSize: 10, fontWeight: 700, color, background: "none",
+                border: `1px solid ${border}`, borderRadius: 4, padding: "2px 8px",
+                cursor: "pointer", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap",
+              });
               return (
                 <div key={i} style={{ ...ROW_STYLE, background: "#fef2f2", border: "1px solid #fecaca" }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <span style={{ fontSize: 10, color: "#dc2626", fontStyle: "italic" }}>Not in statement</span>
                   </div>
                   <div style={{ width: 32, textAlign: "center", fontSize: 14 }}>?</div>
-                  <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6 }}>
+                  <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 4 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 11, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {l.description || "—"}
                       </div>
                       <div style={{ fontSize: 10, color: "#6b7280" }}>{l.tx_date} · {fmtIDR(Number(l.amount_idr || l.amount || 0), true)}</div>
                     </div>
-                    <button onClick={() => setDelTarget(l)}
-                      style={{ fontSize: 10, fontWeight: 700, color: "#dc2626", background: "none", border: "1px solid #fecaca", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
-                      Hapus
-                    </button>
+                    <button onClick={() => openEditFromLedger(l)} style={btnStyle("#3b5bdb", "#bfdbfe")}>Edit</button>
+                    <button onClick={() => markKept(l.id)}       style={btnStyle("#059669", "#bbf7d0")}>Keep</button>
+                    <button onClick={() => setDelTarget(l)}      style={btnStyle("#dc2626", "#fecaca")}>Hapus</button>
                   </div>
                 </div>
               );
@@ -514,24 +583,39 @@ export default function ReconcileModal({
         )}
       </Modal>
 
-      {/* Add Transaction Modal */}
-      {addModal && addPreFill && (
+      {/* Add / Edit Transaction Modal */}
+      {txModalMode && txInitial && (
         <TransactionModal
-          isOpen={addModal}
-          onClose={() => { setAddModal(false); setAddPreFill(null); }}
+          open={!!txModalMode}
+          mode={txModalMode}
+          initialData={txInitial}
+          onSave={() => { onRefresh?.(); setTxModalMode(null); setTxInitial(null); }}
+          onDelete={() => { onRefresh?.(); setTxModalMode(null); setTxInitial(null); }}
+          onClose={() => { setTxModalMode(null); setTxInitial(null); }}
           user={user}
           accounts={accounts}
-          categories={categories}
-          ledger={ledger}
           setLedger={setLedger}
+          categories={categories}
+          fxRates={fxRates}
+          allCurrencies={allCurrencies}
+          bankAccounts={bankAccounts}
+          creditCards={creditCards}
+          assets={assets}
+          liabilities={liabilities}
+          receivables={receivables}
+          incomeSrcs={incomeSrcs}
+          accountCurrencies={accountCurrencies}
           onRefresh={onRefresh}
-          initialData={addPreFill}
         />
       )}
 
       {/* Delete confirmation */}
       {delTarget && (
-        <Modal isOpen={!!delTarget} onClose={() => setDelTarget(null)} title="Hapus transaksi?" width={380}
+        <Modal
+          isOpen={!!delTarget}
+          onClose={() => setDelTarget(null)}
+          title={`Hapus transaksi ${delTarget.description ? `"${delTarget.description}"` : ""}?`}
+          width={420}
           footer={
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", width: "100%" }}>
               <Button variant="ghost" onClick={() => setDelTarget(null)}>Batal</Button>
@@ -539,7 +623,7 @@ export default function ReconcileModal({
             </div>
           }>
           <div style={{ fontSize: 12, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
-            <strong>{delTarget.description}</strong> · {delTarget.tx_date} · {fmtIDR(Number(delTarget.amount_idr || delTarget.amount || 0), true)}
+            <strong>{delTarget.description || "—"}</strong> · {delTarget.tx_date} · {fmtIDR(Number(delTarget.amount_idr || delTarget.amount || 0), true)}
           </div>
         </Modal>
       )}
