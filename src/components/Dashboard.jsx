@@ -48,7 +48,7 @@ export default function Dashboard({
   const [payForm,       setPayForm]       = useState({ amount: "", pay_date: todayStr(), notes: "" });
   const [paySaving,     setPaySaving]     = useState(false);
   // ─── DERIVED STATS ───────────────────────────────────────────
-  const nw = netWorth || { total: 0, bank: 0, assets: 0, receivables: 0, ccDebt: 0, liabilities: 0 };
+  const nw = netWorth || { total: 0, bank: 0, assets: 0, receivables: 0, ccDebt: 0, liabilities: 0, reimburseOutstanding: 0 };
 
   const thisMonthIncome = useMemo(() =>
     thisMonthLedger
@@ -112,6 +112,7 @@ export default function Dashboard({
   [receivables]);
 
   const totalEmpLoans = useMemo(() => netWorth?.employeeLoanTotal || 0, [netWorth]);
+  const totalReimburse = useMemo(() => netWorth?.reimburseOutstanding || 0, [netWorth]);
 
   // Last 6 months cash flow (for mini chart)
   const cashFlowData = useMemo(() => {
@@ -838,9 +839,9 @@ export default function Dashboard({
         <BentoTile
           bg="#fdf6e8" icon="📋" iconBg="rgba(217,119,6,0.12)"
           label="Receivables"
-          value={fmtIDR(totalReceivables + totalEmpLoans)}
-          sub={`Reimburse: ${fmtIDR(totalReceivables, true)}${totalEmpLoans > 0 ? ` · Loans: ${fmtIDR(totalEmpLoans, true)}` : ""}`}
-          badge={totalReceivables + totalEmpLoans > 0 ? "View →" : null}
+          value={fmtIDR(totalReceivables + totalEmpLoans + totalReimburse)}
+          sub={`${totalReimburse > 0 ? `Reimburse: ${fmtIDR(totalReimburse, true)}` : ""}${totalReceivables > 0 ? `${totalReimburse > 0 ? " · " : ""}Other: ${fmtIDR(totalReceivables, true)}` : ""}${totalEmpLoans > 0 ? ` · Loans: ${fmtIDR(totalEmpLoans, true)}` : ""}`}
+          badge={totalReceivables + totalEmpLoans + totalReimburse > 0 ? "View →" : null}
           badgeColor="#d97706"
           onClick={() => setTab?.("receivables")}
         />

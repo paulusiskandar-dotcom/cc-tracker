@@ -89,7 +89,7 @@ export const agingLabel = (dateStr) => {
 };
 
 // ─── NET WORTH CALCULATION ───────────────────────────────────
-export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], fxRates = {}, accountCurrencies = [] } = {}) => {
+export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], fxRates = {}, accountCurrencies = [], reimburseSettlements = [] } = {}) => {
   let bank = 0, assets = 0, receivables = 0, ccDebt = 0, liabilities = 0;
 
   const toIDRValue = (amount, currency) => {
@@ -126,8 +126,11 @@ export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], 
       return sum + Math.max(0, Number(l.total_amount || 0) - paid);
     }, 0);
 
-  const total = bank + assets + receivables + employeeLoanTotal - ccDebt - liabilities;
-  return { total, bank, assets, receivables, ccDebt, liabilities, employeeLoanTotal };
+  const reimburseOutstanding = reimburseSettlements
+    .reduce((sum, s) => sum + Math.max(0, Number(s.total_out || 0) - Number(s.total_in || 0)), 0);
+
+  const total = bank + assets + receivables + employeeLoanTotal + reimburseOutstanding - ccDebt - liabilities;
+  return { total, bank, assets, receivables, ccDebt, liabilities, employeeLoanTotal, reimburseOutstanding };
 };
 
 // ─── CATEGORY HELPERS ─────────────────────────────────────────
