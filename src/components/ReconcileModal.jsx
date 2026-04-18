@@ -18,18 +18,15 @@ const PILL = (bg, color) => ({
 });
 
 // ── Matching logic ───────────────────────────────────────────
+// Word-overlap similarity — more robust than character matching
 function similarity(a, b) {
   if (!a || !b) return 0;
-  const la = a.toLowerCase().replace(/[^a-z0-9]/g, "");
-  const lb = b.toLowerCase().replace(/[^a-z0-9]/g, "");
-  if (!la || !lb) return 0;
-  let matches = 0;
-  const shorter = la.length <= lb.length ? la : lb;
-  const longer  = la.length <= lb.length ? lb : la;
-  for (let i = 0; i < shorter.length; i++) {
-    if (longer.includes(shorter[i])) matches++;
-  }
-  return matches / longer.length;
+  const wordsA = a.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(Boolean);
+  const wordsB = b.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(Boolean);
+  if (!wordsA.length || !wordsB.length) return 0;
+  const setB = new Set(wordsB);
+  const overlap = wordsA.filter(w => setB.has(w)).length;
+  return overlap / Math.max(wordsA.length, wordsB.length);
 }
 
 function matchTransactions(stmtRows, ledgerRows) {
@@ -43,17 +40,32 @@ function matchTransactions(stmtRows, ledgerRows) {
     for (let li = 0; li < ledgerRows.length; li++) {
       if (usedLedger.has(li)) continue;
       const l = ledgerRows[li];
-      const amtDiff = Math.abs(Number(s.amount || 0) - Number(l.amount_idr || l.amount || 0));
+      const sAmt = Math.abs(Number(s.amount || 0));
+      const lAmt = Math.abs(Number(l.amount_idr || l.amount || 0));
+      const amtDiff = Math.abs(sAmt - lAmt);
       if (amtDiff > 100) continue; // amount must be within Rp 100
-      const sd = new Date(s.date + "T00:00:00");
+
+      const sd = new Date((s.date || "") + "T00:00:00");
       const ld = new Date((l.tx_date || "") + "T00:00:00");
       const dayDiff = Math.abs((sd - ld) / 86400000);
-      if (dayDiff > 1) continue; // date within ±1 day
-      const descSim = similarity(s.description || s.merchant, l.description);
-      const score = (amtDiff < 1 ? 2 : 1) + (descSim >= 0.6 ? 1 : 0) + (dayDiff === 0 ? 0.5 : 0);
+      const descSim = similarity(s.description || s.merchant || "", l.description || "");
+
+      // Path 1: amount match + date within ±3 days + description similarity >= 60%
+      // Path 2: amount match + description very similar (>= 80%) — date can be further apart
+      let score = 0;
+      if (dayDiff <= 3 && descSim >= 0.6) {
+        score = 3 + (amtDiff < 1 ? 1 : 0) + (dayDiff === 0 ? 0.5 : dayDiff <= 1 ? 0.3 : 0) + descSim;
+      } else if (descSim >= 0.8) {
+        // Very similar description — allow wider date range (up to 7 days)
+        if (dayDiff <= 7) score = 2 + descSim + (amtDiff < 1 ? 0.5 : 0);
+      } else if (dayDiff <= 3 && amtDiff < 1) {
+        // Exact amount + close date — match even with low description similarity
+        score = 2 + (dayDiff === 0 ? 0.5 : 0);
+      }
+
       if (score > bestScore) { bestScore = score; bestIdx = li; }
     }
-    if (bestIdx >= 0) {
+    if (bestIdx >= 0 && bestScore >= 2) {
       matched.push({ type: "match", stmt: s, ledger: ledgerRows[bestIdx] });
       usedLedger.add(bestIdx);
       usedStmt.add(si);
@@ -127,12 +139,19 @@ export default function ReconcileModal({
     return { periodStart: start, periodEnd: end, periodLabel: label };
   }, [account, year, month, isCC, stmtDay]);
 
-  // Filter ledger for this account + period date range
+  // Filter ledger for this account + period date range (with ±5 day buffer for boundary matching)
   const periodLedger = useMemo(() => {
     if (!account || !ledger || !periodStart) return [];
+    const BUFFER_DAYS = 5;
+    const bufStart = new Date(periodStart + "T00:00:00");
+    bufStart.setDate(bufStart.getDate() - BUFFER_DAYS);
+    const bufEnd = new Date(periodEnd + "T00:00:00");
+    bufEnd.setDate(bufEnd.getDate() + BUFFER_DAYS);
+    const startStr = bufStart.toISOString().slice(0, 10);
+    const endStr   = bufEnd.toISOString().slice(0, 10);
     return ledger.filter(e => {
       const d = e.tx_date || "";
-      return d >= periodStart && d <= periodEnd && (e.from_id === account.id || e.to_id === account.id);
+      return d >= startStr && d <= endStr && (e.from_id === account.id || e.to_id === account.id);
     });
   }, [ledger, account, periodStart, periodEnd]);
 
