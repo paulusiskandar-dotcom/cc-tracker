@@ -136,6 +136,7 @@ export default function Receivables({
   const [selectedIn,    setSelectedIn]   = useState({}); // { accId: Set<ledgerId> }
   const [settling,      setSettling]     = useState(false);
   const [expandedSett,  setExpandedSett] = useState(new Set());
+  const [showSettled,   setShowSettled]  = useState({}); // { entity: bool }
   // ── Edit / Delete settlement ──────────────────────────────────
   const [editSModal,    setEditSModal]   = useState(false);
   const [editSItem,     setEditSItem]    = useState(null);
@@ -723,12 +724,16 @@ export default function Receivables({
               const entBg       = ENT_BG[r.entity]  || T.sur2;
 
               // All reimburse rows for this entity (entity-based, not account-id-based)
-              const outRows = ledger.filter(e =>
+              const entityShowSettled = showSettled[r.entity] || false;
+              const allOutRows = ledger.filter(e =>
                 e.tx_type === "reimburse_out" && e.entity === r.entity
               ).sort((a, b) => b.tx_date.localeCompare(a.tx_date));
-              const inRows = ledger.filter(e =>
+              const allInRows = ledger.filter(e =>
                 e.tx_type === "reimburse_in" && e.entity === r.entity
               ).sort((a, b) => b.tx_date.localeCompare(a.tx_date));
+              const outRows = entityShowSettled ? allOutRows : allOutRows.filter(e => !e.reimburse_settlement_id);
+              const inRows  = entityShowSettled ? allInRows  : allInRows.filter(e => !e.reimburse_settlement_id);
+              const hasSettled = allOutRows.some(e => e.reimburse_settlement_id) || allInRows.some(e => e.reimburse_settlement_id);
 
               const entitySettlements = settlements.filter(s => s.entity === r.entity);
 
@@ -761,6 +766,14 @@ export default function Receivables({
                         </div>
                       </div>
                       <div style={{ display: "flex", gap: 6 }}>
+                        {hasSettled && (
+                          <button
+                            onClick={() => setShowSettled(prev => ({ ...prev, [r.entity]: !prev[r.entity] }))}
+                            style={{ height: 30, padding: "0 12px", border: "1px solid #e5e7eb", borderRadius: 8, cursor: "pointer", background: "transparent", color: "#6b7280", fontSize: 11, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
+                          >
+                            {entityShowSettled ? "Hide settled" : "Show settled"}
+                          </button>
+                        )}
                         <button
                           onClick={() => { setHistoryEntity(r.entity); setHistoryModal(true); }}
                           style={{ height: 30, padding: "0 12px", border: `1px solid ${entCol}`, borderRadius: 8, cursor: "pointer", background: "transparent", color: entCol, fontSize: 12, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
