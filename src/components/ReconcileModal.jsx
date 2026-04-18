@@ -100,17 +100,41 @@ export default function ReconcileModal({
   const [missingImporting, setMissingImporting] = useState(false);
 
   const T = dark ? DARK : LIGHT;
-  const periodStr = account ? `${year}-${String(month).padStart(2, "0")}` : "";
-  const periodLabel = account ? new Date(year, month - 1).toLocaleDateString("en-US", { month: "long", year: "numeric" }) : "";
 
-  // Filter ledger for this account + period
+  // ── Period date range (bank = calendar month, CC = billing cycle) ──
+  const isCC = account?.type === "credit_card";
+  const stmtDay = isCC ? (Number(account?.statement_day) || 25) : 0;
+
+  const { periodStart, periodEnd, periodLabel } = useMemo(() => {
+    if (!account) return { periodStart: "", periodEnd: "", periodLabel: "" };
+    if (!isCC) {
+      // Bank: calendar month
+      const start = `${year}-${String(month).padStart(2, "0")}-01`;
+      const endDate = new Date(year, month, 0); // last day of month
+      const end = endDate.toISOString().slice(0, 10);
+      const label = new Date(year, month - 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+      return { periodStart: start, periodEnd: end, periodLabel: label };
+    }
+    // CC: billing cycle — statement_day of prev month+1 through statement_day of this month
+    // e.g. statement_day=19, month=2 (Feb): 20 Jan → 19 Feb
+    const endDate = new Date(year, month - 1, stmtDay); // statement_day of selected month
+    const startDate = new Date(endDate);
+    startDate.setMonth(startDate.getMonth() - 1);
+    startDate.setDate(startDate.getDate() + 1); // day after previous statement_day
+    const start = startDate.toISOString().slice(0, 10);
+    const end = endDate.toISOString().slice(0, 10);
+    const label = `${startDate.toLocaleDateString("en-US", { day: "numeric", month: "short" })} – ${endDate.toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })}`;
+    return { periodStart: start, periodEnd: end, periodLabel: label };
+  }, [account, year, month, isCC, stmtDay]);
+
+  // Filter ledger for this account + period date range
   const periodLedger = useMemo(() => {
-    if (!account || !ledger) return [];
+    if (!account || !ledger || !periodStart) return [];
     return ledger.filter(e => {
-      const ym = (e.tx_date || "").slice(0, 7);
-      return ym === periodStr && (e.from_id === account.id || e.to_id === account.id);
+      const d = e.tx_date || "";
+      return d >= periodStart && d <= periodEnd && (e.from_id === account.id || e.to_id === account.id);
     });
-  }, [ledger, account, periodStr]);
+  }, [ledger, account, periodStart, periodEnd]);
 
   const results = useMemo(() => {
     const raw = matchTransactions(stmtRows, periodLedger);
