@@ -10,6 +10,8 @@ export default function Reconcile({
   reconSessions = [], onRefresh, dark,
 }) {
   const [modal, setModal] = useState(null); // { account, year, month }
+  const [typeFilter,  setTypeFilter]  = useState("all"); // all | bank | cc
+  const [monthFilter, setMonthFilter] = useState(0);     // 0 = all, 1-12 = specific month
 
   const now = new Date();
   const curYear = now.getFullYear();
@@ -32,6 +34,20 @@ export default function Reconcile({
   const totalDone = reconAccounts.reduce((cnt, a) =>
     cnt + months.filter(m => completedSet.has(`${a.id}-${curYear}-${m}`)).length, 0
   );
+
+  const filteredAccounts = useMemo(() => {
+    let list = reconAccounts;
+    if (typeFilter === "bank") list = list.filter(a => a.type === "bank" || a.type === "cash");
+    else if (typeFilter === "cc") list = list.filter(a => a.type === "credit_card");
+    if (monthFilter > 0) {
+      list = list.filter(a => {
+        const hasPending = !completedSet.has(`${a.id}-${curYear}-${monthFilter}`);
+        const hasCompleted = completedSet.has(`${a.id}-${curYear}-${monthFilter}`);
+        return hasPending || hasCompleted; // show all accounts for the month (they all have that month)
+      });
+    }
+    return list;
+  }, [reconAccounts, typeFilter, monthFilter, completedSet, curYear]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 900 }}>
@@ -61,12 +77,51 @@ export default function Reconcile({
         ))}
       </div>
 
+      {/* Filters */}
+      {(() => {
+        const PILL = (active) => ({
+          padding: "5px 14px", fontSize: 11, fontWeight: active ? 700 : 500,
+          borderRadius: 20, border: active ? "none" : "1px solid #e5e7eb",
+          cursor: "pointer", fontFamily: "Figtree, sans-serif",
+          background: active ? "#111827" : "#fff",
+          color: active ? "#fff" : "#6b7280",
+          transition: "all .15s",
+        });
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {/* Type filter */}
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", fontFamily: "Figtree, sans-serif", marginRight: 4 }}>Type</span>
+              {[
+                { id: "all",  label: "All" },
+                { id: "bank", label: "Bank" },
+                { id: "cc",   label: "Credit Card" },
+              ].map(f => (
+                <button key={f.id} onClick={() => setTypeFilter(f.id)} style={PILL(typeFilter === f.id)}>
+                  {f.label}
+                </button>
+              ))}
+            </div>
+            {/* Month filter */}
+            <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", fontFamily: "Figtree, sans-serif", marginRight: 4 }}>Month</span>
+              <button onClick={() => setMonthFilter(0)} style={PILL(monthFilter === 0)}>All</button>
+              {months.map(m => (
+                <button key={m} onClick={() => setMonthFilter(m)} style={PILL(monthFilter === m)}>
+                  {MO_LABELS[m - 1]}
+                </button>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Account list */}
-      {reconAccounts.length === 0 ? (
-        <EmptyState icon="📋" message="No bank or credit card accounts to reconcile." />
+      {filteredAccounts.length === 0 ? (
+        <EmptyState icon="📋" message="No accounts match the selected filters." />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {reconAccounts.map(a => {
+          {filteredAccounts.map(a => {
             const isCC = a.type === "credit_card";
             const pendingMonths = months.filter(m => !completedSet.has(`${a.id}-${curYear}-${m}`));
             const hasReady = pendingMonths.length > 0;
@@ -107,6 +162,7 @@ export default function Reconcile({
                 <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                   {months.map(m => {
                     const done = completedSet.has(`${a.id}-${curYear}-${m}`);
+                    const isHighlighted = monthFilter === m;
                     const session = reconSessions.find(s =>
                       s.account_id === a.id && s.period_year === curYear && s.period_month === m && s.status === "completed"
                     );
@@ -116,9 +172,10 @@ export default function Reconcile({
                         title={done && session ? `${session.total_match || 0} match, ${session.total_missing || 0} missing, ${session.total_extra || 0} extra` : "Not reconciled"}
                         style={{
                           fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6,
-                          border: "none", cursor: "pointer", fontFamily: "Figtree, sans-serif",
-                          background: done ? "#dcfce7" : "#f3f4f6",
-                          color: done ? "#059669" : "#9ca3af",
+                          border: isHighlighted ? "1.5px solid #3b5bdb" : "none",
+                          cursor: "pointer", fontFamily: "Figtree, sans-serif",
+                          background: done ? "#dcfce7" : isHighlighted ? "#dbeafe" : "#f3f4f6",
+                          color: done ? "#059669" : isHighlighted ? "#3b5bdb" : "#9ca3af",
                           transition: "all .15s",
                         }}>
                         {MO_LABELS[m - 1]}
