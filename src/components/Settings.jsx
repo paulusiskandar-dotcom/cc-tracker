@@ -1955,19 +1955,6 @@ function EStatementTab({
       const payload = buildPayload(row);
       const inserted = await ledgerApi.create(user.id, payload, accounts);
       console.log("[estatement] Saved result:", { data: inserted, error: null });
-      if ((row.tx_type === "reimburse_in" || row.tx_type === "reimburse_out") && row.entity && inserted?.id) {
-        const { error: rsErr } = await supabase.from("reimburse_settlements").insert({
-          user_id:              user.id,
-          entity:               row.entity,
-          status:               "pending",
-          total_out:            Math.abs(Number(row.amount_idr || row.amount || 0)),
-          out_ledger_ids:       [inserted.id],
-          in_ledger_ids:        [],
-          total_in:             0,
-          reimbursable_expense: Math.abs(Number(row.amount_idr || row.amount || 0)),
-        });
-        if (rsErr) console.error("[reimburse_settlements saveRow]", rsErr);
-      }
       if (row.tx_type === "collect_loan" && (row.employee_loan_id || row.from_id)) {
         loanPaymentsApi.recordAndIncrement(user.id, {
           loanId: row.employee_loan_id || row.from_id, payDate: row.tx_date,
@@ -2010,19 +1997,6 @@ function EStatementTab({
         const inserted = await ledgerApi.create(user.id, buildPayload(r), accounts);
         savedIds.push(r._id);
         count++;
-        if ((r.tx_type === "reimburse_in" || r.tx_type === "reimburse_out") && r.entity && inserted?.id) {
-          const { error: rsErr } = await supabase.from("reimburse_settlements").insert({
-            user_id:              user.id,
-            entity:               r.entity,
-            status:               "pending",
-            total_out:            Number(r.amount_idr || r.amount || 0),
-            out_ledger_ids:       [inserted.id],
-            in_ledger_ids:        [],
-            total_in:             0,
-            reimbursable_expense: Number(r.amount_idr || r.amount || 0),
-          });
-          if (rsErr) console.error("[reimburse_settlements saveFile]", rsErr);
-        }
         if (r.tx_type === "collect_loan" && (r.employee_loan_id || r.from_id)) {
           loanPaymentsApi.recordAndIncrement(user.id, {
             loanId: r.employee_loan_id || r.from_id, payDate: r.tx_date,

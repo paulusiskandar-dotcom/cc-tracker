@@ -228,9 +228,10 @@ export const ledgerApi = {
         await applyBalanceDelta(toAcc.id, toAcc.type, deltas.to[toAcc.type]);
     }
 
-    // Auto-create a pending reimburse settlement for each reimburse_out
+    // Auto-create/update reimburse settlements
     const REIMBURSE_ENTITIES = ["Hamasa", "SDC", "Travelio"];
     if (safeEntry.tx_type === "reimburse_out" && REIMBURSE_ENTITIES.includes(safeEntry.entity) && data?.id) {
+      // Create a new pending settlement for reimburse_out
       supabase.from("reimburse_settlements").insert([{
         user_id:              userId,
         entity:               safeEntry.entity,
@@ -240,7 +241,30 @@ export const ledgerApi = {
         in_ledger_ids:        [],
         total_in:             0,
         reimbursable_expense: amount,
-      }]).then(null, (e) => console.error("[reimburse_settlements]", e)); // fire-and-forget
+        settled_at:           null,
+      }]).then(null, (e) => console.error("[reimburse_settlements]", e));
+    }
+    if (safeEntry.tx_type === "reimburse_in" && REIMBURSE_ENTITIES.includes(safeEntry.entity) && data?.id) {
+      // Find pending settlement for same entity, update total_in
+      (async () => {
+        try {
+          const { data: pending } = await supabase.from("reimburse_settlements")
+            .select("*").eq("user_id", userId).eq("entity", safeEntry.entity)
+            .eq("status", "pending").order("created_at", { ascending: false }).limit(1).single();
+          if (pending) {
+            const newTotalIn = Number(pending.total_in || 0) + amount;
+            const newInIds = [...(pending.in_ledger_ids || []), data.id];
+            const isSettled = newTotalIn >= Number(pending.total_out || 0);
+            await supabase.from("reimburse_settlements").update({
+              total_in:      newTotalIn,
+              in_ledger_ids: newInIds,
+              ...(isSettled ? { status: "settled", settled_at: new Date().toISOString() } : {}),
+            }).eq("id", pending.id);
+            // Link the ledger entry to the settlement
+            await supabase.from("ledger").update({ reimburse_settlement_id: pending.id }).eq("id", data.id);
+          }
+        } catch (e) { console.error("[reimburse_settlements reimburse_in]", e); }
+      })();
     }
 
     return data;
