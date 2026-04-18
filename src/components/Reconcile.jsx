@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { fmtIDR } from "../utils";
 import { EmptyState } from "./shared/index";
 import ReconcileModal from "./ReconcileModal";
@@ -19,12 +19,49 @@ export default function Reconcile({
   const now = new Date();
   const curYear = now.getFullYear();
   const curMo   = now.getMonth() + 1;
-  const months  = [];
-  for (let m = 1; m <= curMo; m++) months.push(m);
+
+  // Current year months for the filter bar
+  const curYearMonths = [];
+  for (let m = 1; m <= curMo; m++) curYearMonths.push(m);
 
   const reconAccounts = useMemo(() =>
     accounts.filter(a => ["bank","credit_card"].includes(a.type) && a.is_active),
   [accounts]);
+
+  // Compute earliest tx month per account from ledger
+  const earliestByAccount = useMemo(() => {
+    const map = {};
+    for (const e of (ledger || [])) {
+      const d = e.tx_date || "";
+      if (!d) continue;
+      [e.from_id, e.to_id].forEach(aid => {
+        if (!aid) return;
+        if (!map[aid] || d < map[aid]) map[aid] = d;
+      });
+    }
+    return map;
+  }, [ledger]);
+
+  // Generate month pills for a given account: from earliest tx month to current month
+  const getMonthsForAccount = useCallback((accountId) => {
+    const earliest = earliestByAccount[accountId];
+    let startY, startM;
+    if (earliest) {
+      startY = Number(earliest.slice(0, 4));
+      startM = Number(earliest.slice(5, 7));
+    } else {
+      startY = curYear;
+      startM = 1;
+    }
+    const pills = [];
+    let y = startY, m = startM;
+    while (y < curYear || (y === curYear && m <= curMo)) {
+      pills.push({ year: y, month: m });
+      m++;
+      if (m > 12) { m = 1; y++; }
+    }
+    return pills;
+  }, [earliestByAccount, curYear, curMo]);
 
   const completedSet = useMemo(() => new Set(
     reconSessions.filter(s => s.status === "completed")
@@ -38,10 +75,10 @@ export default function Reconcile({
   ), [reconSessions]);
 
   const totalPending = reconAccounts.reduce((cnt, a) =>
-    cnt + months.filter(m => !completedSet.has(`${a.id}-${curYear}-${m}`)).length, 0
+    cnt + getMonthsForAccount(a.id).filter(p => !completedSet.has(`${a.id}-${p.year}-${p.month}`)).length, 0
   );
   const totalDone = reconAccounts.reduce((cnt, a) =>
-    cnt + months.filter(m => completedSet.has(`${a.id}-${curYear}-${m}`)).length, 0
+    cnt + getMonthsForAccount(a.id).filter(p => completedSet.has(`${a.id}-${p.year}-${p.month}`)).length, 0
   );
 
   const filteredAccounts = useMemo(() => {
@@ -115,7 +152,7 @@ export default function Reconcile({
             <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
               <span style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", fontFamily: "Figtree, sans-serif", marginRight: 4 }}>Month</span>
               <button onClick={() => setMonthFilter(0)} style={PILL(monthFilter === 0)}>All</button>
-              {months.map(m => (
+              {curYearMonths.map(m => (
                 <button key={m} onClick={() => setMonthFilter(m)} style={PILL(monthFilter === m)}>
                   {MO_LABELS[m - 1]}
                 </button>
@@ -132,7 +169,8 @@ export default function Reconcile({
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {filteredAccounts.map(a => {
             const isCC = a.type === "credit_card";
-            const pendingMonths = months.filter(m => !completedSet.has(`${a.id}-${curYear}-${m}`));
+            const acctMonths = getMonthsForAccount(a.id);
+            const pendingMonths = acctMonths.filter(p => !completedSet.has(`${a.id}-${p.year}-${p.month}`));
             const hasReady = pendingMonths.length > 0;
             return (
               <div key={a.id} style={{
@@ -163,8 +201,8 @@ export default function Reconcile({
                   </div>
                   <button
                     onClick={() => {
-                      const firstPending = pendingMonths[0] || curMo;
-                      setModal({ account: a, year: curYear, month: firstPending });
+                      const fp = pendingMonths[0] || { year: curYear, month: curMo };
+                      setModal({ account: a, year: fp.year, month: fp.month });
                     }}
                     style={{
                       fontSize: 11, fontWeight: 700, padding: "5px 14px", borderRadius: 8,
@@ -178,29 +216,28 @@ export default function Reconcile({
 
                 {/* Month pills */}
                 <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                  {months.map(m => {
-                    const key = `${a.id}-${curYear}-${m}`;
+                  {acctMonths.map(p => {
+                    const key = `${a.id}-${p.year}-${p.month}`;
                     const done = completedSet.has(key);
                     const inProg = inProgressSet.has(key);
-                    const isHighlighted = monthFilter === m;
+                    const isHighlighted = monthFilter === p.month && p.year === curYear;
                     const session = reconSessions.find(s =>
-                      s.account_id === a.id && s.period_year === curYear && s.period_month === m
+                      s.account_id === a.id && s.period_year === p.year && s.period_month === p.month
                     );
-                    // Build tooltip with billing cycle for CC
                     let tooltip = done ? `${session?.total_match || 0} match, ${session?.total_missing || 0} missing, ${session?.total_extra || 0} extra` : inProg ? "In progress — click to continue" : "Not reconciled";
                     if (isCC && a.statement_day) {
                       const stDay = Number(a.statement_day);
-                      const endD = new Date(curYear, m - 1, stDay);
+                      const endD = new Date(p.year, p.month - 1, stDay);
                       const startD = new Date(endD); startD.setMonth(startD.getMonth() - 1); startD.setDate(startD.getDate() + 1);
                       const fmt = d => d.toLocaleDateString("en-US", { day: "numeric", month: "short" });
                       tooltip = `${fmt(startD)} – ${fmt(endD)} · ${tooltip}`;
                     }
-                    // 4 states: green=completed, amber=in_progress, blue=highlighted, gray=none
                     const pillBg = done ? "#dcfce7" : inProg ? "#fef3c7" : isHighlighted ? "#dbeafe" : "#f3f4f6";
                     const pillColor = done ? "#059669" : inProg ? "#d97706" : isHighlighted ? "#3b5bdb" : "#9ca3af";
+                    const shortYear = p.year !== curYear ? ` '${String(p.year).slice(2)}` : "";
                     return (
-                      <button key={m}
-                        onClick={() => setModal({ account: a, year: curYear, month: m })}
+                      <button key={`${p.year}-${p.month}`}
+                        onClick={() => setModal({ account: a, year: p.year, month: p.month })}
                         title={tooltip}
                         style={{
                           fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6,
@@ -210,7 +247,7 @@ export default function Reconcile({
                           color: pillColor,
                           transition: "all .15s",
                         }}>
-                        {MO_LABELS[m - 1]}
+                        {MO_LABELS[p.month - 1]}{shortYear}
                         {done ? " ✓" : inProg ? " ●" : ""}
                       </button>
                     );
