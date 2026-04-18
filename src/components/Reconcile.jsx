@@ -8,6 +8,9 @@ const MO_LABELS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","
 export default function Reconcile({
   user, accounts, ledger, setLedger, categories,
   reconSessions = [], onRefresh, dark,
+  // Forwarded to ReconcileModal for its Add/Edit Transaction flows.
+  bankAccounts, creditCards, assets, liabilities, receivables,
+  incomeSrcs, fxRates, CURRENCIES, accountCurrencies,
 }) {
   const [modal, setModal] = useState(null); // { account, year, month }
   const [typeFilter,  setTypeFilter]  = useState("all"); // all | bank | cc
@@ -138,9 +141,18 @@ export default function Reconcile({
                       <div style={{ fontSize: 13, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
                         {a.name}
                       </div>
-                      {a.bank_name && a.bank_name !== a.name && (
-                        <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>{a.bank_name}</div>
-                      )}
+                      {(() => {
+                        const last4 = a.card_last4 || (a.account_no ? String(a.account_no).replace(/\D/g, "").slice(-4) : "");
+                        const parts = [];
+                        if (a.bank_name && a.bank_name !== a.name) parts.push(a.bank_name);
+                        if (last4) parts.push(`···${last4}`);
+                        if (parts.length === 0) return null;
+                        return (
+                          <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+                            {parts.join(" · ")}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                   <button
@@ -204,6 +216,15 @@ export default function Reconcile({
           ledger={ledger}
           setLedger={setLedger}
           onRefresh={onRefresh}
+          bankAccounts={bankAccounts}
+          creditCards={creditCards}
+          assets={assets}
+          liabilities={liabilities}
+          receivables={receivables}
+          incomeSrcs={incomeSrcs}
+          fxRates={fxRates}
+          allCurrencies={CURRENCIES}
+          accountCurrencies={accountCurrencies}
         />
       )}
     </div>
