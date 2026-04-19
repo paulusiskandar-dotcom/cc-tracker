@@ -4,6 +4,7 @@ import { fmtIDR } from "../utils";
 import { TX_TYPE_MAP } from "../constants";
 import { showToast } from "./shared/Card";
 import TransactionModal from "./shared/TransactionModal";
+import { useReconcile, ReconcileBar, ReconcileStatusBadge, ReconcileMissingRows } from "./shared/ReconcileOverlay";
 import * as XLSX from "xlsx";
 
 const FF = "Figtree, sans-serif";
@@ -83,6 +84,9 @@ export default function CCStatement({
 
   const [editEntry, setEditEntry] = useState(null);
   const printRef = useRef(null);
+
+  // Reconcile mode
+  const reconcile = useReconcile({ user, accountId, fromDate, toDate, ledgerRows: useMemo(() => (data?.txs || []).map(tx => ({ ...tx, _dir: ccDirection(tx, accountId) === "charge" ? "debit" : "credit" })), [data, accountId]) });
 
   const bankAccs    = bankAccsProp.length > 0 ? bankAccsProp : accounts.filter(a => a.type === "bank");
   const creditCards = creditCardsProp.length > 0 ? creditCardsProp : accounts.filter(a => a.type === "credit_card");
@@ -251,12 +255,18 @@ export default function CCStatement({
           CC Statement{selectedAccount ? ` — ${selectedAccount.name}` : ""}
         </span>
         <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+          {data && !reconcile.active && (
+            <button onClick={reconcile.startReconcile} style={BTN()}>☑ Reconcile</button>
+          )}
           <button onClick={exportPDF} style={BTN()}>🖨 PDF</button>
           <button onClick={exportExcel} disabled={!data} style={BTN({ opacity: data ? 1 : 0.4, cursor: data ? "pointer" : "default" })}>
             📊 Excel
           </button>
         </div>
       </div>
+
+      {/* Reconcile bar */}
+      <ReconcileBar reconcile={reconcile} onRefresh={onRefresh} />
 
       {/* ── Print-only header ── */}
       <div className="print-only" style={{ display: "none" }}>
@@ -357,7 +367,7 @@ export default function CCStatement({
       {/* ── Transaction table ── */}
       {!loading && data && rowsWithBalance.length > 0 && (() => {
         // Columns: Tanggal | Keterangan | Jenis | Transaksi | Pembayaran | Saldo Hutang
-        const COLS = "80px 1fr 110px 120px 120px 130px";
+        const COLS = reconcile.active ? "80px 1fr 110px 120px 120px 130px 48px" : "80px 1fr 110px 120px 120px 130px";
         const HDR_CELLS = [
           { label: "Tanggal",      align: "left"  },
           { label: "Keterangan",   align: "left"  },
@@ -365,6 +375,7 @@ export default function CCStatement({
           { label: "Transaksi",    align: "right" },
           { label: "Pembayaran",   align: "right" },
           { label: "Saldo Hutang", align: "right" },
+          ...(reconcile.active ? [{ label: "Status", align: "center" }] : []),
         ];
         const ROW_PAD = "0 14px";
         return (
@@ -391,6 +402,7 @@ export default function CCStatement({
                   <div />{/* Transaksi */}
                   <div />{/* Pembayaran */}
                   <div style={{ fontSize: 11, fontWeight: 800, color: c, fontFamily: FF, padding: "7px 6px", textAlign: "right" }}>{b.sign}{b.text}</div>
+                  {reconcile.active && <div />}
                 </div>
               );
             })()}
@@ -454,6 +466,13 @@ export default function CCStatement({
                         {b.sign}{b.text}
                       </div>
 
+                      {/* Status (reconcile mode) */}
+                      {reconcile.active && (
+                        <div style={{ display: "flex", justifyContent: "center", padding: "8px 0" }}>
+                          <ReconcileStatusBadge type={reconcile.getStatus(tx.id)} />
+                        </div>
+                      )}
+
                       {/* Edit button */}
                       <button
                         className="edit-btn no-print"
@@ -488,12 +507,16 @@ export default function CCStatement({
                   <div />{/* Transaksi */}
                   <div />{/* Pembayaran */}
                   <div style={{ fontSize: 13, fontWeight: 800, color: b.color, fontFamily: FF, padding: "9px 6px", textAlign: "right" }}>{b.sign}{b.text}</div>
+                  {reconcile.active && <div />}
                 </div>
               );
             })()}
           </div>
         );
       })()}
+
+      {/* Missing rows (reconcile mode) */}
+      <ReconcileMissingRows reconcile={reconcile} accounts={accounts} categories={categories} user={user} onRefresh={onRefresh} />
 
       {/* ── Footer ── */}
       {data && rowsWithBalance.length > 0 && (

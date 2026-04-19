@@ -3,7 +3,6 @@ import {
   Home, ArrowUpDown, Landmark, Wallet, CreditCard,
   TrendingUp, ClipboardList, ArrowDown, BarChart2,
   Calendar as CalendarIcon, Settings as SettingsIcon, LayoutGrid,
-  CheckSquare,
 } from "lucide-react";
 import PILogo from "./components/PILogo";
 import { supabase } from "./lib/supabase";
@@ -30,7 +29,6 @@ import Calendar     from "./components/Calendar";
 import Settings     from "./components/Settings";
 import AIImport     from "./components/AIImport";
 import Email        from "./components/Email";
-import Reconcile    from "./components/Reconcile";
 
 // ─── AUTH GATE ────────────────────────────────────────────────
 function AuthGate({ children }) {
@@ -331,26 +329,6 @@ function Finance({ user, signOut }) {
     onRefresh: loadData,
   };
 
-  // Pending reconcile count per tab
-  const reconPending = useMemo(() => {
-    const now = new Date();
-    const curYear = now.getFullYear(), curMo = now.getMonth() + 1;
-    const completedSet = new Set(
-      reconSessions.filter(s => s.status === "completed")
-        .map(s => `${s.account_id}-${s.period_year}-${s.period_month}`)
-    );
-    let bankPending = 0, ccPending = 0;
-    for (const a of accounts.filter(x => x.is_active)) {
-      for (let m = 1; m <= curMo; m++) {
-        if (!completedSet.has(`${a.id}-${curYear}-${m}`)) {
-          if (a.type === "bank") bankPending++;
-          else if (a.type === "credit_card") ccPending++;
-        }
-      }
-    }
-    return { bank: bankPending, cards: ccPending };
-  }, [reconSessions, accounts]);
-
   if (loading) return (
     <div style={S.loadScreen}>
       <div style={{ textAlign: "center" }}>
@@ -382,7 +360,6 @@ function Finance({ user, signOut }) {
       case "receivables":  return <Receivables  {...shared} />;
       case "income":       return <Income       {...shared} />;
       case "reports":      return <Reports      {...shared} />;
-      case "reconcile":   return <Reconcile    {...shared} />;
       case "calendar":     return <Calendar     {...shared} />;
       case "settings":     return <Settings     {...shared} signOut={signOut} initialTab={settingsInitialTab} />;
       case "scan":         return <AIImport     {...shared} />;
@@ -425,15 +402,6 @@ function Finance({ user, signOut }) {
                 <span style={{ fontSize: 13 }}>{t.label}</span>
                 {isReminders && overdueReminders.length > 0 && (
                   <span style={S.badge}>{overdueReminders.length}</span>
-                )}
-                {t.id === "bank" && reconPending.bank > 0 && (
-                  <span style={{ ...S.badge, background: "#fef3c7", color: "#d97706" }}>{reconPending.bank}</span>
-                )}
-                {t.id === "cards" && reconPending.cards > 0 && (
-                  <span style={{ ...S.badge, background: "#fef3c7", color: "#d97706" }}>{reconPending.cards}</span>
-                )}
-                {t.id === "reconcile" && (reconPending.bank + reconPending.cards) > 0 && (
-                  <span style={{ ...S.badge, background: "#fef3c7", color: "#d97706" }}>{reconPending.bank + reconPending.cards}</span>
                 )}
               </button>
             );
@@ -574,7 +542,6 @@ function NAV_ICON({ id }) {
     case "receivables":  return <ClipboardList {...LUCIDE_PROPS} />;
     case "income":       return <ArrowDown      {...LUCIDE_PROPS} />;
     case "reports":      return <BarChart2     {...LUCIDE_PROPS} />;
-    case "reconcile":    return <CheckSquare   {...LUCIDE_PROPS} />;
     case "calendar":     return <CalendarIcon  {...LUCIDE_PROPS} />;
     case "settings":     return <SettingsIcon  {...LUCIDE_PROPS} />;
     case "more":         return <LayoutGrid    {...LUCIDE_PROPS} />;
