@@ -766,11 +766,7 @@ export default function ReconcileModal({
     </div>
   ) : null;
 
-  const BORDER_L = { match: "3px solid #059669", missing: "3px solid #d97706", extra: "3px solid #dc2626", kept: "3px solid #d1d5db" };
-  const ROW_BG   = { match: "#f0fdf4", missing: "#fffbeb", extra: "#fef2f2", kept: "#f9fafb" };
   const BADGE_S  = { match: { bg: "#dcfce7", color: "#059669", label: "✓" }, missing: { bg: "#fef3c7", color: "#d97706", label: "!" }, extra: { bg: "#fee2e2", color: "#dc2626", label: "?" }, kept: { bg: "#e5e7eb", color: "#6b7280", label: "◦" }, ignored: { bg: "#f3f4f6", color: "#9ca3af", label: "–" } };
-  const BORDER_L_MAP = { ...BORDER_L, ignored: "3px solid #d1d5db" };
-  const ROW_BG_MAP   = { ...ROW_BG, ignored: "#f9fafb" };
 
   return (
     <>
@@ -921,110 +917,195 @@ export default function ReconcileModal({
           </div>
         )}
 
-        {/* ── Statement table ── */}
-        {step === 4 && hasSomething && (
-          <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
-            {/* Header */}
-            <div style={{ display: "grid", gridTemplateColumns: "58px 1fr 80px 80px 90px 48px", background: "#fafafa", borderBottom: "1px solid #e5e7eb", padding: "6px 8px", fontSize: 9, fontWeight: 800, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.04em", fontFamily: F }}>
-              <span>Tanggal</span><span>Keterangan</span><span style={{ textAlign: "right" }}>Debit</span><span style={{ textAlign: "right" }}>Kredit</span><span style={{ textAlign: "right" }}>Saldo</span><span style={{ textAlign: "center" }}>Status</span>
-            </div>
+        {/* ── Statement table (matches CCStatement style) ── */}
+        {step === 4 && hasSomething && (() => {
+          const COLS = "80px 1fr 120px 120px 130px 48px";
+          const ROW_PAD = "0 14px";
+          const HDR = [
+            { label: "Tanggal",    align: "left"   },
+            { label: "Keterangan", align: "left"   },
+            { label: "Debit",      align: "right"  },
+            { label: "Kredit",     align: "right"  },
+            { label: "Saldo",      align: "right"  },
+            { label: "Status",     align: "center" },
+          ];
+          const fmtDateLabel = (d) => { try { return new Date(d + "T00:00:00").toLocaleDateString("id-ID", { weekday: "long", day: "2-digit", month: "long", year: "numeric" }); } catch { return d; } };
+          const fmtDateShort = (d) => { try { return new Date(d + "T00:00:00").toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }); } catch { return d; } };
 
-            {/* Scrollable rows */}
-            <div style={{ maxHeight: 420, overflowY: "auto" }}>
-              {sortedResults.map((r, i) => {
-                const type = r.type;
-                const s = r.stmt;
-                const l = r.ledger;
-                const date = s?.date || l?.tx_date || "";
-                const desc = s ? (s.description || s.merchant || "") : (l?.description || "");
-                const amt  = Math.abs(Number(s?.amount || l?.amount_idr || l?.amount || 0));
-                const dir  = s?.direction || (l?.tx_type === "income" ? "in" : "out");
-                const badge = BADGE_S[type];
-                const isExpanded = expandedId === (s?._id || l?.id || i);
-                const missRow = type === "missing" ? missingRowsFinal.find(mr => mr._id === s?._id) : null;
-                const isOdd = i % 2 === 1;
+          // Group by date
+          const groups = {};
+          sortedResults.forEach((r, i) => {
+            const date = r.stmt?.date || r.ledger?.tx_date || "";
+            if (!groups[date]) groups[date] = [];
+            groups[date].push({ ...r, _idx: i });
+          });
+          const sortedDates = Object.keys(groups).sort();
 
-                const isMuted = type === "kept" || type === "ignored";
+          return (
+            <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden" }}>
 
-                return (
-                  <div key={s?._id || l?.id || i}>
-                    <div style={{
-                      display: "grid", gridTemplateColumns: "58px 1fr 80px 80px 90px 48px",
-                      padding: "6px 8px", borderLeft: (BORDER_L_MAP[type] || BORDER_L[type]),
-                      background: isOdd ? (ROW_BG_MAP[type] || ROW_BG[type] || "#fafafa") : (ROW_BG_MAP[type] || ROW_BG[type]),
-                      borderBottom: "1px solid #f3f4f6", alignItems: "center",
-                      opacity: isMuted ? 0.55 : 1,
-                      fontFamily: F, fontSize: 11,
-                    }}>
-                      <span style={{ fontSize: 10, color: "#6b7280" }}>{date.slice(5)}</span>
-                      <span style={{ fontWeight: 600, color: isMuted ? "#9ca3af" : "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: 4 }}>
-                        {desc || "—"}
-                        {type === "ignored" && <span style={{ marginLeft: 6, fontSize: 9, fontWeight: 700, color: "#9ca3af", background: "#f3f4f6", padding: "1px 5px", borderRadius: 3 }}>Ignored</span>}
-                      </span>
-                      <span style={{ textAlign: "right", fontWeight: 600, color: dir === "out" ? "#dc2626" : "transparent" }}>{dir === "out" ? fmtIDR(amt) : ""}</span>
-                      <span style={{ textAlign: "right", fontWeight: 600, color: dir === "in" ? "#059669" : "transparent" }}>{dir === "in" ? fmtIDR(amt) : ""}</span>
-                      <span style={{ textAlign: "right", fontSize: 10, color: "#6b7280" }}>{fmtIDR(Math.abs(balanceMap[i] || 0))}</span>
-                      <div style={{ display: "flex", justifyContent: "center" }}>
-                        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: 4, background: badge.bg, color: badge.color, fontSize: 10, fontWeight: 800 }}>{badge.label}</span>
-                      </div>
+              {/* Column header */}
+              <div style={{ display: "grid", gridTemplateColumns: COLS, background: "#f9fafb", borderBottom: "0.5px solid #e5e7eb", padding: ROW_PAD }}>
+                {HDR.map(h => (
+                  <div key={h.label} style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: F, padding: "9px 6px", textAlign: h.align }}>
+                    {h.label}
+                  </div>
+                ))}
+              </div>
+
+              {/* Opening balance row */}
+              <div style={{ display: "grid", gridTemplateColumns: COLS, background: "#eff6ff", borderBottom: "0.5px solid #dbeafe", padding: ROW_PAD }}>
+                <div style={{ fontSize: 11, color: "#1d4ed8", fontFamily: F, padding: "7px 6px", whiteSpace: "nowrap" }}>{fmtDateShort(periodStart)}</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#1d4ed8", fontFamily: F, padding: "7px 6px" }}>Opening Balance</div>
+                <div /><div />
+                <div style={{ fontSize: 11, fontWeight: 800, color: "#1d4ed8", fontFamily: F, padding: "7px 6px", textAlign: "right" }}>—</div>
+                <div />
+              </div>
+
+              {/* Scrollable body */}
+              <div style={{ maxHeight: 420, overflowY: "auto" }}>
+                {sortedDates.map(date => (
+                  <div key={date}>
+                    {/* Date group header */}
+                    <div style={{ background: "#f3f4f6", borderBottom: "0.5px solid #e5e7eb", padding: "5px 20px", fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: F }}>
+                      {fmtDateLabel(date)}
                     </div>
 
-                    {/* Action row for missing */}
-                    {type === "missing" && !isExpanded && (
-                      <div style={{ display: "flex", gap: 6, padding: "4px 8px 6px 64px", background: "#fffbeb", borderBottom: "1px solid #fde68a", borderLeft: "3px solid #d97706" }}>
-                        <button onClick={() => setExpandedId(s?._id)} style={btnS("#3b5bdb", "#bfdbfe")}>Add</button>
-                        <button onClick={() => setIgnoredIds(prev => { const n = new Set(prev); n.add(s?._id); return n; })} style={btnS("#6b7280", "#e5e7eb")}>Ignore</button>
-                      </div>
-                    )}
+                    {/* Transaction rows for this date */}
+                    {groups[date].map(r => {
+                      const type = r.type;
+                      const s = r.stmt;
+                      const l = r.ledger;
+                      const desc = s ? (s.description || s.merchant || "") : (l?.description || "");
+                      const amt  = Math.abs(Number(s?.amount || l?.amount_idr || l?.amount || 0));
+                      const dir  = s?.direction || (l?.tx_type === "income" ? "in" : "out");
+                      const badge = BADGE_S[type];
+                      const isMuted = type === "kept" || type === "ignored";
+                      const isExp = expandedId === (s?._id || l?.id);
+                      const missRow = type === "missing" ? missingRowsFinal.find(mr => mr._id === s?._id) : null;
+                      const rowKey = s?._id || l?.id || r._idx;
 
-                    {/* Undo ignore */}
-                    {type === "ignored" && (
-                      <div style={{ display: "flex", gap: 6, padding: "4px 8px 6px 64px", background: "#f9fafb", borderBottom: "1px solid #e5e7eb", borderLeft: "3px solid #d1d5db", opacity: 0.55 }}>
-                        <button onClick={() => setIgnoredIds(prev => { const n = new Set(prev); n.delete(s?._id); return n; })} style={btnS("#6b7280", "#e5e7eb")}>Undo Ignore</button>
-                      </div>
-                    )}
+                      return (
+                        <div key={rowKey}>
+                          {/* Main row */}
+                          <div
+                            onClick={() => {
+                              if (type === "missing" || type === "extra" || type === "kept" || type === "ignored")
+                                setExpandedId(isExp ? null : (s?._id || l?.id));
+                            }}
+                            style={{
+                              display: "grid", gridTemplateColumns: COLS,
+                              borderBottom: "0.5px solid #f3f4f6", padding: ROW_PAD,
+                              alignItems: "center",
+                              opacity: isMuted ? 0.55 : 1,
+                              cursor: (type === "missing" || type === "extra" || type === "kept" || type === "ignored") ? "pointer" : "default",
+                            }}
+                            onMouseEnter={e => { if (!isMuted) e.currentTarget.style.background = "#fafafa"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "transparent"; }}
+                          >
+                            {/* Tanggal */}
+                            <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: F, padding: "8px 6px", whiteSpace: "nowrap" }}>
+                              {fmtDateShort(date)}
+                            </div>
 
-                    {/* Expanded inline editor for missing (AI scan style) */}
-                    {type === "missing" && isExpanded && missRow && (
-                      <div style={{ background: "#fffbeb", borderBottom: "1px solid #fde68a", borderLeft: "3px solid #d97706", padding: "8px 10px" }}>
-                        <TransactionReviewList
-                          rows={[missRow]}
-                          selected={{ [missRow._id]: true }}
-                          onUpdateRow={updateMissingRow}
-                          onConfirmRow={async (row) => { await confirmMissingOne(row); setExpandedId(null); }}
-                          onSkipRow={() => setExpandedId(null)}
-                          onConfirmAll={async (rows) => { await confirmMissingAll(rows); setExpandedId(null); }}
-                          onToggleSelect={() => {}}
-                          onToggleAll={() => {}}
-                          source="reconcile"
-                          accounts={accounts}
-                          T={T}
-                          busy={missingImporting}
-                        />
-                      </div>
-                    )}
+                            {/* Keterangan */}
+                            <div style={{ padding: "8px 6px", minWidth: 0 }}>
+                              <div style={{ fontSize: 12, fontWeight: 500, color: isMuted ? "#9ca3af" : "#111827", fontFamily: F, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {desc || "—"}
+                                {type === "ignored" && <span style={{ marginLeft: 6, fontSize: 8, fontWeight: 700, color: "#9ca3af", background: "#f3f4f6", padding: "1px 4px", borderRadius: 3 }}>Ignored</span>}
+                              </div>
+                              {type === "extra" && (
+                                <div style={{ fontSize: 10, color: "#dc2626", fontFamily: F, marginTop: 1 }}>Not in statement</div>
+                              )}
+                            </div>
 
-                    {/* Action row for extra */}
-                    {type === "extra" && (
-                      <div style={{ display: "flex", gap: 4, padding: "4px 8px 6px 64px", background: "#fef2f2", borderBottom: "1px solid #fecaca", borderLeft: "3px solid #dc2626" }}>
-                        <button onClick={() => markKept(l.id)} style={btnS("#059669", "#bbf7d0")}>Keep</button>
-                        <button onClick={() => openEditFromLedger(l)} style={btnS("#3b5bdb", "#bfdbfe")}>Edit</button>
-                        <button onClick={() => setDelTarget(l)} style={btnS("#dc2626", "#fecaca")}>Hapus</button>
-                      </div>
-                    )}
+                            {/* Debit */}
+                            <div style={{ fontSize: 12, fontWeight: 600, color: "#A32D2D", fontFamily: F, padding: "8px 6px", textAlign: "right" }}>
+                              {dir === "out" ? fmtIDR(amt) : <span style={{ color: "#d1d5db" }}>—</span>}
+                            </div>
 
-                    {/* Action row for kept */}
-                    {type === "kept" && (
-                      <div style={{ display: "flex", gap: 4, padding: "4px 8px 6px 64px", background: "#f9fafb", borderBottom: "1px solid #e5e7eb", borderLeft: "3px solid #d1d5db", opacity: 0.55 }}>
-                        <button onClick={() => setKeptIds(prev => { const n = new Set(prev); n.delete(l.id); return n; })} style={btnS("#6b7280", "#e5e7eb")}>Undo Keep</button>
-                      </div>
-                    )}
+                            {/* Kredit */}
+                            <div style={{ fontSize: 12, fontWeight: 600, color: "#3B6D11", fontFamily: F, padding: "8px 6px", textAlign: "right" }}>
+                              {dir === "in" ? fmtIDR(amt) : <span style={{ color: "#d1d5db" }}>—</span>}
+                            </div>
+
+                            {/* Saldo */}
+                            <div style={{ fontSize: 12, fontWeight: 700, color: "#111827", fontFamily: F, padding: "8px 6px", textAlign: "right" }}>
+                              {fmtIDR(Math.abs(balanceMap[r._idx] || 0))}
+                            </div>
+
+                            {/* Status badge */}
+                            <div style={{ display: "flex", justifyContent: "center", padding: "8px 0" }}>
+                              <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 22, height: 22, borderRadius: 6, background: badge.bg, color: badge.color, fontSize: 11, fontWeight: 800 }}>{badge.label}</span>
+                            </div>
+                          </div>
+
+                          {/* Expanded: missing → AI scan input */}
+                          {type === "missing" && isExp && missRow && (
+                            <div style={{ background: "#fffbeb", borderBottom: "1px solid #fde68a", padding: "8px 14px" }}>
+                              <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                                <button onClick={() => setExpandedId(null)} style={btnS("#6b7280", "#e5e7eb")}>Cancel</button>
+                                <button onClick={() => setIgnoredIds(prev => { const n = new Set(prev); n.add(s?._id); return n; setExpandedId(null); })} style={btnS("#6b7280", "#e5e7eb")}>Ignore</button>
+                              </div>
+                              <TransactionReviewList
+                                rows={[missRow]}
+                                selected={{ [missRow._id]: true }}
+                                onUpdateRow={updateMissingRow}
+                                onConfirmRow={async (row) => { await confirmMissingOne(row); setExpandedId(null); }}
+                                onSkipRow={() => setExpandedId(null)}
+                                onConfirmAll={async (rows) => { await confirmMissingAll(rows); setExpandedId(null); }}
+                                onToggleSelect={() => {}}
+                                onToggleAll={() => {}}
+                                source="reconcile"
+                                accounts={accounts}
+                                T={T}
+                                busy={missingImporting}
+                              />
+                            </div>
+                          )}
+
+                          {/* Expanded: extra → action buttons */}
+                          {type === "extra" && isExp && (
+                            <div style={{ display: "flex", gap: 6, padding: "6px 20px 8px", background: "#fef2f2", borderBottom: "1px solid #fecaca" }}>
+                              <button onClick={() => markKept(l.id)} style={btnS("#059669", "#bbf7d0")}>Keep</button>
+                              <button onClick={() => openEditFromLedger(l)} style={btnS("#3b5bdb", "#bfdbfe")}>Edit</button>
+                              <button onClick={() => setDelTarget(l)} style={btnS("#dc2626", "#fecaca")}>Hapus</button>
+                            </div>
+                          )}
+
+                          {/* Expanded: kept → undo */}
+                          {type === "kept" && isExp && (
+                            <div style={{ display: "flex", gap: 6, padding: "6px 20px 8px", background: "#f9fafb", borderBottom: "1px solid #e5e7eb", opacity: 0.55 }}>
+                              <button onClick={() => setKeptIds(prev => { const n = new Set(prev); n.delete(l.id); return n; })} style={btnS("#6b7280", "#e5e7eb")}>Undo Keep</button>
+                            </div>
+                          )}
+
+                          {/* Expanded: ignored → undo */}
+                          {type === "ignored" && isExp && (
+                            <div style={{ display: "flex", gap: 6, padding: "6px 20px 8px", background: "#f9fafb", borderBottom: "1px solid #e5e7eb", opacity: 0.55 }}>
+                              <button onClick={() => { setIgnoredIds(prev => { const n = new Set(prev); n.delete(s?._id); return n; }); setExpandedId(null); }} style={btnS("#6b7280", "#e5e7eb")}>Undo Ignore</button>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
+                ))}
+              </div>
+
+              {/* Closing balance row */}
+              <div style={{ display: "grid", gridTemplateColumns: COLS, background: "#f9fafb", borderTop: "1.5px solid #e5e7eb", padding: ROW_PAD }}>
+                <div style={{ fontSize: 11, color: "#374151", fontFamily: F, padding: "9px 6px", whiteSpace: "nowrap" }}>{fmtDateShort(periodEnd)}</div>
+                <div style={{ fontSize: 11, fontWeight: 800, color: "#111827", fontFamily: F, padding: "9px 6px" }}>Closing Balance</div>
+                <div /><div />
+                <div style={{ fontSize: 11, fontWeight: 800, color: "#111827", fontFamily: F, padding: "9px 6px", textAlign: "right" }}>
+                  {fmtIDR(Math.abs(balanceMap[sortedResults.length - 1] || 0))}
+                </div>
+                <div />
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
       </Modal>
 
