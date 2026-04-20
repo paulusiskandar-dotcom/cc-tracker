@@ -4,7 +4,7 @@ import { fmtIDR } from "../utils";
 import { TX_TYPE_MAP } from "../constants";
 import { showToast } from "./shared/Card";
 import TransactionModal from "./shared/TransactionModal";
-import { useReconcile, ReconcileBar, ReconcileStatusBadge, ReconcileAddModal, ReconcileMissingRowInline, getMissingRowsMap } from "./shared/ReconcileOverlay";
+import { useReconcile, ReconcileBar, ReconcileStatusBadge, ReconcileMissingRowInline, getMissingRowsMap } from "./shared/ReconcileOverlay";
 import * as XLSX from "xlsx";
 
 const FF = "Figtree, sans-serif";
@@ -479,8 +479,11 @@ export default function CCStatement({
 
                         {/* Status (reconcile mode) */}
                         {reconcile.active && (
-                          <div style={{ display: "flex", justifyContent: "center", padding: "8px 0" }}>
+                          <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", padding: "8px 0", gap: 2 }}>
                             <ReconcileStatusBadge type={reconcile.getStatus(tx.id)} />
+                            {reconcile.getStatus(tx.id) === "match" && (
+                              <span style={{ fontSize: 10, color: "#059669", fontWeight: 600, fontFamily: FF }}>Matched ✓</span>
+                            )}
                           </div>
                         )}
 
@@ -514,6 +517,9 @@ export default function CCStatement({
                       COLS={COLS}
                       ROW_PAD={ROW_PAD}
                       FF={FF}
+                      accounts={accounts}
+                      user={user}
+                      onRefresh={onRefresh}
                     />
                   ))}
                 </div>
@@ -539,8 +545,6 @@ export default function CCStatement({
         );
       })()}
 
-      {/* Add transaction modal for missing rows */}
-      <ReconcileAddModal reconcile={reconcile} accounts={accounts} categories={categories} user={user} onRefresh={onRefresh} />
 
       {/* ── Footer ── */}
       {data && rowsWithBalance.length > 0 && (
