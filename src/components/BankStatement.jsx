@@ -4,7 +4,7 @@ import { fmtIDR, fmtCur } from "../utils";
 import { TX_TYPE_MAP } from "../constants";
 import { showToast } from "./shared/Card";
 import TxVerticalBig from "./shared/TxVerticalBig";
-import { useReconcile, ReconcileBar, ReconcileStatusBadge, ReconcileMissingRowInline, ReconcileAddPanel, getMissingRowsMap } from "./shared/ReconcileOverlay";
+import { useReconcile, ReconcileBar, ReconcileStatusBadge, ReconcileMissingRowInline, getMissingRowsMap } from "./shared/ReconcileOverlay";
 import * as XLSX from "xlsx";
 
 const FF = "Figtree, sans-serif";
@@ -347,7 +347,6 @@ export default function BankStatement({
 
       {/* Reconcile bar */}
       <ReconcileBar reconcile={reconcile} onRefresh={onRefresh} />
-      <ReconcileAddPanel reconcile={reconcile} accounts={accounts} employeeLoans={[]} user={user} onRefresh={onRefresh} />
 
       {/* ── Print-only header ── */}
       <div className="print-only" style={{ display: "none" }}>
@@ -610,6 +609,7 @@ export default function BankStatement({
                       ROW_PAD={ROW_PAD}
                       FF={FF}
                       accounts={accounts}
+                      employeeLoans={[]}
                       user={user}
                       onRefresh={onRefresh}
                     />

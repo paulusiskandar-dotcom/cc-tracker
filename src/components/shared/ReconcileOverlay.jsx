@@ -1,6 +1,6 @@
 // ReconcileOverlay — shared reconcile mode for Bank & CC statements
 // Provides: upload modal, matching logic, status column renderer, and reconcile bar
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { useState, useMemo, useCallback, useRef } from "react";
 import { reconcileApi, ledgerApi, installmentsApi, loanPaymentsApi } from "../../api";
 import { supabase } from "../../lib/supabase";
 import { fmtIDR, todayStr } from "../../utils";
@@ -82,9 +82,8 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
   const [processing, setProcessing] = useState(false);
   const [keptIds,    setKeptIds]    = useState(() => new Set());
   const [ignoredIds, setIgnoredIds] = useState(() => new Set());
-  const [sessionId,  setSessionId]  = useState(null);
+  const [sessionId,  setSessionId]  = useState(null); // eslint-disable-line no-unused-vars
   const [pdfSource,  setPdfSource]  = useState("");
-  const [addingRow,  setAddingRow]  = useState(null);
   const fileRef = useRef(null);
 
   const { matched, missing, extraIds } = useMemo(() => {
@@ -174,14 +173,13 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
         });
       } catch (e) { console.error("[reconcile] save session error:", e); }
     }
-    setActive(false); setStmtRows([]); setKeptIds(new Set()); setIgnoredIds(new Set()); setPdfSource(""); setAddingRow(null);
+    setActive(false); setStmtRows([]); setKeptIds(new Set()); setIgnoredIds(new Set()); setPdfSource("");
     showToast("Reconcile completed");
   }, [user, accountId, fromDate, stmtRows, stats, pdfSource]);
 
   return {
     active, stmtRows, processing, stats, pdfSource, fileRef,
     matched, missing: missingFiltered, extraIds, keptIds, ignoredIds,
-    addingRow, setAddingRow,
     getStatus, markKept, markIgnored, seedStmtRows,
     stageAndProcess, startReconcile, exitReconcile,
     currentAccountId,
@@ -235,7 +233,7 @@ export function ReconcileBar({ reconcile, onRefresh }) {
           )}
           <button onClick={() => { exitReconcile(); onRefresh?.(); }}
             style={{ fontSize: 11, fontWeight: 700, padding: "5px 14px", borderRadius: 8, border: "none", background: "#111827", color: "#fff", cursor: "pointer", fontFamily: FF }}>
-            Selesai Reconcile
+            Done
           </button>
         </div>
       </div>
@@ -298,84 +296,35 @@ export function getMissingRowsMap(missing) {
   return map;
 }
 
-// ── Inline missing row — summary row with +/✕ buttons ───────
-export function ReconcileMissingRowInline({ missingRow, reconcile, COLS, ROW_PAD, FF: FF_PROP }) {
-  const FF_USED = FF_PROP || FF;
-  const amt = Math.abs(Number(missingRow.amount || 0));
-  const fmtDateIndo = (date) => {
-    try {
-      return new Date(date + "T00:00:00").toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" });
-    } catch { return date; }
+// ── Add panel — TxHorizontal inline form ─────────────────────
+function buildRow(stmtRow, currentAccountId) {
+  return {
+    _id: `reconcile-${stmtRow._id}`,
+    tx_date: stmtRow.date || todayStr(),
+    description: stmtRow.description || stmtRow.merchant || "",
+    amount: Math.abs(Number(stmtRow.amount || 0)),
+    amount_idr: Math.abs(Number(stmtRow.amount || 0)),
+    currency: stmtRow.currency || "IDR",
+    tx_type: "expense",
+    from_id: currentAccountId || "",
+    from_type: "account",
+    to_id: null,
+    to_type: "expense_category",
+    category_id: null,
+    category_name: null,
+    entity: "",
+    notes: "",
+    status: "pending",
   };
-
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: COLS, borderBottom: "0.5px solid #fde68a", padding: ROW_PAD, alignItems: "center", background: "#fffbeb" }}>
-      <div style={{ fontSize: 11, color: "#d97706", fontFamily: FF_USED, padding: "8px 6px", whiteSpace: "nowrap", fontStyle: "italic" }}>
-        {fmtDateIndo(missingRow.date)}
-      </div>
-      <div style={{ padding: "8px 6px", minWidth: 0 }}>
-        <div style={{ fontSize: 12, fontWeight: 500, color: "#d97706", fontFamily: FF_USED, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontStyle: "italic" }}>
-          {missingRow.description || missingRow.merchant || "—"}
-        </div>
-      </div>
-      <div style={{ padding: "8px 6px" }}>
-        <ReconcileStatusBadge type="missing" />
-      </div>
-      <div style={{ fontSize: 12, fontWeight: 600, color: "#A32D2D", fontFamily: FF_USED, padding: "8px 6px", textAlign: "right" }}>
-        {fmtIDR(amt)}
-      </div>
-      <div style={{ fontSize: 12, fontWeight: 600, color: "#d1d5db", fontFamily: FF_USED, padding: "8px 6px", textAlign: "right" }}>—</div>
-      <div style={{ fontSize: 12, fontWeight: 600, color: "#d1d5db", fontFamily: FF_USED, padding: "8px 6px", textAlign: "right" }}>—</div>
-      <div style={{ display: "flex", gap: 4, padding: "8px 6px", justifyContent: "center" }}>
-        <button
-          title="Add to ledger"
-          onClick={() => reconcile.setAddingRow(missingRow)}
-          style={{ width: 22, height: 22, fontSize: 11, fontWeight: 700, borderRadius: 4, border: "none", cursor: "pointer", background: "#fef3c7", color: "#d97706" }}>
-          +
-        </button>
-        <button
-          title="Ignore"
-          onClick={() => reconcile.markIgnored(missingRow._id)}
-          style={{ width: 22, height: 22, fontSize: 11, fontWeight: 700, borderRadius: 4, border: "none", cursor: "pointer", background: "#f3f4f6", color: "#9ca3af" }}>
-          ✕
-        </button>
-      </div>
-    </div>
-  );
 }
 
-// ── Add panel — TxHorizontal inline form ─────────────────────
-export function ReconcileAddPanel({ reconcile, accounts, employeeLoans, user, onRefresh }) {
+export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans, user, onRefresh, onClose }) {
   const T = LIGHT;
-  const adding = reconcile.addingRow;
-  const [rows, setRows] = useState([]);
-  const [selected, setSelected] = useState({});
-
-  useEffect(() => {
-    if (!adding) { setRows([]); setSelected({}); return; }
-    const newRow = {
-      _id: `reconcile-${adding._id}`,
-      tx_date: adding.date || todayStr(),
-      description: adding.description || adding.merchant || "",
-      amount: Math.abs(Number(adding.amount || 0)),
-      amount_idr: Math.abs(Number(adding.amount || 0)),
-      currency: adding.currency || "IDR",
-      tx_type: "expense",
-      from_id: reconcile.currentAccountId || "",
-      from_type: "account",
-      to_id: null,
-      to_type: "expense_category",
-      category_id: null,
-      category_name: null,
-      entity: "",
-      notes: "",
-      status: "pending",
-    };
-    setRows([newRow]);
-    setSelected({ [newRow._id]: true });
-  }, [adding?._id]); // eslint-disable-line
-
-  if (!adding) return null;
+  const [rows, setRows] = useState(() => [buildRow(stmtRow, reconcile.currentAccountId)]);
+  const [selected, setSelected] = useState(() => {
+    const r = buildRow(stmtRow, reconcile.currentAccountId);
+    return { [r._id]: true };
+  });
 
   const updateRow = (id, patch) => setRows(prev => prev.map(r => r._id === id ? { ...r, ...patch } : r));
 
@@ -420,20 +369,17 @@ export function ReconcileAddPanel({ reconcile, accounts, employeeLoans, user, on
         }).catch(e => console.error("[collect_loan]", e));
       }
 
-      reconcile.markIgnored(adding._id);
-      reconcile.setAddingRow(null);
       showToast("Transaction added");
+      onClose();
       onRefresh?.();
     } catch (e) { showToast("Error: " + e.message, "error"); }
   };
 
   return (
-    <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: 10, marginTop: 8 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: "#92400e", fontFamily: FF }}>
-          Add to Ledger
-        </span>
-        <button onClick={() => reconcile.setAddingRow(null)}
+    <div style={{ background: "#fffbeb", borderLeft: "3px solid #fbbf24", borderBottom: "1px solid #fde68a", padding: "8px 12px 10px 14px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "#92400e", fontFamily: FF }}>Add to Ledger</span>
+        <button onClick={onClose}
           style={{ fontSize: 11, color: "#6b7280", background: "none", border: "1px solid #e5e7eb", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontFamily: FF }}>
           Cancel
         </button>
@@ -443,7 +389,7 @@ export function ReconcileAddPanel({ reconcile, accounts, employeeLoans, user, on
         selected={selected}
         onUpdateRow={updateRow}
         onConfirmRow={confirmRow}
-        onSkipRow={() => reconcile.setAddingRow(null)}
+        onSkipRow={onClose}
         onConfirmAll={async (sel) => { for (const r of sel) await confirmRow(r); }}
         onToggleSelect={id => setSelected(s => ({ ...s, [id]: !s[id] }))}
         onToggleAll={() => {}}
@@ -453,5 +399,68 @@ export function ReconcileAddPanel({ reconcile, accounts, employeeLoans, user, on
         T={T}
       />
     </div>
+  );
+}
+
+// ── Inline missing row with accordion add panel ───────────────
+export function ReconcileMissingRowInline({ missingRow, reconcile, accounts, employeeLoans, user, onRefresh, COLS, ROW_PAD, FF: FF_PROP }) {
+  const [expanded, setExpanded] = useState(false);
+  const FF_USED = FF_PROP || FF;
+  const amt = Math.abs(Number(missingRow.amount || 0));
+  const fmtDateIndo = (date) => {
+    try {
+      return new Date(date + "T00:00:00").toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" });
+    } catch { return date; }
+  };
+
+  return (
+    <>
+      {/* Summary row */}
+      <div style={{ display: "grid", gridTemplateColumns: COLS, borderBottom: expanded ? "none" : "0.5px solid #fde68a", padding: ROW_PAD, alignItems: "center", background: "#fffbeb" }}>
+        <div style={{ fontSize: 11, color: "#d97706", fontFamily: FF_USED, padding: "8px 6px", whiteSpace: "nowrap", fontStyle: "italic" }}>
+          {fmtDateIndo(missingRow.date)}
+        </div>
+        <div style={{ padding: "8px 6px", minWidth: 0 }}>
+          <div style={{ fontSize: 12, fontWeight: 500, color: "#d97706", fontFamily: FF_USED, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontStyle: "italic" }}>
+            {missingRow.description || missingRow.merchant || "—"}
+          </div>
+        </div>
+        <div style={{ padding: "8px 6px" }}>
+          <ReconcileStatusBadge type="missing" />
+        </div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "#A32D2D", fontFamily: FF_USED, padding: "8px 6px", textAlign: "right" }}>
+          {fmtIDR(amt)}
+        </div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "#d1d5db", fontFamily: FF_USED, padding: "8px 6px", textAlign: "right" }}>—</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "#d1d5db", fontFamily: FF_USED, padding: "8px 6px", textAlign: "right" }}>—</div>
+        <div style={{ display: "flex", gap: 4, padding: "8px 6px", justifyContent: "center" }}>
+          <button
+            title="Add to ledger"
+            onClick={() => setExpanded(e => !e)}
+            style={{ width: 22, height: 22, fontSize: 11, fontWeight: 700, borderRadius: 4, border: "none", cursor: "pointer", background: expanded ? "#fbbf24" : "#fef3c7", color: "#d97706" }}>
+            +
+          </button>
+          <button
+            title="Ignore"
+            onClick={() => reconcile.markIgnored(missingRow._id)}
+            style={{ width: 22, height: 22, fontSize: 11, fontWeight: 700, borderRadius: 4, border: "none", cursor: "pointer", background: "#f3f4f6", color: "#9ca3af" }}>
+            ✕
+          </button>
+        </div>
+      </div>
+
+      {/* Inline add panel */}
+      {expanded && (
+        <ReconcileAddPanel
+          stmtRow={missingRow}
+          reconcile={reconcile}
+          accounts={accounts}
+          employeeLoans={employeeLoans}
+          user={user}
+          onRefresh={onRefresh}
+          onClose={() => setExpanded(false)}
+        />
+      )}
+    </>
   );
 }
