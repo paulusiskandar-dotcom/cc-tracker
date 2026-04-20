@@ -562,14 +562,10 @@ export function ReconcileMissingRowInline({ missingRow, reconcile, COLS, ROW_PAD
         <div style={{ display: "flex", gap: 4, padding: "8px 6px", justifyContent: "center" }}>
           <button
             onClick={() => setExpanded(e => !e)}
-            style={{ fontSize: 10, fontWeight: 700, color: "#d97706", background: "none", border: "1px solid #d97706", borderRadius: 5, padding: "2px 8px", cursor: "pointer", fontFamily: FF }}>
-            + Add
-          </button>
+            style={{ fontSize: 10, fontWeight: 700, color: "#d97706", background: "none", border: "1px solid #d97706", borderRadius: 5, padding: "3px 10px", cursor: "pointer", fontFamily: FF, whiteSpace: "nowrap", display: "inline-block" }}>+ Add</button>
           <button
             onClick={() => reconcile.markIgnored(missingRow._id)}
-            style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", background: "none", border: "1px solid #e5e7eb", borderRadius: 5, padding: "2px 8px", cursor: "pointer", fontFamily: FF }}>
-            Ignore
-          </button>
+            style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", background: "none", border: "1px solid #e5e7eb", borderRadius: 5, padding: "3px 10px", cursor: "pointer", fontFamily: FF, whiteSpace: "nowrap", display: "inline-block" }}>Ignore</button>
         </div>
       </div>
 

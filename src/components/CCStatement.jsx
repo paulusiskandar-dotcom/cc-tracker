@@ -430,11 +430,14 @@ export default function CCStatement({
                     const amt      = Number(tx.amount_idr || 0);
                     const subLine  = [tx.category_name, tx.entity && tx.entity !== "Personal" ? tx.entity : ""].filter(Boolean).join(" · ");
                     const b        = fmtBalCC(tx._runBal);
+                    const status   = reconcile.active ? reconcile.getStatus(tx.id) : null;
+                    const isMatched = status === "match";
+                    const rowBg    = isMatched ? "#dcfce7" : "transparent";
                     return (
                       <div key={tx.id}
-                        style={{ position: "relative", display: "grid", gridTemplateColumns: COLS, borderBottom: "0.5px solid #f3f4f6", padding: ROW_PAD, alignItems: "center" }}
-                        onMouseEnter={e => { e.currentTarget.style.background = "#fafafa"; e.currentTarget.querySelector(".edit-btn")?.style && (e.currentTarget.querySelector(".edit-btn").style.opacity = "1"); }}
-                        onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.querySelector(".edit-btn")?.style && (e.currentTarget.querySelector(".edit-btn").style.opacity = "0"); }}
+                        style={{ position: "relative", display: "grid", gridTemplateColumns: COLS, borderBottom: "0.5px solid #f3f4f6", padding: ROW_PAD, alignItems: "center", background: rowBg }}
+                        onMouseEnter={e => { if (!isMatched) e.currentTarget.style.background = "#fafafa"; e.currentTarget.querySelector(".edit-btn")?.style && (e.currentTarget.querySelector(".edit-btn").style.opacity = "1"); }}
+                        onMouseLeave={e => { e.currentTarget.style.background = rowBg; e.currentTarget.querySelector(".edit-btn")?.style && (e.currentTarget.querySelector(".edit-btn").style.opacity = "0"); }}
                       >
                         {/* Tanggal */}
                         <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, padding: "8px 6px", whiteSpace: "nowrap" }}>
@@ -479,11 +482,11 @@ export default function CCStatement({
 
                         {/* Status (reconcile mode) */}
                         {reconcile.active && (
-                          <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", padding: "8px 0", gap: 2 }}>
-                            <ReconcileStatusBadge type={reconcile.getStatus(tx.id)} />
-                            {reconcile.getStatus(tx.id) === "match" && (
-                              <span style={{ fontSize: 10, color: "#059669", fontWeight: 600, fontFamily: FF }}>Matched ✓</span>
-                            )}
+                          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "8px 0" }}>
+                            {isMatched
+                              ? <span style={{ fontSize: 10, fontWeight: 700, color: "#059669", fontFamily: FF, textTransform: "uppercase", letterSpacing: "0.04em" }}>Matched</span>
+                              : <ReconcileStatusBadge type={status} />
+                            }
                           </div>
                         )}
 
