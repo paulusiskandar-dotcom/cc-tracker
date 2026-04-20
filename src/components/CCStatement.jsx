@@ -370,7 +370,7 @@ export default function CCStatement({
       )}
 
       {/* ── No transactions ── */}
-      {!loading && data && rowsWithBalance.length === 0 && (
+      {!loading && data && rowsWithBalance.length === 0 && !(reconcile.active && reconcile.missing?.length) && (
         <div style={{
           background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb",
           padding: "40px 20px", textAlign: "center", color: "#9ca3af", fontFamily: FF, fontSize: 13,
@@ -380,7 +380,7 @@ export default function CCStatement({
       )}
 
       {/* ── Transaction table ── */}
-      {!loading && data && rowsWithBalance.length > 0 && (() => {
+      {!loading && data && (rowsWithBalance.length > 0 || (reconcile.active && reconcile.missing?.length > 0)) && (() => {
         // Columns: Tanggal | Keterangan | Jenis | Transaksi | Pembayaran | Saldo Hutang
         const COLS = reconcile.active ? "80px 1fr 110px 120px 120px 130px 48px" : "80px 1fr 110px 120px 120px 130px";
         const HDR_CELLS = [
