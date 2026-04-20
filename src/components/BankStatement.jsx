@@ -611,7 +611,7 @@ export default function BankStatement({
                       accounts={accounts}
                       employeeLoans={[]}
                       user={user}
-                      onRefresh={onRefresh}
+                      onRefresh={() => { load(); onRefresh?.(); }}
                     />
                   ))}
                 </div>

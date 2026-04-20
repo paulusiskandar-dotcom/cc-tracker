@@ -540,7 +540,7 @@ export default function CCStatement({
                       accounts={accounts}
                       employeeLoans={[]}
                       user={user}
-                      onRefresh={onRefresh}
+                      onRefresh={() => { load(); onRefresh?.(); }}
                     />
                   ))}
                 </div>
