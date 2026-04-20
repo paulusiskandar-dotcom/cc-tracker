@@ -217,7 +217,7 @@ function CicilanSection({ enabled, onToggle, form, set }) {
 const accLabel = a => a.name + (a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : "");
 
 // ── MAIN COMPONENT ─────────────────────────────────────────────
-export default function TransactionModal({
+export default function TxVerticalBig({
   open, mode = "add", initialData = null,
   defaultGroup, defaultTxType, defaultAccount,
   defaultEmployeeName = "",

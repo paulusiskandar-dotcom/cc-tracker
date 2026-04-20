@@ -2,7 +2,7 @@ import { useState, useMemo, useRef } from "react";
 import { ledgerApi, recalculateBalance } from "../api";
 import { fmtIDR } from "../utils";
 import { showToast } from "./shared/Card";
-import TransactionModal from "./shared/TransactionModal";
+import TxVerticalBig from "./shared/TxVerticalBig";
 import * as XLSX from "xlsx";
 
 const FF = "Figtree, sans-serif";
@@ -335,8 +335,8 @@ export default function EmployeeLoanStatement({
         </div>
       )}
 
-      {/* ── TransactionModal ── */}
-      <TransactionModal
+      {/* ── TxVerticalBig ── */}
+      <TxVerticalBig
         open={txOpen}
         mode={txMode}
         initialData={txInitial}

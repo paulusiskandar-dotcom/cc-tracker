@@ -8,7 +8,7 @@ import Modal from "./shared/Modal";
 import Button from "./shared/Button";
 import Input, { Field, AmountInput } from "./shared/Input";
 import { accountsApi, ledgerApi, recalculateBalance } from "../api";
-import TransactionModal from "./shared/TransactionModal";
+import TxVerticalBig from "./shared/TxVerticalBig";
 import * as XLSX from "xlsx";
 
 const FF = "Figtree, sans-serif";
@@ -430,8 +430,8 @@ export default function AssetTimeline({
         </div>
       </Modal>
 
-      {/* ── TransactionModal (add + edit) ── */}
-      <TransactionModal
+      {/* ── TxVerticalBig (add + edit) ── */}
+      <TxVerticalBig
         open={txOpen}
         mode={txMode}
         initialData={txInitial}

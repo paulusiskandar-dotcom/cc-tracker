@@ -5,7 +5,7 @@ import { LIGHT, DARK } from "../theme";
 import {
   Button, EmptyState, showToast,
   SectionHeader, Field, Input, FormRow,
-  TransactionReviewList,
+  TxHorizontal,
 } from "./shared/index";
 
 // Convert a pendingSync item to the local editable row format
@@ -546,7 +546,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
 
       {/* ── Pending rows via shared component ── */}
       {rows.length > 0 && (
-        <TransactionReviewList
+        <TxHorizontal
           rows={rows}
           selected={selected}
           onUpdateRow={updateRow}

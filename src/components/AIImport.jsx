@@ -3,7 +3,7 @@ import { supabase } from "../lib/supabase";
 import { ledgerApi, scanApi, merchantApi, getTxFromToTypes, loanPaymentsApi, installmentsApi } from "../api";
 import { fmtIDR, todayStr, checkDuplicateTransaction, resolveCategoryIds } from "../utils";
 import { LIGHT, DARK } from "../theme";
-import { Button, EmptyState, Spinner, showToast, TransactionReviewList } from "./shared/index";
+import { Button, EmptyState, Spinner, showToast, TxHorizontal } from "./shared/index";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
 
 // ── Normalise AI pseudo-types to real tx_type + category ─────────
@@ -634,7 +634,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
           <div style={{ fontSize: 14, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>
             {results.length} transactions found
           </div>
-          <TransactionReviewList
+          <TxHorizontal
             rows={results}
             selected={selected}
             onUpdateRow={updateRow}

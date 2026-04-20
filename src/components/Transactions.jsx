@@ -5,7 +5,7 @@ import { fmtIDR, fmtCur, todayStr, ym, groupByDate, fmtDateLabel } from "../util
 import { ConfirmModal } from "./shared/Modal";
 import { EmptyState, showToast } from "./shared/Card";
 import SortDropdown from "./shared/SortDropdown";
-import TransactionModal from "./shared/TransactionModal";
+import TxVerticalBig from "./shared/TxVerticalBig";
 
 // ─── SUBTABS ─────────────────────────────────────────────────
 const SUBTABS = [
@@ -294,7 +294,7 @@ export default function Transactions({
       )}
 
       {/* ── ADD / EDIT MODAL ── */}
-      <TransactionModal
+      <TxVerticalBig
         open={txModal.open}
         mode={txModal.mode}
         initialData={txModal.entry}

@@ -3,7 +3,7 @@ import { supabase } from "../lib/supabase";
 import { fmtIDR, fmtCur } from "../utils";
 import { TX_TYPE_MAP } from "../constants";
 import { showToast } from "./shared/Card";
-import TransactionModal from "./shared/TransactionModal";
+import TxVerticalBig from "./shared/TxVerticalBig";
 import { useReconcile, ReconcileBar, ReconcileStatusBadge, ReconcileMissingRowInline, getMissingRowsMap } from "./shared/ReconcileOverlay";
 import * as XLSX from "xlsx";
 
@@ -636,7 +636,7 @@ export default function BankStatement({
       )}
 
       {/* ── Edit Transaction Modal ── */}
-      <TransactionModal
+      <TxVerticalBig
         open={!!editEntry}
         mode="edit"
         initialData={editEntry}

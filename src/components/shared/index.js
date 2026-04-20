@@ -18,5 +18,5 @@ export { DateGroupHeader, GroupedTransactionList } from "./TransactionRow";
 
 export { default as SortDropdown } from "./SortDropdown";
 
-export { default as TransactionReviewList } from "./TransactionReviewList";
-export { TX_REVIEW_TYPES } from "./TransactionReviewList";
+export { default as TxHorizontal } from "./TxHorizontal";
+export { TX_HORIZONTAL_TYPES } from "./TxHorizontal";

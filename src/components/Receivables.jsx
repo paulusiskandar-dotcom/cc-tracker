@@ -10,7 +10,7 @@ import {
   Select,
   EmptyState, showToast,
 } from "./shared/index";
-import TransactionModal from "./shared/TransactionModal";
+import TxVerticalBig from "./shared/TxVerticalBig";
 
 // ─── PROGRESS BAR ─────────────────────────────────────────────
 function ProgressBar({ value, max, color = "#059669", height = 6 }) {
@@ -1464,7 +1464,7 @@ export default function Receivables({
       })()}
 
       {/* ── TRANSACTION MODAL (+ Payment) ─────────────────────── */}
-      <TransactionModal
+      <TxVerticalBig
         open={txModalOpen}
         mode="add"
         defaultGroup="loan"
@@ -1491,7 +1491,7 @@ export default function Receivables({
       />
 
       {/* ── TRANSACTION MODAL (+ New Loan for settled employees) ─── */}
-      <TransactionModal
+      <TxVerticalBig
         open={newLoanModalOpen}
         mode="add"
         defaultGroup="loan"

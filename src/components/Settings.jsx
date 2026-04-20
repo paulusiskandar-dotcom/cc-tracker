@@ -10,7 +10,7 @@ import {
   Field, AmountInput, Input, FormRow,
   Select,
   SectionHeader, EmptyState, showToast,
-  TransactionReviewList,
+  TxHorizontal,
 } from "./shared/index";
 
 const SUBTABS = [
@@ -2403,7 +2403,7 @@ function EStmtQueueItem({
               No transactions found in this statement.
             </div>
           ) : (
-            <TransactionReviewList
+            <TxHorizontal
               rows={rows}
               selected={item.selected}
               onUpdateRow={(id, patch) => onUpdateRow(id, patch)}

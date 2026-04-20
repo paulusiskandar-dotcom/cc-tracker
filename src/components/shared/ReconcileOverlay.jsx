@@ -4,17 +4,17 @@ import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { reconcileApi, ledgerApi, getTxFromToTypes } from "../../api";
 import { supabase } from "../../lib/supabase";
 import { fmtIDR, todayStr, resolveCategoryIds } from "../../utils";
-import { Button, showToast, TransactionReviewList } from "./index";
+import { Button, showToast, TxHorizontal } from "./index";
 import { LIGHT, DARK } from "../../theme";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../../constants";
 import Modal from "./Modal";
-import TransactionModal from "./TransactionModal";
+import TxVerticalBig from "./TxVerticalBig";
 
 const EDGE_URL = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/gmail-estatement`;
 const FF = "Figtree, sans-serif";
 
-// ── TX Types and helpers (copied from TransactionReviewList.jsx) ──
-export const TX_REVIEW_TYPES = [
+// ── TX Types and helpers (copied from TxHorizontal.jsx) ──
+export const TX_HORIZONTAL_TYPES = [
   { value: "expense",        label: "Expense",        color: "#dc2626" },
   { value: "income",         label: "Income",         color: "#059669" },
   { value: "transfer",       label: "Transfer",       color: "#3b5bdb" },
@@ -536,7 +536,7 @@ export function ReconcileMissingRowInline({ missingRow, reconcile, COLS, ROW_PAD
   const cfg = getAcctCfg(row.tx_type, accounts);
   const showCat = !NO_CAT_TYPES.has(row.tx_type);
   const cats = row.tx_type === "income" ? INCOME_CATEGORIES_LIST : EXPENSE_CATEGORIES;
-  const typeColor = TX_REVIEW_TYPES.find(t => t.value === row.tx_type)?.color || T.text;
+  const typeColor = TX_HORIZONTAL_TYPES.find(t => t.value === row.tx_type)?.color || T.text;
   const isFX = row.currency && row.currency !== "IDR";
 
   return (
@@ -587,7 +587,7 @@ export function ReconcileMissingRowInline({ missingRow, reconcile, COLS, ROW_PAD
                   entity: REIMBURSE_TYPES.has(t) ? (prev.entity || "") : "",
                 }));
               }}>
-              {TX_REVIEW_TYPES.map(t => (
+              {TX_HORIZONTAL_TYPES.map(t => (
                 <option key={t.value} value={t.value} style={{ color: t.color, fontWeight: 600 }}>{t.label}</option>
               ))}
             </select>

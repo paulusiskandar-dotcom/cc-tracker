@@ -22,7 +22,7 @@ import { showToast } from "./Card";
 import { supabase } from "../../lib/supabase";
 
 // ── TX Types (13 total) ─────────────────────────────────────────
-export const TX_REVIEW_TYPES = [
+export const TX_HORIZONTAL_TYPES = [
   { value: "expense",        label: "Expense",        color: "#dc2626" },
   { value: "income",         label: "Income",         color: "#059669" },
   { value: "transfer",       label: "Transfer",       color: "#3b5bdb" },
@@ -332,7 +332,7 @@ function AccountCell({ r, onUpdate, T, accounts, employeeLoans }) {
 }
 
 // ─── SINGLE TX REVIEW CARD ─────────────────────────────────────
-function TxReviewCard({
+function TxHorizontalCard({
   r, isSelected, isSkipped, isNotesOpen, T,
   source, accounts, employeeLoans, txTypes,
   onUpdate, onConfirm, onSkip, onToggleSelect, onToggleNotes,
@@ -361,7 +361,7 @@ function TxReviewCard({
   const isFX    = r.currency && r.currency !== "IDR";
   const showCat = !NO_CAT_TYPES.has(r.tx_type);
   const cats    = r.tx_type === "income" ? INCOME_CATEGORIES_LIST : EXPENSE_CATEGORIES;
-  const typeColor = TX_REVIEW_TYPES.find(t => t.value === r.tx_type)?.color || T.text;
+  const typeColor = TX_HORIZONTAL_TYPES.find(t => t.value === r.tx_type)?.color || T.text;
 
   const amtStr = isFX
     ? (source === "estatement"
@@ -630,7 +630,7 @@ function TxReviewCard({
 }
 
 // ─── MAIN EXPORT ───────────────────────────────────────────────
-export default function TransactionReviewList({
+export default function TxHorizontal({
   rows = [],
   selected = {},
   skipped,
@@ -714,8 +714,8 @@ export default function TransactionReviewList({
 
   // Show cc_installment only for estatement
   const txTypes = source === "estatement"
-    ? TX_REVIEW_TYPES
-    : TX_REVIEW_TYPES.filter(t => t.value !== "cc_installment");
+    ? TX_HORIZONTAL_TYPES
+    : TX_HORIZONTAL_TYPES.filter(t => t.value !== "cc_installment");
 
   const activeRows    = visibleRows.filter(r => !skipped?.has(r._id));
   const countSelected = activeRows.filter(r => selected[r._id]).length;
@@ -772,7 +772,7 @@ export default function TransactionReviewList({
       {/* ── Cards ── */}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {visibleRows.map(r => (
-          <TxReviewCard
+          <TxHorizontalCard
             key={r._id}
             r={r}
             isSelected={!!selected[r._id]}

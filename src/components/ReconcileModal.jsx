@@ -5,8 +5,8 @@ import { supabase } from "../lib/supabase";
 import { fmtIDR, todayStr, checkDuplicateTransaction, resolveCategoryIds } from "../utils";
 import { LIGHT, DARK } from "../theme";
 import Modal from "./shared/Modal";
-import { Button, showToast, TransactionReviewList } from "./shared/index";
-import TransactionModal from "./shared/TransactionModal";
+import { Button, showToast, TxHorizontal } from "./shared/index";
+import TxVerticalBig from "./shared/TxVerticalBig";
 
 const EDGE_URL          = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/gmail-estatement`;
 const RECONCILE_PDF_URL = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/reconcile-pdf`;
@@ -1047,7 +1047,7 @@ export default function ReconcileModal({
                                 <button onClick={() => setExpandedId(null)} style={btnS("#6b7280", "#e5e7eb")}>Cancel</button>
                                 <button onClick={() => setIgnoredIds(prev => { const n = new Set(prev); n.add(s?._id); return n; setExpandedId(null); })} style={btnS("#6b7280", "#e5e7eb")}>Ignore</button>
                               </div>
-                              <TransactionReviewList
+                              <TxHorizontal
                                 rows={[missRow]}
                                 selected={{ [missRow._id]: true }}
                                 onUpdateRow={updateMissingRow}
@@ -1111,7 +1111,7 @@ export default function ReconcileModal({
 
       {/* Edit Transaction Modal */}
       {txModalMode && txInitial && (
-        <TransactionModal
+        <TxVerticalBig
           open={!!txModalMode} mode={txModalMode} initialData={txInitial}
           onSave={() => { refetchLedger(); onRefresh?.(); setTxModalMode(null); setTxInitial(null); }}
           onDelete={() => { refetchLedger(); onRefresh?.(); setTxModalMode(null); setTxInitial(null); }}
