@@ -650,6 +650,7 @@ export default function TxHorizontal({
   retrySonnet = false,
   onClearAll,
   onCreateInstallment,
+  hideBatchFooter = false,
 }) {
   const [notesOpen,    setNotesOpen]    = useState(new Set());
   const [confirmingId, setConfirmingId] = useState(null);
@@ -725,7 +726,7 @@ export default function TxHorizontal({
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
 
       {/* ── Top bar ── */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+      {!hideBatchFooter && <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <span style={{ fontSize: 12, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>
             {countSelected} / {activeRows.length} selected
@@ -767,7 +768,7 @@ export default function TxHorizontal({
             {confirmingAll ? "Importing…" : `Accept All ✓ (${countSelected})`}
           </button>
         </div>
-      </div>
+      </div>}
 
       {/* ── Cards ── */}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

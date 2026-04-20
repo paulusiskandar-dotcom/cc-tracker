@@ -1,6 +1,6 @@
 // ReconcileOverlay — shared reconcile mode for Bank & CC statements
 // Provides: upload modal, matching logic, status column renderer, and reconcile bar
-import { useState, useMemo, useCallback, useRef } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { reconcileApi, ledgerApi, installmentsApi, loanPaymentsApi } from "../../api";
 import { supabase } from "../../lib/supabase";
 import { fmtIDR, todayStr } from "../../utils";
@@ -77,13 +77,15 @@ export function ReconcileStatusBadge({ type }) {
 
 // ── Main hook ────────────────────────────────────────────────
 export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, currentAccountId }) {
-  const [active,     setActive]     = useState(false);
-  const [stmtRows,   setStmtRows]   = useState([]);
-  const [processing, setProcessing] = useState(false);
-  const [keptIds,    setKeptIds]    = useState(() => new Set());
-  const [ignoredIds, setIgnoredIds] = useState(() => new Set());
-  const [sessionId,  setSessionId]  = useState(null); // eslint-disable-line no-unused-vars
-  const [pdfSource,  setPdfSource]  = useState("");
+  const [active,       setActive]       = useState(false);
+  const [stmtRows,     setStmtRows]     = useState([]);
+  const [processing,   setProcessing]   = useState(false);
+  const [keptIds,      setKeptIds]      = useState(() => new Set());
+  const [ignoredIds,   setIgnoredIds]   = useState(() => new Set());
+  const [sessionId,    setSessionId]    = useState(null); // eslint-disable-line no-unused-vars
+  const [pdfSource,    setPdfSource]    = useState("");
+  const [expandedIds,  setExpandedIds]  = useState(() => new Set());
+  const [pendingRows,  setPendingRows]  = useState({});
   const fileRef = useRef(null);
 
   const { matched, missing, extraIds } = useMemo(() => {
@@ -153,6 +155,19 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
   const markKept    = useCallback((id) => setKeptIds(p => { const n = new Set(p); n.add(id); return n; }), []);
   const markIgnored = useCallback((id) => setIgnoredIds(p => { const n = new Set(p); n.add(id); return n; }), []);
 
+  const toggleExpanded = useCallback((id) => setExpandedIds(p => {
+    const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n;
+  }), []);
+  const expandAll  = useCallback(() => setExpandedIds(new Set(missingFiltered.map(m => m._id))), [missingFiltered]);
+  const collapseAll = useCallback(() => setExpandedIds(new Set()), []);
+
+  const updatePendingRow = useCallback((stmtRowId, row) => {
+    setPendingRows(p => ({ ...p, [stmtRowId]: row }));
+  }, []);
+  const removePendingRow = useCallback((stmtRowId) => {
+    setPendingRows(p => { const n = { ...p }; delete n[stmtRowId]; return n; });
+  }, []);
+
   const seedStmtRows = useCallback((txs, filename = "") => {
     setStmtRows(txs.map((t, i) => ({ ...t, _id: t._id || `stmt-${i}` })));
     setPdfSource(filename);
@@ -191,6 +206,7 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
       } catch (e) { console.error("[reconcile] update reconciled_at error:", e); }
     }
     setActive(false); setStmtRows([]); setKeptIds(new Set()); setIgnoredIds(new Set()); setPdfSource("");
+    setExpandedIds(new Set()); setPendingRows({});
     showToast("Reconcile completed");
   }, [user, accountId, fromDate, stmtRows, stats, pdfSource, matched]);
 
@@ -200,6 +216,8 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
     getStatus, markKept, markIgnored, seedStmtRows,
     stageAndProcess, startReconcile, exitReconcile,
     currentAccountId,
+    expandedIds, toggleExpanded, expandAll, collapseAll,
+    pendingRows, updatePendingRow, removePendingRow,
   };
 }
 
@@ -313,6 +331,37 @@ export function getMissingRowsMap(missing) {
   return map;
 }
 
+// ── Missing rows summary bar ─────────────────────────────────
+export function ReconcileMissingBar({ reconcile, onExpandAll, expandedCount, totalMissing, onSaveAll, saving }) {
+  if (!reconcile.active || totalMissing === 0) return null;
+
+  const allExpanded = expandedCount === totalMissing;
+
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "space-between",
+      background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10,
+      padding: "8px 14px", marginBottom: 8, gap: 8,
+    }}>
+      <span style={{ fontSize: 12, fontWeight: 700, color: "#92400e", fontFamily: FF }}>
+        {totalMissing} missing transaction{totalMissing > 1 ? "s" : ""} from PDF
+      </span>
+      <div style={{ display: "flex", gap: 6 }}>
+        <button onClick={onExpandAll}
+          style={{ fontSize: 11, fontWeight: 700, padding: "5px 12px", borderRadius: 6, border: "1px solid #fbbf24", background: "#fff", color: "#92400e", cursor: "pointer", fontFamily: FF }}>
+          {allExpanded ? "Collapse All" : `Expand All (${totalMissing})`}
+        </button>
+        {expandedCount > 0 && (
+          <button onClick={onSaveAll} disabled={saving}
+            style={{ fontSize: 11, fontWeight: 700, padding: "5px 14px", borderRadius: 6, border: "none", background: "#3b5bdb", color: "#fff", cursor: saving ? "default" : "pointer", fontFamily: FF, opacity: saving ? 0.6 : 1 }}>
+            {saving ? "Saving…" : `Save All (${expandedCount})`}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Add panel — TxHorizontal inline form ─────────────────────
 function buildRow(stmtRow, currentAccountId) {
   return {
@@ -343,7 +392,18 @@ export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans,
     return { [r._id]: true };
   });
 
-  const updateRow = (id, patch) => setRows(prev => prev.map(r => r._id === id ? { ...r, ...patch } : r));
+  // Register initial row in pendingRows on mount; clean up on unmount
+  useEffect(() => {
+    if (rows[0]) reconcile.updatePendingRow(stmtRow._id, rows[0]);
+    return () => reconcile.removePendingRow(stmtRow._id);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const updateRow = (id, patch) => setRows(prev => {
+    const next = prev.map(r => r._id === id ? { ...r, ...patch } : r);
+    // Keep pendingRows in sync — store the first (and only) row
+    if (next[0]) reconcile.updatePendingRow(stmtRow._id, next[0]);
+    return next;
+  });
 
   const confirmRow = async (r) => {
     try {
@@ -387,6 +447,7 @@ export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans,
       }
 
       showToast("Transaction added");
+      reconcile.removePendingRow(stmtRow._id);
       onClose();
       onRefresh?.();
     } catch (e) { showToast("Error: " + e.message, "error"); }
@@ -411,6 +472,7 @@ export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans,
         onToggleSelect={id => setSelected(s => ({ ...s, [id]: !s[id] }))}
         onToggleAll={() => {}}
         source="reconcile"
+        hideBatchFooter
         accounts={accounts}
         employeeLoans={employeeLoans || []}
         T={T}
@@ -421,7 +483,7 @@ export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans,
 
 // ── Inline missing row with accordion add panel ───────────────
 export function ReconcileMissingRowInline({ missingRow, reconcile, accounts, employeeLoans, user, onRefresh, COLS, ROW_PAD, FF: FF_PROP }) {
-  const [expanded, setExpanded] = useState(false);
+  const expanded = reconcile.expandedIds.has(missingRow._id);
   const FF_USED = FF_PROP || FF;
   const amt = Math.abs(Number(missingRow.amount || 0));
   const fmtDateIndo = (date) => {
@@ -453,7 +515,7 @@ export function ReconcileMissingRowInline({ missingRow, reconcile, accounts, emp
         <div style={{ display: "flex", gap: 4, padding: "8px 6px", justifyContent: "center" }}>
           <button
             title="Add to ledger"
-            onClick={() => setExpanded(e => !e)}
+            onClick={() => reconcile.toggleExpanded(missingRow._id)}
             style={{ width: 22, height: 22, fontSize: 11, fontWeight: 700, borderRadius: 4, border: "none", cursor: "pointer", background: expanded ? "#fbbf24" : "#fef3c7", color: "#d97706" }}>
             +
           </button>
@@ -475,7 +537,7 @@ export function ReconcileMissingRowInline({ missingRow, reconcile, accounts, emp
           employeeLoans={employeeLoans}
           user={user}
           onRefresh={onRefresh}
-          onClose={() => setExpanded(false)}
+          onClose={() => reconcile.toggleExpanded(missingRow._id)}
         />
       )}
     </>

@@ -694,20 +694,43 @@ async function processStatement(
   };
 }
 
+// ── HELPER: filter junk rows from extracted transactions ────────
+const JUNK_KEYWORDS = [
+  /balance\s+of\s+last\s+month/i,
+  /opening\s+balance/i,
+  /closing\s+balance/i,
+  /balance\s+(brought|carried)\s+forward/i,
+  /previous\s+balance/i,
+  /starting\s+balance/i,
+  /ending\s+balance/i,
+  /sub\s*total/i,
+  /grand\s+total/i,
+];
+function cleanTransactions(transactions: any[]): any[] {
+  return transactions.filter(t => {
+    const desc = ((t.description || t.merchant || "") as string).trim();
+    const amt = Math.abs(Number(t.amount || 0));
+    if (amt === 0) return false;
+    if (JUNK_KEYWORDS.some(re => re.test(desc))) return false;
+    return true;
+  });
+}
+
 // ── HELPER: save transactions + update status ──────────────────
 async function finalizeTransactions(serviceSupabase: any, statementId: string, transactions: any[]) {
-  if (!Array.isArray(transactions) || transactions.length === 0) {
+  const cleaned = cleanTransactions(transactions);
+  if (!Array.isArray(cleaned) || cleaned.length === 0) {
     await serviceSupabase.from("estatement_pdfs")
       .update({ status: "pending" }).eq("id", statementId);
     return { success: false, error: "No transactions found in this statement.", needs_password: false, encrypted: false };
   }
-  console.log(`[gmail-estatement] process: extracted ${transactions.length} transactions`);
+  console.log(`[gmail-estatement] process: extracted ${cleaned.length} transactions (${transactions.length - cleaned.length} junk filtered)`);
   await serviceSupabase.from("estatement_pdfs").update({
     status:            "parsed",
-    transaction_count: transactions.length,
+    transaction_count: cleaned.length,
     processed_at:      new Date().toISOString(),
   }).eq("id", statementId);
-  return { success: true, transactions, count: transactions.length };
+  return { success: true, transactions: cleaned, count: cleaned.length };
 }
 
 // ── ACTION: mark_done ──────────────────────────────────────────
@@ -829,8 +852,9 @@ Deno.serve(async (req: Request) => {
         let claudeResult = await chunkAndProcessPDF(pdf_base64, ANTHROPIC_KEY);
 
         if (claudeResult.ok) {
-          const meta = inferMetadata(claudeResult.transactions);
-          result = { success: true, transactions: claudeResult.transactions, ...meta };
+          const cleaned = cleanTransactions(claudeResult.transactions);
+          const meta = inferMetadata(cleaned);
+          result = { success: true, transactions: cleaned, ...meta };
         } else if (!claudeResult.is_encrypted) {
           result = { success: false, needs_password: false, error: claudeResult.error };
         } else {
@@ -848,8 +872,9 @@ Deno.serve(async (req: Request) => {
             if ("base64" in decResult) {
               claudeResult = await chunkAndProcessPDF(decResult.base64, ANTHROPIC_KEY);
               if (claudeResult.ok) {
-                const meta = inferMetadata(claudeResult.transactions);
-                result = { success: true, transactions: claudeResult.transactions, ...meta };
+                const cleaned = cleanTransactions(claudeResult.transactions);
+                const meta = inferMetadata(cleaned);
+                result = { success: true, transactions: cleaned, ...meta };
               } else {
                 result = { success: false, needs_password: false, error: "PDF decrypted but no transactions could be extracted. It may be a scanned image." };
               }

@@ -4,7 +4,8 @@ import { fmtIDR, fmtCur } from "../utils";
 import { TX_TYPE_MAP } from "../constants";
 import { showToast } from "./shared/Card";
 import TxVerticalBig from "./shared/TxVerticalBig";
-import { useReconcile, ReconcileBar, ReconcileStatusBadge, ReconcileMissingRowInline, getMissingRowsMap } from "./shared/ReconcileOverlay";
+import { useReconcile, ReconcileBar, ReconcileStatusBadge, ReconcileMissingRowInline, ReconcileMissingBar, getMissingRowsMap } from "./shared/ReconcileOverlay";
+import { ledgerApi } from "../api";
 import * as XLSX from "xlsx";
 
 const FF = "Figtree, sans-serif";
@@ -119,6 +120,7 @@ export default function BankStatement({
   const [loading,        setLoading]        = useState(false);
   const [rawData,        setRawData]        = useState(null);  // { allTxs, allPreTxs }
   const [editEntry,      setEditEntry]      = useState(null);
+  const [savingAll,      setSavingAll]      = useState(false);
   const [activeCurrency, setActiveCurrency] = useState("IDR");
   const [acctCurrencies, setAcctCurrencies] = useState([]);    // rows from account_currencies
   const printRef = useRef(null);
@@ -132,6 +134,37 @@ export default function BankStatement({
       reconcile.seedStmtRows(initialReconcileTxs, initialReconcileFilename);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const saveAll = async () => {
+    const toSave = Object.values(reconcile.pendingRows);
+    if (!toSave.length) return;
+    setSavingAll(true);
+    let successCount = 0, errCount = 0;
+    for (const r of toSave) {
+      try {
+        const entry = {
+          tx_date: r.tx_date, tx_type: r.tx_type, description: r.description,
+          amount: Number(r.amount || r.amount_idr || 0),
+          amount_idr: Number(r.amount_idr || r.amount || 0),
+          currency: r.currency || "IDR", fx_rate_used: Number(r.fx_rate || 1),
+          from_id: r.from_id, from_type: r.from_type,
+          to_id: r.to_id, to_type: r.to_type,
+          category_id: r.category_id || null, category_name: r.category_name || null,
+          entity: r.entity || null,
+          is_reimburse: ["reimburse_in", "reimburse_out"].includes(r.tx_type),
+          notes: r.notes || null,
+        };
+        await ledgerApi.create(user.id, entry, accounts);
+        successCount++;
+      } catch (e) { errCount++; console.error("[saveAll]", e); }
+    }
+    setSavingAll(false);
+    reconcile.collapseAll();
+    Object.keys(reconcile.pendingRows).forEach(id => reconcile.removePendingRow(id));
+    showToast(`Saved ${successCount}${errCount ? `, ${errCount} failed` : ""}`);
+    load();
+    onRefresh?.();
+  };
 
   // Derive bank accounts from all accounts if not passed separately
   const bankAccs = bankAccsProp.length > 0
@@ -467,6 +500,20 @@ export default function BankStatement({
         ];
         const ROW_PAD = "0 14px";
         return (
+          <>
+          {reconcile.active && reconcile.missing.length > 0 && (
+            <ReconcileMissingBar
+              reconcile={reconcile}
+              onExpandAll={() => {
+                if (reconcile.expandedIds.size === reconcile.missing.length) reconcile.collapseAll();
+                else reconcile.expandAll();
+              }}
+              expandedCount={reconcile.expandedIds.size}
+              totalMissing={reconcile.missing.length}
+              onSaveAll={saveAll}
+              saving={savingAll}
+            />
+          )}
           <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden" }}>
 
             {/* Header */}
@@ -631,6 +678,7 @@ export default function BankStatement({
             </div>
             ); })()}
           </div>
+          </>
         );
       })()}
 
