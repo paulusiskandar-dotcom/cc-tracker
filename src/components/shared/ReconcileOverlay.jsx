@@ -173,9 +173,21 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
         });
       } catch (e) { console.error("[reconcile] save session error:", e); }
     }
+    if (matched.size > 0) {
+      try {
+        const matchedIds = [...matched.keys()];
+        const nowIso = new Date().toISOString();
+        const { error } = await supabase
+          .from("ledger")
+          .update({ reconciled_at: nowIso })
+          .in("id", matchedIds)
+          .eq("user_id", user.id);
+        if (error) throw error;
+      } catch (e) { console.error("[reconcile] update reconciled_at error:", e); }
+    }
     setActive(false); setStmtRows([]); setKeptIds(new Set()); setIgnoredIds(new Set()); setPdfSource("");
     showToast("Reconcile completed");
-  }, [user, accountId, fromDate, stmtRows, stats, pdfSource]);
+  }, [user, accountId, fromDate, stmtRows, stats, pdfSource, matched]);
 
   return {
     active, stmtRows, processing, stats, pdfSource, fileRef,
