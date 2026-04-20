@@ -280,7 +280,7 @@ export default function CCStatement({
       </div>
 
       {/* Reconcile bar */}
-      <ReconcileBar reconcile={reconcile} onRefresh={onRefresh} />
+      <ReconcileBar reconcile={reconcile} onRefresh={() => { load(); onRefresh?.(); }} />
 
       {/* ── Print-only header ── */}
       <div className="print-only" style={{ display: "none" }}>

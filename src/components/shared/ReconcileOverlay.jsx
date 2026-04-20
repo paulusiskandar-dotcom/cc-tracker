@@ -97,11 +97,16 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
       const tx = ledgerRows.find(e => e.id === ledgerId);
       return tx?.reconciled_at ? "reconciled" : null;
     }
+    // No PDF uploaded yet — don't label anything
+    if (!stmtRows.length) {
+      const tx = ledgerRows.find(e => e.id === ledgerId);
+      return tx?.reconciled_at ? "reconciled" : null;
+    }
     if (matched.has(ledgerId)) return "match";
     if (keptIds.has(ledgerId)) return "kept";
     if (extraIds.has(ledgerId)) return "extra";
-    return "match"; // in ledger, not flagged
-  }, [active, matched, keptIds, extraIds, ledgerRows]);
+    return "match";
+  }, [active, stmtRows, matched, keptIds, extraIds, ledgerRows]);
 
   const missingFiltered = useMemo(() =>
     missing.filter(s => !ignoredIds.has(s._id)),
@@ -243,7 +248,7 @@ export function ReconcileBar({ reconcile, onRefresh }) {
               {processing ? "Processing…" : "Upload PDF"}
             </button>
           )}
-          <button onClick={() => { exitReconcile(); onRefresh?.(); }}
+          <button onClick={async () => { await exitReconcile(); onRefresh?.(); }}
             style={{ fontSize: 11, fontWeight: 700, padding: "5px 14px", borderRadius: 8, border: "none", background: "#111827", color: "#fff", cursor: "pointer", fontFamily: FF }}>
             Done
           </button>

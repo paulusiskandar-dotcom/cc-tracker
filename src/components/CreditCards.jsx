@@ -516,8 +516,19 @@ export default function CreditCards({
           accounts={accounts}
           user={user}
           onNavigate={(acc, year, month, txs, filename) => {
-            const from = `${year}-${String(month).padStart(2, "0")}-01`;
-            const to   = new Date(year, month, 0).toISOString().slice(0, 10);
+            const stDay = Number(acc.statement_day);
+            let from, to;
+            if (stDay > 0) {
+              const endDate = new Date(year, month - 1, stDay);
+              const startDate = new Date(endDate);
+              startDate.setMonth(startDate.getMonth() - 1);
+              startDate.setDate(startDate.getDate() + 1);
+              from = startDate.toISOString().slice(0, 10);
+              to   = endDate.toISOString().slice(0, 10);
+            } else {
+              from = `${year}-${String(month).padStart(2, "0")}-01`;
+              to   = new Date(year, month, 0).toISOString().slice(0, 10);
+            }
             const selectedMonth = `${year}-${String(month).padStart(2, "0")}`;
             setCcReconcileSeeds({ from, to, selectedMonth, txs, filename });
             setCcStatementAcc(acc);
