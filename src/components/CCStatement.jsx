@@ -4,7 +4,7 @@ import { fmtIDR } from "../utils";
 import { TX_TYPE_MAP } from "../constants";
 import { showToast } from "./shared/Card";
 import TransactionModal from "./shared/TransactionModal";
-import { useReconcile, ReconcileBar, ReconcileStatusBadge, ReconcileMissingRows } from "./shared/ReconcileOverlay";
+import { useReconcile, ReconcileBar, ReconcileStatusBadge, ReconcileAddModal, ReconcileMissingRowInline, getMissingRowsMap } from "./shared/ReconcileOverlay";
 import * as XLSX from "xlsx";
 
 const FF = "Figtree, sans-serif";
@@ -86,7 +86,7 @@ export default function CCStatement({
   const printRef = useRef(null);
 
   // Reconcile mode
-  const reconcile = useReconcile({ user, accountId, fromDate, toDate, ledgerRows: useMemo(() => (data?.txs || []).map(tx => ({ ...tx, _dir: ccDirection(tx, accountId) === "charge" ? "debit" : "credit" })), [data, accountId]) });
+  const reconcile = useReconcile({ user, accountId, fromDate, toDate, ledgerRows: useMemo(() => (data?.txs || []).map(tx => ({ ...tx, _dir: ccDirection(tx, accountId) === "charge" ? "debit" : "credit" })), [data, accountId]), currentAccountId: accountId });
 
   const bankAccs    = bankAccsProp.length > 0 ? bankAccsProp : accounts.filter(a => a.type === "bank");
   const creditCards = creditCardsProp.length > 0 ? creditCardsProp : accounts.filter(a => a.type === "credit_card");
@@ -407,94 +407,118 @@ export default function CCStatement({
               );
             })()}
 
-            {/* Grouped rows */}
-            {grouped.map(([date, txs]) => (
-              <div key={date}>
-                <div style={{ background: "#f3f4f6", borderBottom: "0.5px solid #e5e7eb", padding: "5px 20px", fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF }}>
-                  {fmtDateLabel(date)}
-                </div>
+            {/* Grouped rows with interleaved missing rows */}
+            {(() => {
+              const missingRowsMap = getMissingRowsMap(reconcile.missing || []);
+              const allDates = new Set([
+                ...grouped.map(([date]) => date),
+                ...missingRowsMap.keys()
+              ]);
+              const sortedDates = Array.from(allDates).sort();
+              const groupMap = Object.fromEntries(grouped);
 
-                {txs.map(tx => {
-                  const typeInfo = TX_TYPE_MAP[tx.tx_type];
-                  const amt      = Number(tx.amount_idr || 0);
-                  const subLine  = [tx.category_name, tx.entity && tx.entity !== "Personal" ? tx.entity : ""].filter(Boolean).join(" · ");
-                  const b        = fmtBalCC(tx._runBal);
-                  return (
-                    <div key={tx.id}
-                      style={{ position: "relative", display: "grid", gridTemplateColumns: COLS, borderBottom: "0.5px solid #f3f4f6", padding: ROW_PAD, alignItems: "center" }}
-                      onMouseEnter={e => { e.currentTarget.style.background = "#fafafa"; e.currentTarget.querySelector(".edit-btn")?.style && (e.currentTarget.querySelector(".edit-btn").style.opacity = "1"); }}
-                      onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.querySelector(".edit-btn")?.style && (e.currentTarget.querySelector(".edit-btn").style.opacity = "0"); }}
-                    >
-                      {/* Tanggal */}
-                      <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, padding: "8px 6px", whiteSpace: "nowrap" }}>
-                        {fmtDateShort(tx.tx_date)}
-                      </div>
+              return sortedDates.map(date => (
+                <div key={date}>
+                  {/* Date separator */}
+                  <div style={{ background: "#f3f4f6", borderBottom: "0.5px solid #e5e7eb", padding: "5px 20px", fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF }}>
+                    {fmtDateLabel(date)}
+                  </div>
 
-                      {/* Keterangan */}
-                      <div style={{ padding: "8px 6px", minWidth: 0 }}>
-                        <div style={{ fontSize: 12, fontWeight: 500, color: "#111827", fontFamily: FF, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {tx.description || tx.merchant_name || "—"}
+                  {/* Ledger transactions for this date */}
+                  {(groupMap[date] || []).map(tx => {
+                    const typeInfo = TX_TYPE_MAP[tx.tx_type];
+                    const amt      = Number(tx.amount_idr || 0);
+                    const subLine  = [tx.category_name, tx.entity && tx.entity !== "Personal" ? tx.entity : ""].filter(Boolean).join(" · ");
+                    const b        = fmtBalCC(tx._runBal);
+                    return (
+                      <div key={tx.id}
+                        style={{ position: "relative", display: "grid", gridTemplateColumns: COLS, borderBottom: "0.5px solid #f3f4f6", padding: ROW_PAD, alignItems: "center" }}
+                        onMouseEnter={e => { e.currentTarget.style.background = "#fafafa"; e.currentTarget.querySelector(".edit-btn")?.style && (e.currentTarget.querySelector(".edit-btn").style.opacity = "1"); }}
+                        onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.querySelector(".edit-btn")?.style && (e.currentTarget.querySelector(".edit-btn").style.opacity = "0"); }}
+                      >
+                        {/* Tanggal */}
+                        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, padding: "8px 6px", whiteSpace: "nowrap" }}>
+                          {fmtDateShort(tx.tx_date)}
                         </div>
-                        {subLine && (
-                          <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {subLine}
+
+                        {/* Keterangan */}
+                        <div style={{ padding: "8px 6px", minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 500, color: "#111827", fontFamily: FF, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {tx.description || tx.merchant_name || "—"}
+                          </div>
+                          {subLine && (
+                            <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {subLine}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Jenis badge */}
+                        <div style={{ padding: "8px 6px" }}>
+                          {typeInfo && (
+                            <span style={{ fontSize: 9, fontWeight: 700, fontFamily: FF, background: typeInfo.color + "18", color: typeInfo.color, borderRadius: 4, padding: "2px 6px", whiteSpace: "nowrap" }}>
+                              {typeInfo.icon} {typeInfo.label}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Transaksi (charge) */}
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#A32D2D", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
+                          {tx._dir === "charge"  ? fmtIDR(amt) : <span style={{ color: "#d1d5db" }}>—</span>}
+                        </div>
+
+                        {/* Pembayaran (payment) */}
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#3B6D11", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
+                          {tx._dir === "payment" ? fmtIDR(amt) : <span style={{ color: "#d1d5db" }}>—</span>}
+                        </div>
+
+                        {/* Saldo Hutang */}
+                        <div style={{ fontSize: 12, fontWeight: 700, color: b.color, fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
+                          {b.sign}{b.text}
+                        </div>
+
+                        {/* Status (reconcile mode) */}
+                        {reconcile.active && (
+                          <div style={{ display: "flex", justifyContent: "center", padding: "8px 0" }}>
+                            <ReconcileStatusBadge type={reconcile.getStatus(tx.id)} />
                           </div>
                         )}
+
+                        {/* Edit button */}
+                        <button
+                          className="edit-btn no-print"
+                          onClick={e => { e.stopPropagation(); openEdit(tx); }}
+                          style={{
+                            position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
+                            width: 26, height: 26, borderRadius: 6,
+                            border: "1px solid #e5e7eb", background: "#fff",
+                            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                            fontSize: 14, color: "#9ca3af",
+                            opacity: 0, transition: "opacity 0.15s",
+                            padding: "4px 8px", boxSizing: "border-box",
+                          }}
+                          title="Edit transaction"
+                        >
+                          ✎
+                        </button>
                       </div>
+                    );
+                  })}
 
-                      {/* Jenis badge */}
-                      <div style={{ padding: "8px 6px" }}>
-                        {typeInfo && (
-                          <span style={{ fontSize: 9, fontWeight: 700, fontFamily: FF, background: typeInfo.color + "18", color: typeInfo.color, borderRadius: 4, padding: "2px 6px", whiteSpace: "nowrap" }}>
-                            {typeInfo.icon} {typeInfo.label}
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Transaksi (charge) */}
-                      <div style={{ fontSize: 12, fontWeight: 600, color: "#A32D2D", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
-                        {tx._dir === "charge"  ? fmtIDR(amt) : <span style={{ color: "#d1d5db" }}>—</span>}
-                      </div>
-
-                      {/* Pembayaran (payment) */}
-                      <div style={{ fontSize: 12, fontWeight: 600, color: "#3B6D11", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
-                        {tx._dir === "payment" ? fmtIDR(amt) : <span style={{ color: "#d1d5db" }}>—</span>}
-                      </div>
-
-                      {/* Saldo Hutang */}
-                      <div style={{ fontSize: 12, fontWeight: 700, color: b.color, fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
-                        {b.sign}{b.text}
-                      </div>
-
-                      {/* Status (reconcile mode) */}
-                      {reconcile.active && (
-                        <div style={{ display: "flex", justifyContent: "center", padding: "8px 0" }}>
-                          <ReconcileStatusBadge type={reconcile.getStatus(tx.id)} />
-                        </div>
-                      )}
-
-                      {/* Edit button */}
-                      <button
-                        className="edit-btn no-print"
-                        onClick={e => { e.stopPropagation(); openEdit(tx); }}
-                        style={{
-                          position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
-                          width: 26, height: 26, borderRadius: 6,
-                          border: "1px solid #e5e7eb", background: "#fff",
-                          cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-                          fontSize: 14, color: "#9ca3af",
-                          opacity: 0, transition: "opacity 0.15s",
-                          padding: "4px 8px", boxSizing: "border-box",
-                        }}
-                        title="Edit transaction"
-                      >
-                        ✎
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
+                  {/* Missing rows for this date (interleaved) */}
+                  {reconcile.active && missingRowsMap.has(date) && missingRowsMap.get(date).map(missingRow => (
+                    <ReconcileMissingRowInline
+                      key={missingRow._id}
+                      missingRow={missingRow}
+                      reconcile={reconcile}
+                      COLS={COLS}
+                      ROW_PAD={ROW_PAD}
+                      FF={FF}
+                    />
+                  ))}
+                </div>
+              ));
+            })()}
 
             {/* Closing balance row */}
             {(() => {
@@ -515,8 +539,8 @@ export default function CCStatement({
         );
       })()}
 
-      {/* Missing rows (reconcile mode) */}
-      <ReconcileMissingRows reconcile={reconcile} accounts={accounts} categories={categories} user={user} onRefresh={onRefresh} />
+      {/* Add transaction modal for missing rows */}
+      <ReconcileAddModal reconcile={reconcile} accounts={accounts} categories={categories} user={user} onRefresh={onRefresh} />
 
       {/* ── Footer ── */}
       {data && rowsWithBalance.length > 0 && (

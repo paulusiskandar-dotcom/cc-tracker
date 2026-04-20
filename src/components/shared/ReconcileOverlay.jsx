@@ -77,7 +77,7 @@ export function ReconcileStatusBadge({ type }) {
 }
 
 // ── Main hook ────────────────────────────────────────────────
-export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows }) {
+export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, currentAccountId }) {
   const [active,     setActive]     = useState(false);
   const [stmtRows,   setStmtRows]   = useState([]);
   const [processing, setProcessing] = useState(false);
@@ -85,6 +85,7 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows }) 
   const [ignoredIds, setIgnoredIds] = useState(() => new Set());
   const [sessionId,  setSessionId]  = useState(null);
   const [pdfSource,  setPdfSource]  = useState("");
+  const [addingRow,  setAddingRow]  = useState(null);
   const fileRef = useRef(null);
 
   const { matched, missing, extraIds } = useMemo(() => {
@@ -178,6 +179,7 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows }) 
     matched, missing: missingFiltered, extraIds, keptIds, ignoredIds,
     getStatus, markKept, markIgnored,
     stageAndProcess, startReconcile, exitReconcile,
+    addingRow, setAddingRow, currentAccountId,
   };
 }
 
@@ -185,6 +187,7 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows }) 
 export function ReconcileBar({ reconcile, onRefresh }) {
   const { active, stats, processing, pdfSource, fileRef, stageAndProcess, exitReconcile } = reconcile;
   const [showUpload, setShowUpload] = useState(false);
+  const [stagedFile, setStagedFile] = useState(null);
 
   if (!active) return null;
 
@@ -221,48 +224,135 @@ export function ReconcileBar({ reconcile, onRefresh }) {
       </div>
 
       {/* Upload modal */}
-      <Modal isOpen={showUpload} onClose={() => setShowUpload(false)} title="Upload Statement PDF" width={520}>
-        <div
-          onClick={() => fileRef.current?.click()}
-          onDragOver={e => e.preventDefault()}
-          onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) { stageAndProcess(f); setShowUpload(false); } }}
-          style={{ border: "2px dashed #e5e7eb", borderRadius: 16, padding: "28px 24px", textAlign: "center", cursor: "pointer", background: "#fafafa" }}>
-          <div style={{ fontSize: 28, marginBottom: 6 }}>📄</div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: FF, marginBottom: 4 }}>Drop PDF here or click to browse</div>
-          <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: FF }}>Bank or credit card statement (PDF)</div>
-          <input ref={fileRef} type="file" accept=".pdf" style={{ display: "none" }}
-            onChange={e => { const f = e.target.files?.[0]; if (f) { stageAndProcess(f); setShowUpload(false); } e.target.value = ""; }} />
-          <div style={{ marginTop: 12 }}><Button variant="primary" size="sm">Choose File</Button></div>
-        </div>
+      <Modal isOpen={showUpload} onClose={() => { setShowUpload(false); setStagedFile(null); }} title="Upload Statement PDF" width={520}>
+        {stagedFile ? (
+          /* Staging UI */
+          <div style={{ textAlign: "center", padding: "20px" }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>📄</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: FF, marginBottom: 4 }}>
+              {stagedFile.name}
+            </div>
+            <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: FF, marginBottom: 20 }}>
+              {(stagedFile.size / 1024 > 1024
+                ? `${(stagedFile.size / (1024 * 1024)).toFixed(1)} MB`
+                : `${(stagedFile.size / 1024).toFixed(0)} KB`)}
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+              <button
+                onClick={() => { setStagedFile(null); }}
+                style={{ fontSize: 12, padding: "8px 16px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#f9fafb", color: "#6b7280", cursor: "pointer", fontFamily: FF, fontWeight: 600 }}>
+                Cancel
+              </button>
+              <button
+                onClick={() => { stageAndProcess(stagedFile); setShowUpload(false); setStagedFile(null); }}
+                style={{ fontSize: 12, padding: "8px 16px", borderRadius: 8, border: "none", background: "#3b5bdb", color: "#fff", cursor: "pointer", fontFamily: FF, fontWeight: 600 }}>
+                Process with AI
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* Drop zone */
+          <div
+            onClick={() => fileRef.current?.click()}
+            onDragOver={e => e.preventDefault()}
+            onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setStagedFile(f); }}
+            style={{ border: "2px dashed #e5e7eb", borderRadius: 16, padding: "28px 24px", textAlign: "center", cursor: "pointer", background: "#fafafa" }}>
+            <div style={{ fontSize: 28, marginBottom: 6 }}>📄</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: FF, marginBottom: 4 }}>Drop PDF here or click to browse</div>
+            <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: FF }}>Bank or credit card statement (PDF)</div>
+            <input ref={fileRef} type="file" accept=".pdf" style={{ display: "none" }}
+              onChange={e => { const f = e.target.files?.[0]; if (f) setStagedFile(f); e.target.value = ""; }} />
+            <div style={{ marginTop: 12 }}><Button variant="primary" size="sm">Choose File</Button></div>
+          </div>
+        )}
       </Modal>
     </>
   );
 }
 
-// ── Missing rows section ─────────────────────────────────────
-export function ReconcileMissingRows({ reconcile, accounts, categories, user, onRefresh, dark }) {
-  const { missing, markIgnored, stageAndProcess } = reconcile;
-  const T = dark ? DARK : LIGHT;
+// ── Helper function to get missing rows by date ──────────────
+export function getMissingRowsMap(missing) {
+  const map = new Map();
+  missing.forEach(row => {
+    const date = row.date || "";
+    if (!map.has(date)) {
+      map.set(date, []);
+    }
+    map.get(date).push(row);
+  });
+  return map;
+}
 
-  if (!reconcile.active || missing.length === 0) return null;
+// ── Inline missing row component ─────────────────────────────
+export function ReconcileMissingRowInline({ missingRow, reconcile, COLS, ROW_PAD, FF }) {
+  const amt = Math.abs(Number(missingRow.amount || 0));
+  const fmtDateIndo = (date) => {
+    try {
+      return new Date(date + "T00:00:00").toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" });
+    } catch { return date; }
+  };
 
   return (
-    <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 12, padding: "12px 16px", marginTop: 8 }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: "#d97706", fontFamily: FF, marginBottom: 8 }}>
-        Missing from Ledger ({missing.length})
+    <div style={{ display: "grid", gridTemplateColumns: COLS, borderBottom: "0.5px solid #fde68a", padding: ROW_PAD, alignItems: "center", background: "#fffbeb" }}>
+      <div style={{ fontSize: 11, color: "#d97706", fontFamily: FF, padding: "8px 6px", whiteSpace: "nowrap", fontStyle: "italic" }}>
+        {fmtDateIndo(missingRow.date)}
       </div>
-      {missing.map(s => (
-        <div key={s._id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid #fef3c7", fontSize: 11, fontFamily: FF }}>
-          <span style={{ width: 60, color: "#6b7280", flexShrink: 0 }}>{(s.date || "").slice(5)}</span>
-          <span style={{ flex: 1, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.description || s.merchant || "—"}</span>
-          <span style={{ width: 80, textAlign: "right", fontWeight: 600, color: "#A32D2D" }}>{fmtIDR(Math.abs(Number(s.amount || 0)))}</span>
-          <ReconcileStatusBadge type="missing" />
-          <button onClick={() => markIgnored(s._id)}
-            style={{ fontSize: 9, fontWeight: 700, color: "#6b7280", background: "none", border: "1px solid #e5e7eb", borderRadius: 4, padding: "2px 6px", cursor: "pointer", fontFamily: FF }}>
-            Ignore
-          </button>
+      <div style={{ padding: "8px 6px", minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 500, color: "#d97706", fontFamily: FF, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontStyle: "italic" }}>
+          {missingRow.description || missingRow.merchant || "—"}
         </div>
-      ))}
+      </div>
+      <div style={{ padding: "8px 6px" }}>
+        <ReconcileStatusBadge type="missing" />
+      </div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: "#A32D2D", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
+        {fmtIDR(amt)}
+      </div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: "#d1d5db", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>—</div>
+      <div style={{ fontSize: 12, fontWeight: 600, color: "#d1d5db", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>—</div>
+      <div style={{ display: "flex", gap: 4, padding: "8px 6px", justifyContent: "center" }}>
+        <button
+          onClick={() => reconcile.setAddingRow(missingRow)}
+          style={{ fontSize: 9, fontWeight: 700, color: "#d97706", background: "none", border: "1px solid #d97706", borderRadius: 4, padding: "2px 6px", cursor: "pointer", fontFamily: FF }}>
+          + Add
+        </button>
+        <button
+          onClick={() => reconcile.markIgnored(missingRow._id)}
+          style={{ fontSize: 9, fontWeight: 700, color: "#6b7280", background: "none", border: "1px solid #e5e7eb", borderRadius: 4, padding: "2px 6px", cursor: "pointer", fontFamily: FF }}>
+          Ignore
+        </button>
+      </div>
     </div>
+  );
+}
+
+// ── TransactionModal for adding missing rows ─────────────────
+export function ReconcileAddModal({ reconcile, accounts, categories, user, onRefresh }) {
+  return (
+    <TransactionModal
+      open={!!reconcile.addingRow}
+      mode="confirm"
+      initialData={{
+        tx_date: reconcile.addingRow?.date || todayStr(),
+        description: reconcile.addingRow?.description || reconcile.addingRow?.merchant || "",
+        amount: Math.abs(Number(reconcile.addingRow?.amount || 0)),
+        amount_idr: Math.abs(Number(reconcile.addingRow?.amount || 0)),
+        currency: reconcile.addingRow?.currency || "IDR",
+        tx_type: "expense",
+        from_id: reconcile.currentAccountId,
+        from_type: "account",
+      }}
+      accounts={accounts}
+      categories={categories}
+      user={user}
+      onSave={async (saved) => {
+        reconcile.setAddingRow(null);
+        // Mark this stmt row as no longer missing by adding its _id to ignoredIds
+        if (reconcile.addingRow?._id) reconcile.markIgnored(reconcile.addingRow._id);
+        onRefresh?.();
+      }}
+      onClose={() => reconcile.setAddingRow(null)}
+      onDelete={null}
+    />
   );
 }
