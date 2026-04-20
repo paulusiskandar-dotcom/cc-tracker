@@ -149,6 +149,12 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
   const markKept    = useCallback((id) => setKeptIds(p => { const n = new Set(p); n.add(id); return n; }), []);
   const markIgnored = useCallback((id) => setIgnoredIds(p => { const n = new Set(p); n.add(id); return n; }), []);
 
+  const seedStmtRows = useCallback((txs, filename = "") => {
+    setStmtRows(txs.map((t, i) => ({ ...t, _id: t._id || `stmt-${i}` })));
+    setPdfSource(filename);
+    setActive(true);
+  }, []);
+
   const startReconcile = useCallback(() => setActive(true), []);
   const exitReconcile = useCallback(async () => {
     if (user && accountId && stmtRows.length) {
@@ -176,7 +182,7 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
     active, stmtRows, processing, stats, pdfSource, fileRef,
     matched, missing: missingFiltered, extraIds, keptIds, ignoredIds,
     addingRow, setAddingRow,
-    getStatus, markKept, markIgnored,
+    getStatus, markKept, markIgnored, seedStmtRows,
     stageAndProcess, startReconcile, exitReconcile,
     currentAccountId,
   };

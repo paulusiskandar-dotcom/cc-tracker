@@ -6,6 +6,7 @@ import { ENTITIES, BANKS_L, NETWORKS } from "../constants";
 import { fmtIDR, todayStr, ym, daysUntil } from "../utils";
 import Modal, { ConfirmModal } from "./shared/Modal";
 import Button from "./shared/Button";
+import GlobalReconcileButton from "./shared/GlobalReconcileButton";
 import Input, { Field, AmountInput, FormRow } from "./shared/Input";
 import Select from "./shared/Select";
 import { EmptyState, showToast } from "./shared/Card";
@@ -67,6 +68,7 @@ export default function CreditCards({
   const [subTab,           setSubTab]           = useState("overview");
   const [selectedCard,     setSelectedCard]     = useState(null);
   const [ccStatementAcc,   setCcStatementAcc]   = useState(null);
+  const [ccReconcileSeeds, setCcReconcileSeeds] = useState(null); // { from, to, txs, filename }
   const [ccBankFilter, setCcBankFilter] = useState("all");
   const [ccSort,       setCcSort]       = useState(() => localStorage.getItem("sort_cc") || "debt_desc");
   const [filterMonth,  setFilterMonth]  = useState("");
@@ -485,7 +487,7 @@ export default function CreditCards({
         user={user}
         categories={[]}
         onRefresh={onRefresh}
-        onBack={() => setCcStatementAcc(null)}
+        onBack={() => { setCcStatementAcc(null); setCcReconcileSeeds(null); }}
         bankAccounts={bankAccounts}
         creditCards={creditCards}
         assets={[]}
@@ -495,6 +497,11 @@ export default function CreditCards({
         allCurrencies={[]}
         fxRates={{}}
         incomeSrcs={[]}
+        initialFromDate={ccReconcileSeeds?.from || null}
+        initialToDate={ccReconcileSeeds?.to || null}
+        initialSelectedMonth={ccReconcileSeeds?.selectedMonth || null}
+        initialReconcileTxs={ccReconcileSeeds?.txs || null}
+        initialReconcileFilename={ccReconcileSeeds?.filename || ""}
       />
     );
   }
@@ -504,6 +511,18 @@ export default function CreditCards({
 
       {/* ── HEADER ── */}
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <GlobalReconcileButton
+          type="cc"
+          accounts={accounts}
+          user={user}
+          onNavigate={(acc, year, month, txs, filename) => {
+            const from = `${year}-${String(month).padStart(2, "0")}-01`;
+            const to   = new Date(year, month, 0).toISOString().slice(0, 10);
+            const selectedMonth = `${year}-${String(month).padStart(2, "0")}`;
+            setCcReconcileSeeds({ from, to, selectedMonth, txs, filename });
+            setCcStatementAcc(acc);
+          }}
+        />
         <Button variant="secondary" size="sm" onClick={() => { setAddCardForm(emptyCardForm()); setModal("add_card"); }}>
           + Add Card
         </Button>

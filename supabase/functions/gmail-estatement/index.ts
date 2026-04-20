@@ -498,6 +498,47 @@ async function callClaudeWithFallback(
 }
 
 // ── HELPER: chunk large PDFs and process each chunk ────────────
+// ── HELPER: infer account + period from already-extracted transactions ──
+function inferMetadata(transactions: any[]): { detected_account: any; detected_period: any } {
+  const detected_account: Record<string, string> = {};
+
+  // Use most common card_last4 across transactions
+  const last4Counts: Record<string, number> = {};
+  for (const tx of transactions) {
+    if (tx.card_last4) {
+      const k = String(tx.card_last4);
+      last4Counts[k] = (last4Counts[k] || 0) + 1;
+    }
+  }
+  const topLast4 = Object.entries(last4Counts).sort((a, b) => b[1] - a[1])[0];
+  if (topLast4) detected_account.last4 = topLast4[0];
+
+  // Use first account_hint as account_no
+  for (const tx of transactions) {
+    if (tx.account_hint) { detected_account.account_no = String(tx.account_hint); break; }
+  }
+
+  // Period: majority month from transaction dates
+  const monthCount: Record<string, number> = {};
+  for (const tx of transactions) {
+    if (tx.date && /^\d{4}-\d{2}/.test(tx.date)) {
+      const ym = (tx.date as string).slice(0, 7);
+      monthCount[ym] = (monthCount[ym] || 0) + 1;
+    }
+  }
+  const topMonth = Object.entries(monthCount).sort((a, b) => b[1] - a[1])[0];
+  let detected_period: any = null;
+  if (topMonth) {
+    const [y, m] = topMonth[0].split("-").map(Number);
+    detected_period = { year: y, month: m };
+  }
+
+  return {
+    detected_account: Object.keys(detected_account).length > 0 ? detected_account : null,
+    detected_period,
+  };
+}
+
 async function chunkAndProcessPDF(
   pdfBase64: string, anthropicKey: string
 ): Promise<ClaudeResult> {
@@ -788,7 +829,8 @@ Deno.serve(async (req: Request) => {
         let claudeResult = await chunkAndProcessPDF(pdf_base64, ANTHROPIC_KEY);
 
         if (claudeResult.ok) {
-          result = { success: true, transactions: claudeResult.transactions };
+          const meta = inferMetadata(claudeResult.transactions);
+          result = { success: true, transactions: claudeResult.transactions, ...meta };
         } else if (!claudeResult.is_encrypted) {
           result = { success: false, needs_password: false, error: claudeResult.error };
         } else {
@@ -806,7 +848,8 @@ Deno.serve(async (req: Request) => {
             if ("base64" in decResult) {
               claudeResult = await chunkAndProcessPDF(decResult.base64, ANTHROPIC_KEY);
               if (claudeResult.ok) {
-                result = { success: true, transactions: claudeResult.transactions };
+                const meta = inferMetadata(claudeResult.transactions);
+                result = { success: true, transactions: claudeResult.transactions, ...meta };
               } else {
                 result = { success: false, needs_password: false, error: "PDF decrypted but no transactions could be extracted. It may be a scanned image." };
               }

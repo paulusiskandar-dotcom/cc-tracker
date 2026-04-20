@@ -74,11 +74,16 @@ export default function CCStatement({
   assets = [], liabilities = [], receivables = [],
   accountCurrencies = [], allCurrencies = [], fxRates = {},
   incomeSrcs = [],
+  initialFromDate = null, initialToDate = null, initialSelectedMonth = null,
+  initialReconcileTxs = null, initialReconcileFilename = "",
 }) {
+  const hasInitialDates = useRef(!!(initialFromDate));
   const [accountId, setAccountId] = useState(initialAccount?.id || "");
-  const [fromDate,  setFromDate]  = useState(firstOfMonthStr());
-  const [toDate,    setToDate]    = useState(todayStr());
-  const [selectedMonth, setSelectedMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [fromDate,  setFromDate]  = useState(initialFromDate || firstOfMonthStr());
+  const [toDate,    setToDate]    = useState(initialToDate   || todayStr());
+  const [selectedMonth, setSelectedMonth] = useState(
+    initialSelectedMonth || (initialFromDate ? initialFromDate.slice(0, 7) : new Date().toISOString().slice(0, 7))
+  );
   const [loading,   setLoading]   = useState(false);
   const [data,      setData]      = useState(null);
 
@@ -88,6 +93,13 @@ export default function CCStatement({
   // Reconcile mode
   const reconcile = useReconcile({ user, accountId, fromDate, toDate, ledgerRows: useMemo(() => (data?.txs || []).map(tx => ({ ...tx, _dir: ccDirection(tx, accountId) === "charge" ? "debit" : "credit" })), [data, accountId]), currentAccountId: accountId });
 
+  // Seed reconcile state from props (GlobalReconcileButton flow)
+  useEffect(() => {
+    if (initialReconcileTxs?.length) {
+      reconcile.seedStmtRows(initialReconcileTxs, initialReconcileFilename);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const bankAccs    = bankAccsProp.length > 0 ? bankAccsProp : accounts.filter(a => a.type === "bank");
   const creditCards = creditCardsProp.length > 0 ? creditCardsProp : accounts.filter(a => a.type === "credit_card");
 
@@ -96,7 +108,9 @@ export default function CCStatement({
   const selectedAccount = accounts.find(a => a.id === accountId) || null;
 
   // Auto-compute billing cycle dates when month picker changes
+  // (skip on first run if caller supplied explicit initialFromDate/initialToDate)
   useEffect(() => {
+    if (hasInitialDates.current) { hasInitialDates.current = false; return; }
     if (!selectedMonth || !selectedAccount) return;
     const [y, m] = selectedMonth.split("-").map(Number);
     const stDay = Number(selectedAccount.statement_day);
@@ -431,9 +445,9 @@ export default function CCStatement({
                     const amt      = Number(tx.amount_idr || 0);
                     const subLine  = [tx.category_name, tx.entity && tx.entity !== "Personal" ? tx.entity : ""].filter(Boolean).join(" · ");
                     const b        = fmtBalCC(tx._runBal);
-                    const status   = reconcile.active ? reconcile.getStatus(tx.id) : null;
-                    const isMatched = status === "match";
-                    const rowBg    = isMatched ? "#dcfce7" : "transparent";
+                    const status    = reconcile.getStatus(tx.id);
+                    const isMatched = reconcile.active && status === "match";
+                    const rowBg     = isMatched ? "#dcfce7" : "transparent";
                     return (
                       <div key={tx.id}
                         style={{ position: "relative", display: "grid", gridTemplateColumns: COLS, borderBottom: "0.5px solid #f3f4f6", padding: ROW_PAD, alignItems: "center", background: rowBg }}
@@ -441,8 +455,11 @@ export default function CCStatement({
                         onMouseLeave={e => { e.currentTarget.style.background = rowBg; e.currentTarget.querySelector(".edit-btn")?.style && (e.currentTarget.querySelector(".edit-btn").style.opacity = "0"); }}
                       >
                         {/* Tanggal */}
-                        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, padding: "8px 6px", whiteSpace: "nowrap" }}>
+                        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, padding: "8px 6px", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4 }}>
                           {fmtDateShort(tx.tx_date)}
+                          {tx.reconciled_at && !reconcile.active && (
+                            <span title="Reconciled" style={{ fontSize: 8, fontWeight: 800, background: "#dcfce7", color: "#059669", borderRadius: 3, padding: "1px 3px", lineHeight: 1, flexShrink: 0 }}>R</span>
+                          )}
                         </div>
 
                         {/* Keterangan */}

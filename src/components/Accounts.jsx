@@ -8,6 +8,7 @@ import {
 import { fmtIDR, fmtCur } from "../utils";
 import Modal, { ConfirmModal } from "./shared/Modal";
 import Button from "./shared/Button";
+import GlobalReconcileButton from "./shared/GlobalReconcileButton";
 import Input, { Field, AmountInput, FormRow } from "./shared/Input";
 import Select from "./shared/Select";
 import SortDropdown from "./shared/SortDropdown";
@@ -73,7 +74,8 @@ export default function Accounts({
   const [nilaiAcc,  setNilaiAcc]  = useState(null);
   const [nilaiForm, setNilaiForm] = useState({ value: "", date: "", notes: "" });
   const [nilaiSaving, setNilaiSaving] = useState(false);
-  const [statementAcc, setStatementAcc] = useState(null);
+  const [statementAcc,       setStatementAcc]       = useState(null);
+  const [bankReconcileSeeds, setBankReconcileSeeds] = useState(null); // { from, to, txs, filename }
 
   // ─── FILTERED ACCOUNTS ──────────────────────────────────────
   const filtered = useMemo(() => {
@@ -340,7 +342,7 @@ export default function Accounts({
         user={user}
         categories={categories}
         onRefresh={onRefresh}
-        onBack={() => setStatementAcc(null)}
+        onBack={() => { setStatementAcc(null); setBankReconcileSeeds(null); }}
         bankAccounts={bankAccounts}
         creditCards={creditCards}
         assets={assets}
@@ -350,6 +352,10 @@ export default function Accounts({
         allCurrencies={CURRENCIES}
         fxRates={fxRates}
         incomeSrcs={incomeSrcs}
+        initialFromDate={bankReconcileSeeds?.from || null}
+        initialToDate={bankReconcileSeeds?.to || null}
+        initialReconcileTxs={bankReconcileSeeds?.txs || null}
+        initialReconcileFilename={bankReconcileSeeds?.filename || ""}
       />
     );
   }
@@ -360,7 +366,22 @@ export default function Accounts({
       {/* ── HEADER ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div />
-        <Button onClick={openAdd} size="sm">+ Add Account</Button>
+        <div style={{ display: "flex", gap: 8 }}>
+          {(initialSubTab === "bank" || initialSubTab === "all") && (
+            <GlobalReconcileButton
+              type="bank"
+              accounts={accounts}
+              user={user}
+              onNavigate={(acc, year, month, txs, filename) => {
+                const from = `${year}-${String(month).padStart(2, "0")}-01`;
+                const to   = new Date(year, month, 0).toISOString().slice(0, 10);
+                setBankReconcileSeeds({ from, to, txs, filename });
+                setStatementAcc(acc);
+              }}
+            />
+          )}
+          <Button onClick={openAdd} size="sm">+ Add Account</Button>
+        </div>
       </div>
 
       {/* ── BANK PAGE ── */}

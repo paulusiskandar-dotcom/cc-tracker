@@ -109,10 +109,13 @@ export default function BankStatement({
   bankAccounts: bankAccsProp = [], creditCards = [], assets = [], liabilities = [],
   receivables = [], accountCurrencies = [], allCurrencies = [], fxRates = {},
   incomeSrcs = [],
+  initialFromDate = null, initialToDate = null,
+  initialReconcileTxs = null, initialReconcileFilename = "",
 }) {
+  const hasInitialDates = useRef(!!(initialFromDate));
   const [accountId,      setAccountId]      = useState(initialAccount?.id || "");
-  const [fromDate,       setFromDate]       = useState(firstOfMonthStr());
-  const [toDate,         setToDate]         = useState(todayStr());
+  const [fromDate,       setFromDate]       = useState(initialFromDate || firstOfMonthStr());
+  const [toDate,         setToDate]         = useState(initialToDate   || todayStr());
   const [loading,        setLoading]        = useState(false);
   const [rawData,        setRawData]        = useState(null);  // { allTxs, allPreTxs }
   const [editEntry,      setEditEntry]      = useState(null);
@@ -122,6 +125,13 @@ export default function BankStatement({
 
   // Reconcile mode
   const reconcile = useReconcile({ user, accountId, fromDate, toDate, ledgerRows: useMemo(() => (rawData?.allTxs || []).map(tx => ({ ...tx, _dir: txDirection(tx, accountId) })), [rawData, accountId]), currentAccountId: accountId });
+
+  // Seed reconcile state from props (GlobalReconcileButton flow)
+  useEffect(() => {
+    if (initialReconcileTxs?.length) {
+      reconcile.seedStmtRows(initialReconcileTxs, initialReconcileFilename);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Derive bank accounts from all accounts if not passed separately
   const bankAccs = bankAccsProp.length > 0
@@ -504,9 +514,9 @@ export default function BankStatement({
                     const typeInfo = TX_TYPE_MAP[tx.tx_type];
                     const amt      = tx._displayAmt ?? Number(tx.amount_idr || 0);
                     const subLine  = [tx.category_name, tx.entity && tx.entity !== "Personal" ? tx.entity : ""].filter(Boolean).join(" · ");
-                    const status   = reconcile.active ? reconcile.getStatus(tx.id) : null;
-                    const isMatched = status === "match";
-                    const rowBg    = isMatched ? "#dcfce7" : "transparent";
+                    const status    = reconcile.getStatus(tx.id);
+                    const isMatched = reconcile.active && status === "match";
+                    const rowBg     = isMatched ? "#dcfce7" : "transparent";
                     return (
                       <div key={tx.id}
                         style={{ position: "relative", display: "grid", gridTemplateColumns: COLS, borderBottom: "0.5px solid #f3f4f6", padding: ROW_PAD, alignItems: "center", background: rowBg }}
@@ -514,8 +524,11 @@ export default function BankStatement({
                         onMouseLeave={e => { e.currentTarget.style.background = rowBg; e.currentTarget.querySelector(".edit-btn")?.style && (e.currentTarget.querySelector(".edit-btn").style.opacity = "0"); }}
                       >
                         {/* Tanggal */}
-                        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, padding: "8px 6px", whiteSpace: "nowrap" }}>
+                        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, padding: "8px 6px", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4 }}>
                           {fmtDateShort(tx.tx_date)}
+                          {tx.reconciled_at && !reconcile.active && (
+                            <span title="Reconciled" style={{ fontSize: 8, fontWeight: 800, background: "#dcfce7", color: "#059669", borderRadius: 3, padding: "1px 3px", lineHeight: 1, flexShrink: 0 }}>R</span>
+                          )}
                         </div>
 
                         {/* Keterangan (desc + sub-line) */}
