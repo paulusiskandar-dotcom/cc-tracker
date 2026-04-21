@@ -136,11 +136,30 @@ export default function BankStatement({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveAll = async () => {
-    const toSave = Object.values(reconcile.pendingRows);
-    if (!toSave.length) return;
+    const missing = reconcile.missing;
+    if (!missing.length) return;
     setSavingAll(true);
     let successCount = 0, errCount = 0;
-    for (const r of toSave) {
+    for (const stmtRow of missing) {
+      // Build default row from statement data, merge with any user edits from the panel
+      const defaultRow = {
+        tx_date: stmtRow.date || todayStr(),
+        description: stmtRow.description || stmtRow.merchant || "",
+        amount: Math.abs(Number(stmtRow.amount || 0)),
+        amount_idr: Math.abs(Number(stmtRow.amount || 0)),
+        currency: stmtRow.currency || "IDR",
+        tx_type: "expense",
+        from_id: accountId || "",
+        from_type: "account",
+        to_id: null,
+        to_type: "expense_category",
+        category_id: null,
+        category_name: null,
+        entity: null,
+        notes: null,
+        fx_rate: 1,
+      };
+      const r = { ...defaultRow, ...(reconcile.pendingRows[stmtRow._id] || {}) };
       try {
         const entry = {
           tx_date: r.tx_date, tx_type: r.tx_type, description: r.description,
