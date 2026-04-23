@@ -11,6 +11,7 @@ import { Button, showToast, TxHorizontal, TX_HORIZONTAL_TYPES } from "./index";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../../constants";
 import { LIGHT } from "../../theme";
 import Modal from "./Modal";
+import ReconcileSummaryModal from "./ReconcileSummaryModal";
 
 const EDGE_URL = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/gmail-estatement`;
 const FF = "Figtree, sans-serif";
@@ -87,11 +88,16 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
   const [keptIds,      setKeptIds]      = useState(() => new Set());
   const [ignoredIds,   setIgnoredIds]   = useState(() => new Set());
   const [sessionId,    setSessionId]    = useState(null); // eslint-disable-line no-unused-vars
-  const [pdfSource,    setPdfSource]    = useState("");
+  const [pdfSource,         setPdfSource]         = useState("");
+  const [pdfBlobUrl,        setPdfBlobUrl]        = useState(null);
+  const [stmtClosingBalance, setStmtClosingBalance] = useState(null);
+  const [stmtOpeningBalance, setStmtOpeningBalance] = useState(null);
   const [expandedIds,  setExpandedIds]  = useState(() => new Set());
   const [pendingRows,  setPendingRows]  = useState({});
   const [allLedger,    setAllLedger]    = useState([]);
   const fileRef = useRef(null);
+
+  useEffect(() => () => { if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl); }, [pdfBlobUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!active || !user?.id) return;
@@ -157,9 +163,15 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
   }), [matched, missingFiltered, extraIds, keptIds, ignoredIds]);
 
   // Upload handler
-  const stageAndProcess = useCallback(async (file) => {
+  const stageAndProcess = useCallback(async (file, { append = false } = {}) => {
     if (!file) return;
-    setPdfSource(file.name);
+    if (!append) {
+      const blobUrl = URL.createObjectURL(file);
+      setPdfBlobUrl(prev => { if (prev) URL.revokeObjectURL(prev); return blobUrl; });
+      setPdfSource(file.name);
+    } else {
+      setPdfSource(prev => prev ? `${prev}, ${file.name}` : file.name);
+    }
     setProcessing(true);
     try {
       const reader = new FileReader();
@@ -177,7 +189,13 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
       if (data.needs_password || data.encrypted) {
         showToast("PDF terenkripsi. Silakan hapus password terlebih dahulu.", "error");
       } else if (data.transactions?.length) {
-        setStmtRows(data.transactions.map((t, i) => ({ ...t, _id: `stmt-${i}` })));
+        const newRows = data.transactions.map((t, i) => ({ ...t, _id: t._id || `stmt-${Date.now()}-${i}` }));
+        if (append) setStmtRows(prev => [...prev, ...newRows]);
+        else setStmtRows(newRows);
+        if (!append) {
+          if (data.closing_balance != null) setStmtClosingBalance(Number(data.closing_balance));
+          if (data.opening_balance != null) setStmtOpeningBalance(Number(data.opening_balance));
+        }
         showToast(`${data.transactions.length} transactions extracted`);
       } else {
         showToast(data.error || "No transactions found", "error");
@@ -233,6 +251,8 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
     }
     if (s.ignoredIds) setIgnoredIds(new Set(s.ignoredIds));
     if (s.pendingRows) setPendingRows(s.pendingRows);
+    if (s.stmtClosingBalance != null) setStmtClosingBalance(s.stmtClosingBalance);
+    if (s.stmtOpeningBalance != null) setStmtOpeningBalance(s.stmtOpeningBalance);
   }, []);
 
   const startReconcile = useCallback(() => setActive(true), []);
@@ -266,13 +286,15 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
         if (error) throw error;
       } catch (e) { console.error("[reconcile] update reconciled_at error:", e); }
     }
+    if (pdfBlobUrl) { URL.revokeObjectURL(pdfBlobUrl); setPdfBlobUrl(null); }
     setActive(false); setStmtRows([]); setKeptIds(new Set()); setIgnoredIds(new Set()); setPdfSource("");
-    setExpandedIds(new Set()); setPendingRows({});
+    setExpandedIds(new Set()); setPendingRows({}); setStmtClosingBalance(null); setStmtOpeningBalance(null);
     showToast("Reconcile completed");
   }, [user, accountId, fromDate, stmtRows, stats, pdfSource, matched]);
 
   return {
-    active, stmtRows, processing, stats, pdfSource, fileRef,
+    active, stmtRows, processing, stats, pdfSource, pdfBlobUrl,
+    stmtClosingBalance, stmtOpeningBalance, fileRef,
     matched, missing: missingEnriched, extraIds, keptIds, ignoredIds,
     getStatus, markKept, markIgnored, seedStmtRows, seedFullState,
     stageAndProcess, startReconcile, exitReconcile,
@@ -284,81 +306,117 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
 }
 
 // ── Reconcile bar + upload modal ─────────────────────────────
-export function ReconcileBar({ reconcile, onRefresh, onClearDraft }) {
-  const { active, stats, processing, pdfSource, fileRef, stageAndProcess, exitReconcile } = reconcile;
-  const [showUpload, setShowUpload] = useState(false);
-  const [stagedFile, setStagedFile] = useState(null);
+export function ReconcileBar({ reconcile, onRefresh, onClearDraft, currentAccount, periodLabel, ledgerClosingBalance, showPdfPanel, onTogglePdfPanel }) {
+  const { active, stats, processing, pdfSource, pdfBlobUrl, fileRef, stageAndProcess, exitReconcile, stmtClosingBalance } = reconcile;
+  const [showUpload,   setShowUpload]   = useState(false);
+  const [stagedFiles,  setStagedFiles]  = useState([]);
+  const [processProgress, setProcessProgress] = useState(null);
+  const [showSummary,  setShowSummary]  = useState(false);
 
   if (!active) return null;
 
+  const hasMismatch = stmtClosingBalance != null && ledgerClosingBalance != null &&
+    Math.round(stmtClosingBalance) !== Math.round(ledgerClosingBalance);
+
   return (
     <>
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 12,
-        padding: "10px 16px", flexWrap: "wrap", gap: 8,
-      }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <span style={{ fontSize: 12, fontWeight: 700, color: "#1d4ed8", fontFamily: FF }}>Reconcile Mode</span>
-          {pdfSource && (
-            <>
-              <span
-                title="Matched — In both ledger and statement"
-                style={{ fontSize: 9, fontWeight: 700, background: "#dcfce7", color: "#059669", padding: "2px 8px", borderRadius: 10, cursor: "help" }}>
-                ✓ {stats.match}
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 12,
+          padding: "10px 16px", flexWrap: "wrap", gap: 8,
+        }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: "#1d4ed8", fontFamily: FF }}>Reconcile Mode</span>
+            {pdfSource && (
+              <>
+                <span title="Matched — In both ledger and statement"
+                  style={{ fontSize: 9, fontWeight: 700, background: "#dcfce7", color: "#059669", padding: "2px 8px", borderRadius: 10, cursor: "help" }}>
+                  ✓ {stats.match}
+                </span>
+                <span title="Missing — In statement, not in ledger"
+                  style={{ fontSize: 9, fontWeight: 700, background: "#fef3c7", color: "#d97706", padding: "2px 8px", borderRadius: 10, cursor: "help" }}>
+                  ! {stats.missing}
+                </span>
+                <span title="Extra — In ledger, not in statement"
+                  style={{ fontSize: 9, fontWeight: 700, background: "#fee2e2", color: "#dc2626", padding: "2px 8px", borderRadius: 10, cursor: "help" }}>
+                  ? {stats.extra}
+                </span>
+              </>
+            )}
+            {processProgress && (
+              <span style={{ fontSize: 10, color: "#1d4ed8", fontFamily: FF }}>
+                Processing {processProgress.current}/{processProgress.total}…
               </span>
-              <span
-                title="Missing — In statement, not in ledger"
-                style={{ fontSize: 9, fontWeight: 700, background: "#fef3c7", color: "#d97706", padding: "2px 8px", borderRadius: 10, cursor: "help" }}>
-                ! {stats.missing}
-              </span>
-              <span
-                title="Extra — In ledger, not in statement"
-                style={{ fontSize: 9, fontWeight: 700, background: "#fee2e2", color: "#dc2626", padding: "2px 8px", borderRadius: 10, cursor: "help" }}>
-                ? {stats.extra}
-              </span>
-            </>
-          )}
-          {pdfSource && <span style={{ fontSize: 10, color: "#6b7280", fontFamily: FF }}>{pdfSource}</span>}
-        </div>
-        <div style={{ display: "flex", gap: 6 }}>
-          {!pdfSource && (
-            <button onClick={() => setShowUpload(true)}
-              style={{ fontSize: 11, fontWeight: 700, padding: "5px 14px", borderRadius: 8, border: "none", background: "#3b5bdb", color: "#fff", cursor: "pointer", fontFamily: FF }}>
-              {processing ? "Processing…" : "Upload PDF"}
+            )}
+            {pdfSource && !processProgress && <span style={{ fontSize: 10, color: "#6b7280", fontFamily: FF }}>{pdfSource}</span>}
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            {!pdfSource && (
+              <button onClick={() => setShowUpload(true)}
+                style={{ fontSize: 11, fontWeight: 700, padding: "5px 14px", borderRadius: 8, border: "none", background: "#3b5bdb", color: "#fff", cursor: "pointer", fontFamily: FF }}>
+                {processing ? "Processing…" : "Upload PDF"}
+              </button>
+            )}
+            {pdfBlobUrl && onTogglePdfPanel && (
+              <button onClick={onTogglePdfPanel}
+                style={{ fontSize: 11, fontWeight: 600, padding: "5px 12px", borderRadius: 8, border: "1px solid #bfdbfe", background: showPdfPanel ? "#dbeafe" : "#fff", color: "#1d4ed8", cursor: "pointer", fontFamily: FF }}>
+                {showPdfPanel ? "Hide PDF" : "Show PDF"}
+              </button>
+            )}
+            <button onClick={() => setShowSummary(true)}
+              style={{ fontSize: 11, fontWeight: 700, padding: "5px 14px", borderRadius: 8, border: "none", background: "#111827", color: "#fff", cursor: "pointer", fontFamily: FF }}>
+              Done
             </button>
-          )}
-          <button onClick={async () => { await exitReconcile(); onClearDraft?.(); onRefresh?.(); }}
-            style={{ fontSize: 11, fontWeight: 700, padding: "5px 14px", borderRadius: 8, border: "none", background: "#111827", color: "#fff", cursor: "pointer", fontFamily: FF }}>
-            Done
-          </button>
+          </div>
         </div>
+
+        {/* Persistent mismatch warning */}
+        {hasMismatch && (
+          <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 8, padding: "6px 12px", fontSize: 11, color: "#c2410c", fontFamily: FF }}>
+            ⚠ Closing balance mismatch: {fmtIDR(Math.abs(stmtClosingBalance - ledgerClosingBalance))} difference
+          </div>
+        )}
       </div>
 
       {/* Upload modal */}
-      <Modal isOpen={showUpload} onClose={() => { setShowUpload(false); setStagedFile(null); }} title="Upload Statement PDF" width={520}>
-        {stagedFile ? (
-          /* Staging UI */
-          <div style={{ textAlign: "center", padding: "20px" }}>
-            <div style={{ fontSize: 48, marginBottom: 12 }}>📄</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: FF, marginBottom: 4 }}>
-              {stagedFile.name}
+      <Modal isOpen={showUpload} onClose={() => { setShowUpload(false); setStagedFiles([]); }} title="Upload Statement PDF" width={520}>
+        {stagedFiles.length > 0 ? (
+          /* Staging UI — list of files */
+          <div style={{ padding: "8px 0" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+              {stagedFiles.map((f, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+                  <span style={{ fontSize: 20 }}>📄</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: FF, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</div>
+                    <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF }}>
+                      {f.size / 1024 > 1024 ? `${(f.size / (1024 * 1024)).toFixed(1)} MB` : `${(f.size / 1024).toFixed(0)} KB`}
+                    </div>
+                  </div>
+                  <button onClick={() => setStagedFiles(prev => prev.filter((_, idx) => idx !== i))}
+                    style={{ fontSize: 11, color: "#9ca3af", background: "none", border: "none", cursor: "pointer", padding: "2px 6px", borderRadius: 4, fontFamily: FF }}>✕</button>
+                </div>
+              ))}
             </div>
-            <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: FF, marginBottom: 20 }}>
-              {(stagedFile.size / 1024 > 1024
-                ? `${(stagedFile.size / (1024 * 1024)).toFixed(1)} MB`
-                : `${(stagedFile.size / 1024).toFixed(0)} KB`)}
-            </div>
-            <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-              <button
-                onClick={() => { setStagedFile(null); }}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setStagedFiles([])}
                 style={{ fontSize: 12, padding: "8px 16px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#f9fafb", color: "#6b7280", cursor: "pointer", fontFamily: FF, fontWeight: 600 }}>
                 Cancel
               </button>
               <button
-                onClick={() => { stageAndProcess(stagedFile); setShowUpload(false); setStagedFile(null); }}
+                onClick={async () => {
+                  const files = stagedFiles;
+                  setStagedFiles([]);
+                  setShowUpload(false);
+                  for (let i = 0; i < files.length; i++) {
+                    setProcessProgress({ current: i + 1, total: files.length });
+                    await stageAndProcess(files[i], { append: i > 0 });
+                  }
+                  setProcessProgress(null);
+                }}
                 style={{ fontSize: 12, padding: "8px 16px", borderRadius: 8, border: "none", background: "#3b5bdb", color: "#fff", cursor: "pointer", fontFamily: FF, fontWeight: 600 }}>
-                Process
+                Process{stagedFiles.length > 1 ? ` (${stagedFiles.length} files)` : ""}
               </button>
             </div>
           </div>
@@ -367,17 +425,45 @@ export function ReconcileBar({ reconcile, onRefresh, onClearDraft }) {
           <div
             onClick={() => fileRef.current?.click()}
             onDragOver={e => e.preventDefault()}
-            onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setStagedFile(f); }}
+            onDrop={e => {
+              e.preventDefault();
+              const files = Array.from(e.dataTransfer.files).filter(f => f.name.toLowerCase().endsWith(".pdf"));
+              if (files.length) setStagedFiles(files);
+            }}
             style={{ border: "2px dashed #e5e7eb", borderRadius: 16, padding: "28px 24px", textAlign: "center", cursor: "pointer", background: "#fafafa" }}>
             <div style={{ fontSize: 28, marginBottom: 6 }}>📄</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: FF, marginBottom: 4 }}>Drop PDF here or click to browse</div>
-            <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: FF }}>Bank or credit card statement (PDF)</div>
-            <input ref={fileRef} type="file" accept=".pdf" style={{ display: "none" }}
-              onChange={e => { const f = e.target.files?.[0]; if (f) setStagedFile(f); e.target.value = ""; }} />
-            <div style={{ marginTop: 12 }}><Button variant="primary" size="sm">Choose File</Button></div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: FF, marginBottom: 4 }}>Drop PDF(s) here or click to browse</div>
+            <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: FF }}>Bank or credit card statement — one or multiple PDFs</div>
+            <input ref={fileRef} type="file" accept=".pdf" multiple style={{ display: "none" }}
+              onChange={e => {
+                const files = Array.from(e.target.files || []).filter(f => f.name.toLowerCase().endsWith(".pdf"));
+                if (files.length) setStagedFiles(files);
+                e.target.value = "";
+              }} />
+            <div style={{ marginTop: 12 }}><Button variant="primary" size="sm">Choose File(s)</Button></div>
           </div>
         )}
       </Modal>
+
+      {/* Summary modal */}
+      <ReconcileSummaryModal
+        open={showSummary}
+        onClose={() => setShowSummary(false)}
+        onRecheck={() => setShowSummary(false)}
+        onProceed={async () => {
+          setShowSummary(false);
+          await exitReconcile();
+          onClearDraft?.();
+          onRefresh?.();
+        }}
+        stats={stats}
+        pdfFilename={pdfSource}
+        account={currentAccount}
+        period={periodLabel}
+        stmtClosingBalance={stmtClosingBalance}
+        ledgerClosingBalance={ledgerClosingBalance}
+        addedCount={0}
+      />
     </>
   );
 }

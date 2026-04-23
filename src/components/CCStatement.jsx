@@ -8,6 +8,7 @@ import { useReconcile, ReconcileBar, ReconcileStatusBadge, ReconcileMissingRowIn
 import ProgressIndicator from "./shared/ProgressIndicator";
 import { useImportDraft } from "../lib/useImportDraft";
 import DraftBanner from "./shared/DraftBanner";
+import PDFViewer from "./shared/PDFViewer";
 import { ledgerApi } from "../api";
 import * as XLSX from "xlsx";
 
@@ -92,8 +93,9 @@ export default function CCStatement({
   const [loading,   setLoading]   = useState(false);
   const [data,      setData]      = useState(null);
 
-  const [editEntry,   setEditEntry]   = useState(null);
-  const [savingAll,   setSavingAll]   = useState(false);
+  const [editEntry,    setEditEntry]    = useState(null);
+  const [savingAll,    setSavingAll]    = useState(false);
+  const [showPdfPanel, setShowPdfPanel] = useState(false);
   const printRef = useRef(null);
 
   // Reconcile mode
@@ -108,6 +110,8 @@ export default function CCStatement({
       ignoredIds: [...reconcile.ignoredIds],
       pendingRows: reconcile.pendingRows,
       pdfSource: reconcile.pdfSource,
+      stmtClosingBalance: reconcile.stmtClosingBalance,
+      stmtOpeningBalance: reconcile.stmtOpeningBalance,
     } : null,
     onRestore: (s) => reconcile.seedFullState(s),
   });
@@ -356,7 +360,16 @@ export default function CCStatement({
       )}
 
       {/* Reconcile bar */}
-      <ReconcileBar reconcile={reconcile} onRefresh={() => { load(); onRefresh?.(); }} onClearDraft={reconcileDraft.clearDraft} />
+      <ReconcileBar
+        reconcile={reconcile}
+        onRefresh={() => { load(); onRefresh?.(); }}
+        onClearDraft={reconcileDraft.clearDraft}
+        currentAccount={selectedAccount}
+        periodLabel={periodLabel}
+        ledgerClosingBalance={data?.closingBal ?? null}
+        showPdfPanel={showPdfPanel}
+        onTogglePdfPanel={() => setShowPdfPanel(p => !p)}
+      />
       {reconcile.active && reconcile.stmtRows?.length > 0 && (
         <ProgressIndicator
           label="Reconcile"
@@ -366,6 +379,15 @@ export default function CCStatement({
           matched={reconcile.stats.match}
         />
       )}
+
+      {/* Split view wrapper — flex row when PDF panel is open */}
+      <div style={showPdfPanel && reconcile.pdfBlobUrl ? { display: "flex", gap: 16, alignItems: "flex-start" } : {}}>
+        {showPdfPanel && reconcile.pdfBlobUrl && (
+          <div style={{ width: "40%", flexShrink: 0, position: "sticky", top: 0, height: "calc(100vh - 80px)" }}>
+            <PDFViewer fileUrl={reconcile.pdfBlobUrl} filename={reconcile.pdfSource} />
+          </div>
+        )}
+        <div style={showPdfPanel && reconcile.pdfBlobUrl ? { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 16 } : {}}>
 
       {/* ── Print-only header ── */}
       <div className="print-only" style={{ display: "none" }}>
@@ -681,6 +703,9 @@ export default function CCStatement({
           ); })()}
         </div>
       )}
+
+        </div>{/* end split right column */}
+      </div>{/* end split view wrapper */}
 
       {/* ── Edit Transaction Modal ── */}
       <TxVerticalBig

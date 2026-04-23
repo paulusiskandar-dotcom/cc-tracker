@@ -8,6 +8,7 @@ import { Button, EmptyState, Spinner, showToast, TxHorizontal } from "./shared/i
 import ProgressIndicator from "./shared/ProgressIndicator";
 import { useImportDraft } from "../lib/useImportDraft";
 import DraftBanner from "./shared/DraftBanner";
+import Modal from "./shared/Modal";
 import { detectTransferPairs } from "../lib/transferDetection";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
 
@@ -83,6 +84,8 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
   const [importing,        setImporting]        = useState(false);
   const [batchId,          setBatchId]          = useState(null);
   const [batchFilePath,    setBatchFilePath]    = useState(null);
+  const [imageUrl,         setImageUrl]         = useState(null);  // blob URL for thumbnail/zoom
+  const [zoomUrl,          setZoomUrl]          = useState(null);  // URL to show in zoom modal
   // Fingerprints of rows permanently skipped — persist across Refresh Scan
   const [skippedFPs,  setSkippedFPs]  = useState(new Set());
   const [confirmedCount, setConfirmedCount] = useState(0);
@@ -317,6 +320,11 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
     setSkippedFPs(new Set()); // new upload → clear all skip history
     setBatchId(null);
     setBatchFilePath(null);
+    // Store blob URL for thumbnail (images only — PDFs shown via iframe)
+    setImageUrl(prev => { if (prev) URL.revokeObjectURL(prev); return null; });
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      setImageUrl(URL.createObjectURL(file));
+    }
 
     let newBatchId = null;
     let filePath   = null;
@@ -585,10 +593,12 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
     } catch { /* non-critical */ }
     setBatchId(null);
     setBatchFilePath(null);
+    setImageUrl(prev => { if (prev) URL.revokeObjectURL(prev); return null; });
   };
 
   // ─────────────────────────────────────────────────────────────
   return (
+    <>
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
       {/* Drop zone */}
@@ -616,6 +626,19 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
             </div>
         }
       </div>
+
+      {/* Image thumbnail — shown when a non-PDF file was scanned */}
+      {imageUrl && (
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <img
+            src={imageUrl}
+            alt="scanned"
+            onClick={() => setZoomUrl(imageUrl)}
+            style={{ width: 60, height: 60, objectFit: "cover", borderRadius: 8, cursor: "pointer", border: "1px solid #e5e7eb" }}
+          />
+          <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>Click to zoom</span>
+        </div>
+      )}
 
       {/* Account selector — shown below drop zone once results exist */}
       {results.length > 0 && (
@@ -704,5 +727,13 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
         </div>
       )}
     </div>
+
+    {/* Image zoom modal */}
+    {zoomUrl && (
+      <Modal isOpen={!!zoomUrl} onClose={() => setZoomUrl(null)} title="Receipt Image" width={800}>
+        <img src={zoomUrl} alt="zoomed" style={{ maxWidth: "100%", maxHeight: "75vh", margin: "0 auto", display: "block" }} />
+      </Modal>
+    )}
+    </>
   );
 }

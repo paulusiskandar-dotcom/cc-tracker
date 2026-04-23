@@ -8,6 +8,7 @@ import { useReconcile, ReconcileBar, ReconcileStatusBadge, ReconcileMissingRowIn
 import ProgressIndicator from "./shared/ProgressIndicator";
 import { useImportDraft } from "../lib/useImportDraft";
 import DraftBanner from "./shared/DraftBanner";
+import PDFViewer from "./shared/PDFViewer";
 import { ledgerApi } from "../api";
 import * as XLSX from "xlsx";
 
@@ -125,6 +126,7 @@ export default function BankStatement({
   const [rawData,        setRawData]        = useState(null);  // { allTxs, allPreTxs }
   const [editEntry,      setEditEntry]      = useState(null);
   const [savingAll,      setSavingAll]      = useState(false);
+  const [showPdfPanel,   setShowPdfPanel]   = useState(false);
   const [activeCurrency, setActiveCurrency] = useState("IDR");
   const [acctCurrencies, setAcctCurrencies] = useState([]);    // rows from account_currencies
   const printRef = useRef(null);
@@ -141,6 +143,8 @@ export default function BankStatement({
       ignoredIds: [...reconcile.ignoredIds],
       pendingRows: reconcile.pendingRows,
       pdfSource: reconcile.pdfSource,
+      stmtClosingBalance: reconcile.stmtClosingBalance,
+      stmtOpeningBalance: reconcile.stmtOpeningBalance,
     } : null,
     onRestore: (s) => reconcile.seedFullState(s),
   });
@@ -422,7 +426,16 @@ export default function BankStatement({
       )}
 
       {/* Reconcile bar */}
-      <ReconcileBar reconcile={reconcile} onRefresh={() => { load(); onRefresh?.(); }} onClearDraft={reconcileDraft.clearDraft} />
+      <ReconcileBar
+        reconcile={reconcile}
+        onRefresh={() => { load(); onRefresh?.(); }}
+        onClearDraft={reconcileDraft.clearDraft}
+        currentAccount={selectedAccount}
+        periodLabel={periodLabel}
+        ledgerClosingBalance={data?.closingBal ?? null}
+        showPdfPanel={showPdfPanel}
+        onTogglePdfPanel={() => setShowPdfPanel(p => !p)}
+      />
       {reconcile.active && reconcile.stmtRows?.length > 0 && (
         <ProgressIndicator
           label="Reconcile"
@@ -432,6 +445,15 @@ export default function BankStatement({
           matched={reconcile.stats.match}
         />
       )}
+
+      {/* Split view wrapper — flex row when PDF panel is open */}
+      <div style={showPdfPanel && reconcile.pdfBlobUrl ? { display: "flex", gap: 16, alignItems: "flex-start" } : {}}>
+        {showPdfPanel && reconcile.pdfBlobUrl && (
+          <div style={{ width: "40%", flexShrink: 0, position: "sticky", top: 0, height: "calc(100vh - 80px)" }}>
+            <PDFViewer fileUrl={reconcile.pdfBlobUrl} filename={reconcile.pdfSource} />
+          </div>
+        )}
+        <div style={showPdfPanel && reconcile.pdfBlobUrl ? { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 16 } : {}}>
 
       {/* ── Print-only header ── */}
       <div className="print-only" style={{ display: "none" }}>
@@ -749,6 +771,9 @@ export default function BankStatement({
           ); })()}
         </div>
       )}
+
+        </div>{/* end split right column */}
+      </div>{/* end split view wrapper */}
 
       {/* ── Edit Transaction Modal ── */}
       <TxVerticalBig
