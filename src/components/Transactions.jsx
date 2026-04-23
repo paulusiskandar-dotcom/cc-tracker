@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { ledgerApi, gmailApi, getTxFromToTypes, recalculateBalance } from "../api";
+import { undoManager } from "../lib/undoManager";
 import { EXPENSE_CATEGORIES, ENTITIES } from "../constants";
 import { fmtIDR, fmtCur, todayStr, ym, groupByDate, fmtDateLabel } from "../utils";
 import { ConfirmModal } from "./shared/Modal";
@@ -100,8 +101,8 @@ export default function Transactions({
     if (!deleteEntry) return;
     try {
       await ledgerApi.delete(deleteEntry.id, deleteEntry, accounts);
+      undoManager.register({ type: "delete_single", deletedRow: deleteEntry, label: `Deleted: ${deleteEntry.description || "transaction"}` });
       setLedger(p => p.filter(e => e.id !== deleteEntry.id));
-      // Sync current_balance for all affected bank accounts
       const affectedIds = [
         ...(deleteEntry.from_type === "account" && deleteEntry.from_id ? [deleteEntry.from_id] : []),
         ...(deleteEntry.to_type   === "account" && deleteEntry.to_id   ? [deleteEntry.to_id]   : []),

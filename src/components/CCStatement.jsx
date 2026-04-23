@@ -3,6 +3,7 @@ import { supabase } from "../lib/supabase";
 import { fmtIDR } from "../utils";
 import { TX_TYPE_MAP } from "../constants";
 import { showToast } from "./shared/Card";
+import { undoManager } from "../lib/undoManager";
 import TxVerticalBig from "./shared/TxVerticalBig";
 import { useReconcile, ReconcileBar, ReconcileStatusBadge, ReconcileMissingRowInline, ReconcileMissingBar, getMissingRowsMap } from "./shared/ReconcileOverlay";
 import ProgressIndicator from "./shared/ProgressIndicator";
@@ -135,6 +136,7 @@ export default function CCStatement({
     if (!missing.length) return;
     setSavingAll(true);
     let successCount = 0, errCount = 0;
+    const newLedgerIds = [];
     for (const stmtRow of missing) {
       // Build default row from statement data, merge with any user edits from the panel
       const defaultRow = {
@@ -168,7 +170,8 @@ export default function CCStatement({
           is_reimburse: ["reimburse_in", "reimburse_out"].includes(r.tx_type),
           notes: r.notes || null,
         };
-        await ledgerApi.create(user.id, entry, accounts);
+        const created = await ledgerApi.create(user.id, entry, accounts);
+        if (created?.id) newLedgerIds.push(created.id);
         successCount++;
       } catch (e) { errCount++; console.error("[saveAll]", e); }
     }
@@ -176,6 +179,7 @@ export default function CCStatement({
     reconcile.collapseAll();
     Object.keys(reconcile.pendingRows).forEach(id => reconcile.removePendingRow(id));
     showToast(`Saved ${successCount}${errCount ? `, ${errCount} failed` : ""}`);
+    if (newLedgerIds.length) undoManager.register({ type: "save_batch", ids: newLedgerIds, label: `Saved ${newLedgerIds.length} transaction${newLedgerIds.length !== 1 ? "s" : ""}` });
     load();
     onRefresh?.();
   };

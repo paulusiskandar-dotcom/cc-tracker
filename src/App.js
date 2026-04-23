@@ -16,6 +16,7 @@ import {
 } from "./api";
 import { calcNetWorth, fmtIDR, todayStr, ym } from "./utils";
 import { Spinner, ToastContainer, showToast } from "./components/shared/index";
+import UndoToast from "./components/shared/UndoToast";
 
 import Dashboard    from "./components/Dashboard";
 import Transactions from "./components/Transactions";
@@ -526,6 +527,7 @@ function Finance({ user, signOut }) {
       )}
 
       <ToastContainer />
+      <UndoToast onUndone={() => loadData()} />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { supabase } from "../lib/supabase";
+import { undoManager } from "../lib/undoManager";
 import { merchantRules } from "../lib/merchantRules";
 import { ledgerApi, scanApi, getTxFromToTypes, loanPaymentsApi, installmentsApi } from "../api";
 import { fmtIDR, todayStr, checkDuplicateTransaction, resolveCategoryIds } from "../utils";
@@ -514,10 +515,12 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
     if (!validRows.length) return showToast("All selected rows have missing amounts — edit them first", "warning");
     setImporting(true);
     let ok = 0;
+    const newLedgerIds = [];
     for (const r of validRows) {
       try {
         const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
         if (created) {
+          if (created.id) newLedgerIds.push(created.id);
           setLedger(prev => [created, ...prev]); ok++;
           if (r.tx_type === "collect_loan" && (r.employee_loan_id || r.from_id)) {
             loanPaymentsApi.recordAndIncrement(user.id, {
@@ -550,6 +553,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
     await onRefresh();
     const skipNote = zeroSkipped > 0 ? `. ${zeroSkipped} skipped (amount = 0)` : "";
     showToast(`Imported ${ok} of ${rows.length} entries${skipNote}`);
+    if (newLedgerIds.length) undoManager.register({ type: "save_batch", ids: newLedgerIds, label: `Saved ${newLedgerIds.length} transaction${newLedgerIds.length !== 1 ? "s" : ""}` });
     setImporting(false);
   };
 

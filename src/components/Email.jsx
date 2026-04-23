@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { gmailApi, settingsApi, ledgerApi, getTxFromToTypes, flattenEmailSync, loanPaymentsApi, installmentsApi } from "../api";
+import { undoManager } from "../lib/undoManager";
 import { merchantRules } from "../lib/merchantRules";
 import { todayStr, resolveCategoryIds } from "../utils";
 import { LIGHT, DARK } from "../theme";
@@ -532,9 +533,11 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     if (!selectedRows.length) return;
     setImporting(true);
     let count = 0;
+    const newLedgerIds = [];
     for (const r of selectedRows) {
       try {
         const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
+        if (created?.id) newLedgerIds.push(created.id);
         setLedger(p => [created, ...p]);
         if (r.tx_type === "collect_loan" && r.from_id) {
           loanPaymentsApi.recordAndIncrement(user.id, {
@@ -559,6 +562,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     setImporting(false);
     setProcessedCount(n => n + count);
     showToast(`${count} transaction${count !== 1 ? "s" : ""} imported`);
+    if (newLedgerIds.length) undoManager.register({ type: "save_batch", ids: newLedgerIds, label: `Saved ${newLedgerIds.length} transaction${newLedgerIds.length !== 1 ? "s" : ""}` });
     draft.clearDraft();
     onRefresh?.();
   };

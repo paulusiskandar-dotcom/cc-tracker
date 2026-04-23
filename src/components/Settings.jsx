@@ -4,6 +4,7 @@ import { merchantRules } from "../lib/merchantRules";
 import PILogo from "./PILogo";
 import { fxApi, merchantApi, settingsApi, recurringApi, gmailApi, accountsApi, installmentsApi, ledgerApi, getTxFromToTypes, loanPaymentsApi } from "../api";
 import { fmtIDR, resolveCategoryIds, checkDuplicateTransaction } from "../utils";
+import { undoManager } from "../lib/undoManager";
 import { CURRENCIES, EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST, TX_TYPES, APP_VERSION, APP_BUILD } from "../constants";
 import { LIGHT, DARK } from "../theme";
 import {
@@ -2227,10 +2228,12 @@ function EStatementTab({
     if (toSave.length === 0) { showToast("Nothing selected", "error"); return; }
     let count = 0;
     const savedIds = [];
+    const newLedgerIds = [];
     for (const r of toSave) {
       try {
         const inserted = await ledgerApi.create(user.id, buildPayload(r), accounts);
         savedIds.push(r._id);
+        if (inserted?.id) newLedgerIds.push(inserted.id);
         count++;
         if (r.tx_type === "collect_loan" && (r.employee_loan_id || r.from_id)) {
           loanPaymentsApi.recordAndIncrement(user.id, {
@@ -2271,6 +2274,7 @@ function EStatementTab({
       status: "done", transaction_count: count, processed_at: now,
     }, ...prev]);
     showToast(`${count} transaction${count !== 1 ? "s" : ""} imported`);
+    if (newLedgerIds.length) undoManager.register({ type: "save_batch", ids: newLedgerIds, label: `Saved ${newLedgerIds.length} transaction${newLedgerIds.length !== 1 ? "s" : ""}` });
   };
 
   // ── Create installment from a row ──────────────────────────
