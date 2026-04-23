@@ -368,6 +368,9 @@ export default function Accounts({
         initialReconcileTxs={bankReconcileSeeds?.txs || null}
         initialReconcileFilename={bankReconcileSeeds?.filename || ""}
         initialReconcileFullState={bankReconcileFullState}
+        initialReconcileBlobUrl={bankReconcileSeeds?.blobUrl || null}
+        initialReconcileClosingBal={bankReconcileSeeds?.closingBal ?? null}
+        initialReconcileOpeningBal={bankReconcileSeeds?.openingBal ?? null}
       />
     );
   }

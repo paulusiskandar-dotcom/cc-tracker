@@ -574,7 +574,7 @@ export default function Dashboard({
     return `${sign}Rp ${v}`;
   };
 
-  const handleReconcileNavigate = (acc, year, month, txs, filename) => {
+  const handleReconcileNavigate = (acc, year, month, txs, filename, blobUrl, closingBal, openingBal) => {
     const isCC = acc.type === "credit_card";
     if (isCC) {
       const stDay = Number(acc.statement_day);
@@ -591,12 +591,12 @@ export default function Dashboard({
         to   = new Date(year, month, 0).toISOString().slice(0, 10);
       }
       const selectedMonth = `${year}-${String(month).padStart(2, "0")}`;
-      setPendingReconcileNav?.({ accType: "credit_card", acc, seeds: { from, to, selectedMonth, txs, filename } });
+      setPendingReconcileNav?.({ accType: "credit_card", acc, seeds: { from, to, selectedMonth, txs, filename, blobUrl, closingBal, openingBal } });
       setTab?.("cards");
     } else {
       const from = `${year}-${String(month).padStart(2, "0")}-01`;
       const to   = new Date(year, month, 0).toISOString().slice(0, 10);
-      setPendingReconcileNav?.({ accType: "bank", acc, seeds: { from, to, txs, filename } });
+      setPendingReconcileNav?.({ accType: "bank", acc, seeds: { from, to, txs, filename, blobUrl, closingBal, openingBal } });
       setTab?.("bank");
     }
   };

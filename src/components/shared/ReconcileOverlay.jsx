@@ -237,9 +237,17 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
     setPendingRows(p => { const n = { ...p }; delete n[stmtRowId]; return n; });
   }, []);
 
-  const seedStmtRows = useCallback((txs, filename = "") => {
+  const seedStmtRows = useCallback((txs, filename = "", opts = {}) => {
     setStmtRows(txs.map((t, i) => ({ ...t, _id: t._id || `stmt-${i}` })));
     setPdfSource(filename);
+    if (opts.blobUrl) {
+      setPdfBlobUrl(prev => {
+        if (prev) URL.revokeObjectURL(prev);
+        return opts.blobUrl;
+      });
+    }
+    if (opts.closingBal != null) setStmtClosingBalance(Number(opts.closingBal));
+    if (opts.openingBal != null) setStmtOpeningBalance(Number(opts.openingBal));
     setActive(true);
   }, []);
 

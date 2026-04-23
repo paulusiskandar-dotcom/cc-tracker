@@ -117,6 +117,7 @@ export default function BankStatement({
   initialFromDate = null, initialToDate = null,
   initialReconcileTxs = null, initialReconcileFilename = "",
   initialReconcileFullState = null,
+  initialReconcileBlobUrl = null, initialReconcileClosingBal = null, initialReconcileOpeningBal = null,
 }) {
   const hasInitialDates = useRef(!!(initialFromDate));
   const [accountId,      setAccountId]      = useState(initialAccount?.id || "");
@@ -154,7 +155,11 @@ export default function BankStatement({
     if (initialReconcileFullState?.stmtRows?.length) {
       reconcile.seedFullState(initialReconcileFullState);
     } else if (initialReconcileTxs?.length) {
-      reconcile.seedStmtRows(initialReconcileTxs, initialReconcileFilename);
+      reconcile.seedStmtRows(initialReconcileTxs, initialReconcileFilename, {
+        blobUrl: initialReconcileBlobUrl,
+        closingBal: initialReconcileClosingBal,
+        openingBal: initialReconcileOpeningBal,
+      });
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

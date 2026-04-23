@@ -515,6 +515,9 @@ export default function CreditCards({
         initialReconcileTxs={ccReconcileSeeds?.txs || null}
         initialReconcileFilename={ccReconcileSeeds?.filename || ""}
         initialReconcileFullState={ccReconcileFullState}
+        initialReconcileBlobUrl={ccReconcileSeeds?.blobUrl || null}
+        initialReconcileClosingBal={ccReconcileSeeds?.closingBal ?? null}
+        initialReconcileOpeningBal={ccReconcileSeeds?.openingBal ?? null}
       />
     );
   }

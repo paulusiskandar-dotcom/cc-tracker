@@ -17,8 +17,11 @@ export default function GlobalReconcileButton({ accounts, type, onNavigate, user
   const [pickerAcc,  setPickerAcc]  = useState("");
   const [pickerYear, setPickerYear] = useState(new Date().getFullYear());
   const [pickerMonth, setPickerMonth] = useState(new Date().getMonth() + 1);
-  const [pendingTxs,  setPendingTxs]  = useState([]);
-  const [pendingFile, setPendingFile] = useState("");
+  const [pendingTxs,       setPendingTxs]       = useState([]);
+  const [pendingFile,      setPendingFile]      = useState("");
+  const [pendingBlobUrl,   setPendingBlobUrl]   = useState(null);
+  const [pendingClosingBal, setPendingClosingBal] = useState(null);
+  const [pendingOpeningBal, setPendingOpeningBal] = useState(null);
   const fileRef = useRef(null);
 
   const filteredAccounts = type === "cc"
@@ -62,6 +65,9 @@ export default function GlobalReconcileButton({ accounts, type, onNavigate, user
       const det = data.detected_account;
       const per = data.detected_period;
       const filename = stagedFile.name;
+      const blobUrl = URL.createObjectURL(stagedFile);
+      const closingBal = data.closing_balance != null ? Number(data.closing_balance) : null;
+      const openingBal = data.opening_balance != null ? Number(data.opening_balance) : null;
 
       // Try to match account
       let matchedAcc = null;
@@ -83,11 +89,14 @@ export default function GlobalReconcileButton({ accounts, type, onNavigate, user
       if (matchedAcc && per?.year && per?.month) {
         // Auto-navigate — account and period both detected
         setShowUpload(false); setStagedFile(null);
-        onNavigate(matchedAcc, year, month, txs, filename);
+        onNavigate(matchedAcc, year, month, txs, filename, blobUrl, closingBal, openingBal);
       } else {
         // Show manual picker
         setPendingTxs(txs);
         setPendingFile(filename);
+        setPendingBlobUrl(blobUrl);
+        setPendingClosingBal(closingBal);
+        setPendingOpeningBal(openingBal);
         setPickerAcc(matchedAcc?.id || filteredAccounts[0]?.id || "");
         setPickerYear(year);
         setPickerMonth(month);
@@ -105,8 +114,8 @@ export default function GlobalReconcileButton({ accounts, type, onNavigate, user
     const acc = filteredAccounts.find(a => a.id === pickerAcc);
     if (!acc) { showToast("Please select an account", "error"); return; }
     setShowPicker(false);
-    onNavigate(acc, pickerYear, pickerMonth, pendingTxs, pendingFile);
-    setPendingTxs([]); setPendingFile("");
+    onNavigate(acc, pickerYear, pickerMonth, pendingTxs, pendingFile, pendingBlobUrl, pendingClosingBal, pendingOpeningBal);
+    setPendingTxs([]); setPendingFile(""); setPendingBlobUrl(null); setPendingClosingBal(null); setPendingOpeningBal(null);
   };
 
   return (
@@ -158,7 +167,7 @@ export default function GlobalReconcileButton({ accounts, type, onNavigate, user
       </Modal>
 
       {/* ── Manual picker modal (when auto-detect fails) ── */}
-      <Modal isOpen={showPicker} onClose={() => { setShowPicker(false); setPendingTxs([]); }} title="Select Account & Period" width={400}>
+      <Modal isOpen={showPicker} onClose={() => { setShowPicker(false); setPendingTxs([]); setPendingFile(""); if (pendingBlobUrl) URL.revokeObjectURL(pendingBlobUrl); setPendingBlobUrl(null); setPendingClosingBal(null); setPendingOpeningBal(null); }} title="Select Account & Period" width={400}>
         <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: "4px 0" }}>
           <div style={{ fontSize: 12, color: "#6b7280", fontFamily: FF }}>
             Account or period could not be auto-detected. Please confirm:
@@ -189,7 +198,7 @@ export default function GlobalReconcileButton({ accounts, type, onNavigate, user
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
-            <button onClick={() => { setShowPicker(false); setPendingTxs([]); }}
+            <button onClick={() => { setShowPicker(false); setPendingTxs([]); setPendingFile(""); if (pendingBlobUrl) URL.revokeObjectURL(pendingBlobUrl); setPendingBlobUrl(null); setPendingClosingBal(null); setPendingOpeningBal(null); }}
               style={{ fontSize: 12, padding: "8px 16px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#f9fafb", color: "#6b7280", cursor: "pointer", fontFamily: FF, fontWeight: 600 }}>
               Cancel
             </button>
