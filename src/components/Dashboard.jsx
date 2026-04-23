@@ -9,6 +9,9 @@ import { GroupedTransactionList } from "./shared/TransactionRow";
 import GlobalReconcileButton from "./shared/GlobalReconcileButton";
 import ReconcileDraftBanner from "./shared/ReconcileDraftBanner";
 import { detectRecurringPatterns } from "../lib/recurringDetection";
+import TxVerticalBig from "./shared/TxVerticalBig";
+import BudgetWidget from "./shared/BudgetWidget";
+import SpendingBreakdown from "./shared/SpendingBreakdown";
 
 // ── Reconcile Status widget ────────────────────────────────────
 const RS_FF = "Figtree, sans-serif";
@@ -170,6 +173,38 @@ function RecurringSuggestionsWidget({ user, ledger, recurringTemplates, onCreate
   );
 }
 
+// ── Alert Center ──────────────────────────────────────────────
+function AlertCenter({ alerts }) {
+  if (!alerts || alerts.length === 0) return null;
+  const FF = "Figtree, sans-serif";
+  return (
+    <div style={{ background: "#FCEBEB", border: "1px solid #F7C1C1", borderRadius: 12, padding: "12px 14px", fontFamily: FF }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: "#791F1F", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>
+        Needs Attention · {alerts.length}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {alerts.map((a, i) => (
+          <div key={i}
+            style={{ display: "flex", justifyContent: "space-between", fontSize: 12, cursor: a.onClick ? "pointer" : "default" }}
+            onClick={a.onClick}>
+            <span style={{ color: a.severity === "high" ? "#791F1F" : a.severity === "medium" ? "#633806" : "#0C447C" }}>
+              {a.icon} {a.message}
+            </span>
+            <span style={{ color: "#501313", fontWeight: 500 }}>{a.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function getNextDueDate(dueDay) {
+  const now = new Date();
+  const due = new Date(now.getFullYear(), now.getMonth(), dueDay);
+  if (due < now) due.setMonth(due.getMonth() + 1);
+  return due;
+}
+
 export default function Dashboard({
   user, accounts, ledger, thisMonthLedger, categories,
   reminders, recurTemplates, netWorth, bankAccounts,
@@ -180,6 +215,7 @@ export default function Dashboard({
   employeeLoans = [], loanPayments = [],
   setLoanPayments, setEmployeeLoans,
   reimburseSettlements = [], setReimburseSettlements,
+  budgets = [], fxRates = {}, incomeSrcs = [], accountCurrencies = [], CURRENCIES: allCurrencies = [],
 }) {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
   useEffect(() => {
@@ -211,6 +247,7 @@ export default function Dashboard({
   const [payLoan,       setPayLoan]       = useState(null);
   const [payForm,       setPayForm]       = useState({ amount: "", pay_date: todayStr(), notes: "" });
   const [paySaving,     setPaySaving]     = useState(false);
+  const [showAddTxModal, setShowAddTxModal] = useState(false);
   // ─── DERIVED STATS ───────────────────────────────────────────
   const nw = netWorth || { total: 0, bank: 0, assets: 0, receivables: 0, ccDebt: 0, liabilities: 0, reimburseOutstanding: 0 };
 
@@ -295,6 +332,69 @@ export default function Dashboard({
   }, [ledger]);
 
   const maxCF = Math.max(...cashFlowData.flatMap(d => [d.income, d.expense]), 1);
+
+  const savingsRate = useMemo(() => {
+    if (!thisMonthIncome) return 0;
+    return Math.round(((thisMonthIncome - thisMonthExpense) / thisMonthIncome) * 100);
+  }, [thisMonthIncome, thisMonthExpense]);
+
+  const netWorthHistory = useMemo(() => {
+    const now = new Date();
+    const months = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push(d.toISOString().slice(0, 7));
+    }
+    const deltas = months.map(m =>
+      ledger.filter(e => ym(e.tx_date) === m).reduce((s, e) => {
+        if (e.tx_type === "income")  return s + Number(e.amount_idr || 0);
+        if (e.tx_type === "expense") return s - Number(e.amount_idr || 0);
+        return s;
+      }, 0)
+    );
+    const values = new Array(12).fill(0);
+    values[11] = nw.total;
+    for (let i = 10; i >= 0; i--) values[i] = values[i + 1] - deltas[i + 1];
+    return months.map((m, i) => ({ month: m, value: values[i] }));
+  }, [ledger, nw.total]);
+
+  const alerts = useMemo(() => {
+    const result = [];
+    const now = new Date();
+    // CC due soon
+    (accounts || []).filter(a => a.type === "credit_card" && a.due_day && Number(a.current_balance) < 0).forEach(a => {
+      const nextDue   = getNextDueDate(a.due_day);
+      const daysUntil = Math.ceil((nextDue - now) / 86400000);
+      if (daysUntil <= 7 && daysUntil >= 0) {
+        result.push({
+          icon: "⚠",
+          message: `CC due in ${daysUntil}d`,
+          value: `${a.name} · ${fmtIDR(Math.abs(Number(a.current_balance)))}`,
+          severity: daysUntil <= 3 ? "high" : "medium",
+        });
+      }
+    });
+    // Budget overruns
+    (budgets || []).forEach(b => {
+      const spent = (ledger || [])
+        .filter(t => t.category_id === b.category_id && t.tx_type === "expense")
+        .filter(t => { const d = new Date(t.tx_date + "T00:00:00"); return d.getFullYear() === b.period_year && d.getMonth() + 1 === b.period_month; })
+        .reduce((s, t) => s + Number(t.amount_idr || 0), 0);
+      const pct = (spent / b.amount) * 100;
+      if (pct >= 100) {
+        result.push({ icon: "⚠", message: `${b.category_name} overbudget`, value: `${Math.round(pct)}% of ${fmtIDR(b.amount)}`, severity: "high" });
+      }
+    });
+    // Stale reimbursements (>14 days)
+    const byEntity = {};
+    (ledger || [])
+      .filter(t => t.tx_type === "reimburse_out" && !t.reimburse_settlement_id && (now - new Date(t.tx_date + "T00:00:00")) / 86400000 > 14)
+      .forEach(t => { byEntity[t.entity] = (byEntity[t.entity] || 0) + Number(t.amount_idr || 0); });
+    Object.entries(byEntity).forEach(([entity, total]) => {
+      result.push({ icon: "🕐", message: `${entity} reimburse >14d`, value: `${fmtIDR(total)} pending`, severity: "medium" });
+    });
+    return result.slice(0, 5);
+  }, [accounts, budgets, ledger]);
 
   // Recent transactions, grouped by date (last 10)
   const recentGroups = useMemo(() => {
@@ -773,6 +873,12 @@ export default function Dashboard({
           {getGreeting()}, Paulus 👋
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          <button
+            onClick={() => setShowAddTxModal(true)}
+            title="Add transaction"
+            style={{ width: 32, height: 32, borderRadius: 8, border: "0.5px solid #e5e7eb", background: "#fff", color: "#374151", cursor: "pointer", fontSize: 18, fontWeight: 500, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Figtree, sans-serif" }}>
+            +
+          </button>
           <GlobalReconcileButton
             type="all"
             accounts={accounts}
@@ -874,6 +980,9 @@ export default function Dashboard({
         }}
       />
 
+      {/* ── ALERT CENTER ── */}
+      <AlertCenter alerts={alerts} />
+
       {/* ── BENTO GRID ── */}
       <div style={{
         display:             "grid",
@@ -904,6 +1013,22 @@ export default function Dashboard({
               {monthlyChange >= 0 ? "↑" : "↓"} {fmtIDR(Math.abs(monthlyChange), true)} this month
             </div>
           )}
+          {/* 12-month net worth trend */}
+          {netWorthHistory.length > 1 && (() => {
+            const vals   = netWorthHistory.map(m => m.value);
+            const min    = Math.min(...vals);
+            const max    = Math.max(...vals);
+            const range  = max - min || 1;
+            const pts    = vals.map((v, i) => `${5 + (i / (vals.length - 1)) * 290},${55 - ((v - min) / range) * 45}`).join(" ");
+            const area   = `5,60 ${pts} 295,60`;
+            return (
+              <svg viewBox="0 0 300 60" style={{ width: "100%", height: 40, marginBottom: 10, opacity: 0.8 }}>
+                <polygon points={area} fill="#AFA9EC" opacity="0.2" />
+                <polyline points={pts} fill="none" stroke="#AFA9EC" strokeWidth="1.5" />
+              </svg>
+            );
+          })()}
+
           <div style={{
             ...DARK_STATS,
             gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)",
@@ -1058,6 +1183,13 @@ export default function Dashboard({
           onClick={() => setTab?.("receivables")}
         />
 
+        {/* [B] Budget — full width */}
+        {budgets.length > 0 && (
+          <div style={{ gridColumn: isMobile ? "span 1" : "span 3" }}>
+            <BudgetWidget budgets={budgets} ledger={ledger} onAddBudget={() => setSettingsTab?.("budgets")} />
+          </div>
+        )}
+
         {/* [6] Cash Flow — spans 2 cols on desktop, full width on mobile */}
         <div style={{ ...BENTO_WHITE, gridColumn: isMobile ? "span 1" : "span 2" }}>
           <div style={{
@@ -1066,7 +1198,14 @@ export default function Dashboard({
             alignItems:    isMobile ? "flex-start" : "center",
             gap:           isMobile ? 6 : 0,
           }}>
-            <div style={CARD_TITLE}>Cash Flow</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={CARD_TITLE}>Cash Flow</div>
+              {thisMonthIncome > 0 && (
+                <span style={{ fontSize: 10, color: savingsRate >= 0 ? "#0F6E56" : "#A32D2D", background: savingsRate >= 0 ? "#E1F5EE" : "#FCEBEB", padding: "2px 6px", borderRadius: 4, fontFamily: "Figtree, sans-serif" }}>
+                  {savingsRate >= 0 ? `Saved ${savingsRate}%` : `${savingsRate}%`}
+                </span>
+              )}
+            </div>
             <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
               <LegendDot color="#059669" label="Income" />
               <LegendDot color="#dc2626" label="Expense" />
@@ -1094,6 +1233,13 @@ export default function Dashboard({
           {/* Bar chart */}
           <MiniBarChart data={cashFlowData} max={maxCF} />
         </div>
+
+        {/* [S] Spending Breakdown */}
+        {!isMobile && (
+          <div style={{ alignSelf: "stretch" }}>
+            <SpendingBreakdown ledger={ledger} />
+          </div>
+        )}
 
         {/* [7] Upcoming — full width */}
         <div style={{ ...BENTO_WHITE, gridColumn: isMobile ? "span 1" : "span 3" }}>
@@ -1185,6 +1331,34 @@ export default function Dashboard({
           />
         )}
       </div>
+
+      {/* ── QUICK ADD TRANSACTION ── */}
+      {showAddTxModal && (
+        <TxVerticalBig
+          open={showAddTxModal}
+          mode="add"
+          initialData={null}
+          user={user}
+          accounts={accounts}
+          setLedger={setLedger}
+          categories={categories}
+          fxRates={fxRates}
+          allCurrencies={allCurrencies}
+          bankAccounts={bankAccounts}
+          creditCards={creditCards}
+          assets={assets}
+          liabilities={liabilities}
+          receivables={receivables}
+          incomeSrcs={incomeSrcs}
+          employeeLoans={employeeLoans}
+          setEmployeeLoans={setEmployeeLoans}
+          accountCurrencies={accountCurrencies}
+          onRefresh={onRefresh}
+          onSave={() => { setShowAddTxModal(false); onRefresh?.(); }}
+          onDelete={null}
+          onClose={() => setShowAddTxModal(false)}
+        />
+      )}
 
       {/* ── LOAN PAYMENT MODAL ── */}
       <Modal

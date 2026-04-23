@@ -209,6 +209,7 @@ function Finance({ user, signOut }) {
   const [accountCurrencies, setAccountCurrencies] = useState([]);
   const [reconSessions,     setReconSessions]     = useState([]);
   const [pendingReconcileNav, setPendingReconcileNav] = useState(null);
+  const [budgets,           setBudgets]           = useState([]);
 
   const curMonth = ym(todayStr());
 
@@ -216,7 +217,7 @@ function Finance({ user, signOut }) {
   const loadData = useCallback(async () => {
     const safe = (p, fallback) => p.catch(e => { console.warn("[loadData]", e.message); return fallback; });
 
-    const [acc, led, cats, inc, inst, rtempl, rem, merch, fx, dark, pending, loans, payments, accs, reimburse, recon] = await Promise.all([
+    const [acc, led, cats, inc, inst, rtempl, rem, merch, fx, dark, pending, loans, payments, accs, reimburse, recon, bdg] = await Promise.all([
       safe(accountsApi.getAll(user.id),                      []),
       safe(ledgerApi.getAll(user.id, { limit: 500 }),        []),
       safe(categoriesApi.getAll(user.id),                    []),
@@ -233,6 +234,7 @@ function Finance({ user, signOut }) {
       safe(accountCurrenciesApi.getAll(user.id),             []),
       safe(reimburseSettlementsApi.getPending(user.id),      []),
       safe(reconcileApi.getAll(user.id),                     []),
+      safe(supabase.from("budgets").select("*").eq("user_id", user.id).then(r => r.data || []), []),
     ]);
 
     console.log("[loadData] accounts:", acc.length, "ledger:", led.length);
@@ -276,6 +278,7 @@ function Finance({ user, signOut }) {
     setLoanPayments(payments);
     setAccountCurrencies(accs);
     setReconSessions(recon);
+    setBudgets(bdg);
     setLoading(false);
   }, [user.id]);
 
@@ -326,6 +329,7 @@ function Finance({ user, signOut }) {
     accountCurrencies, setAccountCurrencies,
     reconSessions, setReconSessions,
     pendingReconcileNav, setPendingReconcileNav,
+    budgets, setBudgets,
     setAccounts, setLedger, setCategories, setIncomeSrcs,
     setInstallments, setRecurTemplates, setReminders,
     setMerchantMaps, setFxRates,
