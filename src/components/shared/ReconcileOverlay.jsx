@@ -363,10 +363,6 @@ export function ReconcileMissingBar({ reconcile, accounts, onExpandAll, expanded
     ids.forEach(id => {
       reconcile.updatePendingRow(id, { ...pending[id], [field]: value, ...extra });
     });
-    if (field === "tx_type")    setBulkType("");
-    if (field === "category_id") setBulkCategory("");
-    if (field === "from_id")    setBulkAccount("");
-    if (field === "entity")     setBulkEntity("");
     showToast(`Applied to ${ids.length} rows`);
   };
 
@@ -399,7 +395,18 @@ export function ReconcileMissingBar({ reconcile, accounts, onExpandAll, expanded
           </span>
 
           <select value={bulkType}
-            onChange={e => { setBulkType(e.target.value); applyBulkToAll("tx_type", e.target.value); }}
+            onChange={e => {
+              const newType = e.target.value;
+              setBulkType(newType);
+              applyBulkToAll("tx_type", newType);
+              const isIncomeType  = ["income","collect_loan","sell_asset","reimburse_in"].includes(newType);
+              const isExpenseType = ["expense","reimburse_out"].includes(newType);
+              if (bulkCategory) {
+                const inIncome  = INCOME_CATEGORIES_LIST.some(c => c.id === bulkCategory);
+                const inExpense = EXPENSE_CATEGORIES.some(c => c.id === bulkCategory);
+                if ((isIncomeType && !inIncome) || (isExpenseType && !inExpense)) setBulkCategory("");
+              }
+            }}
             style={{ fontSize: 11, padding: "3px 6px", borderRadius: 5, border: "1px solid #fbbf24", background: "#fff", fontFamily: FF, cursor: "pointer" }}>
             <option value="">Type…</option>
             {TX_HORIZONTAL_TYPES.filter(t => t.value !== "cc_installment").map(t => (
@@ -415,12 +422,22 @@ export function ReconcileMissingBar({ reconcile, accounts, onExpandAll, expanded
             }}
             style={{ fontSize: 11, padding: "3px 6px", borderRadius: 5, border: "1px solid #fbbf24", background: "#fff", fontFamily: FF, cursor: "pointer" }}>
             <option value="">Category…</option>
-            <optgroup label="Expense">
-              {EXPENSE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>)}
-            </optgroup>
-            <optgroup label="Income">
-              {INCOME_CATEGORIES_LIST.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>)}
-            </optgroup>
+            {(() => {
+              const isIncomeType  = ["income","collect_loan","sell_asset","reimburse_in"].includes(bulkType);
+              const isExpenseType = ["expense","reimburse_out"].includes(bulkType);
+              if (isIncomeType)  return INCOME_CATEGORIES_LIST.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>);
+              if (isExpenseType) return EXPENSE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>);
+              return (
+                <>
+                  <optgroup label="Expense">
+                    {EXPENSE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>)}
+                  </optgroup>
+                  <optgroup label="Income">
+                    {INCOME_CATEGORIES_LIST.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>)}
+                  </optgroup>
+                </>
+              );
+            })()}
           </select>
 
           <select value={bulkAccount}

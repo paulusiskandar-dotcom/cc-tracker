@@ -693,10 +693,6 @@ export default function TxHorizontal({
     const selectedIds = visibleRows.filter(r => selected[r._id] && !skipped?.has(r._id)).map(r => r._id);
     if (!selectedIds.length) { showToast("Select rows first", "warning"); return; }
     selectedIds.forEach(id => onUpdateRow(id, { [field]: value, ...extra }));
-    if (field === "tx_type")                    setBulkType("");
-    if (field === "category_id")                setBulkCategory("");
-    if (field === "from_id" || field === "to_id") setBulkAccount("");
-    if (field === "entity")                     setBulkEntity("");
     showToast(`Applied to ${selectedIds.length} rows`);
   };
 
@@ -799,7 +795,18 @@ export default function TxHorizontal({
 
           {/* Type */}
           <select value={bulkType}
-            onChange={e => { setBulkType(e.target.value); applyBulk("tx_type", e.target.value); }}
+            onChange={e => {
+              const newType = e.target.value;
+              setBulkType(newType);
+              applyBulk("tx_type", newType);
+              const isIncomeType  = ["income","collect_loan","sell_asset","reimburse_in"].includes(newType);
+              const isExpenseType = ["expense","reimburse_out"].includes(newType);
+              if (bulkCategory) {
+                const inIncome  = INCOME_CATEGORIES_LIST.some(c => c.id === bulkCategory);
+                const inExpense = EXPENSE_CATEGORIES.some(c => c.id === bulkCategory);
+                if ((isIncomeType && !inIncome) || (isExpenseType && !inExpense)) setBulkCategory("");
+              }
+            }}
             style={{ fontSize: 11, padding: "4px 6px", borderRadius: 5, border: "1px solid #bfdbfe", background: "#fff", fontFamily: "Figtree, sans-serif", cursor: "pointer" }}>
             <option value="">Set type…</option>
             {txTypes.map(t => <option key={t.value} value={t.value} style={{ color: t.color }}>{t.label}</option>)}
@@ -814,12 +821,22 @@ export default function TxHorizontal({
             }}
             style={{ fontSize: 11, padding: "4px 6px", borderRadius: 5, border: "1px solid #bfdbfe", background: "#fff", fontFamily: "Figtree, sans-serif", cursor: "pointer" }}>
             <option value="">Set category…</option>
-            <optgroup label="Expense">
-              {EXPENSE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>)}
-            </optgroup>
-            <optgroup label="Income">
-              {INCOME_CATEGORIES_LIST.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>)}
-            </optgroup>
+            {(() => {
+              const isIncomeType  = ["income","collect_loan","sell_asset","reimburse_in"].includes(bulkType);
+              const isExpenseType = ["expense","reimburse_out"].includes(bulkType);
+              if (isIncomeType)  return INCOME_CATEGORIES_LIST.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>);
+              if (isExpenseType) return EXPENSE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>);
+              return (
+                <>
+                  <optgroup label="Expense">
+                    {EXPENSE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>)}
+                  </optgroup>
+                  <optgroup label="Income">
+                    {INCOME_CATEGORIES_LIST.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>)}
+                  </optgroup>
+                </>
+              );
+            })()}
           </select>
 
           {/* Account */}
