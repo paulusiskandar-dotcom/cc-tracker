@@ -678,7 +678,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
             onRetrySonnet={batchFilePath ? handleRetrySonnet : null}
             retrySonnet={retrySonnet}
             onClearAll={handleClearAll}
-          />
+          />}
         </div>
       )}
     </div>
