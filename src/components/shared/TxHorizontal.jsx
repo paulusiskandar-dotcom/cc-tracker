@@ -657,6 +657,10 @@ export default function TxHorizontal({
   const [confirmingAll,setConfirmingAll]= useState(false);
   const [confirmedIds,  setConfirmedIds]  = useState(new Set());
   const [fetchedLoans,  setFetchedLoans]  = useState([]);
+  const [bulkType,     setBulkType]     = useState("");
+  const [bulkCategory, setBulkCategory] = useState("");
+  const [bulkAccount,  setBulkAccount]  = useState("");
+  const [bulkEntity,   setBulkEntity]   = useState("");
 
   // Fallback: fetch employee loans directly if prop arrives empty and rows contain collect_loan
   useEffect(() => {
@@ -683,6 +687,18 @@ export default function TxHorizontal({
   const toggleNotes = (id) => setNotesOpen(s => {
     const ns = new Set(s); ns.has(id) ? ns.delete(id) : ns.add(id); return ns;
   });
+
+  const applyBulk = (field, value, extra = {}) => {
+    if (!value) return;
+    const selectedIds = visibleRows.filter(r => selected[r._id] && !skipped?.has(r._id)).map(r => r._id);
+    if (!selectedIds.length) { showToast("Select rows first", "warning"); return; }
+    selectedIds.forEach(id => onUpdateRow(id, { [field]: value, ...extra }));
+    if (field === "tx_type")                    setBulkType("");
+    if (field === "category_id")                setBulkCategory("");
+    if (field === "from_id" || field === "to_id") setBulkAccount("");
+    if (field === "entity")                     setBulkEntity("");
+    showToast(`Applied to ${selectedIds.length} rows`);
+  };
 
   const handleConfirmRow = async (row) => {
     setConfirmingId(row._id);
@@ -769,6 +785,65 @@ export default function TxHorizontal({
           </button>
         </div>
       </div>}
+
+      {/* ── Bulk Edit Toolbar ── */}
+      {!hideBatchFooter && countSelected >= 2 && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap",
+          background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10,
+          padding: "8px 12px", fontFamily: "Figtree, sans-serif",
+        }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "#1d4ed8" }}>
+            Bulk Edit ({countSelected})
+          </span>
+
+          {/* Type */}
+          <select value={bulkType}
+            onChange={e => { setBulkType(e.target.value); applyBulk("tx_type", e.target.value); }}
+            style={{ fontSize: 11, padding: "4px 6px", borderRadius: 5, border: "1px solid #bfdbfe", background: "#fff", fontFamily: "Figtree, sans-serif", cursor: "pointer" }}>
+            <option value="">Set type…</option>
+            {txTypes.map(t => <option key={t.value} value={t.value} style={{ color: t.color }}>{t.label}</option>)}
+          </select>
+
+          {/* Category */}
+          <select value={bulkCategory}
+            onChange={e => {
+              const cat = [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES_LIST].find(c => c.id === e.target.value);
+              setBulkCategory(e.target.value);
+              applyBulk("category_id", e.target.value, { category_name: cat?.label || "" });
+            }}
+            style={{ fontSize: 11, padding: "4px 6px", borderRadius: 5, border: "1px solid #bfdbfe", background: "#fff", fontFamily: "Figtree, sans-serif", cursor: "pointer" }}>
+            <option value="">Set category…</option>
+            <optgroup label="Expense">
+              {EXPENSE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>)}
+            </optgroup>
+            <optgroup label="Income">
+              {INCOME_CATEGORIES_LIST.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>)}
+            </optgroup>
+          </select>
+
+          {/* Account */}
+          <select value={bulkAccount}
+            onChange={e => { setBulkAccount(e.target.value); applyBulk("from_id", e.target.value); }}
+            style={{ fontSize: 11, padding: "4px 6px", borderRadius: 5, border: "1px solid #bfdbfe", background: "#fff", fontFamily: "Figtree, sans-serif", cursor: "pointer" }}>
+            <option value="">Set account…</option>
+            {accounts.filter(a => ["bank","cash","credit_card"].includes(a.type)).map(a => (
+              <option key={a.id} value={a.id}>{a.name}</option>
+            ))}
+          </select>
+
+          {/* Entity */}
+          <select value={bulkEntity}
+            onChange={e => { setBulkEntity(e.target.value); applyBulk("entity", e.target.value); }}
+            style={{ fontSize: 11, padding: "4px 6px", borderRadius: 5, border: "1px solid #bfdbfe", background: "#fff", fontFamily: "Figtree, sans-serif", cursor: "pointer" }}>
+            <option value="">Set entity…</option>
+            <option value="Personal">Personal</option>
+            <option value="Hamasa">Hamasa</option>
+            <option value="SDC">SDC</option>
+            <option value="Travelio">Travelio</option>
+          </select>
+        </div>
+      )}
 
       {/* ── Cards ── */}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
