@@ -16,6 +16,7 @@ import {
 import ProgressIndicator from "./shared/ProgressIndicator";
 import { useImportDraft } from "../lib/useImportDraft";
 import DraftBanner from "./shared/DraftBanner";
+import PDFViewer from "./shared/PDFViewer";
 import { detectTransferPairs } from "../lib/transferDetection";
 
 const SUBTABS = [
@@ -2399,6 +2400,13 @@ function EStmtQueueItem({
   statusBadge, fmtSize,
 }) {
   const [processedCount, setProcessedCount] = useState(0);
+  const [showPdfPanel, setShowPdfPanel] = useState(false);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState(() => item.file ? URL.createObjectURL(item.file) : null);
+
+  useEffect(() => {
+    if (!pdfBlobUrl && item.file) setPdfBlobUrl(URL.createObjectURL(item.file));
+  }, [item.file]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => { if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const draft = useImportDraft({
     user,
@@ -2493,6 +2501,12 @@ function EStmtQueueItem({
         {isReviewed && (
           <button style={OUTLINE_BTN} onClick={onProcess}>Re-scan</button>
         )}
+        {isReviewed && pdfBlobUrl && (
+          <button style={{ ...OUTLINE_BTN, background: showPdfPanel ? "#eff6ff" : undefined, color: showPdfPanel ? "#1d4ed8" : undefined }}
+            onClick={() => setShowPdfPanel(s => !s)}>
+            {showPdfPanel ? "Hide PDF" : "Show PDF"}
+          </button>
+        )}
         {["queued","failed","reviewed"].includes(item.status) && !item._uploading && (
           <button onClick={onRemove}
             style={{ border: "none", background: "none", cursor: "pointer", fontSize: 16, color: "#d1d5db", padding: "0 2px", flexShrink: 0 }}
@@ -2567,22 +2581,27 @@ function EStmtQueueItem({
                 </div>
               )}
               {rows.length > 0 && (
-                <TxHorizontal
-                  rows={rows}
-                  selected={item.selected}
-                  onUpdateRow={(id, patch) => onUpdateRow(id, patch)}
-                  onConfirmRow={(row) => { setProcessedCount(n => n + 1); onSaveRow(row); }}
-                  onSkipRow={(id) => { setProcessedCount(n => n + 1); onSkipRow(id); }}
-                  onConfirmAll={(selectedRows) => { setProcessedCount(n => n + selectedRows.length); onSave(selectedRows); draft.clearDraft(); }}
-                  onToggleSelect={(id) => onToggleSel(id)}
-                  onToggleAll={onToggleAll}
-                  source="estatement"
-                  accounts={accounts}
-                  employeeLoans={employeeLoans}
-                  T={T}
-                  onCreateInstallment={(row) => onCreateInstallment(row)}
-                  onMergeTransfer={onMergeTransfer}
-                />
+                <div style={showPdfPanel && pdfBlobUrl ? { display: "grid", gridTemplateColumns: "2fr 3fr", gap: 12, alignItems: "flex-start", padding: "0 14px 14px" } : {}}>
+                  {showPdfPanel && pdfBlobUrl && (
+                    <PDFViewer fileUrl={pdfBlobUrl} filename={item.name} />
+                  )}
+                  <TxHorizontal
+                    rows={rows}
+                    selected={item.selected}
+                    onUpdateRow={(id, patch) => onUpdateRow(id, patch)}
+                    onConfirmRow={(row) => { setProcessedCount(n => n + 1); onSaveRow(row); }}
+                    onSkipRow={(id) => { setProcessedCount(n => n + 1); onSkipRow(id); }}
+                    onConfirmAll={(selectedRows) => { setProcessedCount(n => n + selectedRows.length); onSave(selectedRows); draft.clearDraft(); }}
+                    onToggleSelect={(id) => onToggleSel(id)}
+                    onToggleAll={onToggleAll}
+                    source="estatement"
+                    accounts={accounts}
+                    employeeLoans={employeeLoans}
+                    T={T}
+                    onCreateInstallment={(row) => onCreateInstallment(row)}
+                    onMergeTransfer={onMergeTransfer}
+                  />
+                </div>
               )}
             </>
           )}

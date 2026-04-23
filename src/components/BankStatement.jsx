@@ -447,13 +447,11 @@ export default function BankStatement({
       )}
 
       {/* Split view wrapper — flex row when PDF panel is open */}
-      <div style={showPdfPanel && reconcile.pdfBlobUrl ? { display: "flex", gap: 16, alignItems: "flex-start" } : {}}>
+      <div style={showPdfPanel && reconcile.pdfBlobUrl ? { display: "grid", gridTemplateColumns: "2fr 3fr", gap: 12, alignItems: "flex-start" } : {}}>
         {showPdfPanel && reconcile.pdfBlobUrl && (
-          <div style={{ width: "40%", flexShrink: 0, position: "sticky", top: 0, height: "calc(100vh - 80px)" }}>
-            <PDFViewer fileUrl={reconcile.pdfBlobUrl} filename={reconcile.pdfSource} />
-          </div>
+          <PDFViewer fileUrl={reconcile.pdfBlobUrl} filename={reconcile.pdfSource} />
         )}
-        <div style={showPdfPanel && reconcile.pdfBlobUrl ? { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 16 } : {}}>
+        <div style={showPdfPanel && reconcile.pdfBlobUrl ? { display: "flex", flexDirection: "column", gap: 16 } : {}}>
 
       {/* ── Print-only header ── */}
       <div className="print-only" style={{ display: "none" }}>

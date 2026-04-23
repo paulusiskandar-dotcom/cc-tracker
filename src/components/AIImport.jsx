@@ -84,7 +84,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
   const [importing,        setImporting]        = useState(false);
   const [batchId,          setBatchId]          = useState(null);
   const [batchFilePath,    setBatchFilePath]    = useState(null);
-  const [imageUrl,         setImageUrl]         = useState(null);  // blob URL for thumbnail/zoom
+  const [imageBlobUrls,    setImageBlobUrls]    = useState([]);    // blob URLs for thumbnail strip
   const [zoomUrl,          setZoomUrl]          = useState(null);  // URL to show in zoom modal
   // Fingerprints of rows permanently skipped — persist across Refresh Scan
   const [skippedFPs,  setSkippedFPs]  = useState(new Set());
@@ -320,10 +320,10 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
     setSkippedFPs(new Set()); // new upload → clear all skip history
     setBatchId(null);
     setBatchFilePath(null);
-    // Store blob URL for thumbnail (images only — PDFs shown via iframe)
-    setImageUrl(prev => { if (prev) URL.revokeObjectURL(prev); return null; });
+    // Store blob URL for thumbnail strip (images only — PDFs shown via iframe)
+    setImageBlobUrls(prev => { prev.forEach(u => URL.revokeObjectURL(u)); return []; });
     if (!file.name.toLowerCase().endsWith(".pdf")) {
-      setImageUrl(URL.createObjectURL(file));
+      setImageBlobUrls([URL.createObjectURL(file)]);
     }
 
     let newBatchId = null;
@@ -593,7 +593,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
     } catch { /* non-critical */ }
     setBatchId(null);
     setBatchFilePath(null);
-    setImageUrl(prev => { if (prev) URL.revokeObjectURL(prev); return null; });
+    setImageBlobUrls(prev => { prev.forEach(u => URL.revokeObjectURL(u)); return []; });
   };
 
   // ─────────────────────────────────────────────────────────────
@@ -627,16 +627,15 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
         }
       </div>
 
-      {/* Image thumbnail — shown when a non-PDF file was scanned */}
-      {imageUrl && (
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <img
-            src={imageUrl}
-            alt="scanned"
-            onClick={() => setZoomUrl(imageUrl)}
-            style={{ width: 60, height: 60, objectFit: "cover", borderRadius: 8, cursor: "pointer", border: "1px solid #e5e7eb" }}
-          />
-          <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>Click to zoom</span>
+      {/* Image thumbnail strip — shown when non-PDF files were scanned */}
+      {imageBlobUrls.length > 0 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "8px", background: "#f9fafb", borderRadius: 8 }}>
+          {imageBlobUrls.map((url, i) => (
+            <img key={i} src={url} alt={`receipt ${i + 1}`}
+              onClick={() => setZoomUrl(url)}
+              style={{ width: 60, height: 60, objectFit: "cover", borderRadius: 6, cursor: "pointer", border: "1px solid #e5e7eb" }}
+            />
+          ))}
         </div>
       )}
 
