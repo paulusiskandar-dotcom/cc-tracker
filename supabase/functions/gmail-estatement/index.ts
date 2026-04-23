@@ -849,12 +849,22 @@ Deno.serve(async (req: Request) => {
         const { pwdList, vars } = await loadPasswordsAndVars(serviceSupabase, userId, body);
 
         // Step 1: try Claude with raw PDF (with chunking + fallback)
-        let claudeResult = await chunkAndProcessPDF(pdf_base64, ANTHROPIC_KEY);
+        let claudeResult: ClaudeResult;
+        try {
+          claudeResult = await chunkAndProcessPDF(pdf_base64, ANTHROPIC_KEY);
+        } catch (e: any) {
+          const errMsg = (e.message || String(e)).toLowerCase();
+          if (errMsg.includes("password protected") || errMsg.includes("password-protected")) {
+            claudeResult = { ok: false, is_encrypted: true };
+          } else {
+            throw e;
+          }
+        }
 
         if (claudeResult.ok) {
           const cleaned = cleanTransactions(claudeResult.transactions);
           const meta = inferMetadata(cleaned);
-          result = { success: true, transactions: cleaned, ...meta };
+          result = { success: true, transactions: cleaned, ...meta, closing_balance: null, opening_balance: null };
         } else if (!claudeResult.is_encrypted) {
           result = { success: false, needs_password: false, error: claudeResult.error };
         } else {

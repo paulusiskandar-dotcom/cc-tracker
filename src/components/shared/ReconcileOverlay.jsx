@@ -6,6 +6,7 @@ import { merchantRules } from "../../lib/merchantRules";
 import { detectDuplicate } from "../../lib/duplicateDetection";
 import { detectTransferPairs } from "../../lib/transferDetection";
 import { supabase } from "../../lib/supabase";
+import { processReconcilePDF } from "../../lib/reconcilePdfUpload";
 import { fmtIDR, todayStr } from "../../utils";
 import { Button, showToast, TxHorizontal, TX_HORIZONTAL_TYPES } from "./index";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../../constants";
@@ -13,7 +14,6 @@ import { LIGHT } from "../../theme";
 import Modal from "./Modal";
 import ReconcileSummaryModal from "./ReconcileSummaryModal";
 
-const EDGE_URL = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/gmail-estatement`;
 const FF = "Figtree, sans-serif";
 
 // ── Matching ─────────────────────────────────────────────────
@@ -165,43 +165,32 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
   // Upload handler
   const stageAndProcess = useCallback(async (file, { append = false } = {}) => {
     if (!file) return;
-    const blobUrl = URL.createObjectURL(file);
-    setPdfBlobUrl(prev => {
-      if (append && prev) { URL.revokeObjectURL(blobUrl); return prev; } // keep first file preview
-      if (prev) URL.revokeObjectURL(prev);
-      return blobUrl;
-    });
-    setPdfSource(prev => append && prev ? `${prev}, ${file.name}` : file.name);
     setProcessing(true);
-    try {
-      const reader = new FileReader();
-      const base64 = await new Promise((res, rej) => { reader.onload = () => res(reader.result.split(",")[1]); reader.onerror = rej; reader.readAsDataURL(file); });
-      const r = await fetch(EDGE_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
-          apikey: process.env.REACT_APP_SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({ action: "process_upload", user_id: user.id, pdf_base64: base64 }),
+    const result = await processReconcilePDF(file, user.id);
+    setProcessing(false);
+
+    if (result.error) {
+      showToast(result.error, "error");
+      return;
+    }
+
+    if (append) {
+      setStmtRows(prev => [...prev, ...result.transactions]);
+      setPdfSource(prev => prev ? `${prev}, ${result.filename}` : result.filename);
+      URL.revokeObjectURL(result.blobUrl); // keep first file's preview
+    } else {
+      setStmtRows(result.transactions);
+      setPdfSource(result.filename);
+      setPdfBlobUrl(prev => {
+        if (prev) URL.revokeObjectURL(prev);
+        return result.blobUrl;
       });
-      const data = await r.json();
-      if (data.needs_password || data.encrypted) {
-        showToast("PDF terenkripsi. Silakan hapus password terlebih dahulu.", "error");
-      } else if (data.transactions?.length) {
-        const newRows = data.transactions.map((t, i) => ({ ...t, _id: t._id || `stmt-${Date.now()}-${i}`, _sourceFile: file.name }));
-        if (append) setStmtRows(prev => [...prev, ...newRows]);
-        else setStmtRows(newRows);
-        if (!append) {
-          if (data.closing_balance != null) setStmtClosingBalance(Number(data.closing_balance));
-          if (data.opening_balance != null) setStmtOpeningBalance(Number(data.opening_balance));
-        }
-        showToast(`${data.transactions.length} transactions extracted`);
-      } else {
-        showToast(data.error || "No transactions found", "error");
-      }
-    } catch (e) { showToast(`Error: ${e.message}`, "error"); }
-    finally { setProcessing(false); }
+      if (result.closing_balance != null) setStmtClosingBalance(Number(result.closing_balance));
+      if (result.opening_balance != null) setStmtOpeningBalance(Number(result.opening_balance));
+    }
+
+    setActive(true);
+    showToast(`${result.transactions.length} transactions extracted`);
   }, [user]);
 
   const markKept    = useCallback((id) => setKeptIds(p => { const n = new Set(p); n.add(id); return n; }), []);

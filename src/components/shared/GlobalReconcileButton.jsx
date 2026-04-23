@@ -1,10 +1,9 @@
 // GlobalReconcileButton — upload PDF statements, auto-detect account + period, navigate to the right statement page in reconcile mode
 import { useState, useRef } from "react";
-import { supabase } from "../../lib/supabase";
 import { Button, showToast } from "./index";
 import Modal from "./Modal";
+import { processReconcilePDF, matchDetectedAccount } from "../../lib/reconcilePdfUpload";
 
-const EDGE_URL = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/gmail-estatement`;
 const FF = "Figtree, sans-serif";
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -31,95 +30,42 @@ export default function GlobalReconcileButton({ accounts, type, onNavigate, user
       ? accounts.filter(a => ["bank", "credit_card"].includes(a.type))
       : accounts.filter(a => a.type === "bank");
 
-  const processFile = async (file) => {
-    const base64 = await new Promise((res, rej) => {
-      const reader = new FileReader();
-      reader.onload  = () => res(reader.result.split(",")[1]);
-      reader.onerror = rej;
-      reader.readAsDataURL(file);
-    });
-    const r = await fetch(EDGE_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
-        apikey: process.env.REACT_APP_SUPABASE_ANON_KEY,
-      },
-      body: JSON.stringify({ action: "process_upload", user_id: user.id, pdf_base64: base64 }),
-    });
-    return await r.json();
-  };
-
   const handleProcess = async () => {
     if (!stagedFiles.length) return;
     setProcessing(true);
     try {
       const aggregatedTxs = [];
-      let firstData = null, firstBlobUrl = null, firstFilename = "";
+      let firstResult = null;
 
       for (let i = 0; i < stagedFiles.length; i++) {
         const file = stagedFiles[i];
         setProcessProgress({ current: i + 1, total: stagedFiles.length });
-        try {
-          const data = await processFile(file);
-          if (data.needs_password || data.encrypted) {
-            showToast(`${file.name}: PDF terenkripsi. Silakan hapus password terlebih dahulu.`, "error");
-            continue;
-          }
-          if (!data.transactions?.length) {
-            showToast(`${file.name}: ${data.error || "No transactions found"}`, "error");
-            continue;
-          }
-          const tagged = data.transactions.map((t, idx) => ({
-            ...t,
-            _id: t._id || `stmt-${Date.now()}-${idx}`,
-            _sourceFile: file.name,
-          }));
-          aggregatedTxs.push(...tagged);
-          if (!firstData) {
-            firstData = data;
-            firstBlobUrl = URL.createObjectURL(file);
-            firstFilename = file.name;
-          }
-        } catch (e) {
-          showToast(`${file.name}: ${e.message}`, "error");
+        const result = await processReconcilePDF(file, user.id);
+        if (result.error) {
+          showToast(`${file.name}: ${result.error}`, "error");
+          continue;
         }
+        aggregatedTxs.push(...result.transactions);
+        if (!firstResult) firstResult = result;
       }
 
       setProcessProgress(null);
       if (!aggregatedTxs.length) return;
 
-      const det = firstData.detected_account;
-      const per = firstData.detected_period;
-      const closingBal = firstData.closing_balance != null ? Number(firstData.closing_balance) : null;
-      const openingBal = firstData.opening_balance != null ? Number(firstData.opening_balance) : null;
+      const detectedAcc = matchDetectedAccount(firstResult.detected_account, filteredAccounts);
+      const year  = firstResult.detected_period?.year  || new Date().getFullYear();
+      const month = firstResult.detected_period?.month || (new Date().getMonth() + 1);
 
-      let matchedAcc = null;
-      if (det?.last4) {
-        matchedAcc = filteredAccounts.find(a =>
-          String(a.card_last4 || a.last4 || "") === String(det.last4)
-        );
-      }
-      if (!matchedAcc && det?.account_no) {
-        matchedAcc = filteredAccounts.find(a =>
-          String(a.account_no || "").includes(det.account_no) ||
-          String(det.account_no).includes(String(a.account_no || "").slice(-6))
-        );
-      }
-
-      const year  = per?.year  || new Date().getFullYear();
-      const month = per?.month || (new Date().getMonth() + 1);
-
-      if (matchedAcc && per?.year && per?.month) {
+      if (detectedAcc && firstResult.detected_period?.year && firstResult.detected_period?.month) {
         setShowUpload(false); setStagedFiles([]);
-        onNavigate(matchedAcc, year, month, aggregatedTxs, firstFilename, firstBlobUrl, closingBal, openingBal);
+        onNavigate(detectedAcc, year, month, aggregatedTxs, firstResult.filename, firstResult.blobUrl, firstResult.closing_balance, firstResult.opening_balance);
       } else {
         setPendingTxs(aggregatedTxs);
-        setPendingFile(firstFilename);
-        setPendingBlobUrl(firstBlobUrl);
-        setPendingClosingBal(closingBal);
-        setPendingOpeningBal(openingBal);
-        setPickerAcc(matchedAcc?.id || filteredAccounts[0]?.id || "");
+        setPendingFile(firstResult.filename);
+        setPendingBlobUrl(firstResult.blobUrl);
+        setPendingClosingBal(firstResult.closing_balance);
+        setPendingOpeningBal(firstResult.opening_balance);
+        setPickerAcc(detectedAcc?.id || filteredAccounts[0]?.id || "");
         setPickerYear(year);
         setPickerMonth(month);
         setShowUpload(false); setStagedFiles([]);
