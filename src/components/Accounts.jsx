@@ -13,6 +13,7 @@ import Input, { Field, AmountInput, FormRow } from "./shared/Input";
 import Select from "./shared/Select";
 import SortDropdown from "./shared/SortDropdown";
 import { EmptyState, showToast } from "./shared/Card";
+import ReconcileDraftBanner from "./shared/ReconcileDraftBanner";
 
 const MULTICURRENCY_BANKS = ["BCA", "OCBC", "Jenius", "Danamon"];
 
@@ -391,6 +392,17 @@ export default function Accounts({
           <Button onClick={openAdd} size="sm">+ Add Account</Button>
         </div>
       </div>
+
+      {/* ── RECONCILE DRAFT BANNER ── */}
+      <ReconcileDraftBanner
+        user={user}
+        accounts={accounts}
+        filterType="bank"
+        onContinue={(acc) => {
+          setBankReconcileSeeds(null);
+          setStatementAcc(acc);
+        }}
+      />
 
       {/* ── BANK PAGE ── */}
       {locked && initialSubTab === "bank" && (

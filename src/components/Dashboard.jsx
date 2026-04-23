@@ -6,6 +6,7 @@ import { showToast, EmptyState, Modal, Button, AmountInput, Field, Input, FormRo
 import Select from "./shared/Select";
 import { GroupedTransactionList } from "./shared/TransactionRow";
 import GlobalReconcileButton from "./shared/GlobalReconcileButton";
+import ReconcileDraftBanner from "./shared/ReconcileDraftBanner";
 
 export default function Dashboard({
   user, accounts, ledger, thisMonthLedger, categories,
@@ -695,6 +696,21 @@ export default function Dashboard({
           </div>
         );
       })()}
+
+      {/* ── RECONCILE DRAFT BANNER ── */}
+      <ReconcileDraftBanner
+        user={user}
+        accounts={accounts}
+        onContinue={(acc) => {
+          if (acc.type === "credit_card") {
+            setPendingReconcileNav?.({ accType: "credit_card", acc, seeds: { from: null, to: null, selectedMonth: null, txs: null, filename: "" } });
+            setTab?.("cards");
+          } else {
+            setPendingReconcileNav?.({ accType: "bank", acc, seeds: { from: null, to: null, txs: null, filename: "" } });
+            setTab?.("bank");
+          }
+        }}
+      />
 
       {/* ── BENTO GRID ── */}
       <div style={{

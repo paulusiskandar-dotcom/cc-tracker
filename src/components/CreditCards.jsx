@@ -11,6 +11,7 @@ import Input, { Field, AmountInput, FormRow } from "./shared/Input";
 import Select from "./shared/Select";
 import { EmptyState, showToast } from "./shared/Card";
 import SortDropdown from "./shared/SortDropdown";
+import ReconcileDraftBanner from "./shared/ReconcileDraftBanner";
 
 const SUBTABS = [
   { id: "overview",     label: "Overview" },
@@ -553,6 +554,17 @@ export default function CreditCards({
           💳 Pay Bill
         </Button>
       </div>
+
+      {/* ── RECONCILE DRAFT BANNER ── */}
+      <ReconcileDraftBanner
+        user={user}
+        accounts={accounts}
+        filterType="credit_card"
+        onContinue={(acc) => {
+          setCcReconcileSeeds(null);
+          setCcStatementAcc(acc);
+        }}
+      />
 
       {/* ── SUBTABS ── */}
       <div style={{ display: "flex", gap: 4 }}>
