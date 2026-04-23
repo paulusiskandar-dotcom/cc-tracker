@@ -1,4 +1,4 @@
-// GlobalReconcileButton — upload a PDF statement, auto-detect account + period, navigate to the right statement page in reconcile mode
+// GlobalReconcileButton — upload PDF statements, auto-detect account + period, navigate to the right statement page in reconcile mode
 import { useState, useRef } from "react";
 import { supabase } from "../../lib/supabase";
 import { Button, showToast } from "./index";
@@ -11,15 +11,16 @@ const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov
 
 export default function GlobalReconcileButton({ accounts, type, onNavigate, user }) {
   const [showUpload, setShowUpload] = useState(false);
-  const [stagedFile, setStagedFile] = useState(null);
+  const [stagedFiles, setStagedFiles] = useState([]);
   const [processing, setProcessing] = useState(false);
+  const [processProgress, setProcessProgress] = useState(null);
   const [showPicker, setShowPicker] = useState(false);
   const [pickerAcc,  setPickerAcc]  = useState("");
   const [pickerYear, setPickerYear] = useState(new Date().getFullYear());
   const [pickerMonth, setPickerMonth] = useState(new Date().getMonth() + 1);
-  const [pendingTxs,       setPendingTxs]       = useState([]);
-  const [pendingFile,      setPendingFile]      = useState("");
-  const [pendingBlobUrl,   setPendingBlobUrl]   = useState(null);
+  const [pendingTxs,        setPendingTxs]        = useState([]);
+  const [pendingFile,       setPendingFile]       = useState("");
+  const [pendingBlobUrl,    setPendingBlobUrl]    = useState(null);
   const [pendingClosingBal, setPendingClosingBal] = useState(null);
   const [pendingOpeningBal, setPendingOpeningBal] = useState(null);
   const fileRef = useRef(null);
@@ -30,46 +31,69 @@ export default function GlobalReconcileButton({ accounts, type, onNavigate, user
       ? accounts.filter(a => ["bank", "credit_card"].includes(a.type))
       : accounts.filter(a => a.type === "bank");
 
+  const processFile = async (file) => {
+    const base64 = await new Promise((res, rej) => {
+      const reader = new FileReader();
+      reader.onload  = () => res(reader.result.split(",")[1]);
+      reader.onerror = rej;
+      reader.readAsDataURL(file);
+    });
+    const r = await fetch(EDGE_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
+        apikey: process.env.REACT_APP_SUPABASE_ANON_KEY,
+      },
+      body: JSON.stringify({ action: "process_upload", user_id: user.id, pdf_base64: base64 }),
+    });
+    return await r.json();
+  };
+
   const handleProcess = async () => {
-    if (!stagedFile) return;
+    if (!stagedFiles.length) return;
     setProcessing(true);
     try {
-      const reader = new FileReader();
-      const base64 = await new Promise((res, rej) => {
-        reader.onload  = () => res(reader.result.split(",")[1]);
-        reader.onerror = rej;
-        reader.readAsDataURL(stagedFile);
-      });
+      const aggregatedTxs = [];
+      let firstData = null, firstBlobUrl = null, firstFilename = "";
 
-      const resp = await fetch(EDGE_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`,
-          apikey: process.env.REACT_APP_SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({ action: "process_upload", user_id: user.id, pdf_base64: base64 }),
-      });
-      const data = await resp.json();
-
-      if (data.needs_password || data.encrypted) {
-        showToast("PDF terenkripsi. Silakan hapus password terlebih dahulu.", "error");
-        return;
+      for (let i = 0; i < stagedFiles.length; i++) {
+        const file = stagedFiles[i];
+        setProcessProgress({ current: i + 1, total: stagedFiles.length });
+        try {
+          const data = await processFile(file);
+          if (data.needs_password || data.encrypted) {
+            showToast(`${file.name}: PDF terenkripsi. Silakan hapus password terlebih dahulu.`, "error");
+            continue;
+          }
+          if (!data.transactions?.length) {
+            showToast(`${file.name}: ${data.error || "No transactions found"}`, "error");
+            continue;
+          }
+          const tagged = data.transactions.map((t, idx) => ({
+            ...t,
+            _id: t._id || `stmt-${Date.now()}-${idx}`,
+            _sourceFile: file.name,
+          }));
+          aggregatedTxs.push(...tagged);
+          if (!firstData) {
+            firstData = data;
+            firstBlobUrl = URL.createObjectURL(file);
+            firstFilename = file.name;
+          }
+        } catch (e) {
+          showToast(`${file.name}: ${e.message}`, "error");
+        }
       }
-      if (!data.transactions?.length) {
-        showToast(data.error || "No transactions found", "error");
-        return;
-      }
 
-      const txs = data.transactions.map((t, i) => ({ ...t, _id: t._id || `stmt-${i}` }));
-      const det = data.detected_account;
-      const per = data.detected_period;
-      const filename = stagedFile.name;
-      const blobUrl = URL.createObjectURL(stagedFile);
-      const closingBal = data.closing_balance != null ? Number(data.closing_balance) : null;
-      const openingBal = data.opening_balance != null ? Number(data.opening_balance) : null;
+      setProcessProgress(null);
+      if (!aggregatedTxs.length) return;
 
-      // Try to match account
+      const det = firstData.detected_account;
+      const per = firstData.detected_period;
+      const closingBal = firstData.closing_balance != null ? Number(firstData.closing_balance) : null;
+      const openingBal = firstData.opening_balance != null ? Number(firstData.opening_balance) : null;
+
       let matchedAcc = null;
       if (det?.last4) {
         matchedAcc = filteredAccounts.find(a =>
@@ -87,26 +111,25 @@ export default function GlobalReconcileButton({ accounts, type, onNavigate, user
       const month = per?.month || (new Date().getMonth() + 1);
 
       if (matchedAcc && per?.year && per?.month) {
-        // Auto-navigate — account and period both detected
-        setShowUpload(false); setStagedFile(null);
-        onNavigate(matchedAcc, year, month, txs, filename, blobUrl, closingBal, openingBal);
+        setShowUpload(false); setStagedFiles([]);
+        onNavigate(matchedAcc, year, month, aggregatedTxs, firstFilename, firstBlobUrl, closingBal, openingBal);
       } else {
-        // Show manual picker
-        setPendingTxs(txs);
-        setPendingFile(filename);
-        setPendingBlobUrl(blobUrl);
+        setPendingTxs(aggregatedTxs);
+        setPendingFile(firstFilename);
+        setPendingBlobUrl(firstBlobUrl);
         setPendingClosingBal(closingBal);
         setPendingOpeningBal(openingBal);
         setPickerAcc(matchedAcc?.id || filteredAccounts[0]?.id || "");
         setPickerYear(year);
         setPickerMonth(month);
-        setShowUpload(false); setStagedFile(null);
+        setShowUpload(false); setStagedFiles([]);
         setShowPicker(true);
       }
     } catch (e) {
       showToast("Error: " + e.message, "error");
     } finally {
       setProcessing(false);
+      setProcessProgress(null);
     }
   };
 
@@ -118,6 +141,17 @@ export default function GlobalReconcileButton({ accounts, type, onNavigate, user
     setPendingTxs([]); setPendingFile(""); setPendingBlobUrl(null); setPendingClosingBal(null); setPendingOpeningBal(null);
   };
 
+  const clearPicker = () => {
+    setShowPicker(false); setPendingTxs([]); setPendingFile("");
+    if (pendingBlobUrl) URL.revokeObjectURL(pendingBlobUrl);
+    setPendingBlobUrl(null); setPendingClosingBal(null); setPendingOpeningBal(null);
+  };
+
+  const addFiles = (files) => {
+    const pdfs = Array.from(files).filter(f => f.name.toLowerCase().endsWith(".pdf"));
+    if (pdfs.length) setStagedFiles(prev => [...prev, ...pdfs]);
+  };
+
   return (
     <>
       <Button size="sm" variant="secondary" onClick={() => setShowUpload(true)}>
@@ -125,26 +159,35 @@ export default function GlobalReconcileButton({ accounts, type, onNavigate, user
       </Button>
 
       {/* ── Upload modal ── */}
-      <Modal isOpen={showUpload} onClose={() => { setShowUpload(false); setStagedFile(null); }} title="Reconcile from PDF" width={520}>
-        {stagedFile ? (
-          <div style={{ textAlign: "center", padding: "20px" }}>
-            <div style={{ fontSize: 48, marginBottom: 12 }}>📄</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: FF, marginBottom: 4 }}>
-              {stagedFile.name}
+      <Modal isOpen={showUpload} onClose={() => { setShowUpload(false); setStagedFiles([]); }} title="Reconcile from PDF" width={520}>
+        {stagedFiles.length > 0 ? (
+          <div style={{ padding: "20px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
+              {stagedFiles.map((f, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "#f9fafb", borderRadius: 6, fontSize: 11, fontFamily: FF }}>
+                  <span>📄 {f.name} · {Math.round(f.size / 1024)} KB</span>
+                  <button onClick={() => setStagedFiles(prev => prev.filter((_, idx) => idx !== i))}
+                    style={{ background: "none", border: "none", color: "#6b7280", cursor: "pointer", fontSize: 14, lineHeight: 1 }}>✕</button>
+                </div>
+              ))}
             </div>
-            <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: FF, marginBottom: 20 }}>
-              {stagedFile.size > 1048576
-                ? `${(stagedFile.size / 1048576).toFixed(1)} MB`
-                : `${(stagedFile.size / 1024).toFixed(0)} KB`}
+            <div
+              onClick={() => fileRef.current?.click()}
+              onDragOver={e => e.preventDefault()}
+              onDrop={e => { e.preventDefault(); addFiles(e.dataTransfer.files); }}
+              style={{ border: "1px dashed #e5e7eb", borderRadius: 8, padding: "8px 12px", textAlign: "center", cursor: "pointer", fontSize: 11, color: "#9ca3af", fontFamily: FF, marginBottom: 16 }}>
+              + Add more PDFs
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-              <button onClick={() => setStagedFile(null)} disabled={processing}
-                style={{ fontSize: 12, padding: "8px 16px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#f9fafb", color: "#6b7280", cursor: "pointer", fontFamily: FF, fontWeight: 600 }}>
+              <button onClick={() => setStagedFiles([])} disabled={processing}
+                style={{ fontSize: 12, padding: "8px 16px", borderRadius: 6, border: "1px solid #e5e7eb", background: "#fff", color: "#374151", cursor: "pointer", fontFamily: FF }}>
                 Back
               </button>
               <button onClick={handleProcess} disabled={processing}
-                style={{ fontSize: 12, padding: "8px 16px", borderRadius: 8, border: "none", background: "#3b5bdb", color: "#fff", cursor: "pointer", fontFamily: FF, fontWeight: 600, opacity: processing ? 0.6 : 1 }}>
-                {processing ? "Processing…" : "Process"}
+                style={{ fontSize: 12, fontWeight: 700, padding: "8px 18px", borderRadius: 6, border: "none", background: "#3b5bdb", color: "#fff", cursor: processing ? "default" : "pointer", fontFamily: FF, opacity: processing ? 0.6 : 1 }}>
+                {processProgress
+                  ? `Processing ${processProgress.current}/${processProgress.total}…`
+                  : `Process${stagedFiles.length > 1 ? ` (${stagedFiles.length})` : ""}`}
               </button>
             </div>
           </div>
@@ -152,13 +195,13 @@ export default function GlobalReconcileButton({ accounts, type, onNavigate, user
           <div
             onClick={() => fileRef.current?.click()}
             onDragOver={e => e.preventDefault()}
-            onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setStagedFile(f); }}
+            onDrop={e => { e.preventDefault(); addFiles(e.dataTransfer.files); }}
             style={{ border: "2px dashed #e5e7eb", borderRadius: 16, padding: "28px 24px", textAlign: "center", cursor: "pointer", background: "#fafafa" }}>
             <div style={{ fontSize: 28, marginBottom: 6 }}>📄</div>
             <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: FF, marginBottom: 4 }}>Drop PDF here or click to browse</div>
-            <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: FF }}>Bank or credit card statement (PDF)</div>
-            <input ref={fileRef} type="file" accept=".pdf" style={{ display: "none" }}
-              onChange={e => { const f = e.target.files?.[0]; if (f) setStagedFile(f); e.target.value = ""; }} />
+            <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: FF }}>Bank or credit card statement (PDF) — multiple files supported</div>
+            <input ref={fileRef} type="file" accept=".pdf" multiple style={{ display: "none" }}
+              onChange={e => { addFiles(e.target.files || []); e.target.value = ""; }} />
             <div style={{ marginTop: 12 }}>
               <Button variant="primary" size="sm">Choose File</Button>
             </div>
@@ -167,7 +210,7 @@ export default function GlobalReconcileButton({ accounts, type, onNavigate, user
       </Modal>
 
       {/* ── Manual picker modal (when auto-detect fails) ── */}
-      <Modal isOpen={showPicker} onClose={() => { setShowPicker(false); setPendingTxs([]); setPendingFile(""); if (pendingBlobUrl) URL.revokeObjectURL(pendingBlobUrl); setPendingBlobUrl(null); setPendingClosingBal(null); setPendingOpeningBal(null); }} title="Select Account & Period" width={400}>
+      <Modal isOpen={showPicker} onClose={clearPicker} title="Select Account & Period" width={400}>
         <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: "4px 0" }}>
           <div style={{ fontSize: 12, color: "#6b7280", fontFamily: FF }}>
             Account or period could not be auto-detected. Please confirm:
@@ -198,7 +241,7 @@ export default function GlobalReconcileButton({ accounts, type, onNavigate, user
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
-            <button onClick={() => { setShowPicker(false); setPendingTxs([]); setPendingFile(""); if (pendingBlobUrl) URL.revokeObjectURL(pendingBlobUrl); setPendingBlobUrl(null); setPendingClosingBal(null); setPendingOpeningBal(null); }}
+            <button onClick={clearPicker}
               style={{ fontSize: 12, padding: "8px 16px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#f9fafb", color: "#6b7280", cursor: "pointer", fontFamily: FF, fontWeight: 600 }}>
               Cancel
             </button>
