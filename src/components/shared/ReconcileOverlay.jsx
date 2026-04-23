@@ -3,6 +3,7 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { reconcileApi, ledgerApi, installmentsApi, loanPaymentsApi } from "../../api";
 import { categoryLearn } from "../../lib/categoryLearn";
+import { detectDuplicate } from "../../lib/duplicateDetection";
 import { supabase } from "../../lib/supabase";
 import { fmtIDR, todayStr } from "../../utils";
 import { Button, showToast, TxHorizontal, TX_HORIZONTAL_TYPES } from "./index";
@@ -89,11 +90,23 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
   const [expandedIds,  setExpandedIds]  = useState(() => new Set());
   const [pendingRows,  setPendingRows]  = useState({});
   const [learnedCats,  setLearnedCats]  = useState([]);
+  const [allLedger,    setAllLedger]    = useState([]);
   const fileRef = useRef(null);
 
   useEffect(() => {
     if (!active || !user?.id) return;
     categoryLearn.getLearned(user.id).then(setLearnedCats).catch(() => {});
+  }, [active, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!active || !user?.id) return;
+    supabase
+      .from("ledger")
+      .select("id, tx_date, description, merchant_name, amount_idr, amount, from_id, to_id")
+      .eq("user_id", user.id)
+      .order("tx_date", { ascending: false })
+      .limit(5000)
+      .then(({ data }) => setAllLedger(data || []));
   }, [active, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { matched, missing, extraIds } = useMemo(() => {
@@ -121,6 +134,18 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
   const missingFiltered = useMemo(() =>
     missing.filter(s => !ignoredIds.has(s._id)),
   [missing, ignoredIds]);
+
+  const missingEnriched = useMemo(() =>
+    missingFiltered.map(s => {
+      const dup = detectDuplicate(
+        { tx_date: s.date, amount_idr: s.amount, amount: s.amount, description: s.description, merchant_name: s.merchant },
+        allLedger,
+        { sameAccountId: currentAccountId },
+      );
+      if (!dup) return s;
+      return { ...s, _dupEntry: dup.dupEntry, _dupReasons: dup.reasons, _dupLevel: dup.level };
+    }),
+  [missingFiltered, allLedger, currentAccountId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const stats = useMemo(() => ({
     match: matched.size,
@@ -220,13 +245,13 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
 
   return {
     active, stmtRows, processing, stats, pdfSource, fileRef,
-    matched, missing: missingFiltered, extraIds, keptIds, ignoredIds,
+    matched, missing: missingEnriched, extraIds, keptIds, ignoredIds,
     getStatus, markKept, markIgnored, seedStmtRows,
     stageAndProcess, startReconcile, exitReconcile,
     currentAccountId,
     expandedIds, toggleExpanded, expandAll, collapseAll,
     pendingRows, updatePendingRow, removePendingRow,
-    learnedCats,
+    learnedCats, allLedger,
   };
 }
 
@@ -470,6 +495,7 @@ function buildRow(stmtRow, currentAccountId, learnedCats = []) {
   const suggestion = learnedCats.length > 0
     ? categoryLearn.suggest(desc, desc, learnedCats)
     : null;
+  const dupLevel = stmtRow._dupLevel || 0;
   return {
     _id: `reconcile-${stmtRow._id}`,
     tx_date: stmtRow.date || todayStr(),
@@ -486,7 +512,9 @@ function buildRow(stmtRow, currentAccountId, learnedCats = []) {
     category_name: suggestion?.confidence >= 2 ? (suggestion.category_name || null) : null,
     entity: "",
     notes: "",
-    status: "pending",
+    status: dupLevel === 3 ? "duplicate" : dupLevel === 2 ? "possible_duplicate" : dupLevel === 1 ? "review" : "pending",
+    _dupEntry: stmtRow._dupEntry || null,
+    _dupReasons: stmtRow._dupReasons || [],
     learned_cat: suggestion || undefined,
   };
 }
@@ -496,7 +524,7 @@ export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans,
   const [rows, setRows] = useState(() => [buildRow(stmtRow, reconcile.currentAccountId, reconcile.learnedCats || [])]);
   const [selected, setSelected] = useState(() => {
     const r = buildRow(stmtRow, reconcile.currentAccountId, reconcile.learnedCats || []);
-    return { [r._id]: true };
+    return { [r._id]: (stmtRow._dupLevel || 0) !== 3 };
   });
 
   // Register initial row in pendingRows on mount; clean up on unmount
@@ -628,11 +656,25 @@ export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans,
   );
 }
 
+const DUP_ROW_THEME = {
+  3: { rowBg: "#FCEBEB", rowBorder: "#E24B4A", pillBg: "#F7C1C1", pillColor: "#791F1F", pillLabel: "DUP",          infoBg: "#FCEBEB", infoText: "#A32D2D", infoBorder: "#E24B4A" },
+  2: { rowBg: "#FAEEDA", rowBorder: "#EF9F27", pillBg: "#FAC775", pillColor: "#633806", pillLabel: "POSSIBLE DUP", infoBg: "#FAEEDA", infoText: "#854F0B", infoBorder: "#EF9F27" },
+  1: { rowBg: "#FAEEDA", rowBorder: "#FAC775", pillBg: "#FAC775", pillColor: "#633806", pillLabel: "SUSPICIOUS",   infoBg: "#FAEEDA", infoText: "#854F0B", infoBorder: "#FAC775" },
+};
+
 // ── Inline missing row with accordion add panel ───────────────
 export function ReconcileMissingRowInline({ missingRow, reconcile, accounts, employeeLoans, user, onRefresh, COLS, ROW_PAD, FF: FF_PROP }) {
   const expanded = reconcile.expandedIds.has(missingRow._id);
+  const [dupDismissed, setDupDismissed] = useState(false);
   const FF_USED = FF_PROP || FF;
   const amt = Math.abs(Number(missingRow.amount || 0));
+  const rawDupLevel = missingRow._dupLevel || 0;
+  const dupLevel = dupDismissed ? 0 : rawDupLevel;
+  const dt = DUP_ROW_THEME[dupLevel];
+
+  const rowBg     = dt ? dt.rowBg     : "#fffbeb";
+  const rowBorder = dt ? dt.rowBorder : "#fde68a";
+
   const fmtDateIndo = (date) => {
     try {
       return new Date(date + "T00:00:00").toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" });
@@ -642,13 +684,20 @@ export function ReconcileMissingRowInline({ missingRow, reconcile, accounts, emp
   return (
     <>
       {/* Summary row */}
-      <div style={{ display: "grid", gridTemplateColumns: COLS, borderBottom: expanded ? "none" : "0.5px solid #fde68a", padding: ROW_PAD, alignItems: "center", background: "#fffbeb" }}>
+      <div style={{ display: "grid", gridTemplateColumns: COLS, borderBottom: (expanded || (dupLevel > 0 && missingRow._dupEntry)) ? "none" : `0.5px solid ${rowBorder}`, padding: ROW_PAD, alignItems: "center", background: rowBg }}>
         <div style={{ fontSize: 11, color: "#d97706", fontFamily: FF_USED, padding: "8px 6px", whiteSpace: "nowrap", fontStyle: "italic" }}>
           {fmtDateIndo(missingRow.date)}
         </div>
         <div style={{ padding: "8px 6px", minWidth: 0 }}>
-          <div style={{ fontSize: 12, fontWeight: 500, color: "#d97706", fontFamily: FF_USED, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontStyle: "italic" }}>
-            {missingRow.description || missingRow.merchant || "—"}
+          <div style={{ display: "flex", alignItems: "center", gap: 4, overflow: "hidden" }}>
+            {dupLevel > 0 && (
+              <span style={{ fontSize: 9, fontWeight: 800, background: dt.pillBg, color: dt.pillColor, padding: "2px 5px", borderRadius: 4, whiteSpace: "nowrap", flexShrink: 0 }}>
+                {dt.pillLabel}
+              </span>
+            )}
+            <span style={{ fontSize: 12, fontWeight: 500, color: "#d97706", fontFamily: FF_USED, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontStyle: "italic" }}>
+              {missingRow.description || missingRow.merchant || "—"}
+            </span>
           </div>
         </div>
         <div style={{ padding: "8px 6px" }}>
@@ -674,6 +723,36 @@ export function ReconcileMissingRowInline({ missingRow, reconcile, accounts, emp
           </button>
         </div>
       </div>
+
+      {/* Duplicate info panel */}
+      {dupLevel > 0 && missingRow._dupEntry && (
+        <div style={{ borderTop: `1px solid ${dt.infoBorder}`, borderBottom: expanded ? "none" : `0.5px solid ${dt.infoBorder}`, background: dt.infoBg, padding: "5px 10px 6px 10px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ fontSize: 10, color: dt.infoText, fontFamily: FF_USED }}>
+                <span style={{ fontWeight: 700 }}>Similar to:</span>{" "}
+                {missingRow._dupEntry.description || missingRow._dupEntry.merchant_name || "(no desc)"}
+                {" · "}{missingRow._dupEntry.tx_date}
+                {" · Rp "}{Number(missingRow._dupEntry.amount_idr || 0).toLocaleString("id-ID")}
+              </span>
+              {missingRow._dupReasons?.length > 0 && (
+                <span style={{ display: "inline-flex", gap: 3, marginLeft: 6 }}>
+                  {missingRow._dupReasons.map(r => (
+                    <span key={r} style={{ fontSize: 9, fontWeight: 700, background: dt.pillBg, color: dt.pillColor, borderRadius: 3, padding: "1px 5px", fontFamily: FF_USED }}>
+                      {r}
+                    </span>
+                  ))}
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => setDupDismissed(true)}
+              style={{ fontSize: 10, fontWeight: 700, color: "#059669", background: "none", border: "1px solid #6ee7b7", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontFamily: FF_USED, whiteSpace: "nowrap", flexShrink: 0 }}>
+              It's different
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Inline add panel */}
       {expanded && (
