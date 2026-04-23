@@ -4,6 +4,7 @@ import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { reconcileApi, ledgerApi, installmentsApi, loanPaymentsApi } from "../../api";
 import { categoryLearn } from "../../lib/categoryLearn";
 import { detectDuplicate } from "../../lib/duplicateDetection";
+import { detectTransferPairs } from "../../lib/transferDetection";
 import { supabase } from "../../lib/supabase";
 import { fmtIDR, todayStr } from "../../utils";
 import { Button, showToast, TxHorizontal, TX_HORIZONTAL_TYPES } from "./index";
@@ -79,7 +80,7 @@ export function ReconcileStatusBadge({ type }) {
 }
 
 // ── Main hook ────────────────────────────────────────────────
-export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, currentAccountId }) {
+export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, currentAccountId, accounts = [] }) {
   const [active,       setActive]       = useState(false);
   const [stmtRows,     setStmtRows]     = useState([]);
   const [processing,   setProcessing]   = useState(false);
@@ -135,8 +136,8 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
     missing.filter(s => !ignoredIds.has(s._id)),
   [missing, ignoredIds]);
 
-  const missingEnriched = useMemo(() =>
-    missingFiltered.map(s => {
+  const missingEnriched = useMemo(() => {
+    const dupEnriched = missingFiltered.map(s => {
       const dup = detectDuplicate(
         { tx_date: s.date, amount_idr: s.amount, amount: s.amount, description: s.description, merchant_name: s.merchant },
         allLedger,
@@ -144,8 +145,14 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
       );
       if (!dup) return s;
       return { ...s, _dupEntry: dup.dupEntry, _dupReasons: dup.reasons, _dupLevel: dup.level };
-    }),
-  [missingFiltered, allLedger, currentAccountId]); // eslint-disable-line react-hooks/exhaustive-deps
+    });
+    const pairs = detectTransferPairs(dupEnriched, accounts, allLedger);
+    return dupEnriched.map(s => {
+      const p = pairs.find(x => x.rowId === s._id || x.partnerRowId === s._id);
+      return p ? { ...s, _transferPair: p } : s;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missingFiltered, allLedger, currentAccountId]);
 
   const stats = useMemo(() => ({
     match: matched.size,
@@ -187,6 +194,23 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
 
   const markKept    = useCallback((id) => setKeptIds(p => { const n = new Set(p); n.add(id); return n; }), []);
   const markIgnored = useCallback((id) => setIgnoredIds(p => { const n = new Set(p); n.add(id); return n; }), []);
+
+  const mergeTransferPair = useCallback((stmtRowId) => {
+    const row = missingEnriched.find(s => s._id === stmtRowId);
+    if (!row?._transferPair) return;
+    const { partnerRowId, fromId, toId } = row._transferPair;
+    if (partnerRowId) markIgnored(partnerRowId);
+    setPendingRows(p => ({
+      ...p,
+      [stmtRowId]: {
+        ...(p[stmtRowId] || {}),
+        tx_type: "transfer",
+        from_id: fromId || "",
+        to_id:   toId   || "",
+        category_id: null,
+      },
+    }));
+  }, [missingEnriched, markIgnored]);
 
   const toggleExpanded = useCallback((id) => setExpandedIds(p => {
     const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n;
@@ -261,7 +285,7 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
     currentAccountId,
     expandedIds, toggleExpanded, expandAll, collapseAll,
     pendingRows, updatePendingRow, removePendingRow,
-    learnedCats, allLedger,
+    learnedCats, allLedger, mergeTransferPair,
   };
 }
 
@@ -525,6 +549,7 @@ function buildRow(stmtRow, currentAccountId, learnedCats = []) {
     status: dupLevel === 3 ? "duplicate" : dupLevel === 2 ? "possible_duplicate" : dupLevel === 1 ? "review" : "pending",
     _dupEntry: stmtRow._dupEntry || null,
     _dupReasons: stmtRow._dupReasons || [],
+    _transferPair: stmtRow._transferPair || undefined,
     learned_cat: suggestion || undefined,
   };
 }
@@ -661,6 +686,7 @@ export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans,
         accounts={accounts}
         employeeLoans={employeeLoans || []}
         T={T}
+        onMergeTransfer={() => reconcile.mergeTransferPair?.(stmtRow._id)}
       />
     </div>
   );

@@ -129,7 +129,7 @@ export default function BankStatement({
   const printRef = useRef(null);
 
   // Reconcile mode
-  const reconcile = useReconcile({ user, accountId, fromDate, toDate, ledgerRows: useMemo(() => (rawData?.allTxs || []).map(tx => ({ ...tx, _dir: txDirection(tx, accountId) })), [rawData, accountId]), currentAccountId: accountId });
+  const reconcile = useReconcile({ user, accountId, fromDate, toDate, ledgerRows: useMemo(() => (rawData?.allTxs || []).map(tx => ({ ...tx, _dir: txDirection(tx, accountId) })), [rawData, accountId]), currentAccountId: accountId, accounts });
 
   const reconcileDraft = useImportDraft({
     user,

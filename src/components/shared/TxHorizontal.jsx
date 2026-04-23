@@ -336,7 +336,7 @@ function TxHorizontalCard({
   r, isSelected, isSkipped, isNotesOpen, T,
   source, accounts, employeeLoans, txTypes,
   onUpdate, onConfirm, onSkip, onToggleSelect, onToggleNotes,
-  onCreateInstallment, confirmingId,
+  onCreateInstallment, confirmingId, onMergeTransfer,
 }) {
   const [validErr, setValidErr] = useState(null);
   const [dupDismissed, setDupDismissed] = useState(false);
@@ -414,6 +414,9 @@ function TxHorizontalCard({
         )}
         {r.learned_cat?.confidence === 1 && (
           <span style={BADGE("#fef9c3","#a16207")}>Suggest</span>
+        )}
+        {r._transferPair && (
+          <span style={BADGE("#dbeafe","#1d4ed8")}>🔄 Transfer</span>
         )}
 
         <span style={{ fontSize: 12, fontWeight: 800, color, fontFamily: "Figtree, sans-serif", flexShrink: 0, whiteSpace: "nowrap" }}>
@@ -511,6 +514,24 @@ function TxHorizontalCard({
           <span style={{ fontSize: 10, color: "#dc2626", fontFamily: "Figtree, sans-serif", fontWeight: 600 }}>
             ⚠ {validErr}
           </span>
+        </div>
+      )}
+
+      {/* ── Transfer pair panel ── */}
+      {r._transferPair && onMergeTransfer && (
+        <div style={{ borderTop: "1px solid #bfdbfe", background: "#eff6ff", padding: "6px 10px 7px 32px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 10, color: "#1d4ed8", fontFamily: "Figtree, sans-serif", flex: 1 }}>
+            {r._transferPair.partnerRowId
+              ? "Matches another row — merge as a single transfer?"
+              : "Similar entry exists in ledger — possible transfer pair"}
+          </span>
+          {r._transferPair.partnerRowId && (
+            <button
+              onClick={() => onMergeTransfer(r._id)}
+              style={{ fontSize: 10, fontWeight: 700, color: "#1d4ed8", background: "none", border: "1px solid #93c5fd", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
+              Merge as Transfer
+            </button>
+          )}
         </div>
       )}
 
@@ -644,6 +665,7 @@ export default function TxHorizontal({
   retrySonnet = false,
   onClearAll,
   onCreateInstallment,
+  onMergeTransfer,
   hideBatchFooter = false,
 }) {
   const [notesOpen,    setNotesOpen]    = useState(new Set());
@@ -876,6 +898,7 @@ export default function TxHorizontal({
             onToggleSelect={() => onToggleSelect(r._id)}
             onToggleNotes={() => toggleNotes(r._id)}
             onCreateInstallment={onCreateInstallment}
+            onMergeTransfer={onMergeTransfer}
             confirmingId={confirmingId}
           />
         ))}

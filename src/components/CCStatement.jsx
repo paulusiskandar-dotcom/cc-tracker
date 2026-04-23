@@ -96,7 +96,7 @@ export default function CCStatement({
   const printRef = useRef(null);
 
   // Reconcile mode
-  const reconcile = useReconcile({ user, accountId, fromDate, toDate, ledgerRows: useMemo(() => (data?.txs || []).map(tx => ({ ...tx, _dir: ccDirection(tx, accountId) === "charge" ? "debit" : "credit" })), [data, accountId]), currentAccountId: accountId });
+  const reconcile = useReconcile({ user, accountId, fromDate, toDate, ledgerRows: useMemo(() => (data?.txs || []).map(tx => ({ ...tx, _dir: ccDirection(tx, accountId) === "charge" ? "debit" : "credit" })), [data, accountId]), currentAccountId: accountId, accounts });
 
   const reconcileDraft = useImportDraft({
     user,

@@ -11,6 +11,7 @@ import {
 import ProgressIndicator from "./shared/ProgressIndicator";
 import { useImportDraft } from "../lib/useImportDraft";
 import DraftBanner from "./shared/DraftBanner";
+import { detectTransferPairs } from "../lib/transferDetection";
 
 // Convert a pendingSync item to the local editable row format
 const syncToRow = (s) => ({
@@ -410,7 +411,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
   useEffect(() => {
     setRows(prev => {
       const prevMap = new Map(prev.map(r => [r._id, r]));
-      return (pendingSyncs || []).map(s => {
+      const built = (pendingSyncs || []).map(s => {
         if (prevMap.has(s.id)) return prevMap.get(s.id);
         const row = syncToRow(s);
         if (GMAIL_NO_CAT.has(row.tx_type) || !learnedCats.length) return row;
@@ -423,6 +424,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
           category_name: suggestion.confidence >= 2 ? (suggestion.category_name || row.category_name) : row.category_name,
         };
       });
+      return enrichTransfers(built);
     });
     setSelected(prev => {
       const next = {};
@@ -430,6 +432,28 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       return next;
     });
   }, [pendingSyncs]);
+
+  const enrichTransfers = (items) => {
+    const pairs = detectTransferPairs(items, accounts, ledger || []);
+    return items.map(r => {
+      const p = pairs.find(x => x.rowId === r._id || x.partnerRowId === r._id);
+      return p ? { ...r, _transferPair: p } : r;
+    });
+  };
+
+  const handleMergeTransfer = (rowId) => {
+    setRows(prev => {
+      const row = prev.find(r => r._id === rowId);
+      if (!row?._transferPair) return prev;
+      const { partnerRowId, fromId, toId } = row._transferPair;
+      return prev
+        .filter(r => r._id !== partnerRowId)
+        .map(r => r._id === rowId
+          ? { ...r, tx_type: "transfer", from_id: fromId || r.from_id, to_id: toId || r.to_id, category_id: null, _transferPair: undefined }
+          : r
+        );
+    });
+  };
 
   const updateRow = (id, patch) =>
     setRows(prev => prev.map(r => r._id === id ? { ...r, ...patch } : r));
@@ -632,6 +656,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
           employeeLoans={employeeLoans}
           T={T}
           busy={importing}
+          onMergeTransfer={handleMergeTransfer}
         />
       )}
 

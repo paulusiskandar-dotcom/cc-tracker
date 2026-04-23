@@ -16,6 +16,7 @@ import {
 import ProgressIndicator from "./shared/ProgressIndicator";
 import { useImportDraft } from "../lib/useImportDraft";
 import DraftBanner from "./shared/DraftBanner";
+import { detectTransferPairs } from "../lib/transferDetection";
 
 const SUBTABS = [
   { id: "profile",     label: "Profile"     },
@@ -1468,6 +1469,32 @@ function EStatementTab({
     categoryLearn.getLearned(user.id).then(d => { learnedCatsRef.current = d || []; }).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const enrichTransfers = (rows) => {
+    const pairs = detectTransferPairs(rows, accounts, ledger || []);
+    return rows.map(r => {
+      const p = pairs.find(x => x.rowId === r._id || x.partnerRowId === r._id);
+      return p ? { ...r, _transferPair: p } : r;
+    });
+  };
+
+  const mergeTransferInQueue = (itemId, rowId) => {
+    setQueue(prev => prev.map(item => {
+      if (item.id !== itemId) return item;
+      const row = (item.rows || []).find(r => r._id === rowId);
+      if (!row?._transferPair) return item;
+      const { partnerRowId, fromId, toId } = row._transferPair;
+      const newRows = (item.rows || [])
+        .filter(r => r._id !== partnerRowId)
+        .map(r => r._id === rowId
+          ? { ...r, tx_type: "transfer", from_id: fromId || r.from_id, to_id: toId || r.to_id, category_id: null, _transferPair: undefined }
+          : r
+        );
+      const newSelected = { ...item.selected };
+      if (partnerRowId != null) delete newSelected[partnerRowId];
+      return { ...item, rows: newRows, selected: newSelected };
+    }));
+  };
+
   // ── Load persisted queue + history + account_currencies on mount ─
   useEffect(() => {
     (async () => {
@@ -1492,7 +1519,8 @@ function EStatementTab({
           const rawTxs = isExtracted
             ? (Array.isArray(r.ai_raw_result) ? r.ai_raw_result : r.ai_raw_result?.transactions || [])
             : [];
-          const rows = isExtracted ? buildRows(rawTxs, r.account_id || "", fetchedAcctCurrencies) : null;
+          const rawRows = isExtracted ? buildRows(rawTxs, r.account_id || "", fetchedAcctCurrencies) : null;
+          const rows = rawRows ? enrichTransfers(rawRows) : null;
           const sel = {};
           if (rows) rows.forEach(row => { sel[row._id] = row.status !== "duplicate"; });
           const detectedCurrency = rows?.find(row => row.currency && row.currency !== "IDR")?.currency || "IDR";
@@ -1835,7 +1863,7 @@ function EStatementTab({
         ai_raw_result: result,
       }).eq("id", itemId);
 
-      const rows = buildRows(result.transactions || [], item.account_id || "");
+      const rows = enrichTransfers(buildRows(result.transactions || [], item.account_id || ""));
       const sel = {};
       rows.forEach(r => { sel[r._id] = r.status !== "duplicate"; });
       const detectedCurrency = rows.find(r => r.currency && r.currency !== "IDR")?.currency || "IDR";
@@ -2217,6 +2245,7 @@ function EStatementTab({
               onSave={(rows) => saveFile(item.id, rows)}
               onSaveRow={(row) => saveRow(item.id, row)}
               onSkipRow={(id) => removeRow(item.id, id)}
+              onMergeTransfer={(rowId) => mergeTransferInQueue(item.id, rowId)}
               onCreateInstallment={(row) => createInstallment(item.id, row)}
               onRemove={() => removeFromQueue(item.id)}
               statusBadge={statusBadge}
@@ -2293,7 +2322,7 @@ function EStmtQueueItem({
   item, user, T, card, accounts, employeeLoans = [],
   onProcess, onSetAccount, onSetCurrency,
   onUpdateRow, onToggleSel, onToggleAll,
-  onSave, onSaveRow, onSkipRow, onCreateInstallment, onRemove,
+  onSave, onSaveRow, onSkipRow, onMergeTransfer, onCreateInstallment, onRemove,
   statusBadge, fmtSize,
 }) {
   const [processedCount, setProcessedCount] = useState(0);
@@ -2479,6 +2508,7 @@ function EStmtQueueItem({
                   employeeLoans={employeeLoans}
                   T={T}
                   onCreateInstallment={(row) => onCreateInstallment(row)}
+                  onMergeTransfer={onMergeTransfer}
                 />
               )}
             </>

@@ -8,6 +8,7 @@ import { Button, EmptyState, Spinner, showToast, TxHorizontal } from "./shared/i
 import ProgressIndicator from "./shared/ProgressIndicator";
 import { useImportDraft } from "../lib/useImportDraft";
 import DraftBanner from "./shared/DraftBanner";
+import { detectTransferPairs } from "../lib/transferDetection";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
 
 // ── Normalise AI pseudo-types to real tx_type + category ─────────
@@ -123,8 +124,9 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       const latest = batches[0];
       const raw    = Array.isArray(latest.ai_raw_result) ? latest.ai_raw_result : latest.ai_raw_result?.transactions || [];
       if (!raw.length) return;
-      const items = buildRows(raw, defaultAccountId);
-      if (!items.length) return;
+      const rawItems = buildRows(raw, defaultAccountId);
+      if (!rawItems.length) return;
+      const items = enrichTransfers(rawItems);
       setResults(items);
       const sel = {};
       items.forEach(r => { sel[r._id] = r.status !== "duplicate"; });
@@ -179,6 +181,28 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
     const cat = EXPENSE_CATEGORIES.find(c => c.id === r.category_id)
              || INCOME_CATEGORIES_LIST.find(c => c.id === r.category_id);
     merchantApi.upsert(user.id, name, r.category_id, cat?.label || r.category_id).catch(() => {});
+  };
+
+  const enrichTransfers = (items) => {
+    const pairs = detectTransferPairs(items, accounts, ledger || []);
+    return items.map(r => {
+      const p = pairs.find(x => x.rowId === r._id || x.partnerRowId === r._id);
+      return p ? { ...r, _transferPair: p } : r;
+    });
+  };
+
+  const handleMergeTransfer = (rowId) => {
+    setResults(prev => {
+      const row = prev.find(r => r._id === rowId);
+      if (!row?._transferPair) return prev;
+      const { partnerRowId, fromId, toId } = row._transferPair;
+      return prev
+        .filter(r => r._id !== partnerRowId)
+        .map(r => r._id === rowId
+          ? { ...r, tx_type: "transfer", from_id: fromId || r.from_id, to_id: toId || r.to_id, category_id: null, _transferPair: undefined }
+          : r
+        );
+    });
   };
 
   const updateRow = (id, patch) =>
@@ -345,7 +369,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       const bankHint = bankAcc?.bank_name || bankAcc?.name || "";
       const parsed = await scanApi.scan(user.id, file, { accounts, bankHint });
       console.log(`[AIImport] total transactions from AI: ${parsed.length}`);
-      const items  = buildRows(parsed, defaultAccountId);
+      const items  = enrichTransfers(buildRows(parsed, defaultAccountId));
       console.log(`[AIImport] after buildRows: ${items.length} rows`);
 
       // 4. Save results to DB
@@ -386,6 +410,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       if (skippedFPs.size > 0) {
         items = items.filter(r => !skippedFPs.has(`${r.tx_date}|${r.amount_idr}|${(r.description || "").toLowerCase().trim()}`));
       }
+      items = enrichTransfers(items);
       console.log(`[AIImport refresh] after buildRows+skip filter: ${items.length} rows`);
       if (batchId) scanApi.updateBatch(batchId, { ai_raw_result: parsed, total_detected: items.length, processed_at: new Date().toISOString() }).catch(() => {});
       setResults(items);
@@ -413,6 +438,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       if (skippedFPs.size > 0) {
         items = items.filter(r => !skippedFPs.has(`${r.tx_date}|${r.amount_idr}|${(r.description || "").toLowerCase().trim()}`));
       }
+      items = enrichTransfers(items);
       if (batchId) scanApi.updateBatch(batchId, { ai_raw_result: parsed, total_detected: items.length, processed_at: new Date().toISOString() }).catch(() => {});
       setResults(items);
       const sel = {};
@@ -699,6 +725,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
             onRetrySonnet={batchFilePath ? handleRetrySonnet : null}
             retrySonnet={retrySonnet}
             onClearAll={handleClearAll}
+            onMergeTransfer={handleMergeTransfer}
           />}
         </div>
       )}
