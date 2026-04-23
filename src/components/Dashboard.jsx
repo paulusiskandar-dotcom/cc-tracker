@@ -8,6 +8,7 @@ import Select from "./shared/Select";
 import { GroupedTransactionList } from "./shared/TransactionRow";
 import GlobalReconcileButton from "./shared/GlobalReconcileButton";
 import ReconcileDraftBanner from "./shared/ReconcileDraftBanner";
+import { detectRecurringPatterns } from "../lib/recurringDetection";
 
 // ── Reconcile Status widget ────────────────────────────────────
 const RS_FF = "Figtree, sans-serif";
@@ -71,6 +72,99 @@ function ReconcileStatusWidget({ user, accounts }) {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// ── Recurring Suggestions widget ──────────────────────────────
+const REC_FF   = "Figtree, sans-serif";
+const recFmtAmt = n => "Rp " + Math.round(n).toLocaleString("id-ID");
+
+function RecurringSuggestionsWidget({ user, ledger, recurringTemplates, onCreated }) {
+  const [dismissed, setDismissed] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem("recurring_dismissed") || "[]")); }
+    catch { return new Set(); }
+  });
+
+  const suggestions = useMemo(() => {
+    const patterns = detectRecurringPatterns(ledger);
+    const existingKeys = new Set(
+      (recurringTemplates || []).map(t => {
+        const desc = ((t.description || t.name || "")).toLowerCase().replace(/[^a-z0-9\s]/g, "").trim().slice(0, 20);
+        return `${t.tx_type}|${desc}`;
+      })
+    );
+    return patterns.filter(p => !existingKeys.has(p.key) && !dismissed.has(p.key)).slice(0, 5);
+  }, [ledger, recurringTemplates, dismissed]);
+
+  const handleDismiss = key => {
+    const next = new Set(dismissed);
+    next.add(key);
+    setDismissed(next);
+    localStorage.setItem("recurring_dismissed", JSON.stringify([...next]));
+  };
+
+  const handleCreate = async pattern => {
+    const tx = pattern.txSample;
+    try {
+      await recurringApi.createTemplate(user.id, {
+        name:               (tx.description || tx.merchant_name || "Recurring").slice(0, 50),
+        description:        tx.description || "",
+        amount:             pattern.avgAmount,
+        currency:           tx.currency || "IDR",
+        tx_type:            tx.tx_type,
+        from_type:          tx.from_type,
+        from_id:            tx.from_id,
+        to_type:            tx.to_type,
+        to_id:              tx.to_id,
+        category_id:        tx.category_id,
+        entity:             tx.entity,
+        is_reimburse:       tx.is_reimburse,
+        frequency:          pattern.frequency,
+        day_of_month:       pattern.frequency === "monthly" ? pattern.avgDay : null,
+        remind_days_before: 3,
+        is_active:          true,
+        notes:              `Auto-detected from ${pattern.occurrences} past transactions`,
+      });
+      handleDismiss(pattern.key);
+      onCreated?.();
+    } catch (e) { console.error(e); }
+  };
+
+  if (!suggestions.length) return null;
+
+  return (
+    <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 14, padding: 16, fontFamily: REC_FF }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: "#111827", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+          Recurring Suggestions
+        </span>
+        <span style={{ fontSize: 10, color: "#6b7280" }}>{suggestions.length} detected</span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {suggestions.map(p => (
+          <div key={p.key} style={{ padding: "10px 12px", background: "#f9fafb", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {p.txSample.description || p.txSample.merchant_name || "(untitled)"}
+              </div>
+              <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>
+                {recFmtAmt(p.avgAmount)} · {p.frequency}{p.frequency === "monthly" ? ` on ${p.avgDay}th` : ""} · {p.occurrences}× past
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+              <button onClick={() => handleCreate(p)}
+                style={{ fontSize: 10, fontWeight: 700, padding: "4px 10px", borderRadius: 5, border: "none", background: "#3b5bdb", color: "#fff", cursor: "pointer", fontFamily: REC_FF }}>
+                Create
+              </button>
+              <button onClick={() => handleDismiss(p.key)}
+                style={{ fontSize: 10, fontWeight: 600, padding: "4px 8px", borderRadius: 5, border: "1px solid #e5e7eb", background: "#fff", color: "#6b7280", cursor: "pointer", fontFamily: REC_FF }}>
+                Dismiss
+              </button>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -1060,6 +1154,14 @@ export default function Dashboard({
 
       {/* ── RECONCILE STATUS ── */}
       <ReconcileStatusWidget user={user} accounts={accounts} />
+
+      {/* ── RECURRING SUGGESTIONS ── */}
+      <RecurringSuggestionsWidget
+        user={user}
+        ledger={ledger}
+        recurringTemplates={recurTemplates}
+        onCreated={() => onRefresh?.()}
+      />
 
       {/* ── RECENT TRANSACTIONS ── */}
       <div style={{ ...BENTO_WHITE, marginTop: 4 }}>
