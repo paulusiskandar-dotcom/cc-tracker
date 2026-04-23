@@ -69,13 +69,15 @@ export default function CreditCards({
 
   const [subTab,           setSubTab]           = useState("overview");
   const [selectedCard,     setSelectedCard]     = useState(null);
-  const [ccStatementAcc,   setCcStatementAcc]   = useState(null);
-  const [ccReconcileSeeds, setCcReconcileSeeds] = useState(null); // { from, to, txs, filename }
+  const [ccStatementAcc,      setCcStatementAcc]      = useState(null);
+  const [ccReconcileSeeds,    setCcReconcileSeeds]    = useState(null); // { from, to, txs, filename }
+  const [ccReconcileFullState, setCcReconcileFullState] = useState(null);
 
   useEffect(() => {
     if (!pendingReconcileNav || pendingReconcileNav.accType !== "credit_card") return;
     setCcStatementAcc(pendingReconcileNav.acc);
     setCcReconcileSeeds(pendingReconcileNav.seeds);
+    setCcReconcileFullState(pendingReconcileNav.seeds?.fullState || null);
     setPendingReconcileNav?.(null);
   }, [pendingReconcileNav]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -512,6 +514,7 @@ export default function CreditCards({
         initialSelectedMonth={ccReconcileSeeds?.selectedMonth || null}
         initialReconcileTxs={ccReconcileSeeds?.txs || null}
         initialReconcileFilename={ccReconcileSeeds?.filename || ""}
+        initialReconcileFullState={ccReconcileFullState}
       />
     );
   }
@@ -560,8 +563,9 @@ export default function CreditCards({
         user={user}
         accounts={accounts}
         filterType="credit_card"
-        onContinue={(acc) => {
+        onContinue={(acc, state) => {
           setCcReconcileSeeds(null);
+          setCcReconcileFullState(state || null);
           setCcStatementAcc(acc);
         }}
       />

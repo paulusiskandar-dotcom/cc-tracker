@@ -115,6 +115,7 @@ export default function BankStatement({
   incomeSrcs = [], merchantMaps = [],
   initialFromDate = null, initialToDate = null,
   initialReconcileTxs = null, initialReconcileFilename = "",
+  initialReconcileFullState = null,
 }) {
   const hasInitialDates = useRef(!!(initialFromDate));
   const [accountId,      setAccountId]      = useState(initialAccount?.id || "");
@@ -144,9 +145,11 @@ export default function BankStatement({
     onRestore: (s) => reconcile.seedFullState(s),
   });
 
-  // Seed reconcile state from props (GlobalReconcileButton flow)
+  // Seed reconcile state from props (GlobalReconcileButton or draft-continue flow)
   useEffect(() => {
-    if (initialReconcileTxs?.length) {
+    if (initialReconcileFullState?.stmtRows?.length) {
+      reconcile.seedFullState(initialReconcileFullState);
+    } else if (initialReconcileTxs?.length) {
       reconcile.seedStmtRows(initialReconcileTxs, initialReconcileFilename);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps

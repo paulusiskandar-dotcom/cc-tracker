@@ -701,12 +701,12 @@ export default function Dashboard({
       <ReconcileDraftBanner
         user={user}
         accounts={accounts}
-        onContinue={(acc) => {
+        onContinue={(acc, state) => {
           if (acc.type === "credit_card") {
-            setPendingReconcileNav?.({ accType: "credit_card", acc, seeds: { from: null, to: null, selectedMonth: null, txs: null, filename: "" } });
+            setPendingReconcileNav?.({ accType: "credit_card", acc, seeds: { from: null, to: null, selectedMonth: null, txs: null, filename: "", fullState: state } });
             setTab?.("cards");
           } else {
-            setPendingReconcileNav?.({ accType: "bank", acc, seeds: { from: null, to: null, txs: null, filename: "" } });
+            setPendingReconcileNav?.({ accType: "bank", acc, seeds: { from: null, to: null, txs: null, filename: "", fullState: state } });
             setTab?.("bank");
           }
         }}

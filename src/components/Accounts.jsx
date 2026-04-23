@@ -76,13 +76,15 @@ export default function Accounts({
   const [nilaiAcc,  setNilaiAcc]  = useState(null);
   const [nilaiForm, setNilaiForm] = useState({ value: "", date: "", notes: "" });
   const [nilaiSaving, setNilaiSaving] = useState(false);
-  const [statementAcc,       setStatementAcc]       = useState(null);
-  const [bankReconcileSeeds, setBankReconcileSeeds] = useState(null); // { from, to, txs, filename }
+  const [statementAcc,          setStatementAcc]          = useState(null);
+  const [bankReconcileSeeds,    setBankReconcileSeeds]    = useState(null); // { from, to, txs, filename }
+  const [bankReconcileFullState, setBankReconcileFullState] = useState(null);
 
   useEffect(() => {
     if (!pendingReconcileNav || pendingReconcileNav.accType !== "bank") return;
     setStatementAcc(pendingReconcileNav.acc);
     setBankReconcileSeeds(pendingReconcileNav.seeds);
+    setBankReconcileFullState(pendingReconcileNav.seeds?.fullState || null);
     setPendingReconcileNav?.(null);
   }, [pendingReconcileNav]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -365,6 +367,7 @@ export default function Accounts({
         initialToDate={bankReconcileSeeds?.to || null}
         initialReconcileTxs={bankReconcileSeeds?.txs || null}
         initialReconcileFilename={bankReconcileSeeds?.filename || ""}
+        initialReconcileFullState={bankReconcileFullState}
       />
     );
   }
@@ -398,8 +401,9 @@ export default function Accounts({
         user={user}
         accounts={accounts}
         filterType="bank"
-        onContinue={(acc) => {
+        onContinue={(acc, state) => {
           setBankReconcileSeeds(null);
+          setBankReconcileFullState(state || null);
           setStatementAcc(acc);
         }}
       />
