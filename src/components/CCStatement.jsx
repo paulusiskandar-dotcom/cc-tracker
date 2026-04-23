@@ -5,6 +5,7 @@ import { TX_TYPE_MAP } from "../constants";
 import { showToast } from "./shared/Card";
 import TxVerticalBig from "./shared/TxVerticalBig";
 import { useReconcile, ReconcileBar, ReconcileStatusBadge, ReconcileMissingRowInline, ReconcileMissingBar, getMissingRowsMap } from "./shared/ReconcileOverlay";
+import ProgressIndicator from "./shared/ProgressIndicator";
 import { ledgerApi } from "../api";
 import * as XLSX from "xlsx";
 
@@ -333,6 +334,15 @@ export default function CCStatement({
 
       {/* Reconcile bar */}
       <ReconcileBar reconcile={reconcile} onRefresh={() => { load(); onRefresh?.(); }} />
+      {reconcile.active && reconcile.stmtRows?.length > 0 && (
+        <ProgressIndicator
+          label="Reconcile"
+          total={reconcile.stmtRows.length}
+          processed={reconcile.stats.match + reconcile.stats.ignored}
+          pending={reconcile.stats.missing}
+          matched={reconcile.stats.match}
+        />
+      )}
 
       {/* ── Print-only header ── */}
       <div className="print-only" style={{ display: "none" }}>

@@ -5,6 +5,7 @@ import { ledgerApi, scanApi, merchantApi, getTxFromToTypes, loanPaymentsApi, ins
 import { fmtIDR, todayStr, checkDuplicateTransaction, resolveCategoryIds } from "../utils";
 import { LIGHT, DARK } from "../theme";
 import { Button, EmptyState, Spinner, showToast, TxHorizontal } from "./shared/index";
+import ProgressIndicator from "./shared/ProgressIndicator";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
 
 // ── Normalise AI pseudo-types to real tx_type + category ─────────
@@ -88,6 +89,8 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
   const [batchFilePath,    setBatchFilePath]    = useState(null);
   // Fingerprints of rows permanently skipped — persist across Refresh Scan
   const [skippedFPs,  setSkippedFPs]  = useState(new Set());
+  const [confirmedCount, setConfirmedCount] = useState(0);
+  const [skippedCount,   setSkippedCount]   = useState(0);
 
   const spendAccounts = accounts.filter(a => ["bank","cash","credit_card"].includes(a.type));
   const bankAccounts  = accounts.filter(a => a.type === "bank");
@@ -482,6 +485,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
     const importedIds = new Set(validRows.map(r => r._id));
     setResults(prev => prev.filter(r => !importedIds.has(r._id)));
     setSelected(s => { const ns = { ...s }; importedIds.forEach(id => delete ns[id]); return ns; });
+    setConfirmedCount(n => n + ok);
     if (batchId && results.filter(r => !importedIds.has(r._id)).length === 0) {
       scanApi.updateBatch(batchId, { status: "imported", total_imported: ok }).catch(() => {});
     }
@@ -516,6 +520,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
         }
         setResults(prev => prev.filter(x => x._id !== r._id));
         setSelected(s => { const ns = { ...s }; delete ns[r._id]; return ns; });
+        setConfirmedCount(n => n + 1);
         showToast(`Imported: ${r.description}`);
       }
     } catch (e) { showToast(e.message, "error"); }
@@ -537,6 +542,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
     }
     setResults(prev => prev.filter(r => r._id !== id));
     setSelected(s => { const ns = { ...s }; delete ns[id]; return ns; });
+    setSkippedCount(n => n + 1);
   };
 
   // Change default account — patches all rows without a specific AI-matched account
@@ -639,12 +645,22 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       )}
 
       {/* Results */}
-      {results.length > 0 && (
+      {(results.length > 0 || confirmedCount > 0 || skippedCount > 0) && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>
-            {results.length} transactions found
-          </div>
-          <TxHorizontal
+          {(confirmedCount > 0 || skippedCount > 0) && (
+            <ProgressIndicator
+              label="Review"
+              total={results.length + confirmedCount + skippedCount}
+              processed={confirmedCount + skippedCount}
+              pending={results.length}
+            />
+          )}
+          {results.length > 0 && (
+            <div style={{ fontSize: 14, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>
+              {results.length} transactions found
+            </div>
+          )}
+          {results.length > 0 && <TxHorizontal
             rows={results}
             selected={selected}
             onUpdateRow={updateRow}

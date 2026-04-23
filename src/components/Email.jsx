@@ -8,6 +8,7 @@ import {
   SectionHeader, Field, Input, FormRow,
   TxHorizontal,
 } from "./shared/index";
+import ProgressIndicator from "./shared/ProgressIndicator";
 
 // Convert a pendingSync item to the local editable row format
 const syncToRow = (s) => ({
@@ -366,6 +367,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
   const [rows,         setRows]         = useState(() => (pendingSyncs || []).map(syncToRow));
   const [selected,     setSelected]     = useState(() => Object.fromEntries((pendingSyncs || []).map(s => [s.id, true])));
   const [importing,    setImporting]    = useState(false);
+  const [processedCount, setProcessedCount] = useState(0);
   const [failedRows,   setFailedRows]   = useState(null);
   const [loadingFailed,setLoadingFailed]= useState(false);
   const [reprocessing, setReprocessing] = useState(new Set());
@@ -490,6 +492,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       }
       await gmailApi.updateSync(r.email_sync_id, { status: "confirmed" });
       removeRow(r._id);
+      setProcessedCount(n => n + 1);
       showToast("Imported");
       onRefresh?.();
     } catch (e) { showToast(e.message, "error"); }
@@ -501,6 +504,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     try {
       await gmailApi.updateSync(r.email_sync_id, { status: "skipped" });
       removeRow(id);
+      setProcessedCount(n => n + 1);
       showToast("Skipped");
     } catch (e) { showToast(e.message, "error"); }
   };
@@ -534,6 +538,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       } catch (_) { /* skip failures */ }
     }
     setImporting(false);
+    setProcessedCount(n => n + count);
     showToast(`${count} transaction${count !== 1 ? "s" : ""} imported`);
     onRefresh?.();
   };
@@ -582,6 +587,14 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
 
       {/* ── Pending rows via shared component ── */}
+      {(rows.length > 0 || processedCount > 0) && (
+        <ProgressIndicator
+          label="Email Sync"
+          total={rows.length + processedCount}
+          processed={processedCount}
+          pending={rows.length}
+        />
+      )}
       {rows.length > 0 && (
         <TxHorizontal
           rows={rows}

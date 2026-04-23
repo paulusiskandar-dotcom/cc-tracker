@@ -13,6 +13,7 @@ import {
   SectionHeader, EmptyState, showToast,
   TxHorizontal,
 } from "./shared/index";
+import ProgressIndicator from "./shared/ProgressIndicator";
 
 const SUBTABS = [
   { id: "profile",     label: "Profile"     },
@@ -2292,6 +2293,7 @@ function EStmtQueueItem({
   onSave, onSaveRow, onSkipRow, onCreateInstallment, onRemove,
   statusBadge, fmtSize,
 }) {
+  const [processedCount, setProcessedCount] = useState(0);
 
   const rows = item.rows || [];
   const isReviewed = item.status === "reviewed";
@@ -2414,26 +2416,40 @@ function EStmtQueueItem({
       {/* ── Transaction preview ── */}
       {item.status === "reviewed" && (
         <div style={{ padding: "8px 0" }}>
-          {rows.length === 0 ? (
+          {rows.length === 0 && processedCount === 0 ? (
             <div style={{ fontSize: 12, color: T.text3, fontFamily: "Figtree, sans-serif", padding: "8px 14px" }}>
               No transactions found in this statement.
             </div>
           ) : (
-            <TxHorizontal
-              rows={rows}
-              selected={item.selected}
-              onUpdateRow={(id, patch) => onUpdateRow(id, patch)}
-              onConfirmRow={(row) => onSaveRow(row)}
-              onSkipRow={(id) => onSkipRow(id)}
-              onConfirmAll={(selectedRows) => onSave(selectedRows)}
-              onToggleSelect={(id) => onToggleSel(id)}
-              onToggleAll={onToggleAll}
-              source="estatement"
-              accounts={accounts}
-              employeeLoans={employeeLoans}
-              T={T}
-              onCreateInstallment={(row) => onCreateInstallment(row)}
-            />
+            <>
+              {(processedCount > 0 || rows.length > 0) && (
+                <div style={{ padding: "4px 14px 0" }}>
+                  <ProgressIndicator
+                    label="E-Statement"
+                    total={rows.length + processedCount}
+                    processed={processedCount}
+                    pending={rows.length}
+                  />
+                </div>
+              )}
+              {rows.length > 0 && (
+                <TxHorizontal
+                  rows={rows}
+                  selected={item.selected}
+                  onUpdateRow={(id, patch) => onUpdateRow(id, patch)}
+                  onConfirmRow={(row) => { setProcessedCount(n => n + 1); onSaveRow(row); }}
+                  onSkipRow={(id) => { setProcessedCount(n => n + 1); onSkipRow(id); }}
+                  onConfirmAll={(selectedRows) => { setProcessedCount(n => n + selectedRows.length); onSave(selectedRows); }}
+                  onToggleSelect={(id) => onToggleSel(id)}
+                  onToggleAll={onToggleAll}
+                  source="estatement"
+                  accounts={accounts}
+                  employeeLoans={employeeLoans}
+                  T={T}
+                  onCreateInstallment={(row) => onCreateInstallment(row)}
+                />
+              )}
+            </>
           )}
         </div>
       )}
