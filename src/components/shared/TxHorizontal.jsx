@@ -16,7 +16,7 @@
 //   onRefreshScan   () => void         — optional, shows 🔄 button
 //   onCreateInstallment (row) => void  — optional, estatement only
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../../constants";
 import { showToast } from "./Card";
 import { supabase } from "../../lib/supabase";
@@ -879,30 +879,45 @@ export default function TxHorizontal({
       )}
 
       {/* ── Cards ── */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {visibleRows.map(r => (
-          <TxHorizontalCard
-            key={r._id}
-            r={r}
-            isSelected={!!selected[r._id]}
-            isSkipped={!!skipped?.has(r._id)}
-            isNotesOpen={notesOpen.has(r._id)}
-            T={T}
-            source={source}
-            accounts={accounts}
-            employeeLoans={effectiveLoans}
-            txTypes={txTypes}
-            onUpdate={patch => onUpdateRow(r._id, patch)}
-            onConfirm={() => handleConfirmRow(r)}
-            onSkip={onSkipRow}
-            onToggleSelect={() => onToggleSelect(r._id)}
-            onToggleNotes={() => toggleNotes(r._id)}
-            onCreateInstallment={onCreateInstallment}
-            onMergeTransfer={onMergeTransfer}
-            confirmingId={confirmingId}
-          />
-        ))}
-      </div>
+      {(() => {
+        const hasMultipleSources = visibleRows.some((r, i) => i > 0 && r._sourceFile && r._sourceFile !== visibleRows[0]._sourceFile);
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {visibleRows.map((r, i) => {
+              const prev = i > 0 ? visibleRows[i - 1] : null;
+              const showDivider = hasMultipleSources && r._sourceFile && (!prev || prev._sourceFile !== r._sourceFile);
+              return (
+                <Fragment key={r._id}>
+                  {showDivider && (
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", padding: "6px 2px", borderBottom: "1px solid #e5e7eb", fontFamily: "Figtree, sans-serif" }}>
+                      📄 {r._sourceFile}
+                    </div>
+                  )}
+                  <TxHorizontalCard
+                    r={r}
+                    isSelected={!!selected[r._id]}
+                    isSkipped={!!skipped?.has(r._id)}
+                    isNotesOpen={notesOpen.has(r._id)}
+                    T={T}
+                    source={source}
+                    accounts={accounts}
+                    employeeLoans={effectiveLoans}
+                    txTypes={txTypes}
+                    onUpdate={patch => onUpdateRow(r._id, patch)}
+                    onConfirm={() => handleConfirmRow(r)}
+                    onSkip={onSkipRow}
+                    onToggleSelect={() => onToggleSelect(r._id)}
+                    onToggleNotes={() => toggleNotes(r._id)}
+                    onCreateInstallment={onCreateInstallment}
+                    onMergeTransfer={onMergeTransfer}
+                    confirmingId={confirmingId}
+                  />
+                </Fragment>
+              );
+            })}
+          </div>
+        );
+      })()}
     </div>
   );
 }

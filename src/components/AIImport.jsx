@@ -86,6 +86,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
   const [batchFilePath,    setBatchFilePath]    = useState(null);
   const [imageBlobUrls,    setImageBlobUrls]    = useState([]);    // blob URLs for thumbnail strip
   const [zoomUrl,          setZoomUrl]          = useState(null);  // URL to show in zoom modal
+  const [processingProgress, setProcessingProgress] = useState(null); // { current, total } for multi-file
   // Fingerprints of rows permanently skipped — persist across Refresh Scan
   const [skippedFPs,  setSkippedFPs]  = useState(new Set());
   const [confirmedCount, setConfirmedCount] = useState(0);
@@ -352,7 +353,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       const bankHint = bankAcc?.bank_name || bankAcc?.name || "";
       const parsed = await scanApi.scan(user.id, file, { accounts, bankHint });
       console.log(`[AIImport] total transactions from AI: ${parsed.length}`);
-      const items  = enrichTransfers(buildRows(parsed, defaultAccountId));
+      const items  = enrichTransfers(buildRows(parsed, defaultAccountId).map(r => ({ ...r, _sourceFile: file.name })));
       console.log(`[AIImport] after buildRows: ${items.length} rows`);
 
       // 4. Save results to DB
@@ -371,6 +372,39 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       if (newBatchId) scanApi.updateBatch(newBatchId, { status: "failed" }).catch(() => {});
       showToast(e.message || "Scan failed", "error");
     }
+    setScanning(false);
+  };
+
+  // ── Multi-file scan ──────────────────────────────────────────
+  const handleFiles = async (fileList) => {
+    const files = Array.from(fileList).filter(Boolean);
+    if (!files.length) return;
+    if (files.length === 1) { handleFile(files[0]); return; }
+
+    setScanning(true);
+    setResults([]); setSelected({}); setSkippedFPs(new Set());
+    setBatchId(null); setBatchFilePath(null);
+    setImageBlobUrls(prev => { prev.forEach(u => URL.revokeObjectURL(u)); return []; });
+
+    const bankAcc  = defaultAccountId ? spendAccounts.find(a => a.id === defaultAccountId) : null;
+    const bankHint = bankAcc?.bank_name || bankAcc?.name || "";
+    let allItems = [];
+
+    for (let i = 0; i < files.length; i++) {
+      setProcessingProgress({ current: i + 1, total: files.length });
+      try {
+        const parsed = await scanApi.scan(user.id, files[i], { accounts, bankHint });
+        const rows = buildRows(parsed, defaultAccountId).map(r => ({ ...r, _sourceFile: files[i].name }));
+        allItems = [...allItems, ...rows];
+      } catch (e) { showToast(`${files[i].name}: ${e.message || "Scan failed"}`, "error"); }
+    }
+
+    const items = enrichTransfers(allItems);
+    setResults(items);
+    const sel = {};
+    items.forEach(r => { sel[r._id] = r.status !== "duplicate"; });
+    setSelected(sel);
+    setProcessingProgress(null);
     setScanning(false);
   };
 
@@ -605,7 +639,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       <div
         onClick={() => fileRef.current?.click()}
         onDragOver={e => e.preventDefault()}
-        onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
+        onDrop={e => { e.preventDefault(); const files = e.dataTransfer.files; if (files.length) handleFiles(files); }}
         style={{
           border: `2px dashed ${T.border}`, borderRadius: 16, padding: "28px 24px",
           textAlign: "center", cursor: "pointer", background: T.sur2,
@@ -617,12 +651,12 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
         <div style={{ fontSize: 12, color: T.text3 }}>
           JPG · PNG · PDF — AI extracts all transactions automatically
         </div>
-        <input ref={fileRef} type="file" accept="image/*,.pdf" style={{ display: "none" }}
-          onChange={e => { const f = e.target.files[0]; if (f) handleFile(f); e.target.value = ""; }} />
+        <input ref={fileRef} type="file" accept="image/*,.pdf" multiple style={{ display: "none" }}
+          onChange={e => { const f = e.target.files; if (f?.length) handleFiles(f); e.target.value = ""; }} />
         {!scanning
-          ? <div style={{ marginTop: 12 }}><Button variant="primary" size="sm">Choose File</Button></div>
+          ? <div style={{ marginTop: 12 }}><Button variant="primary" size="sm">Choose File(s)</Button></div>
           : <div style={{ marginTop: 12, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontSize: 13, color: T.text2 }}>
-              <Spinner size={16} /> Scanning with AI…
+              <Spinner size={16} /> {processingProgress ? `Scanning ${processingProgress.current}/${processingProgress.total}…` : "Scanning with AI…"}
             </div>
         }
       </div>

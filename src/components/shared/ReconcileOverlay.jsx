@@ -165,13 +165,13 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
   // Upload handler
   const stageAndProcess = useCallback(async (file, { append = false } = {}) => {
     if (!file) return;
-    if (!append) {
-      const blobUrl = URL.createObjectURL(file);
-      setPdfBlobUrl(prev => { if (prev) URL.revokeObjectURL(prev); return blobUrl; });
-      setPdfSource(file.name);
-    } else {
-      setPdfSource(prev => prev ? `${prev}, ${file.name}` : file.name);
-    }
+    const blobUrl = URL.createObjectURL(file);
+    setPdfBlobUrl(prev => {
+      if (append && prev) { URL.revokeObjectURL(blobUrl); return prev; } // keep first file preview
+      if (prev) URL.revokeObjectURL(prev);
+      return blobUrl;
+    });
+    setPdfSource(prev => append && prev ? `${prev}, ${file.name}` : file.name);
     setProcessing(true);
     try {
       const reader = new FileReader();
@@ -189,7 +189,7 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
       if (data.needs_password || data.encrypted) {
         showToast("PDF terenkripsi. Silakan hapus password terlebih dahulu.", "error");
       } else if (data.transactions?.length) {
-        const newRows = data.transactions.map((t, i) => ({ ...t, _id: t._id || `stmt-${Date.now()}-${i}` }));
+        const newRows = data.transactions.map((t, i) => ({ ...t, _id: t._id || `stmt-${Date.now()}-${i}`, _sourceFile: file.name }));
         if (append) setStmtRows(prev => [...prev, ...newRows]);
         else setStmtRows(newRows);
         if (!append) {
