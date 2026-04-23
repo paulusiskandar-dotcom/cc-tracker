@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { supabase } from "../lib/supabase";
+import { categoryLearn } from "../lib/categoryLearn";
 import { ledgerApi, scanApi, merchantApi, getTxFromToTypes, loanPaymentsApi, installmentsApi } from "../api";
 import { fmtIDR, todayStr, checkDuplicateTransaction, resolveCategoryIds } from "../utils";
 import { LIGHT, DARK } from "../theme";
@@ -69,6 +70,13 @@ const fmtDateShort = (d) => {
 export default function AIImport({ user, accounts, categories = [], ledger, onRefresh, setLedger, dark, merchantMaps = [], fxRates = {}, CURRENCIES = [], setPendingSyncs, employeeLoans = [] }) {
   const T = dark ? DARK : LIGHT;
   const fileRef = useRef();
+
+  const learnedCatsRef = useRef([]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    categoryLearn.getLearned(user.id).then(d => { learnedCatsRef.current = d || []; }).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [defaultAccountId, setDefaultAccountId] = useState("");
   const [scanning,         setScanning]         = useState(false);
@@ -245,9 +253,11 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
         }
       }
 
-      const learned = lookupLearned(desc);
+      const learnedSuggestion = !NO_CAT.has(txType)
+        ? categoryLearn.suggest(desc, r.merchant_name || "", learnedCatsRef.current)
+        : null;
       let catId = NO_CAT.has(txType) ? null : aiCatId;
-      if (learned && !NO_CAT.has(txType) && learned.confidence >= 2) catId = learned.category_id;
+      if (learnedSuggestion?.confidence >= 2) catId = learnedSuggestion.category_id;
 
       const dupResult = checkDuplicateTransaction(ledger, {
         tx_date: txDate, amount_idr: amtIDR, currency, from_id: fromId, description: desc,
@@ -271,7 +281,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
         entity:       REIMBURSE_ENTITIES.includes(r.entity) ? r.entity : "Hamasa",
         category_id:  catId,
         ai_category:  aiCatId,
-        learned_cat:  learned,
+        learned_cat:  learnedSuggestion,
         notes:        r.notes || "",
         flagged,
         _hasAccountMatch: hasAccountMatch,

@@ -2,6 +2,7 @@
 // Provides: upload modal, matching logic, status column renderer, and reconcile bar
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { reconcileApi, ledgerApi, installmentsApi, loanPaymentsApi } from "../../api";
+import { categoryLearn } from "../../lib/categoryLearn";
 import { supabase } from "../../lib/supabase";
 import { fmtIDR, todayStr } from "../../utils";
 import { Button, showToast, TxHorizontal } from "./index";
@@ -86,7 +87,13 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
   const [pdfSource,    setPdfSource]    = useState("");
   const [expandedIds,  setExpandedIds]  = useState(() => new Set());
   const [pendingRows,  setPendingRows]  = useState({});
+  const [learnedCats,  setLearnedCats]  = useState([]);
   const fileRef = useRef(null);
+
+  useEffect(() => {
+    if (!active || !user?.id) return;
+    categoryLearn.getLearned(user.id).then(setLearnedCats).catch(() => {});
+  }, [active, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { matched, missing, extraIds } = useMemo(() => {
     if (!active || !stmtRows.length) return { matched: new Map(), missing: [], extraIds: new Set() };
@@ -218,6 +225,7 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
     currentAccountId,
     expandedIds, toggleExpanded, expandAll, collapseAll,
     pendingRows, updatePendingRow, removePendingRow,
+    learnedCats,
   };
 }
 
@@ -363,11 +371,15 @@ export function ReconcileMissingBar({ reconcile, onExpandAll, expandedCount, tot
 }
 
 // ── Add panel — TxHorizontal inline form ─────────────────────
-function buildRow(stmtRow, currentAccountId) {
+function buildRow(stmtRow, currentAccountId, learnedCats = []) {
+  const desc = stmtRow.description || stmtRow.merchant || "";
+  const suggestion = learnedCats.length > 0
+    ? categoryLearn.suggest(desc, desc, learnedCats)
+    : null;
   return {
     _id: `reconcile-${stmtRow._id}`,
     tx_date: stmtRow.date || todayStr(),
-    description: stmtRow.description || stmtRow.merchant || "",
+    description: desc,
     amount: Math.abs(Number(stmtRow.amount || 0)),
     amount_idr: Math.abs(Number(stmtRow.amount || 0)),
     currency: stmtRow.currency || "IDR",
@@ -376,19 +388,20 @@ function buildRow(stmtRow, currentAccountId) {
     from_type: "account",
     to_id: null,
     to_type: "expense_category",
-    category_id: null,
-    category_name: null,
+    category_id: suggestion?.confidence >= 2 ? suggestion.category_id : null,
+    category_name: suggestion?.confidence >= 2 ? (suggestion.category_name || null) : null,
     entity: "",
     notes: "",
     status: "pending",
+    learned_cat: suggestion || undefined,
   };
 }
 
 export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans, user, onRefresh, onClose }) {
   const T = LIGHT;
-  const [rows, setRows] = useState(() => [buildRow(stmtRow, reconcile.currentAccountId)]);
+  const [rows, setRows] = useState(() => [buildRow(stmtRow, reconcile.currentAccountId, reconcile.learnedCats || [])]);
   const [selected, setSelected] = useState(() => {
-    const r = buildRow(stmtRow, reconcile.currentAccountId);
+    const r = buildRow(stmtRow, reconcile.currentAccountId, reconcile.learnedCats || []);
     return { [r._id]: true };
   });
 
@@ -397,6 +410,24 @@ export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans,
     if (rows[0]) reconcile.updatePendingRow(stmtRow._id, rows[0]);
     return () => reconcile.removePendingRow(stmtRow._id);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Apply learned suggestions when learnedCats loads after panel has already mounted
+  useEffect(() => {
+    if (!reconcile.learnedCats?.length) return;
+    setRows(prev => prev.map(r => {
+      if (r.learned_cat) return r;
+      const suggestion = categoryLearn.suggest(r.description, r.description, reconcile.learnedCats);
+      if (!suggestion) return r;
+      const updated = {
+        ...r,
+        learned_cat:   suggestion,
+        category_id:   suggestion.confidence >= 2 ? suggestion.category_id : r.category_id,
+        category_name: suggestion.confidence >= 2 ? (suggestion.category_name || null) : r.category_name,
+      };
+      reconcile.updatePendingRow(stmtRow._id, updated);
+      return updated;
+    }));
+  }, [reconcile.learnedCats]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateRow = (id, patch) => setRows(prev => {
     const next = prev.map(r => r._id === id ? { ...r, ...patch } : r);

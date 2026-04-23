@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { gmailApi, settingsApi, ledgerApi, getTxFromToTypes, flattenEmailSync, loanPaymentsApi, installmentsApi } from "../api";
+import { categoryLearn } from "../lib/categoryLearn";
 import { todayStr, resolveCategoryIds } from "../utils";
 import { LIGHT, DARK } from "../theme";
 import {
@@ -356,6 +357,8 @@ export default function Email({
 }
 
 // ─── EMAIL PENDING TAB ────────────────────────────────────────────
+const GMAIL_NO_CAT = new Set(["transfer","pay_cc","give_loan","collect_loan","fx_exchange","reimburse_in","reimburse_out","buy_asset","sell_asset","pay_liability"]);
+
 function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, user, ledger, setLedger, onRefresh, dark, T: theme, employeeLoans = [] }) {
   const T = theme || LIGHT;
 
@@ -366,12 +369,46 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
   const [failedRows,   setFailedRows]   = useState(null);
   const [loadingFailed,setLoadingFailed]= useState(false);
   const [reprocessing, setReprocessing] = useState(new Set());
+  const [learnedCats,  setLearnedCats]  = useState([]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    categoryLearn.getLearned(user.id).then(setLearnedCats).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Apply category suggestions once learnedCats loads
+  useEffect(() => {
+    if (!learnedCats.length) return;
+    setRows(prev => prev.map(r => {
+      if (r.learned_cat || GMAIL_NO_CAT.has(r.tx_type)) return r;
+      const suggestion = categoryLearn.suggest(r.description, r.description, learnedCats);
+      if (!suggestion) return r;
+      return {
+        ...r,
+        learned_cat:   suggestion,
+        category_id:   suggestion.confidence >= 2 ? suggestion.category_id : r.category_id,
+        category_name: suggestion.confidence >= 2 ? (suggestion.category_name || r.category_name) : r.category_name,
+      };
+    }));
+  }, [learnedCats]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sync rows when pendingSyncs changes from parent (new sync, refresh)
   useEffect(() => {
     setRows(prev => {
       const prevMap = new Map(prev.map(r => [r._id, r]));
-      return (pendingSyncs || []).map(s => prevMap.get(s.id) || syncToRow(s));
+      return (pendingSyncs || []).map(s => {
+        if (prevMap.has(s.id)) return prevMap.get(s.id);
+        const row = syncToRow(s);
+        if (GMAIL_NO_CAT.has(row.tx_type) || !learnedCats.length) return row;
+        const suggestion = categoryLearn.suggest(row.description, row.description, learnedCats);
+        if (!suggestion) return row;
+        return {
+          ...row,
+          learned_cat:   suggestion,
+          category_id:   suggestion.confidence >= 2 ? suggestion.category_id : row.category_id,
+          category_name: suggestion.confidence >= 2 ? (suggestion.category_name || row.category_name) : row.category_name,
+        };
+      });
     });
     setSelected(prev => {
       const next = {};

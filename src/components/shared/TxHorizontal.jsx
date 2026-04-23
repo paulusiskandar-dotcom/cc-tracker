@@ -411,10 +411,10 @@ function TxHorizontalCard({
             CICILAN{r._instNo ? ` ${r._instNo}${r._instTotal ? `/${r._instTotal}` : ""}` : ""}
           </span>
         )}
-        {source === "ai_scan" && r.learned_cat?.confidence >= 2 && r.learned_cat?.category_id === r.category_id && (
+        {r.learned_cat?.confidence >= 2 && r.learned_cat?.category_id === r.category_id && (
           <span style={BADGE("#dcfce7","#059669")}>✓ Learned</span>
         )}
-        {source === "ai_scan" && r.learned_cat?.confidence === 1 && (
+        {r.learned_cat?.confidence === 1 && (
           <span style={BADGE("#fef9c3","#a16207")}>Suggest</span>
         )}
 

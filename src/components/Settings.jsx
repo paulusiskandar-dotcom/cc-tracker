@@ -1,5 +1,6 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabase";
+import { categoryLearn } from "../lib/categoryLearn";
 import PILogo from "./PILogo";
 import { fxApi, merchantApi, settingsApi, recurringApi, gmailApi, accountsApi, installmentsApi, ledgerApi, getTxFromToTypes, loanPaymentsApi } from "../api";
 import { fmtIDR, resolveCategoryIds, checkDuplicateTransaction } from "../utils";
@@ -1457,6 +1458,12 @@ function EStatementTab({
   const [dragging,       setDragging]       = useState(false);
   const [dbLoading,      setDbLoading]      = useState(true);
   const [acctCurrencies, setAcctCurrencies] = useState([]);
+  const learnedCatsRef = useRef([]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    categoryLearn.getLearned(user.id).then(d => { learnedCatsRef.current = d || []; }).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Load persisted queue + history + account_currencies on mount ─
   useEffect(() => {
@@ -1749,6 +1756,14 @@ function EStatementTab({
       // For e-statement, amount_idr = amount (original currency); FX rate used elsewhere for net worth
       const amtIdr = amt;
 
+      const effectiveTxType = autoReimburse ? "reimburse_in" : txType;
+      const learnedSuggestion = !ESTMT_NO_CAT.has(effectiveTxType)
+        ? categoryLearn.suggest(t.merchant || t.description || "", "", learnedCatsRef.current)
+        : null;
+      const effectiveCatId = learnedSuggestion?.confidence >= 2 && !catId
+        ? learnedSuggestion.category_id
+        : catId;
+
       return {
         _id:              idx,
         tx_date:          t.date,
@@ -1756,10 +1771,10 @@ function EStatementTab({
         amount:           String(amt),
         amount_idr:       String(amtIdr),
         currency:         txCurrency,
-        tx_type:          autoReimburse ? "reimburse_in" : txType,
+        tx_type:          effectiveTxType,
         from_id:          fromId,
         to_id:            toId,
-        category_id:      catId,
+        category_id:      effectiveCatId,
         notes:            "",
         is_reimburse:     autoReimburse,
         entity:           "",
@@ -1771,6 +1786,7 @@ function EStatementTab({
         _instNo:          inst_no,
         _instTotal:       inst_total,
         _card_last4:      last4,
+        learned_cat:      learnedSuggestion || undefined,
       };
     }).filter(Boolean);
   };
