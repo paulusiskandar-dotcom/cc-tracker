@@ -27,9 +27,108 @@ const SUBTABS = [
   { id: "estatement",  label: "E-Statement" },
   { id: "fx",          label: "FX Rates"    },
   { id: "recurring",   label: "Recurring"   },
-  { id: "merchants",   label: "Merchants"   },
-  { id: "appearance",  label: "Appearance"  },
+  { id: "merchants",         label: "Merchants"         },
+  { id: "appearance",        label: "Appearance"        },
+  { id: "reconcile_history", label: "Reconcile History" },
 ];
+
+// ── Reconcile History tab ─────────────────────────────────────
+const RH_FF = "Figtree, sans-serif";
+const rhFmtDate = iso => new Date(iso).toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+const rhFmtAgo  = iso => {
+  const days = Math.round((Date.now() - new Date(iso).getTime()) / 86400000);
+  if (days === 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 30)  return `${days}d ago`;
+  return `${Math.round(days / 30)}mo ago`;
+};
+const rhMonthName = m => ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][m - 1];
+
+function ReconcileHistoryTab({ user, accounts }) {
+  const [sessions,    setSessions]    = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [filterAcc,   setFilterAcc]   = useState("");
+  const [filterYear,  setFilterYear]  = useState("");
+  const [expandedId,  setExpandedId]  = useState(null);
+
+  useEffect(() => {
+    if (!user) return;
+    setLoading(true);
+    supabase.from("reconcile_sessions")
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("status", "completed")
+      .order("completed_at", { ascending: false })
+      .limit(200)
+      .then(({ data }) => { setSessions(data || []); setLoading(false); });
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const years    = [...new Set(sessions.map(s => s.period_year))].sort((a, b) => b - a);
+  const filtered = sessions.filter(s => {
+    if (filterAcc  && s.account_id   !== filterAcc)           return false;
+    if (filterYear && s.period_year  !== Number(filterYear))  return false;
+    return true;
+  });
+
+  if (loading) return <div style={{ fontSize: 12, color: "#6b7280", fontFamily: RH_FF, padding: 20 }}>Loading…</div>;
+  if (!sessions.length) return <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: RH_FF, padding: 20, textAlign: "center" }}>No reconcile history yet.</div>;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12, fontFamily: RH_FF }}>
+      {/* Filters */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <select value={filterAcc} onChange={e => setFilterAcc(e.target.value)}
+          style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, border: "1px solid #e5e7eb", fontFamily: RH_FF }}>
+          <option value="">All accounts</option>
+          {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+        <select value={filterYear} onChange={e => setFilterYear(e.target.value)}
+          style={{ fontSize: 11, padding: "5px 10px", borderRadius: 6, border: "1px solid #e5e7eb", fontFamily: RH_FF }}>
+          <option value="">All years</option>
+          {years.map(y => <option key={y} value={y}>{y}</option>)}
+        </select>
+        <span style={{ fontSize: 11, color: "#6b7280" }}>
+          {filtered.length} session{filtered.length !== 1 ? "s" : ""}
+        </span>
+      </div>
+
+      {/* List */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {filtered.map(s => {
+          const acc      = accounts.find(a => a.id === s.account_id);
+          const expanded = expandedId === s.id;
+          return (
+            <div key={s.id} style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
+              <div onClick={() => setExpandedId(expanded ? null : s.id)}
+                style={{ padding: "10px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#111827" }}>
+                    {acc?.name || "Unknown"} · {rhMonthName(s.period_month)} {s.period_year}
+                  </div>
+                  <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>
+                    ✓ {s.total_match || 0} matched · + {s.total_missing || 0} missing · ? {s.total_extra || 0} extra
+                  </div>
+                </div>
+                <div style={{ textAlign: "right", flexShrink: 0 }}>
+                  <div style={{ fontSize: 10, color: "#6b7280" }}>{rhFmtAgo(s.completed_at)}</div>
+                  <div style={{ fontSize: 9, color: "#9ca3af" }}>{s.pdf_filename || ""}</div>
+                </div>
+              </div>
+              {expanded && (
+                <div style={{ borderTop: "1px solid #f3f4f6", background: "#f9fafb", padding: "10px 14px", fontSize: 11, color: "#374151", display: "flex", flexDirection: "column", gap: 3 }}>
+                  <div>Reconciled at: {rhFmtDate(s.completed_at)}</div>
+                  <div>Period: {s.period_month}/{s.period_year}</div>
+                  <div>Statement PDF: {s.pdf_filename || "(none)"}</div>
+                  <div>Total statement txs: {s.total_statement || 0}</div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 const SETUP_STEPS = [
   'Go to console.cloud.google.com → Create project "Paulus Finance"',
@@ -987,6 +1086,13 @@ export default function Settings({
             </div>
           </div>
         </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════ */}
+      {/* ── RECONCILE HISTORY ────────────────────────── */}
+      {/* ══════════════════════════════════════════════════ */}
+      {subTab === "reconcile_history" && (
+        <ReconcileHistoryTab user={user} accounts={accounts} />
       )}
 
       {/* ── RECURRING MODAL ─────────────────────────────── */}
