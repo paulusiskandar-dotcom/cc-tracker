@@ -531,7 +531,7 @@ export default function CreditCards({
           type="cc"
           accounts={accounts}
           user={user}
-          onNavigate={(acc, year, month, txs, filename) => {
+          onNavigate={(acc, year, month, txs, filename, blobUrl, closingBal, openingBal) => {
             const stDay = Number(acc.statement_day);
             let from, to;
             if (stDay > 0) {
@@ -546,7 +546,7 @@ export default function CreditCards({
               to   = new Date(year, month, 0).toISOString().slice(0, 10);
             }
             const selectedMonth = `${year}-${String(month).padStart(2, "0")}`;
-            setCcReconcileSeeds({ from, to, selectedMonth, txs, filename });
+            setCcReconcileSeeds({ from, to, selectedMonth, txs, filename, blobUrl, closingBal, openingBal });
             setCcStatementAcc(acc);
           }}
         />

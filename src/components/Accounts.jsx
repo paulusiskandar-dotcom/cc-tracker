@@ -387,10 +387,10 @@ export default function Accounts({
               type="bank"
               accounts={accounts}
               user={user}
-              onNavigate={(acc, year, month, txs, filename) => {
+              onNavigate={(acc, year, month, txs, filename, blobUrl, closingBal, openingBal) => {
                 const from = `${year}-${String(month).padStart(2, "0")}-01`;
                 const to   = new Date(year, month, 0).toISOString().slice(0, 10);
-                setBankReconcileSeeds({ from, to, txs, filename });
+                setBankReconcileSeeds({ from, to, txs, filename, blobUrl, closingBal, openingBal });
                 setStatementAcc(acc);
               }}
             />
