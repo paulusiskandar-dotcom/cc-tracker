@@ -48,16 +48,19 @@ export function detectDuplicate(candidate, ledgerRows, { sameAccountId } = {}) {
     let level = 0;
     const reasons = [];
 
+    const signedDays = Math.round((candDate - lDate) / 86400000);
+    const dayLabel = signedDays === 0 ? "0D" : signedDays > 0 ? `+${signedDays}D` : `${signedDays}D`;
+
     if (sameAcc && dayDiff <= 3 && descSim >= 0.5) {
       level = 3;
-      reasons.push("Same amount", `${Math.round(dayDiff)}d apart`, "Description match");
+      reasons.push("Same IDR", dayLabel, "Description match");
     } else if (sameAcc && dayDiff <= 7) {
       level = 2;
-      reasons.push("Same amount", `${Math.round(dayDiff)}d apart`);
+      reasons.push("Same IDR", dayLabel);
       if (descSim >= 0.3) reasons.push("Similar desc");
     } else if (dayDiff <= 14) {
       level = 1;
-      reasons.push("Same amount", `${Math.round(dayDiff)}d apart`);
+      reasons.push("Same IDR", dayLabel);
       if (!sameAcc) reasons.push("Different account");
     }
 
