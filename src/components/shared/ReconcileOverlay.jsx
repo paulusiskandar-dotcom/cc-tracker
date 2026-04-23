@@ -5,7 +5,8 @@ import { reconcileApi, ledgerApi, installmentsApi, loanPaymentsApi } from "../..
 import { categoryLearn } from "../../lib/categoryLearn";
 import { supabase } from "../../lib/supabase";
 import { fmtIDR, todayStr } from "../../utils";
-import { Button, showToast, TxHorizontal } from "./index";
+import { Button, showToast, TxHorizontal, TX_HORIZONTAL_TYPES } from "./index";
+import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../../constants";
 import { LIGHT } from "../../theme";
 import Modal from "./Modal";
 
@@ -340,32 +341,108 @@ export function getMissingRowsMap(missing) {
 }
 
 // ── Missing rows summary bar ─────────────────────────────────
-export function ReconcileMissingBar({ reconcile, onExpandAll, expandedCount, totalMissing, onSaveAll, saving }) {
+export function ReconcileMissingBar({ reconcile, accounts, onExpandAll, expandedCount, totalMissing, onSaveAll, saving }) {
+  const [bulkType,     setBulkType]     = useState("");
+  const [bulkCategory, setBulkCategory] = useState("");
+  const [bulkAccount,  setBulkAccount]  = useState("");
+  const [bulkEntity,   setBulkEntity]   = useState("");
+
   if (!reconcile.active || totalMissing === 0) return null;
 
   const allExpanded = expandedCount === totalMissing;
 
+  const applyBulkToAll = (field, value, extra = {}) => {
+    if (!value) return;
+    const pending = reconcile.pendingRows || {};
+    const ids = Object.keys(pending);
+    if (!ids.length) {
+      reconcile.expandAll();
+      showToast("Expanding all rows — click bulk again after they load", "info");
+      return;
+    }
+    ids.forEach(id => {
+      reconcile.updatePendingRow(id, { ...pending[id], [field]: value, ...extra });
+    });
+    if (field === "tx_type")    setBulkType("");
+    if (field === "category_id") setBulkCategory("");
+    if (field === "from_id")    setBulkAccount("");
+    if (field === "entity")     setBulkEntity("");
+    showToast(`Applied to ${ids.length} rows`);
+  };
+
   return (
-    <div style={{
-      display: "flex", alignItems: "center", justifyContent: "space-between",
-      background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10,
-      padding: "8px 14px", marginBottom: 8, gap: 8,
-    }}>
-      <span style={{ fontSize: 12, fontWeight: 700, color: "#92400e", fontFamily: FF }}>
-        {totalMissing} missing transaction{totalMissing > 1 ? "s" : ""} from PDF
-      </span>
-      <div style={{ display: "flex", gap: 6 }}>
-        <button onClick={onExpandAll}
-          style={{ fontSize: 11, fontWeight: 700, padding: "5px 12px", borderRadius: 6, border: "1px solid #fbbf24", background: "#fff", color: "#92400e", cursor: "pointer", fontFamily: FF }}>
-          {allExpanded ? "Collapse All" : `Expand All (${totalMissing})`}
-        </button>
-        {expandedCount > 0 && (
-          <button onClick={onSaveAll} disabled={saving}
-            style={{ fontSize: 11, fontWeight: 700, padding: "5px 14px", borderRadius: 6, border: "none", background: "#3b5bdb", color: "#fff", cursor: saving ? "default" : "pointer", fontFamily: FF, opacity: saving ? 0.6 : 1 }}>
-            {saving ? "Saving…" : `Save All (${expandedCount})`}
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "8px 14px", marginBottom: 8 }}>
+      {/* Top row: count + action buttons */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <span style={{ fontSize: 12, fontWeight: 700, color: "#92400e", fontFamily: FF }}>
+          {totalMissing} missing transaction{totalMissing > 1 ? "s" : ""} from PDF
+        </span>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={onExpandAll}
+            style={{ fontSize: 11, fontWeight: 700, padding: "5px 12px", borderRadius: 6, border: "1px solid #fbbf24", background: "#fff", color: "#92400e", cursor: "pointer", fontFamily: FF }}>
+            {allExpanded ? "Collapse All" : `Expand All (${totalMissing})`}
           </button>
-        )}
+          {expandedCount > 0 && (
+            <button onClick={onSaveAll} disabled={saving}
+              style={{ fontSize: 11, fontWeight: 700, padding: "5px 14px", borderRadius: 6, border: "none", background: "#3b5bdb", color: "#fff", cursor: saving ? "default" : "pointer", fontFamily: FF, opacity: saving ? 0.6 : 1 }}>
+              {saving ? "Saving…" : `Save All (${expandedCount})`}
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Bulk edit row — only visible when at least 1 panel is expanded */}
+      {expandedCount > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", paddingTop: 6, borderTop: "1px solid #fde68a" }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: "#92400e", fontFamily: FF, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            Bulk Edit:
+          </span>
+
+          <select value={bulkType}
+            onChange={e => { setBulkType(e.target.value); applyBulkToAll("tx_type", e.target.value); }}
+            style={{ fontSize: 11, padding: "3px 6px", borderRadius: 5, border: "1px solid #fbbf24", background: "#fff", fontFamily: FF, cursor: "pointer" }}>
+            <option value="">Type…</option>
+            {TX_HORIZONTAL_TYPES.filter(t => t.value !== "cc_installment").map(t => (
+              <option key={t.value} value={t.value} style={{ color: t.color }}>{t.label}</option>
+            ))}
+          </select>
+
+          <select value={bulkCategory}
+            onChange={e => {
+              const cat = [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES_LIST].find(c => c.id === e.target.value);
+              setBulkCategory(e.target.value);
+              applyBulkToAll("category_id", e.target.value, { category_name: cat?.label || "" });
+            }}
+            style={{ fontSize: 11, padding: "3px 6px", borderRadius: 5, border: "1px solid #fbbf24", background: "#fff", fontFamily: FF, cursor: "pointer" }}>
+            <option value="">Category…</option>
+            <optgroup label="Expense">
+              {EXPENSE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>)}
+            </optgroup>
+            <optgroup label="Income">
+              {INCOME_CATEGORIES_LIST.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>)}
+            </optgroup>
+          </select>
+
+          <select value={bulkAccount}
+            onChange={e => { setBulkAccount(e.target.value); applyBulkToAll("from_id", e.target.value); }}
+            style={{ fontSize: 11, padding: "3px 6px", borderRadius: 5, border: "1px solid #fbbf24", background: "#fff", fontFamily: FF, cursor: "pointer" }}>
+            <option value="">Account…</option>
+            {(accounts || []).filter(a => ["bank","cash","credit_card"].includes(a.type)).map(a => (
+              <option key={a.id} value={a.id}>{a.name}</option>
+            ))}
+          </select>
+
+          <select value={bulkEntity}
+            onChange={e => { setBulkEntity(e.target.value); applyBulkToAll("entity", e.target.value); }}
+            style={{ fontSize: 11, padding: "3px 6px", borderRadius: 5, border: "1px solid #fbbf24", background: "#fff", fontFamily: FF, cursor: "pointer" }}>
+            <option value="">Entity…</option>
+            <option value="Personal">Personal</option>
+            <option value="Hamasa">Hamasa</option>
+            <option value="SDC">SDC</option>
+            <option value="Travelio">Travelio</option>
+          </select>
+        </div>
+      )}
     </div>
   );
 }
