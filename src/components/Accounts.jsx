@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { accountsApi, accountCurrenciesApi, ledgerApi, getTxFromToTypes, recalculateBalance } from "../api";
 import BankStatement from "./BankStatement";
 import {
@@ -58,6 +58,7 @@ export default function Accounts({
   bankAccounts: bankAccountsProp = [], creditCards = [], assets = [], liabilities = [], receivables = [],
   incomeSrcs = [],
   initialSubTab = "all",
+  pendingReconcileNav = null, setPendingReconcileNav,
 }) {
   // When initialSubTab != "all" the page is "locked" to that type — hide subtab bar
   const locked = initialSubTab !== "all";
@@ -76,6 +77,13 @@ export default function Accounts({
   const [nilaiSaving, setNilaiSaving] = useState(false);
   const [statementAcc,       setStatementAcc]       = useState(null);
   const [bankReconcileSeeds, setBankReconcileSeeds] = useState(null); // { from, to, txs, filename }
+
+  useEffect(() => {
+    if (!pendingReconcileNav || pendingReconcileNav.accType !== "bank") return;
+    setStatementAcc(pendingReconcileNav.acc);
+    setBankReconcileSeeds(pendingReconcileNav.seeds);
+    setPendingReconcileNav?.(null);
+  }, [pendingReconcileNav]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── FILTERED ACCOUNTS ──────────────────────────────────────
   const filtered = useMemo(() => {

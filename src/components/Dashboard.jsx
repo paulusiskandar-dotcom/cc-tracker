@@ -5,6 +5,7 @@ import { fmtIDR, ym, mlShort, getGreeting, todayStr, groupByDate, checkDuplicate
 import { showToast, EmptyState, Modal, Button, AmountInput, Field, Input, FormRow } from "./shared/index";
 import Select from "./shared/Select";
 import { GroupedTransactionList } from "./shared/TransactionRow";
+import GlobalReconcileButton from "./shared/GlobalReconcileButton";
 
 export default function Dashboard({
   user, accounts, ledger, thisMonthLedger, categories,
@@ -12,7 +13,7 @@ export default function Dashboard({
   creditCards, assets, receivables, liabilities,
   installments = [],
   curMonth, pendingSyncs, setTab, setSettingsTab, openEmail,
-  setLedger, setReminders, onRefresh,
+  setLedger, setReminders, onRefresh, setPendingReconcileNav,
   employeeLoans = [], loanPayments = [],
   setLoanPayments, setEmployeeLoans,
   reimburseSettlements = [], setReimburseSettlements,
@@ -572,6 +573,33 @@ export default function Dashboard({
     return `${sign}Rp ${v}`;
   };
 
+  const handleReconcileNavigate = (acc, year, month, txs, filename) => {
+    const isCC = acc.type === "credit_card";
+    if (isCC) {
+      const stDay = Number(acc.statement_day);
+      let from, to;
+      if (stDay > 0) {
+        const endDate = new Date(year, month - 1, stDay);
+        const startDate = new Date(endDate);
+        startDate.setMonth(startDate.getMonth() - 1);
+        startDate.setDate(startDate.getDate() + 1);
+        from = startDate.toISOString().slice(0, 10);
+        to   = endDate.toISOString().slice(0, 10);
+      } else {
+        from = `${year}-${String(month).padStart(2, "0")}-01`;
+        to   = new Date(year, month, 0).toISOString().slice(0, 10);
+      }
+      const selectedMonth = `${year}-${String(month).padStart(2, "0")}`;
+      setPendingReconcileNav?.({ accType: "credit_card", acc, seeds: { from, to, selectedMonth, txs, filename } });
+      setTab?.("cards");
+    } else {
+      const from = `${year}-${String(month).padStart(2, "0")}-01`;
+      const to   = new Date(year, month, 0).toISOString().slice(0, 10);
+      setPendingReconcileNav?.({ accType: "bank", acc, seeds: { from, to, txs, filename } });
+      setTab?.("bank");
+    }
+  };
+
   // ─── RENDER ──────────────────────────────────────────────────
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -581,7 +609,13 @@ export default function Dashboard({
         <div style={{ fontSize: 15, fontWeight: 600, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
           {getGreeting()}, Paulus 👋
         </div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          <GlobalReconcileButton
+            type="all"
+            accounts={accounts}
+            user={user}
+            onNavigate={handleReconcileNavigate}
+          />
           {[
             { label: "Email Sync",  onClick: () => openEmail?.("pending") },
             { label: "E-Statement", onClick: () => setSettingsTab?.("estatement") },

@@ -21,10 +21,11 @@ export default function GlobalReconcileButton({ accounts, type, onNavigate, user
   const [pendingFile, setPendingFile] = useState("");
   const fileRef = useRef(null);
 
-  const filteredAccounts = (type === "cc"
+  const filteredAccounts = type === "cc"
     ? accounts.filter(a => a.type === "credit_card")
-    : accounts.filter(a => a.type === "bank")
-  );
+    : type === "all"
+      ? accounts.filter(a => ["bank", "credit_card"].includes(a.type))
+      : accounts.filter(a => a.type === "bank");
 
   const handleProcess = async () => {
     if (!stagedFile) return;
@@ -111,7 +112,7 @@ export default function GlobalReconcileButton({ accounts, type, onNavigate, user
   return (
     <>
       <Button size="sm" variant="secondary" onClick={() => setShowUpload(true)}>
-        ☑ Reconcile
+        Reconcile
       </Button>
 
       {/* ── Upload modal ── */}
@@ -134,7 +135,7 @@ export default function GlobalReconcileButton({ accounts, type, onNavigate, user
               </button>
               <button onClick={handleProcess} disabled={processing}
                 style={{ fontSize: 12, padding: "8px 16px", borderRadius: 8, border: "none", background: "#3b5bdb", color: "#fff", cursor: "pointer", fontFamily: FF, fontWeight: 600, opacity: processing ? 0.6 : 1 }}>
-                {processing ? "Processing…" : "Process with AI"}
+                {processing ? "Processing…" : "Process"}
               </button>
             </div>
           </div>

@@ -207,6 +207,7 @@ function Finance({ user, signOut }) {
   const [loanPayments,      setLoanPayments]      = useState([]);
   const [accountCurrencies, setAccountCurrencies] = useState([]);
   const [reconSessions,     setReconSessions]     = useState([]);
+  const [pendingReconcileNav, setPendingReconcileNav] = useState(null);
 
   const curMonth = ym(todayStr());
 
@@ -323,6 +324,7 @@ function Finance({ user, signOut }) {
     employeeLoans, setEmployeeLoans, loanPayments, setLoanPayments,
     accountCurrencies, setAccountCurrencies,
     reconSessions, setReconSessions,
+    pendingReconcileNav, setPendingReconcileNav,
     setAccounts, setLedger, setCategories, setIncomeSrcs,
     setInstallments, setRecurTemplates, setReminders,
     setMerchantMaps, setFxRates,

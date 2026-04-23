@@ -305,7 +305,7 @@ export function ReconcileBar({ reconcile, onRefresh }) {
               <button
                 onClick={() => { stageAndProcess(stagedFile); setShowUpload(false); setStagedFile(null); }}
                 style={{ fontSize: 12, padding: "8px 16px", borderRadius: 8, border: "none", background: "#3b5bdb", color: "#fff", cursor: "pointer", fontFamily: FF, fontWeight: 600 }}>
-                Process with AI
+                Process
               </button>
             </div>
           </div>

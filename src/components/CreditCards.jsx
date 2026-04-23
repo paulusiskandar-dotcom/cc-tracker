@@ -57,6 +57,7 @@ export default function CreditCards({
   installments, recurTemplates,
   setAccounts, setLedger, setInstallments, setRecurTemplates,
   onRefresh, bankAccounts: propBankAccounts,
+  pendingReconcileNav = null, setPendingReconcileNav,
 }) {
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   useEffect(() => {
@@ -69,6 +70,14 @@ export default function CreditCards({
   const [selectedCard,     setSelectedCard]     = useState(null);
   const [ccStatementAcc,   setCcStatementAcc]   = useState(null);
   const [ccReconcileSeeds, setCcReconcileSeeds] = useState(null); // { from, to, txs, filename }
+
+  useEffect(() => {
+    if (!pendingReconcileNav || pendingReconcileNav.accType !== "credit_card") return;
+    setCcStatementAcc(pendingReconcileNav.acc);
+    setCcReconcileSeeds(pendingReconcileNav.seeds);
+    setPendingReconcileNav?.(null);
+  }, [pendingReconcileNav]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const [ccBankFilter, setCcBankFilter] = useState("all");
   const [ccSort,       setCcSort]       = useState(() => localStorage.getItem("sort_cc") || "debt_desc");
   const [filterMonth,  setFilterMonth]  = useState("");
