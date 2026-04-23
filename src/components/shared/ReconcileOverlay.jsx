@@ -683,9 +683,9 @@ export function ReconcileMissingRowInline({ missingRow, reconcile, accounts, emp
         </div>
         <div style={{ padding: "8px 6px", minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 4, overflow: "hidden" }}>
-            {rawDupLevel > 0 && !dupDismissed && (
-              <span style={{ fontSize: 9, fontWeight: 600, color: "#92400e", fontFamily: FF_USED, fontStyle: "italic" }}>
-                ⚠ possible match
+            {missingRow._dupLevel > 0 && (
+              <span style={{ fontSize: 9, fontWeight: 800, background: "#F7C1C1", color: "#791F1F", padding: "2px 5px", borderRadius: 4, fontFamily: FF_USED, whiteSpace: "nowrap", flexShrink: 0 }}>
+                {missingRow._dupLevel === 3 ? "DUP" : missingRow._dupLevel === 2 ? "POSSIBLE DUP" : "SUSPICIOUS"}
               </span>
             )}
             <span style={{ fontSize: 12, fontWeight: 500, color: "#d97706", fontFamily: FF_USED, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontStyle: "italic" }}>

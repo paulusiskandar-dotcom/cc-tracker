@@ -345,8 +345,10 @@ function TxHorizontalCard({
                     : r.status === "review" ? 1 : 0;
   const dupLevel = dupDismissed ? 0 : rawDupLevel;
 
-  const cardBg = isSkipped ? T.sur2 : T.surface;
-  const cardBorder = dupLevel > 0 ? "1px solid #fde68a"
+  const cardBg = isSkipped ? T.sur2
+               : dupLevel > 0 ? "#FCEBEB"
+               : T.surface;
+  const cardBorder = dupLevel > 0 ? "1.5px solid #E24B4A"
                    : r.flagged ? "1.5px solid #f97316"
                    : `1px solid ${T.border}`;
 
@@ -397,8 +399,8 @@ function TxHorizontalCard({
         {/* Inline badges next to description */}
         {r._invalidAmount && <span style={BADGE("#fee2e2","#dc2626")}>Amount!</span>}
         {dupLevel > 0 && !dupDismissed && (
-          <span style={{ fontSize: 9, fontWeight: 600, color: "#92400e", fontFamily: "Figtree, sans-serif", fontStyle: "italic" }}>
-            ⚠ possible match
+          <span style={BADGE("#F7C1C1","#791F1F")}>
+            {dupLevel === 3 ? "DUP" : dupLevel === 2 ? "POSSIBLE DUP" : "SUSPICIOUS"}
           </span>
         )}
         {r.flagged && dupLevel === 0 && <span style={BADGE("#fff7ed","#f97316")}>⚠ Reimb</span>}
@@ -514,17 +516,40 @@ function TxHorizontalCard({
 
       {/* ── Duplicate info panel ── */}
       {rawDupLevel > 0 && !dupDismissed && r._dupEntry && (
-        <div style={{ borderTop: "1px solid #fde68a", background: "#fffbeb", padding: "6px 10px 7px 32px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 11, color: "#92400e", fontFamily: "Figtree, sans-serif", flex: 1, minWidth: 0 }}>
-            <span style={{ fontWeight: 700 }}>
-              {rawDupLevel === 3 ? "High confidence match" : rawDupLevel === 2 ? "Possible match" : "Same amount found"}:
-            </span>{" "}
-            {r._dupEntry.description || r._dupEntry.merchant_name || "(no desc)"} · {r._dupEntry.tx_date} · Rp {Number(r._dupEntry.amount_idr || 0).toLocaleString("id-ID")}
-            {(() => { const matchAcc = accounts.find(a => a.id === (r._dupEntry.from_id || r._dupEntry.from_account_id)); return matchAcc ? ` · ${matchAcc.name}` : ""; })()}
-          </span>
-          <button onClick={() => setDupDismissed(true)} style={{ fontSize: 10, fontWeight: 600, color: "#059669", background: "none", border: "1px solid #6ee7b7", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
-            Not a duplicate
-          </button>
+        <div style={{ borderTop: "1px solid #E24B4A", background: "#FCEBEB", padding: "6px 10px 7px 32px" }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#A32D2D", fontFamily: "Figtree, sans-serif", marginBottom: 3 }}>
+                {rawDupLevel === 3 ? "High confidence duplicate — not imported by default"
+                  : rawDupLevel === 2 ? "Possible duplicate — please verify"
+                  : "Suspicious — same amount, different account"}
+              </div>
+              <div style={{ fontSize: 10, color: "#A32D2D", fontFamily: "Figtree, sans-serif", marginBottom: 3 }}>
+                <span style={{ fontWeight: 600 }}>Similar to:</span>{" "}
+                {r._dupEntry.description || r._dupEntry.merchant_name || "(no desc)"}
+                {" · "}{r._dupEntry.tx_date}
+                {" · Rp "}{Number(r._dupEntry.amount_idr || 0).toLocaleString("id-ID")}
+                {(() => {
+                  const matchAcc = accounts.find(a => a.id === (r._dupEntry.from_id || r._dupEntry.from_account_id));
+                  return matchAcc ? <span>{" · "}{matchAcc.name}</span> : null;
+                })()}
+              </div>
+              {r._dupReasons?.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+                  {r._dupReasons.map(reason => (
+                    <span key={reason} style={{ background: "#F7C1C1", color: "#791F1F", borderRadius: 3, padding: "1px 5px", fontSize: 9, fontWeight: 700, fontFamily: "Figtree, sans-serif" }}>
+                      {reason}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => setDupDismissed(true)}
+              style={{ fontSize: 10, fontWeight: 700, color: "#059669", background: "none", border: "1px solid #6ee7b7", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", flexShrink: 0 }}>
+              It's different
+            </button>
+          </div>
         </div>
       )}
 
