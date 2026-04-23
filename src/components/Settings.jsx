@@ -14,6 +14,8 @@ import {
   TxHorizontal,
 } from "./shared/index";
 import ProgressIndicator from "./shared/ProgressIndicator";
+import { useImportDraft } from "../lib/useImportDraft";
+import DraftBanner from "./shared/DraftBanner";
 
 const SUBTABS = [
   { id: "profile",     label: "Profile"     },
@@ -2196,6 +2198,7 @@ function EStatementTab({
             <EStmtQueueItem
               key={item.id}
               item={item}
+              user={user}
               T={T} card={card}
               accounts={accounts}
               employeeLoans={employeeLoans}
@@ -2287,13 +2290,37 @@ const OUTLINE_BTN = {
 
 // ─── QUEUE FILE ITEM (card wrapper + preview) ─────────────────
 function EStmtQueueItem({
-  item, T, card, accounts, employeeLoans = [],
+  item, user, T, card, accounts, employeeLoans = [],
   onProcess, onSetAccount, onSetCurrency,
   onUpdateRow, onToggleSel, onToggleAll,
   onSave, onSaveRow, onSkipRow, onCreateInstallment, onRemove,
   statusBadge, fmtSize,
 }) {
   const [processedCount, setProcessedCount] = useState(0);
+
+  const draft = useImportDraft({
+    user,
+    source: "estatement",
+    accountId: item.account_id || null,
+    state: (item.rows?.length > 0) ? { rows: item.rows, selected: item.selected } : null,
+    onRestore: (s) => {
+      if (!s.rows) return;
+      s.rows.forEach(row => {
+        const existing = (item.rows || []).find(r => r._id === row._id);
+        if (!existing) return;
+        const patch = {};
+        ["tx_type","category_id","category_name","from_id","to_id","entity","notes","fx_rate","amount_idr","currency"].forEach(k => {
+          if (row[k] !== existing[k]) patch[k] = row[k];
+        });
+        if (Object.keys(patch).length) onUpdateRow(row._id, patch);
+      });
+      if (s.selected) {
+        Object.entries(s.selected).forEach(([id, checked]) => {
+          if (checked !== (item.selected?.[id] ?? false)) onToggleSel(id);
+        });
+      }
+    },
+  });
 
   const rows = item.rows || [];
   const isReviewed = item.status === "reviewed";
@@ -2416,6 +2443,11 @@ function EStmtQueueItem({
       {/* ── Transaction preview ── */}
       {item.status === "reviewed" && (
         <div style={{ padding: "8px 0" }}>
+          {draft.showBanner && item.status === "reviewed" && (
+            <div style={{ padding: "8px 14px 0" }}>
+              <DraftBanner draftInfo={draft.draftInfo} onResume={draft.resume} onDiscard={draft.discard} />
+            </div>
+          )}
           {rows.length === 0 && processedCount === 0 ? (
             <div style={{ fontSize: 12, color: T.text3, fontFamily: "Figtree, sans-serif", padding: "8px 14px" }}>
               No transactions found in this statement.
@@ -2439,7 +2471,7 @@ function EStmtQueueItem({
                   onUpdateRow={(id, patch) => onUpdateRow(id, patch)}
                   onConfirmRow={(row) => { setProcessedCount(n => n + 1); onSaveRow(row); }}
                   onSkipRow={(id) => { setProcessedCount(n => n + 1); onSkipRow(id); }}
-                  onConfirmAll={(selectedRows) => { setProcessedCount(n => n + selectedRows.length); onSave(selectedRows); }}
+                  onConfirmAll={(selectedRows) => { setProcessedCount(n => n + selectedRows.length); onSave(selectedRows); draft.clearDraft(); }}
                   onToggleSelect={(id) => onToggleSel(id)}
                   onToggleAll={onToggleAll}
                   source="estatement"

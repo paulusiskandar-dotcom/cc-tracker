@@ -9,6 +9,8 @@ import {
   TxHorizontal,
 } from "./shared/index";
 import ProgressIndicator from "./shared/ProgressIndicator";
+import { useImportDraft } from "../lib/useImportDraft";
+import DraftBanner from "./shared/DraftBanner";
 
 // Convert a pendingSync item to the local editable row format
 const syncToRow = (s) => ({
@@ -368,6 +370,16 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
   const [selected,     setSelected]     = useState(() => Object.fromEntries((pendingSyncs || []).map(s => [s.id, true])));
   const [importing,    setImporting]    = useState(false);
   const [processedCount, setProcessedCount] = useState(0);
+
+  const draft = useImportDraft({
+    user,
+    source: "gmail",
+    state: rows.length > 0 ? { rows, selected } : null,
+    onRestore: (s) => {
+      if (s.rows) setRows(s.rows);
+      if (s.selected) setSelected(s.selected);
+    },
+  });
   const [failedRows,   setFailedRows]   = useState(null);
   const [loadingFailed,setLoadingFailed]= useState(false);
   const [reprocessing, setReprocessing] = useState(new Set());
@@ -540,6 +552,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     setImporting(false);
     setProcessedCount(n => n + count);
     showToast(`${count} transaction${count !== 1 ? "s" : ""} imported`);
+    draft.clearDraft();
     onRefresh?.();
   };
 
@@ -585,6 +598,11 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+
+      {/* Draft resume banner */}
+      {draft.showBanner && rows.length === 0 && (
+        <DraftBanner draftInfo={draft.draftInfo} onResume={draft.resume} onDiscard={draft.discard} />
+      )}
 
       {/* ── Pending rows via shared component ── */}
       {(rows.length > 0 || processedCount > 0) && (

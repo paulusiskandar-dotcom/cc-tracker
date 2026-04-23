@@ -6,6 +6,8 @@ import { showToast } from "./shared/Card";
 import TxVerticalBig from "./shared/TxVerticalBig";
 import { useReconcile, ReconcileBar, ReconcileStatusBadge, ReconcileMissingRowInline, ReconcileMissingBar, getMissingRowsMap } from "./shared/ReconcileOverlay";
 import ProgressIndicator from "./shared/ProgressIndicator";
+import { useImportDraft } from "../lib/useImportDraft";
+import DraftBanner from "./shared/DraftBanner";
 import { ledgerApi } from "../api";
 import * as XLSX from "xlsx";
 
@@ -95,6 +97,19 @@ export default function CCStatement({
 
   // Reconcile mode
   const reconcile = useReconcile({ user, accountId, fromDate, toDate, ledgerRows: useMemo(() => (data?.txs || []).map(tx => ({ ...tx, _dir: ccDirection(tx, accountId) === "charge" ? "debit" : "credit" })), [data, accountId]), currentAccountId: accountId });
+
+  const reconcileDraft = useImportDraft({
+    user,
+    source: "reconcile",
+    accountId: accountId || null,
+    state: reconcile.active && reconcile.stmtRows?.length > 0 ? {
+      stmtRows: reconcile.stmtRows,
+      ignoredIds: [...reconcile.ignoredIds],
+      pendingRows: reconcile.pendingRows,
+      pdfSource: reconcile.pdfSource,
+    } : null,
+    onRestore: (s) => reconcile.seedFullState(s),
+  });
 
   // Seed reconcile state from props (GlobalReconcileButton flow)
   useEffect(() => {
@@ -332,8 +347,13 @@ export default function CCStatement({
         </div>
       </div>
 
+      {/* Reconcile draft banner */}
+      {reconcileDraft.showBanner && !reconcile.active && (
+        <DraftBanner draftInfo={reconcileDraft.draftInfo} onResume={reconcileDraft.resume} onDiscard={reconcileDraft.discard} />
+      )}
+
       {/* Reconcile bar */}
-      <ReconcileBar reconcile={reconcile} onRefresh={() => { load(); onRefresh?.(); }} />
+      <ReconcileBar reconcile={reconcile} onRefresh={() => { load(); onRefresh?.(); }} onClearDraft={reconcileDraft.clearDraft} />
       {reconcile.active && reconcile.stmtRows?.length > 0 && (
         <ProgressIndicator
           label="Reconcile"

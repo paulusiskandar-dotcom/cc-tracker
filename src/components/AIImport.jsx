@@ -6,6 +6,8 @@ import { fmtIDR, todayStr, checkDuplicateTransaction, resolveCategoryIds } from 
 import { LIGHT, DARK } from "../theme";
 import { Button, EmptyState, Spinner, showToast, TxHorizontal } from "./shared/index";
 import ProgressIndicator from "./shared/ProgressIndicator";
+import { useImportDraft } from "../lib/useImportDraft";
+import DraftBanner from "./shared/DraftBanner";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
 
 // ── Normalise AI pseudo-types to real tx_type + category ─────────
@@ -91,6 +93,17 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
   const [skippedFPs,  setSkippedFPs]  = useState(new Set());
   const [confirmedCount, setConfirmedCount] = useState(0);
   const [skippedCount,   setSkippedCount]   = useState(0);
+
+  const draft = useImportDraft({
+    user,
+    source: "ai_scan",
+    state: results.length > 0 ? { rows: results, selected, skipped: [...skippedFPs] } : null,
+    onRestore: (s) => {
+      if (s.rows) setResults(s.rows);
+      if (s.selected) setSelected(s.selected);
+      if (s.skipped) setSkippedFPs(new Set(s.skipped));
+    },
+  });
 
   const spendAccounts = accounts.filter(a => ["bank","cash","credit_card"].includes(a.type));
   const bankAccounts  = accounts.filter(a => a.type === "bank");
@@ -486,8 +499,10 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
     setResults(prev => prev.filter(r => !importedIds.has(r._id)));
     setSelected(s => { const ns = { ...s }; importedIds.forEach(id => delete ns[id]); return ns; });
     setConfirmedCount(n => n + ok);
-    if (batchId && results.filter(r => !importedIds.has(r._id)).length === 0) {
+    const remaining = results.filter(r => !importedIds.has(r._id));
+    if (batchId && remaining.length === 0) {
       scanApi.updateBatch(batchId, { status: "imported", total_imported: ok }).catch(() => {});
+      draft.clearDraft();
     }
     await onRefresh();
     const skipNote = zeroSkipped > 0 ? `. ${zeroSkipped} skipped (amount = 0)` : "";
@@ -559,6 +574,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
     setResults([]);
     setSelected({});
     setSkippedFPs(new Set());
+    draft.clearDraft();
     try {
       if (batchId) {
         await supabase.from("scan_batches").delete().eq("id", batchId);
@@ -642,6 +658,11 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
             (applies to all rows)
           </span>
         </div>
+      )}
+
+      {/* Draft resume banner */}
+      {draft.showBanner && results.length === 0 && (
+        <DraftBanner draftInfo={draft.draftInfo} onResume={draft.resume} onDiscard={draft.discard} />
       )}
 
       {/* Results */}

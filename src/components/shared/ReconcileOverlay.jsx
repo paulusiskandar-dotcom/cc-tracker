@@ -207,6 +207,16 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
     setActive(true);
   }, []);
 
+  const seedFullState = useCallback((s) => {
+    if (s.stmtRows?.length) {
+      setStmtRows(s.stmtRows);
+      setPdfSource(s.pdfSource || "");
+      setActive(true);
+    }
+    if (s.ignoredIds) setIgnoredIds(new Set(s.ignoredIds));
+    if (s.pendingRows) setPendingRows(s.pendingRows);
+  }, []);
+
   const startReconcile = useCallback(() => setActive(true), []);
   const exitReconcile = useCallback(async () => {
     if (user && accountId && stmtRows.length) {
@@ -246,7 +256,7 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
   return {
     active, stmtRows, processing, stats, pdfSource, fileRef,
     matched, missing: missingEnriched, extraIds, keptIds, ignoredIds,
-    getStatus, markKept, markIgnored, seedStmtRows,
+    getStatus, markKept, markIgnored, seedStmtRows, seedFullState,
     stageAndProcess, startReconcile, exitReconcile,
     currentAccountId,
     expandedIds, toggleExpanded, expandAll, collapseAll,
@@ -256,7 +266,7 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
 }
 
 // ── Reconcile bar + upload modal ─────────────────────────────
-export function ReconcileBar({ reconcile, onRefresh }) {
+export function ReconcileBar({ reconcile, onRefresh, onClearDraft }) {
   const { active, stats, processing, pdfSource, fileRef, stageAndProcess, exitReconcile } = reconcile;
   const [showUpload, setShowUpload] = useState(false);
   const [stagedFile, setStagedFile] = useState(null);
@@ -300,7 +310,7 @@ export function ReconcileBar({ reconcile, onRefresh }) {
               {processing ? "Processing…" : "Upload PDF"}
             </button>
           )}
-          <button onClick={async () => { await exitReconcile(); onRefresh?.(); }}
+          <button onClick={async () => { await exitReconcile(); onClearDraft?.(); onRefresh?.(); }}
             style={{ fontSize: 11, fontWeight: 700, padding: "5px 14px", borderRadius: 8, border: "none", background: "#111827", color: "#fff", cursor: "pointer", fontFamily: FF }}>
             Done
           </button>
