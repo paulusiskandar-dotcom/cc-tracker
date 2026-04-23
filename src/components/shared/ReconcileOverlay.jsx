@@ -488,6 +488,28 @@ export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans,
     return () => reconcile.removePendingRow(stmtRow._id);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Sync external pendingRows changes (e.g. from bulk edit) into local rows
+  useEffect(() => {
+    const external = reconcile.pendingRows[stmtRow._id];
+    if (!external) return;
+    setRows(prev => {
+      const current = prev[0];
+      if (!current) return prev;
+      const changedFields = {};
+      ["tx_type", "category_id", "category_name", "from_id", "to_id", "entity", "from_type", "to_type"].forEach(f => {
+        if (external[f] !== current[f]) changedFields[f] = external[f];
+      });
+      if (!Object.keys(changedFields).length) return prev;
+      return [{ ...current, ...changedFields }];
+    });
+  }, [ // eslint-disable-line react-hooks/exhaustive-deps
+    reconcile.pendingRows[stmtRow._id]?.tx_type,
+    reconcile.pendingRows[stmtRow._id]?.category_id,
+    reconcile.pendingRows[stmtRow._id]?.from_id,
+    reconcile.pendingRows[stmtRow._id]?.entity,
+    reconcile.pendingRows[stmtRow._id]?.to_id,
+  ]);
+
   // Apply learned suggestions when learnedCats loads after panel has already mounted
   useEffect(() => {
     if (!reconcile.learnedCats?.length) return;
