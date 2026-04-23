@@ -524,7 +524,7 @@ export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans,
   const [rows, setRows] = useState(() => [buildRow(stmtRow, reconcile.currentAccountId, reconcile.learnedCats || [])]);
   const [selected, setSelected] = useState(() => {
     const r = buildRow(stmtRow, reconcile.currentAccountId, reconcile.learnedCats || []);
-    return { [r._id]: (stmtRow._dupLevel || 0) !== 3 };
+    return { [r._id]: (stmtRow._dupLevel || 0) <= 1 };
   });
 
   // Register initial row in pendingRows on mount; clean up on unmount
@@ -656,12 +656,6 @@ export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans,
   );
 }
 
-const DUP_ROW_THEME = {
-  3: { rowBg: "#FCEBEB", rowBorder: "#E24B4A", pillBg: "#F7C1C1", pillColor: "#791F1F", pillLabel: "DUP",          infoBg: "#FCEBEB", infoText: "#A32D2D", infoBorder: "#E24B4A" },
-  2: { rowBg: "#FAEEDA", rowBorder: "#EF9F27", pillBg: "#FAC775", pillColor: "#633806", pillLabel: "POSSIBLE DUP", infoBg: "#FAEEDA", infoText: "#854F0B", infoBorder: "#EF9F27" },
-  1: { rowBg: "#FAEEDA", rowBorder: "#FAC775", pillBg: "#FAC775", pillColor: "#633806", pillLabel: "SUSPICIOUS",   infoBg: "#FAEEDA", infoText: "#854F0B", infoBorder: "#FAC775" },
-};
-
 // ── Inline missing row with accordion add panel ───────────────
 export function ReconcileMissingRowInline({ missingRow, reconcile, accounts, employeeLoans, user, onRefresh, COLS, ROW_PAD, FF: FF_PROP }) {
   const expanded = reconcile.expandedIds.has(missingRow._id);
@@ -670,10 +664,9 @@ export function ReconcileMissingRowInline({ missingRow, reconcile, accounts, emp
   const amt = Math.abs(Number(missingRow.amount || 0));
   const rawDupLevel = missingRow._dupLevel || 0;
   const dupLevel = dupDismissed ? 0 : rawDupLevel;
-  const dt = DUP_ROW_THEME[dupLevel];
 
-  const rowBg     = dt ? dt.rowBg     : "#fffbeb";
-  const rowBorder = dt ? dt.rowBorder : "#fde68a";
+  const rowBg     = "#fffbeb";
+  const rowBorder = "#fde68a";
 
   const fmtDateIndo = (date) => {
     try {
@@ -684,15 +677,15 @@ export function ReconcileMissingRowInline({ missingRow, reconcile, accounts, emp
   return (
     <>
       {/* Summary row */}
-      <div style={{ display: "grid", gridTemplateColumns: COLS, borderBottom: (expanded || (dupLevel > 0 && missingRow._dupEntry)) ? "none" : `0.5px solid ${rowBorder}`, padding: ROW_PAD, alignItems: "center", background: rowBg }}>
+      <div style={{ display: "grid", gridTemplateColumns: COLS, borderBottom: expanded ? "none" : `0.5px solid ${rowBorder}`, padding: ROW_PAD, alignItems: "center", background: rowBg }}>
         <div style={{ fontSize: 11, color: "#d97706", fontFamily: FF_USED, padding: "8px 6px", whiteSpace: "nowrap", fontStyle: "italic" }}>
           {fmtDateIndo(missingRow.date)}
         </div>
         <div style={{ padding: "8px 6px", minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 4, overflow: "hidden" }}>
-            {dupLevel > 0 && (
-              <span style={{ fontSize: 9, fontWeight: 800, background: dt.pillBg, color: dt.pillColor, padding: "2px 5px", borderRadius: 4, whiteSpace: "nowrap", flexShrink: 0 }}>
-                {dt.pillLabel}
+            {rawDupLevel > 0 && !dupDismissed && (
+              <span style={{ fontSize: 9, fontWeight: 600, color: "#92400e", fontFamily: FF_USED, fontStyle: "italic" }}>
+                ⚠ possible match
               </span>
             )}
             <span style={{ fontSize: 12, fontWeight: 500, color: "#d97706", fontFamily: FF_USED, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontStyle: "italic" }}>
@@ -723,36 +716,6 @@ export function ReconcileMissingRowInline({ missingRow, reconcile, accounts, emp
           </button>
         </div>
       </div>
-
-      {/* Duplicate info panel */}
-      {dupLevel > 0 && missingRow._dupEntry && (
-        <div style={{ borderTop: `1px solid ${dt.infoBorder}`, borderBottom: expanded ? "none" : `0.5px solid ${dt.infoBorder}`, background: dt.infoBg, padding: "5px 10px 6px 10px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <span style={{ fontSize: 10, color: dt.infoText, fontFamily: FF_USED }}>
-                <span style={{ fontWeight: 700 }}>Similar to:</span>{" "}
-                {missingRow._dupEntry.description || missingRow._dupEntry.merchant_name || "(no desc)"}
-                {" · "}{missingRow._dupEntry.tx_date}
-                {" · Rp "}{Number(missingRow._dupEntry.amount_idr || 0).toLocaleString("id-ID")}
-              </span>
-              {missingRow._dupReasons?.length > 0 && (
-                <span style={{ display: "inline-flex", gap: 3, marginLeft: 6 }}>
-                  {missingRow._dupReasons.map(r => (
-                    <span key={r} style={{ fontSize: 9, fontWeight: 700, background: dt.pillBg, color: dt.pillColor, borderRadius: 3, padding: "1px 5px", fontFamily: FF_USED }}>
-                      {r}
-                    </span>
-                  ))}
-                </span>
-              )}
-            </div>
-            <button
-              onClick={() => setDupDismissed(true)}
-              style={{ fontSize: 10, fontWeight: 700, color: "#059669", background: "none", border: "1px solid #6ee7b7", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontFamily: FF_USED, whiteSpace: "nowrap", flexShrink: 0 }}>
-              It's different
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Inline add panel */}
       {expanded && (

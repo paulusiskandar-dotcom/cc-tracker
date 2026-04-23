@@ -345,15 +345,9 @@ function TxHorizontalCard({
                     : r.status === "review" ? 1 : 0;
   const dupLevel = dupDismissed ? 0 : rawDupLevel;
 
-  const cardBg = isSkipped ? T.sur2
-               : dupLevel === 3 ? "#FCEBEB"
-               : dupLevel === 2 ? "#FAEEDA"
-               : dupLevel === 1 ? "#FAEEDA"
-               : T.surface;
-  const cardBorder = dupLevel === 3 ? "1.5px solid #E24B4A"
-                   : dupLevel === 2 ? "1.5px solid #EF9F27"
-                   : dupLevel === 1 ? "1.5px solid #BA7517"
-                   : r.flagged    ? "1.5px solid #f97316"
+  const cardBg = isSkipped ? T.sur2 : T.surface;
+  const cardBorder = dupLevel > 0 ? "1px solid #fde68a"
+                   : r.flagged ? "1.5px solid #f97316"
                    : `1px solid ${T.border}`;
 
   const color   = amtColor(r.tx_type);
@@ -402,9 +396,11 @@ function TxHorizontalCard({
 
         {/* Inline badges next to description */}
         {r._invalidAmount && <span style={BADGE("#fee2e2","#dc2626")}>Amount!</span>}
-        {dupLevel === 3 && <span style={BADGE("#F7C1C1","#791F1F")}>DUP</span>}
-        {dupLevel === 2 && <span style={BADGE("#FAC775","#633806")}>POSSIBLE DUP</span>}
-        {dupLevel === 1 && <span style={BADGE("#FAEEDA","#854F0B")}>SUSPICIOUS</span>}
+        {dupLevel > 0 && !dupDismissed && (
+          <span style={{ fontSize: 9, fontWeight: 600, color: "#92400e", fontFamily: "Figtree, sans-serif", fontStyle: "italic" }}>
+            ⚠ possible match
+          </span>
+        )}
         {r.flagged && dupLevel === 0 && <span style={BADGE("#fff7ed","#f97316")}>⚠ Reimb</span>}
         {source === "estatement" && r._isInstallment && (
           <span style={BADGE("#dbeafe","#1d4ed8")}>
@@ -517,47 +513,20 @@ function TxHorizontalCard({
       )}
 
       {/* ── Duplicate info panel ── */}
-      {rawDupLevel > 0 && !dupDismissed && r._dupEntry && (() => {
-        const DUP_THEME = {
-          3: { bg: "#FCEBEB", border: "#E24B4A", text: "#A32D2D", pillBg: "#F7C1C1", pillText: "#791F1F", title: "High confidence duplicate — not imported by default" },
-          2: { bg: "#FAEEDA", border: "#EF9F27", text: "#854F0B", pillBg: "#FAC775", pillText: "#633806", title: "Possible duplicate — please verify before importing" },
-          1: { bg: "#FAEEDA", border: "#FAC775", text: "#854F0B", pillBg: "#FAC775", pillText: "#633806", title: "Suspicious — same amount found in different account" },
-        };
-        const dt = DUP_THEME[dupLevel];
-        const matchAcc = accounts.find(a => a.id === (r._dupEntry.from_id || r._dupEntry.from_account_id));
-        return (
-          <div style={{ borderTop: `1px solid ${dt.border}`, background: dt.bg, padding: "6px 10px 7px 32px" }}>
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: dt.text, fontFamily: "Figtree, sans-serif", marginBottom: 3 }}>
-                  {dt.title}
-                </div>
-                <div style={{ fontSize: 10, color: dt.text, fontFamily: "Figtree, sans-serif", marginBottom: 3 }}>
-                  <span style={{ fontWeight: 600 }}>Similar to:</span>{" "}
-                  {r._dupEntry.description || r._dupEntry.merchant_name || "(no desc)"}
-                  {" · "}{r._dupEntry.tx_date}
-                  {" · Rp "}{Number(r._dupEntry.amount_idr || 0).toLocaleString("id-ID")}
-                  {matchAcc && <span>{" · "}{matchAcc.name}</span>}
-                </div>
-                {r._dupReasons?.length > 0 && (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-                    {r._dupReasons.map(reason => (
-                      <span key={reason} style={{ background: dt.pillBg, color: dt.pillText, borderRadius: 3, padding: "1px 5px", fontSize: 9, fontWeight: 700, fontFamily: "Figtree, sans-serif" }}>
-                        {reason}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <button
-                onClick={() => setDupDismissed(true)}
-                style={{ fontSize: 10, fontWeight: 700, color: "#059669", background: "none", border: "1px solid #6ee7b7", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", flexShrink: 0 }}>
-                It's different
-              </button>
-            </div>
-          </div>
-        );
-      })()}
+      {rawDupLevel > 0 && !dupDismissed && r._dupEntry && (
+        <div style={{ borderTop: "1px solid #fde68a", background: "#fffbeb", padding: "6px 10px 7px 32px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 11, color: "#92400e", fontFamily: "Figtree, sans-serif", flex: 1, minWidth: 0 }}>
+            <span style={{ fontWeight: 700 }}>
+              {rawDupLevel === 3 ? "High confidence match" : rawDupLevel === 2 ? "Possible match" : "Same amount found"}:
+            </span>{" "}
+            {r._dupEntry.description || r._dupEntry.merchant_name || "(no desc)"} · {r._dupEntry.tx_date} · Rp {Number(r._dupEntry.amount_idr || 0).toLocaleString("id-ID")}
+            {(() => { const matchAcc = accounts.find(a => a.id === (r._dupEntry.from_id || r._dupEntry.from_account_id)); return matchAcc ? ` · ${matchAcc.name}` : ""; })()}
+          </span>
+          <button onClick={() => setDupDismissed(true)} style={{ fontSize: 10, fontWeight: 600, color: "#059669", background: "none", border: "1px solid #6ee7b7", borderRadius: 4, padding: "2px 8px", cursor: "pointer", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
+            Not a duplicate
+          </button>
+        </div>
+      )}
 
       {/* ── Cicilan cross-check (estatement only) ── */}
       {source === "estatement" && r._isInstallment && (
