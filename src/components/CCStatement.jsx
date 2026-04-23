@@ -77,7 +77,7 @@ export default function CCStatement({
   bankAccounts: bankAccsProp = [], creditCards: creditCardsProp = [],
   assets = [], liabilities = [], receivables = [],
   accountCurrencies = [], allCurrencies = [], fxRates = {},
-  incomeSrcs = [],
+  incomeSrcs = [], merchantMaps = [],
   initialFromDate = null, initialToDate = null, initialSelectedMonth = null,
   initialReconcileTxs = null, initialReconcileFilename = "",
 }) {
@@ -96,7 +96,7 @@ export default function CCStatement({
   const printRef = useRef(null);
 
   // Reconcile mode
-  const reconcile = useReconcile({ user, accountId, fromDate, toDate, ledgerRows: useMemo(() => (data?.txs || []).map(tx => ({ ...tx, _dir: ccDirection(tx, accountId) === "charge" ? "debit" : "credit" })), [data, accountId]), currentAccountId: accountId, accounts });
+  const reconcile = useReconcile({ user, accountId, fromDate, toDate, ledgerRows: useMemo(() => (data?.txs || []).map(tx => ({ ...tx, _dir: ccDirection(tx, accountId) === "charge" ? "debit" : "credit" })), [data, accountId]), currentAccountId: accountId, accounts, merchantMaps });
 
   const reconcileDraft = useImportDraft({
     user,

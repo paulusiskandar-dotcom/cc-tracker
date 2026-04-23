@@ -1,6 +1,6 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
-import { categoryLearn } from "../lib/categoryLearn";
+import { merchantRules } from "../lib/merchantRules";
 import PILogo from "./PILogo";
 import { fxApi, merchantApi, settingsApi, recurringApi, gmailApi, accountsApi, installmentsApi, ledgerApi, getTxFromToTypes, loanPaymentsApi } from "../api";
 import { fmtIDR, resolveCategoryIds, checkDuplicateTransaction } from "../utils";
@@ -99,7 +99,10 @@ export default function Settings({
   // ── Merchants ──────────────────────────────────────────────
   const [editMerchant, setEditMerchant] = useState(null);
   const [merchantCat, setMerchantCat]   = useState("");
+  const [merchantTxType, setMerchantTxType] = useState("");
+  const [merchantKeyword, setMerchantKeyword] = useState("");
   const [merchantModal, setMerchantModal] = useState(false);
+  const [merchantSearch, setMerchantSearch] = useState("");
 
   // ── What's New ─────────────────────────────────────────────
   const [whatsNewOpen, setWhatsNewOpen] = useState(false);
@@ -307,18 +310,63 @@ export default function Settings({
 
   // ── Actions: Merchants ─────────────────────────────────────
   const saveMerchantCat = async () => {
-    if (!editMerchant || !merchantCat) return;
+    const keyword = (merchantKeyword || editMerchant?.merchant_name || "").trim();
+    if (!keyword) return showToast("Keyword required", "error");
     try {
-      const catDef = EXPENSE_CATEGORIES.find(c => c.id === merchantCat);
-      await merchantApi.upsert(user.id, editMerchant.merchant_name, merchantCat, catDef?.label || merchantCat);
-      setMerchantMaps(prev => prev.map(m =>
-        m.merchant_name === editMerchant.merchant_name
-          ? { ...m, category_id: merchantCat, category_name: catDef?.label || merchantCat }
+      const allCats = [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES_LIST];
+      const catDef  = allCats.find(c => c.id === merchantCat);
+      const catName = catDef?.label || merchantCat || null;
+      await supabase.from("merchant_mappings").upsert(
+        { user_id: user.id, merchant_name: keyword.toLowerCase(), category_id: merchantCat || null,
+          category_name: catName, tx_type: merchantTxType || null, last_seen: new Date().toISOString() },
+        { onConflict: "user_id,merchant_name" }
+      );
+      const isNew = !editMerchant?.id;
+      setMerchantMaps(prev => {
+        const updated = prev.map(m => m.merchant_name === keyword.toLowerCase()
+          ? { ...m, category_id: merchantCat || null, category_name: catName, tx_type: merchantTxType || null }
           : m
-      ));
-      showToast("Merchant mapping saved");
+        );
+        if (isNew && !updated.some(m => m.merchant_name === keyword.toLowerCase())) {
+          return [{ id: Date.now(), merchant_name: keyword.toLowerCase(), category_id: merchantCat || null,
+                    category_name: catName, tx_type: merchantTxType || null, confidence: 1 }, ...prev];
+        }
+        return updated;
+      });
+      showToast(isNew ? "Rule added" : "Rule saved");
       setMerchantModal(false);
+      setEditMerchant(null);
     } catch (e) { showToast(e.message, "error"); }
+  };
+
+  const deleteMerchantRule = async (m) => {
+    if (!window.confirm(`Delete rule for "${m.merchant_name}"?`)) return;
+    try {
+      if (m.id && typeof m.id === "string") {
+        await merchantApi.delete(m.id);
+      } else {
+        await supabase.from("merchant_mappings").delete()
+          .eq("user_id", user.id).eq("merchant_name", m.merchant_name);
+      }
+      setMerchantMaps(prev => prev.filter(x => x.merchant_name !== m.merchant_name));
+      showToast("Deleted");
+    } catch (e) { showToast(e.message, "error"); }
+  };
+
+  const openAddMerchant = () => {
+    setEditMerchant(null);
+    setMerchantKeyword("");
+    setMerchantCat("");
+    setMerchantTxType("");
+    setMerchantModal(true);
+  };
+
+  const openEditMerchant = (m) => {
+    setEditMerchant(m);
+    setMerchantKeyword(m.merchant_name || "");
+    setMerchantCat(m.category_id || "");
+    setMerchantTxType(m.tx_type || "");
+    setMerchantModal(true);
   };
 
   // ── Theme ──────────────────────────────────────────────────
@@ -612,6 +660,7 @@ export default function Settings({
           installments={installments} setInstallments={setInstallments}
           employeeLoans={employeeLoans}
           fxRates={fxRates}
+          merchantMaps={merchantMaps}
         />
       )}
 
@@ -806,39 +855,47 @@ export default function Settings({
       {/* ══════════════════════════════════════════════════ */}
       {subTab === "merchants" && (
         <div style={card}>
-          <SectionHeader title="Merchant → Category Mappings" />
-          <div style={{ fontSize: 11, color: T.text3, marginTop: 4, marginBottom: 12 }}>
-            Learned from AI imports. Edit to override category auto-assignment.
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <SectionHeader title="Merchant Rules" />
+            <Button variant="primary" size="sm" onClick={openAddMerchant}>+ Add Rule</Button>
           </div>
+          <div style={{ fontSize: 11, color: T.text3, marginBottom: 12 }}>
+            Keyword rules for auto-categorizing transactions. More specific keywords take priority — reorder by editing.
+          </div>
+          <input
+            value={merchantSearch}
+            onChange={e => setMerchantSearch(e.target.value)}
+            placeholder="Search rules…"
+            style={{ width: "100%", fontSize: 12, padding: "6px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.sur2, color: T.text, fontFamily: "Figtree, sans-serif", marginBottom: 10, boxSizing: "border-box" }}
+          />
           {merchantMaps.length === 0 ? (
-            <EmptyState icon="🏪" message="No merchant mappings yet." />
+            <EmptyState icon="🏪" message="No merchant rules yet. Add one to auto-categorize transactions." />
           ) : (
-            merchantMaps.map(m => {
-              const cat = EXPENSE_CATEGORIES.find(c => c.id === m.category_id);
-              return (
-                <div key={m.merchant_name} style={{
-                  display: "flex", justifyContent: "space-between", alignItems: "center",
-                  padding: "8px 12px", background: T.sur2, borderRadius: 10, marginBottom: 6,
-                }}>
-                  <div>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: T.text }}>{m.merchant_name}</div>
-                    <div style={{ fontSize: 10, color: T.text3 }}>
-                      {cat ? `${cat.icon} ${cat.label}` : m.category_name || m.category_id}
+            merchantMaps
+              .filter(m => !merchantSearch || m.merchant_name?.toLowerCase().includes(merchantSearch.toLowerCase()))
+              .map(m => {
+                const allCats = [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES_LIST];
+                const cat = allCats.find(c => c.id === m.category_id);
+                return (
+                  <div key={m.merchant_name} style={{
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                    padding: "8px 12px", background: T.sur2, borderRadius: 10, marginBottom: 6,
+                  }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: T.text, fontFamily: "Figtree, sans-serif" }}>{m.merchant_name}</div>
+                      <div style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, sans-serif" }}>
+                        {cat ? `${cat.icon} ${cat.label}` : m.category_name || m.category_id || "—"}
+                        {m.tx_type ? ` · ${m.tx_type}` : ""}
+                        {m.confidence > 1 ? ` · used ${m.confidence}×` : ""}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                      <Button variant="secondary" size="sm" onClick={() => openEditMerchant(m)}>Edit</Button>
+                      <Button variant="danger" size="sm" onClick={() => deleteMerchantRule(m)}>×</Button>
                     </div>
                   </div>
-                  <Button
-                    variant="secondary" size="sm"
-                    onClick={() => {
-                      setEditMerchant(m);
-                      setMerchantCat(m.category_id || "");
-                      setMerchantModal(true);
-                    }}
-                  >
-                    Edit
-                  </Button>
-                </div>
-              );
-            })
+                );
+              })
           )}
         </div>
       )}
@@ -1112,29 +1169,51 @@ export default function Settings({
 
       {/* ── MERCHANT EDIT MODAL ─────────────────────────── */}
       <Modal
-        isOpen={merchantModal && !!editMerchant}
+        isOpen={merchantModal}
         onClose={() => { setMerchantModal(false); setEditMerchant(null); }}
-        title="Edit Merchant Mapping"
+        title={editMerchant ? "Edit Merchant Rule" : "Add Merchant Rule"}
         footer={
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <Button variant="secondary" size="md" onClick={() => { setMerchantModal(false); setEditMerchant(null); }}>Cancel</Button>
-            <Button variant="primary" size="md" disabled={!merchantCat} onClick={saveMerchantCat}>Save</Button>
+            <Button variant="primary" size="md" onClick={saveMerchantCat}>Save</Button>
           </div>
         }
       >
-        {editMerchant && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{editMerchant.merchant_name}</div>
-            <Field label="Category">
-              <Select
-                value={merchantCat}
-                onChange={e => setMerchantCat(e.target.value)}
-                options={EXPENSE_CATEGORIES.map(c => ({ value: c.id, label: `${c.icon} ${c.label}` }))}
-                placeholder="Select category…"
-              />
-            </Field>
-          </div>
-        )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <Field label="Keyword (matches transaction description)">
+            <Input
+              value={merchantKeyword}
+              onChange={e => setMerchantKeyword(e.target.value)}
+              placeholder="e.g. indomaret, grab, netflix"
+            />
+          </Field>
+          <Field label="Tx Type (optional — leave blank to match any)">
+            <Select
+              value={merchantTxType}
+              onChange={e => setMerchantTxType(e.target.value)}
+              options={[
+                { value: "expense",  label: "Expense" },
+                { value: "income",   label: "Income" },
+                { value: "transfer", label: "Transfer" },
+                { value: "pay_cc",   label: "Pay CC" },
+              ]}
+              placeholder="Any type…"
+            />
+          </Field>
+          <Field label="Category (optional)">
+            <Select
+              value={merchantCat}
+              onChange={e => setMerchantCat(e.target.value)}
+              options={[
+                { value: "", label: "— expense categories —", disabled: true },
+                ...EXPENSE_CATEGORIES.map(c => ({ value: c.id, label: `${c.icon} ${c.label}` })),
+                { value: "", label: "— income categories —", disabled: true },
+                ...INCOME_CATEGORIES_LIST.map(c => ({ value: c.id, label: c.label })),
+              ]}
+              placeholder="Select category…"
+            />
+          </Field>
+        </div>
       </Modal>
 
     </div>
@@ -1455,6 +1534,7 @@ function EStatementTab({
   accounts, categories = [], ledger, installments = [], setInstallments,
   employeeLoans = [],
   fxRates = {},
+  merchantMaps = [],
 }) {
   const [queue,          setQueue]          = useState([]);
   const [history,        setHistory]        = useState([]);
@@ -1462,13 +1542,6 @@ function EStatementTab({
   const [dragging,       setDragging]       = useState(false);
   const [dbLoading,      setDbLoading]      = useState(true);
   const [acctCurrencies, setAcctCurrencies] = useState([]);
-  const learnedCatsRef = useRef([]);
-
-  useEffect(() => {
-    if (!user?.id) return;
-    categoryLearn.getLearned(user.id).then(d => { learnedCatsRef.current = d || []; }).catch(() => {});
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
   const enrichTransfers = (rows) => {
     const pairs = detectTransferPairs(rows, accounts, ledger || []);
     return rows.map(r => {
@@ -1789,7 +1862,7 @@ function EStatementTab({
 
       const effectiveTxType = autoReimburse ? "reimburse_in" : txType;
       const learnedSuggestion = !ESTMT_NO_CAT.has(effectiveTxType)
-        ? categoryLearn.suggest(t.merchant || t.description || "", "", learnedCatsRef.current)
+        ? merchantRules.apply(t.merchant || t.description || "", "", merchantMaps)
         : null;
       const effectiveCatId = learnedSuggestion?.confidence >= 2 && !catId
         ? learnedSuggestion.category_id

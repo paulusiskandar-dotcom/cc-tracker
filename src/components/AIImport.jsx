@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { supabase } from "../lib/supabase";
-import { categoryLearn } from "../lib/categoryLearn";
-import { ledgerApi, scanApi, merchantApi, getTxFromToTypes, loanPaymentsApi, installmentsApi } from "../api";
+import { merchantRules } from "../lib/merchantRules";
+import { ledgerApi, scanApi, getTxFromToTypes, loanPaymentsApi, installmentsApi } from "../api";
 import { fmtIDR, todayStr, checkDuplicateTransaction, resolveCategoryIds } from "../utils";
 import { LIGHT, DARK } from "../theme";
 import { Button, EmptyState, Spinner, showToast, TxHorizontal } from "./shared/index";
@@ -74,13 +74,6 @@ const fmtDateShort = (d) => {
 export default function AIImport({ user, accounts, categories = [], ledger, onRefresh, setLedger, dark, merchantMaps = [], fxRates = {}, CURRENCIES = [], setPendingSyncs, employeeLoans = [] }) {
   const T = dark ? DARK : LIGHT;
   const fileRef = useRef();
-
-  const learnedCatsRef = useRef([]);
-
-  useEffect(() => {
-    if (!user?.id) return;
-    categoryLearn.getLearned(user.id).then(d => { learnedCatsRef.current = d || []; }).catch(() => {});
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [defaultAccountId, setDefaultAccountId] = useState("");
   const [scanning,         setScanning]         = useState(false);
@@ -163,24 +156,6 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
     if (toOwn && fromOwn) return tx;
     if (toOwn && !fromOwn) return { ...tx, tx_type: "income" };
     return { ...tx, tx_type: "expense", to_id: null, to_account_id: null };
-  };
-
-  // ── Merchant learning ─────────────────────────────────────────
-  const lookupLearned = (desc) => {
-    if (!desc || !merchantMaps.length) return null;
-    const lower = desc.toLowerCase();
-    return merchantMaps.find(m => {
-      const mn = (m.merchant_name || "").toLowerCase();
-      return mn && (lower.includes(mn) || mn.includes(lower));
-    }) || null;
-  };
-
-  const saveMerchantMapping = (r) => {
-    const name = (r.description || r.merchant_name || "").trim();
-    if (!name || !r.category_id || NO_CAT.has(r.tx_type)) return;
-    const cat = EXPENSE_CATEGORIES.find(c => c.id === r.category_id)
-             || INCOME_CATEGORIES_LIST.find(c => c.id === r.category_id);
-    merchantApi.upsert(user.id, name, r.category_id, cat?.label || r.category_id).catch(() => {});
   };
 
   const enrichTransfers = (items) => {
@@ -294,7 +269,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       }
 
       const learnedSuggestion = !NO_CAT.has(txType)
-        ? categoryLearn.suggest(desc, r.merchant_name || "", learnedCatsRef.current)
+        ? merchantRules.apply(desc, r.merchant_name || "", merchantMaps)
         : null;
       let catId = NO_CAT.has(txType) ? null : aiCatId;
       if (learnedSuggestion?.confidence >= 2) catId = learnedSuggestion.category_id;
@@ -501,7 +476,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       try {
         const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
         if (created) {
-          setLedger(prev => [created, ...prev]); ok++; saveMerchantMapping(r);
+          setLedger(prev => [created, ...prev]); ok++;
           if (r.tx_type === "collect_loan" && (r.employee_loan_id || r.from_id)) {
             loanPaymentsApi.recordAndIncrement(user.id, {
               loanId: r.employee_loan_id || r.from_id, payDate: r.tx_date,
@@ -543,7 +518,6 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
       if (created) {
         setLedger(prev => [created, ...prev]);
-        saveMerchantMapping(r);
         if (r.tx_type === "collect_loan" && r.from_id) {
           loanPaymentsApi.recordAndIncrement(user.id, {
             loanId: r.from_id, payDate: r.tx_date,

@@ -606,6 +606,11 @@ export const merchantApi = {
       .upsert(rows, { onConflict: "user_id,merchant_name" });
     if (error) throw new Error(error.message);
   },
+
+  delete: async (id) => {
+    const { error } = await supabase.from("merchant_mappings").delete().eq("id", id);
+    if (error) throw new Error(error.message);
+  },
 };
 
 // ─── ACCOUNT CURRENCIES ───────────────────────────────────────

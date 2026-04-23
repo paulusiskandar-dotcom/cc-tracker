@@ -2,7 +2,7 @@
 // Provides: upload modal, matching logic, status column renderer, and reconcile bar
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { reconcileApi, ledgerApi, installmentsApi, loanPaymentsApi } from "../../api";
-import { categoryLearn } from "../../lib/categoryLearn";
+import { merchantRules } from "../../lib/merchantRules";
 import { detectDuplicate } from "../../lib/duplicateDetection";
 import { detectTransferPairs } from "../../lib/transferDetection";
 import { supabase } from "../../lib/supabase";
@@ -80,7 +80,7 @@ export function ReconcileStatusBadge({ type }) {
 }
 
 // ── Main hook ────────────────────────────────────────────────
-export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, currentAccountId, accounts = [] }) {
+export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, currentAccountId, accounts = [], merchantMaps = [] }) {
   const [active,       setActive]       = useState(false);
   const [stmtRows,     setStmtRows]     = useState([]);
   const [processing,   setProcessing]   = useState(false);
@@ -90,14 +90,8 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
   const [pdfSource,    setPdfSource]    = useState("");
   const [expandedIds,  setExpandedIds]  = useState(() => new Set());
   const [pendingRows,  setPendingRows]  = useState({});
-  const [learnedCats,  setLearnedCats]  = useState([]);
   const [allLedger,    setAllLedger]    = useState([]);
   const fileRef = useRef(null);
-
-  useEffect(() => {
-    if (!active || !user?.id) return;
-    categoryLearn.getLearned(user.id).then(setLearnedCats).catch(() => {});
-  }, [active, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!active || !user?.id) return;
@@ -285,7 +279,7 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
     currentAccountId,
     expandedIds, toggleExpanded, expandAll, collapseAll,
     pendingRows, updatePendingRow, removePendingRow,
-    learnedCats, allLedger, mergeTransferPair,
+    merchantMaps, allLedger, mergeTransferPair,
   };
 }
 
@@ -524,10 +518,10 @@ export function ReconcileMissingBar({ reconcile, accounts, onExpandAll, expanded
 }
 
 // ── Add panel — TxHorizontal inline form ─────────────────────
-function buildRow(stmtRow, currentAccountId, learnedCats = []) {
+function buildRow(stmtRow, currentAccountId, merchantMapsArg = []) {
   const desc = stmtRow.description || stmtRow.merchant || "";
-  const suggestion = learnedCats.length > 0
-    ? categoryLearn.suggest(desc, desc, learnedCats)
+  const suggestion = merchantMapsArg.length > 0
+    ? merchantRules.apply(desc, desc, merchantMapsArg)
     : null;
   const dupLevel = stmtRow._dupLevel || 0;
   return {
@@ -556,9 +550,9 @@ function buildRow(stmtRow, currentAccountId, learnedCats = []) {
 
 export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans, user, onRefresh, onClose }) {
   const T = LIGHT;
-  const [rows, setRows] = useState(() => [buildRow(stmtRow, reconcile.currentAccountId, reconcile.learnedCats || [])]);
+  const [rows, setRows] = useState(() => [buildRow(stmtRow, reconcile.currentAccountId, reconcile.merchantMaps || [])]);
   const [selected, setSelected] = useState(() => {
-    const r = buildRow(stmtRow, reconcile.currentAccountId, reconcile.learnedCats || []);
+    const r = buildRow(stmtRow, reconcile.currentAccountId, reconcile.merchantMaps || []);
     return { [r._id]: (stmtRow._dupLevel || 0) <= 1 };
   });
 
@@ -590,23 +584,23 @@ export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans,
     reconcile.pendingRows[stmtRow._id]?.to_id,
   ]);
 
-  // Apply learned suggestions when learnedCats loads after panel has already mounted
+  // Apply merchant rules when merchantMaps changes (loaded after panel mounts)
   useEffect(() => {
-    if (!reconcile.learnedCats?.length) return;
+    if (!reconcile.merchantMaps?.length) return;
     setRows(prev => prev.map(r => {
       if (r.learned_cat) return r;
-      const suggestion = categoryLearn.suggest(r.description, r.description, reconcile.learnedCats);
+      const suggestion = merchantRules.apply(r.description, r.description, reconcile.merchantMaps);
       if (!suggestion) return r;
       const updated = {
         ...r,
         learned_cat:   suggestion,
-        category_id:   suggestion.confidence >= 2 ? suggestion.category_id : r.category_id,
-        category_name: suggestion.confidence >= 2 ? (suggestion.category_name || null) : r.category_name,
+        category_id:   suggestion.category_id   || r.category_id,
+        category_name: suggestion.category_name || r.category_name,
       };
       reconcile.updatePendingRow(stmtRow._id, updated);
       return updated;
     }));
-  }, [reconcile.learnedCats]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [reconcile.merchantMaps]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateRow = (id, patch) => setRows(prev => {
     const next = prev.map(r => r._id === id ? { ...r, ...patch } : r);
