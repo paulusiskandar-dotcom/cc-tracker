@@ -92,9 +92,10 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
   const [pdfBlobUrl,        setPdfBlobUrl]        = useState(null);
   const [stmtClosingBalance, setStmtClosingBalance] = useState(null);
   const [stmtOpeningBalance, setStmtOpeningBalance] = useState(null);
-  const [expandedIds,  setExpandedIds]  = useState(() => new Set());
-  const [pendingRows,  setPendingRows]  = useState({});
-  const [allLedger,    setAllLedger]    = useState([]);
+  const [expandedIds,        setExpandedIds]        = useState(() => new Set());
+  const [pendingRows,        setPendingRows]        = useState({});
+  const [allLedger,          setAllLedger]          = useState([]);
+  const [manuallyUnmatched,  setManuallyUnmatched]  = useState(() => new Set());
   const fileRef = useRef(null);
 
   useEffect(() => () => { if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl); }, [pdfBlobUrl]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -112,8 +113,23 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
 
   const { matched, missing, extraIds } = useMemo(() => {
     if (!active || !stmtRows.length) return { matched: new Map(), missing: [], extraIds: new Set() };
-    return matchRows(stmtRows, ledgerRows);
-  }, [active, stmtRows, ledgerRows]);
+    const raw = matchRows(stmtRows, ledgerRows);
+    if (!manuallyUnmatched.size) return raw;
+
+    const adjustedMatched = new Map(raw.matched);
+    const releasedStmtRows = [];
+    for (const ledgerId of manuallyUnmatched) {
+      if (adjustedMatched.has(ledgerId)) {
+        releasedStmtRows.push(adjustedMatched.get(ledgerId));
+        adjustedMatched.delete(ledgerId);
+      }
+    }
+    return {
+      matched:  adjustedMatched,
+      missing:  [...raw.missing, ...releasedStmtRows],
+      extraIds: new Set([...raw.extraIds, ...manuallyUnmatched]),
+    };
+  }, [active, stmtRows, ledgerRows, manuallyUnmatched]);
 
   // Status for a ledger row
   const getStatus = useCallback((ledgerId) => {
@@ -121,16 +137,16 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
       const tx = ledgerRows.find(e => e.id === ledgerId);
       return tx?.reconciled_at ? "reconciled" : null;
     }
-    // No PDF uploaded yet — don't label anything
     if (!stmtRows.length) {
       const tx = ledgerRows.find(e => e.id === ledgerId);
       return tx?.reconciled_at ? "reconciled" : null;
     }
+    if (manuallyUnmatched.has(ledgerId)) return "extra";
     if (matched.has(ledgerId)) return "match";
     if (keptIds.has(ledgerId)) return "kept";
     if (extraIds.has(ledgerId)) return "extra";
     return "match";
-  }, [active, stmtRows, matched, keptIds, extraIds, ledgerRows]);
+  }, [active, stmtRows, matched, keptIds, extraIds, ledgerRows, manuallyUnmatched]);
 
   const missingFiltered = useMemo(() =>
     missing.filter(s => !ignoredIds.has(s._id)),
@@ -195,6 +211,8 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
 
   const markKept    = useCallback((id) => setKeptIds(p => { const n = new Set(p); n.add(id); return n; }), []);
   const markIgnored = useCallback((id) => setIgnoredIds(p => { const n = new Set(p); n.add(id); return n; }), []);
+  const unmatchLedgerRow = useCallback((id) => setManuallyUnmatched(p => { const n = new Set(p); n.add(id); return n; }), []);
+  const rematchLedgerRow = useCallback((id) => setManuallyUnmatched(p => { const n = new Set(p); n.delete(id); return n; }), []);
 
   const mergeTransferPair = useCallback((stmtRowId) => {
     const row = missingEnriched.find(s => s._id === stmtRowId);
@@ -286,6 +304,7 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
     if (pdfBlobUrl) { URL.revokeObjectURL(pdfBlobUrl); setPdfBlobUrl(null); }
     setActive(false); setStmtRows([]); setKeptIds(new Set()); setIgnoredIds(new Set()); setPdfSource("");
     setExpandedIds(new Set()); setPendingRows({}); setStmtClosingBalance(null); setStmtOpeningBalance(null);
+    setManuallyUnmatched(new Set());
     showToast("Reconcile completed");
   }, [user, accountId, fromDate, stmtRows, stats, pdfSource, matched]);
 
@@ -293,7 +312,8 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
     active, stmtRows, processing, stats, pdfSource, pdfBlobUrl,
     stmtClosingBalance, stmtOpeningBalance, fileRef,
     matched, missing: missingEnriched, extraIds, keptIds, ignoredIds,
-    getStatus, markKept, markIgnored, seedStmtRows, seedFullState,
+    getStatus, markKept, markIgnored, unmatchLedgerRow, rematchLedgerRow,
+    seedStmtRows, seedFullState,
     stageAndProcess, startReconcile, exitReconcile,
     currentAccountId,
     expandedIds, toggleExpanded, expandAll, collapseAll,

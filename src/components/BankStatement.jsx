@@ -648,8 +648,8 @@ export default function BankStatement({
                     return (
                       <div key={tx.id}
                         style={{ position: "relative", display: "grid", gridTemplateColumns: COLS, borderBottom: "0.5px solid #f3f4f6", padding: ROW_PAD, alignItems: "center", background: rowBg }}
-                        onMouseEnter={e => { if (!isMatched) e.currentTarget.style.background = "#fafafa"; e.currentTarget.querySelector(".edit-btn")?.style && (e.currentTarget.querySelector(".edit-btn").style.opacity = "1"); }}
-                        onMouseLeave={e => { e.currentTarget.style.background = rowBg; e.currentTarget.querySelector(".edit-btn")?.style && (e.currentTarget.querySelector(".edit-btn").style.opacity = "0"); }}
+                        onMouseEnter={e => { if (!isMatched) e.currentTarget.style.background = "#fafafa"; e.currentTarget.querySelectorAll(".row-action").forEach(el => { el.style.opacity = "1"; }); }}
+                        onMouseLeave={e => { e.currentTarget.style.background = rowBg; e.currentTarget.querySelectorAll(".row-action").forEach(el => { el.style.opacity = "0"; }); }}
                       >
                         {/* Tanggal */}
                         <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, padding: "8px 6px", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4 }}>
@@ -699,17 +699,27 @@ export default function BankStatement({
 
                         {/* Status (reconcile mode) */}
                         {reconcile.active && (
-                          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "8px 0" }}>
-                            {isMatched
-                              ? <span style={{ fontSize: 10, fontWeight: 700, color: "#059669", fontFamily: FF, textTransform: "uppercase", letterSpacing: "0.04em" }}>Matched</span>
-                              : <ReconcileStatusBadge type={status} />
-                            }
+                          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", padding: "8px 0", gap: 4 }}>
+                            {isMatched ? (
+                              <>
+                                <span style={{ fontSize: 10, fontWeight: 700, color: "#059669", fontFamily: FF, textTransform: "uppercase", letterSpacing: "0.04em" }}>Matched</span>
+                                <button
+                                  className="row-action"
+                                  onClick={e => { e.stopPropagation(); reconcile.unmatchLedgerRow(tx.id); }}
+                                  title="Unmatch"
+                                  style={{ fontSize: 11, padding: "1px 5px", borderRadius: 4, border: "1px solid #e5e7eb", background: "#fff", color: "#6b7280", cursor: "pointer", fontFamily: FF, opacity: 0, transition: "opacity 0.15s", lineHeight: 1 }}>
+                                  ⤺
+                                </button>
+                              </>
+                            ) : (
+                              <ReconcileStatusBadge type={status} />
+                            )}
                           </div>
                         )}
 
                         {/* Edit button — overlay, opacity 0→1 on row hover */}
                         <button
-                          className="edit-btn no-print"
+                          className="row-action edit-btn no-print"
                           onClick={e => { e.stopPropagation(); openEdit(tx); }}
                           style={{
                             position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)",
