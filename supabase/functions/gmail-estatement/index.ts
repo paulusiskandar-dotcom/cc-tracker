@@ -337,42 +337,63 @@ IMPORTANT - Year detection rules:
 - For bank statements dated Jan-Dec without a year, assume 2026
 - Double-check: if a transaction date would result in a year before 2024, it is likely wrong — default to 2026
 
-Return ONLY valid JSON array. No markdown, no explanation.
-If no transactions found, return [].`;
+Return ONLY a valid JSON object (no markdown, no explanation) with this exact schema:
+{
+  "transactions": [...array of transaction objects above...],
+  "detected_account": { "last4": "1234", "bank_name": "BCA", "account_no": "1234567890" },
+  "detected_period": { "year": 2025, "month": 3 },
+  "closing_balance": 5000000,
+  "opening_balance": 3000000
+}
+- detected_account: extracted from statement header (card last 4, bank name, account number). Set fields to null if not found. Set entire value to null if no account info present.
+- detected_period: statement month/year from header (e.g. March 2025 → year:2025, month:3). null if not found.
+- closing_balance: the closing/ending balance shown in the statement summary (Saldo Akhir / Total Tagihan / Closing Balance) as a plain number without formatting. null if not shown.
+- opening_balance: the opening/previous balance (Saldo Awal / Saldo Bulan Lalu / Opening Balance / Previous Balance) as a plain number. null if not shown.
+If no transactions found, return the object with an empty transactions array.`;
 
 const FALLBACK_PROMPT = `This is a bank statement PDF. Extract every single transaction row from the transaction table.
 Look for a table with columns like: Tanggal/Date, Keterangan/Description, Debet/Debit, Kredit/Credit, Saldo/Balance.
 First, detect the document currency: look for "MATA UANG : [CODE]" in the header (e.g. "MATA UANG : JPY"). If found, use that currency for all transactions. Otherwise use "IDR".
-Return ONLY a JSON array — no markdown, no explanation. Each item:
+Return ONLY a valid JSON object (no markdown) with this schema:
 {
-  "date": "YYYY-MM-DD",
-  "description": "transaction description as written",
-  "merchant": "merchant or payee name",
-  "amount": 150000,
-  "currency": "IDR",
-  "direction": "out",
-  "is_installment": false,
-  "installment_current": null,
-  "installment_total": null,
-  "is_fee": false,
-  "fee_type": null,
-  "is_transfer": false,
-  "card_last4": null,
-  "account_hint": null,
-  "currency_original": null,
-  "amount_original": null,
-  "rate_used": null
+  "transactions": [
+    {
+      "date": "YYYY-MM-DD",
+      "description": "transaction description as written",
+      "merchant": "merchant or payee name",
+      "amount": 150000,
+      "currency": "IDR",
+      "direction": "out",
+      "is_installment": false,
+      "installment_current": null,
+      "installment_total": null,
+      "is_fee": false,
+      "fee_type": null,
+      "is_transfer": false,
+      "card_last4": null,
+      "account_hint": null,
+      "currency_original": null,
+      "amount_original": null,
+      "rate_used": null
+    }
+  ],
+  "detected_account": { "last4": null, "bank_name": null, "account_no": null },
+  "detected_period": { "year": 2025, "month": 3 },
+  "closing_balance": null,
+  "opening_balance": null
 }
-currency: document currency detected above ("IDR", "JPY", "USD", etc.) — always set this.
+currency: document currency ("IDR", "JPY", "USD", etc.) — always set this.
 direction: "out" for debits/expenses, "in" for credits received.
-amount: positive number in the document's currency (no dots/commas formatting).
+amount: positive number in document currency (no dots/commas formatting).
+closing_balance: closing/ending balance from statement summary as a plain number, null if not shown.
+opening_balance: opening/previous balance as a plain number, null if not shown.
 IMPORTANT - Year detection rules:
 - If the document clearly shows a year, use that year
 - If no year is visible or it is ambiguous, use the current year (2026)
 - Never use years before 2026 unless explicitly stated in the document
 - For bank statements dated Jan-Dec without a year, assume 2026
 - Double-check: if a transaction date would result in a year before 2024, it is likely wrong — default to 2026
-If no transactions found, return [].`;
+If no transactions found, return the object with an empty transactions array.`;
 
 // ── HELPER: try to decrypt PDF with pdf-lib ────────────────────
 // Returns { base64: string } on success, or { error: 'wrong_password'|'unsupported' }
@@ -402,7 +423,7 @@ async function tryDecryptPDF(
 
 // ── HELPER: send PDF bytes to Claude, return extracted transactions ─
 type ClaudeResult =
-  | { ok: true;  transactions: any[] }
+  | { ok: true;  transactions: any[]; closing_balance?: number | null; opening_balance?: number | null; detected_account?: any; detected_period?: any; }
   | { ok: false; is_encrypted: true }
   | { ok: false; is_encrypted: false; error: string };
 
@@ -465,10 +486,28 @@ async function callClaude(pdfBase64: string, prompt: string, anthropicKey: strin
     return { ok: false, is_encrypted: true };
   }
 
+  // Try object format first (new schema: { transactions, detected_account, detected_period, closing_balance, opening_balance })
+  const objMatch = rawText.match(/\{[\s\S]*"transactions"[\s\S]*\}/);
+  if (objMatch) {
+    try {
+      const parsed = JSON.parse(objMatch[0]);
+      if (Array.isArray(parsed.transactions)) {
+        return {
+          ok: true,
+          transactions:     parsed.transactions,
+          closing_balance:  parsed.closing_balance  ?? null,
+          opening_balance:  parsed.opening_balance  ?? null,
+          detected_account: parsed.detected_account ?? null,
+          detected_period:  parsed.detected_period  ?? null,
+        };
+      }
+    } catch { /* fall through to array format */ }
+  }
+  // Fall back to bare array format (older prompts / chunked responses)
   const jsonMatch = rawText.match(/\[[\s\S]*\]/);
   if (!jsonMatch) {
     const snippet = rawText.slice(0, 200).replace(/\n/g, " ");
-    return { ok: false, is_encrypted: false, error: `Claude response contained no JSON array. Response: "${snippet}"` };
+    return { ok: false, is_encrypted: false, error: `Claude response contained no JSON. Response: "${snippet}"` };
   }
   try {
     const transactions = JSON.parse(jsonMatch[0]);
@@ -565,6 +604,9 @@ async function chunkAndProcessPDF(
   const bytes = Uint8Array.from(atob(pdfBase64), c => c.charCodeAt(0));
   const fullDoc = await PDFDocument.load(bytes);
 
+  // Track metadata: detected_account/period from first chunk, balances from last chunk that has them
+  let chunkMeta: { detected_account?: any; detected_period?: any; closing_balance?: number | null; opening_balance?: number | null } = {};
+
   for (let start = 0; start < pageCount; start += CHUNK_SIZE) {
     const end = Math.min(start + CHUNK_SIZE, pageCount);
     console.log(`[gmail-estatement] chunking: processing pages ${start + 1}–${end} of ${pageCount}`);
@@ -582,6 +624,11 @@ async function chunkAndProcessPDF(
     const chunkResult = await callClaudeWithFallback(chunkBase64, anthropicKey);
     if (chunkResult.ok) {
       allTransactions.push(...chunkResult.transactions);
+      // First chunk wins for account/period; last chunk wins for balances (summary is usually last)
+      if (!chunkMeta.detected_account && chunkResult.detected_account) chunkMeta.detected_account = chunkResult.detected_account;
+      if (!chunkMeta.detected_period  && chunkResult.detected_period)  chunkMeta.detected_period  = chunkResult.detected_period;
+      if (chunkResult.closing_balance != null) chunkMeta.closing_balance = chunkResult.closing_balance;
+      if (chunkResult.opening_balance != null) chunkMeta.opening_balance = chunkResult.opening_balance;
     } else if (chunkResult.is_encrypted) {
       return chunkResult; // Propagate encrypted signal
     } else {
@@ -591,7 +638,7 @@ async function chunkAndProcessPDF(
   }
 
   console.log(`[gmail-estatement] chunking complete: ${allTransactions.length} total transactions`);
-  return { ok: true, transactions: allTransactions };
+  return { ok: true, transactions: allTransactions, ...chunkMeta };
 }
 
 // ── ACTION: process ────────────────────────────────────────────
@@ -863,8 +910,15 @@ Deno.serve(async (req: Request) => {
 
         if (claudeResult.ok) {
           const cleaned = cleanTransactions(claudeResult.transactions);
-          const meta = inferMetadata(cleaned);
-          result = { success: true, transactions: cleaned, ...meta, closing_balance: null, opening_balance: null };
+          const metaInferred = inferMetadata(cleaned);
+          result = {
+            success: true,
+            transactions:     cleaned,
+            detected_account: claudeResult.detected_account ?? metaInferred.detected_account,
+            detected_period:  claudeResult.detected_period  ?? metaInferred.detected_period,
+            closing_balance:  claudeResult.closing_balance  ?? null,
+            opening_balance:  claudeResult.opening_balance  ?? null,
+          };
         } else if (!claudeResult.is_encrypted) {
           result = { success: false, needs_password: false, error: claudeResult.error };
         } else {
@@ -883,8 +937,15 @@ Deno.serve(async (req: Request) => {
               claudeResult = await chunkAndProcessPDF(decResult.base64, ANTHROPIC_KEY);
               if (claudeResult.ok) {
                 const cleaned = cleanTransactions(claudeResult.transactions);
-                const meta = inferMetadata(cleaned);
-                result = { success: true, transactions: cleaned, ...meta };
+                const metaInferred = inferMetadata(cleaned);
+                result = {
+                  success: true,
+                  transactions:     cleaned,
+                  detected_account: claudeResult.detected_account ?? metaInferred.detected_account,
+                  detected_period:  claudeResult.detected_period  ?? metaInferred.detected_period,
+                  closing_balance:  claudeResult.closing_balance  ?? null,
+                  opening_balance:  claudeResult.opening_balance  ?? null,
+                };
               } else {
                 result = { success: false, needs_password: false, error: "PDF decrypted but no transactions could be extracted. It may be a scanned image." };
               }
