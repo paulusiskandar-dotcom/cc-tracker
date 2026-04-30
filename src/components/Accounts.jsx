@@ -3,7 +3,7 @@ import { accountsApi, accountCurrenciesApi, ledgerApi, getTxFromToTypes, recalcu
 import BankStatement from "./BankStatement";
 import {
   BANKS_L, NETWORKS, ASSET_SUBTYPES, LIAB_SUBTYPES,
-  ACC_TYPE_LABEL, ACC_TYPE_ICON,
+  ACC_TYPE_LABEL, ACC_TYPE_ICON, REIMBURSE_ENTITIES,
 } from "../constants";
 import { fmtIDR, fmtCur } from "../utils";
 import Modal, { ConfirmModal } from "./shared/Modal";
@@ -1968,7 +1968,7 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
           label="Entity"
           value={form.entity || "Hamasa"}
           onChange={e => set("entity", e.target.value)}
-          options={["Hamasa", "SDC", "Travelio"]}
+          options={REIMBURSE_ENTITIES}
         />
       )}
 

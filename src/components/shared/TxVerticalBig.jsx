@@ -26,7 +26,7 @@ import {
   accountCurrenciesApi, assetsApi,
   installmentsApi, recalculateBalance, accountsApi, employeeLoanApi,
 } from "../../api";
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../../constants";
+import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST, REIMBURSE_ENTITIES } from "../../constants";
 import { fmtIDR, todayStr, toIDR } from "../../utils";
 import Modal from "./Modal";
 import { showToast } from "./Card";
@@ -79,7 +79,7 @@ const EMPTY = () => ({
 });
 
 const ASSET_TYPES = ["Property","Vehicle","Investment","Crypto","Collectible","Other"];
-const ENTITY_OPTS = ["Hamasa","SDC","Travelio"];
+const ENTITY_OPTS = REIMBURSE_ENTITIES;
 
 // Shared select style
 const SEL = {

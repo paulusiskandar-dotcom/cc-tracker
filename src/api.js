@@ -1,4 +1,5 @@
 import { supabase } from "./lib/supabase";
+import { REIMBURSE_ENTITIES } from "./constants";
 
 // ─── FROM_TYPE / TO_TYPE MAPPING ─────────────────────────────
 export const getTxFromToTypes = (txType) => {
@@ -103,7 +104,6 @@ async function applyBalanceDelta(accountId, accountType, delta) {
 // ─── ACCOUNTS ─────────────────────────────────────────────────
 export const accountsApi = {
   getAll: async (userId) => {
-    console.log("[accountsApi.getAll] fetching for user:", userId);
     const { data, error } = await supabase
       .from("accounts")
       .select("*")
@@ -111,7 +111,6 @@ export const accountsApi = {
       .neq("is_active", false)
       .order("sort_order", { nullsLast: true })
       .order("created_at", { ascending: false });
-    console.log("[accountsApi.getAll] result:", data?.length ?? 0, "error:", error?.message);
     if (error) throw new Error(error.message);
     return data || [];
   },
@@ -230,7 +229,6 @@ export const ledgerApi = {
     }
 
     // Auto-create/update reimburse settlements
-    const REIMBURSE_ENTITIES = ["Hamasa", "SDC", "Travelio"];
     if (safeEntry.tx_type === "reimburse_out" && REIMBURSE_ENTITIES.includes(safeEntry.entity) && data?.id) {
       // Create a new pending settlement for reimburse_out
       try {
@@ -983,26 +981,21 @@ IMPORTANT - Year detection rules:
             const stopReason = d?.stop_reason || "";
             // Log usage for token debugging
             const usage = d?.usage || {};
-            console.log(`[AI scan] pass=${_aiPass} stop_reason=${stopReason} raw_len=${raw.length} input_tokens=${usage.input_tokens} output_tokens=${usage.output_tokens}`);
-            console.log("[AI scan] raw preview:", raw.slice(0, 400));
             return { raw, stopReason };
           };
 
           // ── Mandiri 2-page extraction ────────────────────────────
           if (isMandiri) {
-            console.log("[AI scan] Mandiri format detected — running 2-page extraction");
             const { raw: mRaw1 } = await callAI(buildMandiriPrompt(1));
             const { raw: mRaw2 } = await callAI(buildMandiriPrompt(2));
             const page1 = extractJSON(mRaw1).map(normMandiri);
             const page2 = extractJSON(mRaw2).map(normMandiri);
-            console.log(`[AI scan] Mandiri page1=${page1.length} page2=${page2.length}`);
             // Deduplicate by row number
             const seen = new Set(page1.map(t => t._no).filter(Boolean));
             const merged = [
               ...page1,
               ...page2.filter(t => !t._no || !seen.has(t._no)),
             ].sort((a, b) => (a._no || 0) - (b._no || 0));
-            console.log(`[AI scan] Mandiri merged=${merged.length} transactions`);
             resolve(merged);
             return;
           }
@@ -1015,14 +1008,12 @@ IMPORTANT - Year detection rules:
           try {
             const meta = JSON.parse(raw1.replace(/^```json\s*/i,"").replace(/```\s*$/,"").trim());
             if (meta?.total_rows_in_document) {
-              console.log(`[AI scan] AI reports total_rows_in_document=${meta.total_rows_in_document}, extracted=${parsed1.length}`);
               if (meta.total_rows_in_document > parsed1.length) {
                 console.warn(`[AI scan] ⚠ Missing ${meta.total_rows_in_document - parsed1.length} rows!`);
               }
             }
           } catch {}
 
-          console.log(`[AI scan] pass 1: ${parsed1.length} transactions extracted, stop_reason=${stop1}`);
 
           // Pass 2: if output was truncated (max_tokens hit), do a second pass for remaining rows
           let allTx = parsed1;
@@ -1031,12 +1022,10 @@ IMPORTANT - Year detection rules:
             try {
               const { raw: raw2, stopReason: stop2 } = await callAI(buildPrompt(2, parsed1.length));
               const parsed2 = extractJSON(raw2);
-              console.log(`[AI scan] pass 2: ${parsed2.length} additional transactions, stop_reason=${stop2}`);
               // Deduplicate by date+amount
               const seen = new Set(parsed1.map(t => `${t.date}|${t.amount}`));
               const newRows = parsed2.filter(t => !seen.has(`${t.date}|${t.amount}`));
               allTx = [...parsed1, ...newRows];
-              console.log(`[AI scan] merged total: ${allTx.length} transactions`);
             } catch (e2) {
               console.warn("[AI scan] pass 2 failed:", e2.message);
             }

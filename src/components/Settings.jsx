@@ -2153,23 +2153,6 @@ function EStatementTab({
       notes,
     };
 
-    console.log("[estatement] Saving row:", {
-      tx_date:      payload.tx_date,
-      tx_type:      payload.tx_type,
-      amount:       payload.amount,
-      description:  payload.description,
-      from_id:      payload.from_id,
-      from_type:    payload.from_type,
-      to_id:        payload.to_id,
-      to_type:      payload.to_type,
-      category_id:  payload.category_id,
-      category_name:payload.category_name,
-      entity:       payload.entity,
-      is_reimburse: payload.is_reimburse,
-      currency:     payload.currency,
-      _raw: { category_id: r.category_id, entity: r.entity, amount: r.amount, tx_type: r.tx_type },
-    });
-
     return payload;
   };
 
@@ -2182,7 +2165,6 @@ function EStatementTab({
     try {
       const payload = buildPayload(row);
       const inserted = await ledgerApi.create(user.id, payload, accounts);
-      console.log("[estatement] Saved result:", { data: inserted, error: null });
       if (row.tx_type === "collect_loan" && (row.employee_loan_id || row.from_id)) {
         loanPaymentsApi.recordAndIncrement(user.id, {
           loanId: row.employee_loan_id || row.from_id, payDate: row.tx_date,

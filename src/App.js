@@ -237,7 +237,6 @@ function Finance({ user, signOut }) {
       safe(supabase.from("budgets").select("*").eq("user_id", user.id).then(r => r.data || []), []),
     ]);
 
-    console.log("[loadData] accounts:", acc.length, "ledger:", led.length);
 
     // Auto-create default receivable accounts on first run
     let finalAccounts = acc;
@@ -256,7 +255,6 @@ function Finance({ user, signOut }) {
           })
         ));
         finalAccounts = [...acc, ...created];
-        console.log("[loadData] created default receivables:", created.length);
       } catch (e) {
         console.warn("[loadData] failed to create default receivables:", e.message);
       }
@@ -421,7 +419,7 @@ function Finance({ user, signOut }) {
             Net Worth
           </div>
           <div style={{ fontSize: 15, fontWeight: 800, color: nwColor, marginBottom: 12, fontFamily: "Figtree, sans-serif" }}>
-            {"Rp " + Math.round(Number(netWorth.total || 0)).toLocaleString("id-ID")}
+            {fmtIDR(Math.round(Number(netWorth.total || 0)))}
           </div>
           <button onClick={signOut} style={S.signOutBtn}>Sign out</button>
           <div style={{ marginTop: 8, fontSize: 10, color: "#d1d5db" }}>

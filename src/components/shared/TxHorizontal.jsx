@@ -17,7 +17,7 @@
 //   onCreateInstallment (row) => void  — optional, estatement only
 
 import { useState, useEffect, Fragment } from "react";
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../../constants";
+import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST, REIMBURSE_ENTITIES } from "../../constants";
 import { showToast } from "./Card";
 import { supabase } from "../../lib/supabase";
 
@@ -128,7 +128,7 @@ function TabbedAcctSelect({ accounts, value, onChange, placeholder = "Select…"
   );
 }
 
-const REIMBURSE_ENTITY_NAMES = ["Hamasa", "SDC", "Travelio"];
+const REIMBURSE_ENTITY_NAMES = REIMBURSE_ENTITIES;
 
 // ── Account filter/mode per tx_type ────────────────────────────
 function getAcctCfg(txType, accounts) {
@@ -482,7 +482,7 @@ function TxHorizontalCard({
             value={r.entity || ""}
             onChange={e => onUpdate({ entity: e.target.value })}>
             <option value="">Entity…</option>
-            {["Hamasa", "SDC", "Travelio"].map(e => <option key={e} value={e}>{e}</option>)}
+            {REIMBURSE_ENTITIES.map(e => <option key={e} value={e}>{e}</option>)}
           </select>
         )}
 

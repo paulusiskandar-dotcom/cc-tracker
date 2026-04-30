@@ -11,7 +11,7 @@ import { useImportDraft } from "../lib/useImportDraft";
 import DraftBanner from "./shared/DraftBanner";
 import Modal from "./shared/Modal";
 import { detectTransferPairs } from "../lib/transferDetection";
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
+import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST, REIMBURSE_ENTITIES } from "../constants";
 
 // ── Normalise AI pseudo-types to real tx_type + category ─────────
 const PSEUDO_TYPE_MAP = {
@@ -62,7 +62,6 @@ const applyKeywordRules = (desc, amount) => {
 
 const NO_CAT          = new Set(["transfer","pay_cc","reimburse_out","reimburse_in","give_loan","collect_loan","fx_exchange"]);
 const REIMBURSE_TYPES = new Set(["reimburse_out","reimburse_in"]);
-const REIMBURSE_ENTITIES = ["Hamasa", "SDC", "Travelio"];
 const INCOME_TYPES    = new Set(["income","collect_loan","reimburse_in"]);
 
 const getCatOptions = (txType) => INCOME_TYPES.has(txType) ? INCOME_CATEGORIES_LIST : EXPENSE_CATEGORIES;
@@ -353,9 +352,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       const bankAcc  = defaultAccountId ? spendAccounts.find(a => a.id === defaultAccountId) : null;
       const bankHint = bankAcc?.bank_name || bankAcc?.name || "";
       const parsed = await scanApi.scan(user.id, file, { accounts, bankHint });
-      console.log(`[AIImport] total transactions from AI: ${parsed.length}`);
       const items  = enrichTransfers(buildRows(parsed, defaultAccountId).map(r => ({ ...r, _sourceFile: file.name })));
-      console.log(`[AIImport] after buildRows: ${items.length} rows`);
 
       // 4. Save results to DB
       if (newBatchId) {
@@ -422,14 +419,12 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       const bankAccR  = defaultAccountId ? spendAccounts.find(a => a.id === defaultAccountId) : null;
       const bankHintR = bankAccR?.bank_name || bankAccR?.name || "";
       const parsed = await scanApi.scan(user.id, file, { accounts, bankHint: bankHintR });
-      console.log(`[AIImport refresh] total transactions from AI: ${parsed.length}`);
       let items = buildRows(parsed, defaultAccountId);
       // Filter out previously skipped rows (by fingerprint)
       if (skippedFPs.size > 0) {
         items = items.filter(r => !skippedFPs.has(`${r.tx_date}|${r.amount_idr}|${(r.description || "").toLowerCase().trim()}`));
       }
       items = enrichTransfers(items);
-      console.log(`[AIImport refresh] after buildRows+skip filter: ${items.length} rows`);
       if (batchId) scanApi.updateBatch(batchId, { ai_raw_result: parsed, total_detected: items.length, processed_at: new Date().toISOString() }).catch(() => {});
       setResults(items);
       const sel = {};

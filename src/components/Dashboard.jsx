@@ -82,7 +82,7 @@ function ReconcileStatusWidget({ user, accounts }) {
 
 // ── Recurring Suggestions widget ──────────────────────────────
 const REC_FF   = "Figtree, sans-serif";
-const recFmtAmt = n => "Rp " + Math.round(n).toLocaleString("id-ID");
+const recFmtAmt = n => fmtIDR(Math.round(n));
 
 function RecurringSuggestionsWidget({ user, ledger, recurringTemplates, onCreated }) {
   const [dismissed, setDismissed] = useState(() => {

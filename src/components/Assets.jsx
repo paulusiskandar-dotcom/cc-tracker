@@ -58,15 +58,12 @@ function AssetHistory({ asset, ledger, accounts }) {
       .eq("account_id", asset.id)
       .order("date", { ascending: false })
       .then(({ data, error }) => {
-        console.log("[AssetHistory] account_id:", asset.id);
-        console.log("[AssetHistory] asset_value_history rows:", data, "error:", error);
         setValueHistory(data || []);
         setLoading(false);
       });
   }, [asset?.id]);
 
   const txEntries = ledger.filter(e => e.from_id === asset.id || e.to_id === asset.id);
-  console.log("[AssetHistory] ledger tx entries:", txEntries.length);
 
   // Merge: value history rows + ledger tx rows, sorted by date desc
   const allRows = [
@@ -421,7 +418,6 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
         console.error("[handleUpdateValue] asset_value_history insert failed:", histErr);
         throw new Error(histErr.message);
       }
-      console.log("[handleUpdateValue] history saved:", histRow);
 
       setValueHistoryCounts(prev => ({ ...prev, [accountId]: (prev[accountId] || 0) + 1 }));
       setAccounts(prev => prev.map(a => a.id === accountId ? { ...a, current_value: newVal } : a));

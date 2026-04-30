@@ -3,7 +3,7 @@
  * Used by both Transactions page (add + edit) and BankStatement (edit only).
  */
 import { useState } from "react";
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST, ENTITIES } from "../../constants";
+import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST, ENTITIES, REIMBURSE_ENTITIES } from "../../constants";
 import { fmtIDR, todayStr } from "../../utils";
 import Input, { Field, AmountInput, FormRow } from "./Input";
 import Select from "./Select";
@@ -403,7 +403,7 @@ export function TxForm({ form, set, fromOptions, toOptions, accounts, categories
   const needsCat    = ["expense", "income"].includes(type);
   const needsEntity = ["reimburse_out", "reimburse_in"].includes(type);
 
-  const ENTITY_OPTS = ["Hamasa", "SDC", "Travelio"];
+  const ENTITY_OPTS = REIMBURSE_ENTITIES;
 
   const pillStyle = (active, activeColor = "#111827") => ({
     flex: 1, height: 36, borderRadius: 8, border: "1.5px solid",

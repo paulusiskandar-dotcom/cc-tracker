@@ -21,6 +21,7 @@ export const CURRENCIES = [
 
 // ─── ENTITIES ─────────────────────────────────────────────────
 export const ENTITIES = ["Personal", "Hamasa", "SDC", "Travelio"];
+export const REIMBURSE_ENTITIES = ["Hamasa", "SDC", "Travelio"];
 
 // ─── ACCOUNT TYPES ────────────────────────────────────────────
 export const ACC_TYPES = {

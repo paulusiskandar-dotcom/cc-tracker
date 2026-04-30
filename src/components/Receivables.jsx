@@ -10,6 +10,7 @@ import {
   Select,
   EmptyState, showToast,
 } from "./shared/index";
+import { REIMBURSE_ENTITIES } from "../constants";
 import TxVerticalBig from "./shared/TxVerticalBig";
 
 // ─── PROGRESS BAR ─────────────────────────────────────────────
@@ -28,7 +29,7 @@ const SUBTABS = [
   { id: "history",   label: "History"        },
 ];
 
-const ENTITY_CHOICES = ["Hamasa", "SDC", "Travelio"];
+const ENTITY_CHOICES = REIMBURSE_ENTITIES;
 
 const EMPTY_LOAN = {
   employee_name: "", employee_dept: "",
