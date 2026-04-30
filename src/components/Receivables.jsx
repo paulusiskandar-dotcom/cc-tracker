@@ -912,7 +912,9 @@ export default function Receivables({
                         </div>
                         {entitySettlements.map(s => {
                           const isExpanded = expandedSett.has(s.id);
-                          const date = new Date(s.settled_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                          const date = s.settled_at
+                            ? new Date(s.settled_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                            : "Pending";
                           const outLedger = ledger.filter(e => (s.out_ledger_ids || []).includes(e.id));
                           const inLedger  = ledger.filter(e => (s.in_ledger_ids  || []).includes(e.id));
                           const re = Number(s.reimbursable_expense || 0);
