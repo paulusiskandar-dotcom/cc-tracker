@@ -514,7 +514,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
     const zeroSkipped = rows.length - validRows.length;
     if (!validRows.length) return showToast("All selected rows have missing amounts — edit them first", "warning");
     setImporting(true);
-    let ok = 0;
+    let ok = 0, failed = 0;
     const newLedgerIds = [];
     for (const r of validRows) {
       try {
@@ -538,7 +538,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
             }).catch(e => console.error("[cicilan import]", e));
           }
         }
-      } catch { /* continue */ }
+      } catch (e) { failed++; console.error("[importSelected] row failed:", r.description, e); }
     }
     // Mark all as skipped (remove from view)
     const importedIds = new Set(validRows.map(r => r._id));
@@ -552,7 +552,8 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
     }
     await onRefresh();
     const skipNote = zeroSkipped > 0 ? `. ${zeroSkipped} skipped (amount = 0)` : "";
-    showToast(`Imported ${ok} of ${rows.length} entries${skipNote}`);
+    const failNote = failed > 0 ? `. ${failed} failed` : "";
+    showToast(`Imported ${ok} of ${rows.length} entries${skipNote}${failNote}`, failed > 0 ? "warning" : undefined);
     if (newLedgerIds.length) undoManager.register({ type: "save_batch", ids: newLedgerIds, label: `Saved ${newLedgerIds.length} transaction${newLedgerIds.length !== 1 ? "s" : ""}` });
     setImporting(false);
   };
