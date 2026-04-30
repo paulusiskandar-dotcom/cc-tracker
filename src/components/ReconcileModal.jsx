@@ -635,12 +635,14 @@ export default function ReconcileModal({
 
   const confirmMissingAll = async (validRows) => {
     setMissingImporting(true);
-    let ok = 0;
-    for (const r of validRows) {
-      try {
+    let ok = 0, failed = 0;
+    const CHUNK_SIZE = 5;
+    for (let i = 0; i < validRows.length; i += CHUNK_SIZE) {
+      const chunk = validRows.slice(i, i + CHUNK_SIZE);
+      const results = await Promise.allSettled(chunk.map(async (r) => {
         const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
         if (created) {
-          setLedger?.(prev => [created, ...prev]); ok++;
+          setLedger?.(prev => [created, ...prev]);
           if (r._cicilan && r._cicilanMonths >= 2) {
             installmentsApi.createFromImport(user.id, {
               ledgerId: created.id, description: r.description || "", accountId: r.from_id,
@@ -650,10 +652,16 @@ export default function ReconcileModal({
             }).catch(e => console.error("[cicilan reconcile]", e));
           }
         }
-      } catch { /* continue */ }
+        return created;
+      }));
+      results.forEach((res, idx) => {
+        if (res.status === "fulfilled" && res.value) { ok++; }
+        else { failed++; console.error("[confirmMissingAll]", chunk[idx], res.reason); }
+      });
     }
     if (ok > 0) refetchLedger();
-    showToast(`Imported ${ok} of ${validRows.length} transactions`);
+    const failNote = failed > 0 ? `, ${failed} failed` : "";
+    showToast(`Imported ${ok} of ${validRows.length} transactions${failNote}`, failed > 0 ? "warning" : undefined);
     setMissingImporting(false);
   };
 
