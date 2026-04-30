@@ -219,7 +219,7 @@ function Finance({ user, signOut }) {
 
     const [acc, led, cats, inc, inst, rtempl, rem, merch, fx, dark, pending, loans, payments, accs, reimburse, recon, bdg] = await Promise.all([
       safe(accountsApi.getAll(user.id),                      []),
-      safe(ledgerApi.getAll(user.id, { limit: 500 }),        []),
+      safe(ledgerApi.getAll(user.id, { limit: 10000 }),       []),
       safe(categoriesApi.getAll(user.id),                    []),
       safe(incomeSrcApi.getAll(user.id),                     []),
       safe(installmentsApi.getAll(user.id),                  []),

@@ -174,6 +174,7 @@ export const ledgerApi = {
     if (filters.entity)    q = q.eq("entity", filters.entity);
     if (filters.accountId) q = q.or(`from_id.eq.${filters.accountId},to_id.eq.${filters.accountId}`);
     if (filters.search)    q = q.ilike("description", `%${filters.search}%`);
+    // TODO: implement cursor pagination when ledger exceeds 10k entries
     if (filters.limit)     q = q.limit(filters.limit);
 
     const { data, error } = await q;
@@ -232,39 +233,42 @@ export const ledgerApi = {
     const REIMBURSE_ENTITIES = ["Hamasa", "SDC", "Travelio"];
     if (safeEntry.tx_type === "reimburse_out" && REIMBURSE_ENTITIES.includes(safeEntry.entity) && data?.id) {
       // Create a new pending settlement for reimburse_out
-      supabase.from("reimburse_settlements").insert([{
-        user_id:              userId,
-        entity:               safeEntry.entity,
-        status:               "pending",
-        total_out:            amount,
-        out_ledger_ids:       [data.id],
-        in_ledger_ids:        [],
-        total_in:             0,
-        reimbursable_expense: amount,
-        settled_at:           null,
-      }]).then(null, (e) => console.error("[reimburse_settlements]", e));
+      try {
+        const { error: settlErr } = await supabase.from("reimburse_settlements").insert([{
+          user_id:              userId,
+          entity:               safeEntry.entity,
+          status:               "pending",
+          total_out:            amount,
+          out_ledger_ids:       [data.id],
+          in_ledger_ids:        [],
+          total_in:             0,
+          reimbursable_expense: amount,
+          settled_at:           null,
+        }]);
+        if (settlErr) console.error("[ledgerApi.create] settlement insert failed:", settlErr);
+      } catch (e) {
+        console.error("[ledgerApi.create] settlement insert exception:", e);
+      }
     }
     if (safeEntry.tx_type === "reimburse_in" && REIMBURSE_ENTITIES.includes(safeEntry.entity) && data?.id) {
       // Find pending settlement for same entity, update total_in
-      (async () => {
-        try {
-          const { data: pending } = await supabase.from("reimburse_settlements")
-            .select("*").eq("user_id", userId).eq("entity", safeEntry.entity)
-            .eq("status", "pending").order("created_at", { ascending: false }).limit(1).single();
-          if (pending) {
-            const newTotalIn = Number(pending.total_in || 0) + amount;
-            const newInIds = [...(pending.in_ledger_ids || []), data.id];
-            const isSettled = newTotalIn >= Number(pending.total_out || 0);
-            await supabase.from("reimburse_settlements").update({
-              total_in:      newTotalIn,
-              in_ledger_ids: newInIds,
-              ...(isSettled ? { status: "settled", settled_at: new Date().toISOString() } : {}),
-            }).eq("id", pending.id);
-            // Link the ledger entry to the settlement
-            await supabase.from("ledger").update({ reimburse_settlement_id: pending.id }).eq("id", data.id);
-          }
-        } catch (e) { console.error("[reimburse_settlements reimburse_in]", e); }
-      })();
+      try {
+        const { data: pending } = await supabase.from("reimburse_settlements")
+          .select("*").eq("user_id", userId).eq("entity", safeEntry.entity)
+          .eq("status", "pending").order("created_at", { ascending: false }).limit(1).single();
+        if (pending) {
+          const newTotalIn = Number(pending.total_in || 0) + amount;
+          const newInIds = [...(pending.in_ledger_ids || []), data.id];
+          const isSettled = newTotalIn >= Number(pending.total_out || 0);
+          await supabase.from("reimburse_settlements").update({
+            total_in:      newTotalIn,
+            in_ledger_ids: newInIds,
+            ...(isSettled ? { status: "settled", settled_at: new Date().toISOString() } : {}),
+          }).eq("id", pending.id);
+          // Link the ledger entry to the settlement
+          await supabase.from("ledger").update({ reimburse_settlement_id: pending.id }).eq("id", data.id);
+        }
+      } catch (e) { console.error("[ledgerApi.create] settlement reimburse_in exception:", e); }
     }
 
     return data;
@@ -313,8 +317,11 @@ export const recalculateBalance = async (accountId, userId) => {
     .select("amount_idr, from_id, from_type, to_id, to_type")
     .eq("user_id", userId)
     .or(`from_id.eq.${accountId},to_id.eq.${accountId}`);
+  const accType = acc?.type;
+  const field   = balField(accType);
+  if (!field) return null; // unknown type — nothing to write
   let balance = Number(acc?.initial_balance || 0);
-  const isCC  = acc?.type === "credit_card";
+  const isCC  = accType === "credit_card";
   for (const tx of (txns || [])) {
     const amt = Number(tx.amount_idr || 0);
     if (isCC) {
@@ -322,12 +329,12 @@ export const recalculateBalance = async (accountId, userId) => {
       if (tx.from_id === accountId && tx.from_type === "account") balance += amt;
       if (tx.to_id   === accountId && tx.to_type   === "account") balance -= amt;
     } else {
-      // Bank/cash/receivable: incoming credits add; outgoing debits subtract
+      // Bank/cash/receivable/asset/liability: incoming credits add; outgoing debits subtract
       if (tx.to_id   === accountId && tx.to_type   === "account") balance += amt;
       if (tx.from_id === accountId && tx.from_type === "account") balance -= amt;
     }
   }
-  await supabase.from("accounts").update({ current_balance: balance }).eq("id", accountId);
+  await supabase.from("accounts").update({ [field]: balance }).eq("id", accountId);
   return balance;
 };
 
