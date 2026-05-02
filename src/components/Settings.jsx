@@ -1681,7 +1681,7 @@ function EStatementTab({
     (async () => {
       setDbLoading(true);
       const thirtyDaysAgo = new Date(Date.now() - 30 * 86400000).toISOString();
-      const [{ data: pending }, { data: done }, { data: acCur }] = await Promise.all([
+      const [{ data: pending }, { data: done }] = await Promise.all([
         supabase.from("estatement_pdfs").select("*")
           .eq("user_id", user.id).in("status", ["queued", "failed", "extracted"])
           .order("created_at", { ascending: false }),
@@ -1689,18 +1689,14 @@ function EStatementTab({
           .eq("user_id", user.id).eq("status", "done")
           .gte("processed_at", thirtyDaysAgo)
           .order("processed_at", { ascending: false }),
-        supabase.from("account_currencies").select("account_id, currency")
-          .eq("user_id", user.id),
       ]);
-      const fetchedAcctCurrencies = acCur || [];
-      if (fetchedAcctCurrencies.length) setAcctCurrencies(fetchedAcctCurrencies);
       if (pending) {
         setQueue(pending.map(r => {
           const isExtracted = r.status === "extracted" && r.ai_raw_result;
           const rawTxs = isExtracted
             ? (Array.isArray(r.ai_raw_result) ? r.ai_raw_result : r.ai_raw_result?.transactions || [])
             : [];
-          const rawRows = isExtracted ? buildRows(rawTxs, r.account_id || "", fetchedAcctCurrencies) : null;
+          const rawRows = isExtracted ? buildRows(rawTxs, r.account_id || "", []) : null;
           const rows = rawRows ? enrichTransfers(rawRows) : null;
           const sel = {};
           if (rows) rows.forEach(row => { sel[row._id] = row.status !== "duplicate"; });
