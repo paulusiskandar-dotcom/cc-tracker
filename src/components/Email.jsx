@@ -55,7 +55,7 @@ const SETUP_STEPS = [
 ];
 
 export default function Email({
-  user, accounts, categories, ledger, setLedger,
+  user, accounts, setAccounts, categories, ledger, setLedger,
   pendingSyncs, setPendingSyncs,
   dark, onRefresh,
   employeeLoans = [],
@@ -70,6 +70,7 @@ export default function Email({
   // ── Email Sync state ────────────────────────────────────────────
   const [gmailToken,    setGmailToken]    = useState(null);
   const [gmailLoaded,   setGmailLoaded]   = useState(false);
+  const [needsReconnect, setNeedsReconnect] = useState(false);
   const [clientId,      setClientId]      = useState("");
   const [syncingNow,    setSyncingNow]    = useState(false);
   const [syncLog,       setSyncLog]       = useState([]);
@@ -87,6 +88,7 @@ export default function Email({
     try {
       const t = await gmailApi.getToken(user.id);
       setGmailToken(t);
+      setNeedsReconnect(t?.needs_reconnect || false);
       const log = await settingsApi.get(user.id, "gmail_sync_log", []);
       setSyncLog(Array.isArray(log) ? log : []);
     } catch { /* table may not exist */ }
@@ -107,7 +109,7 @@ export default function Email({
       if (!popup || popup.closed) {
         clearInterval(poll);
         const t = await gmailApi.getToken(user.id).catch(() => null);
-        if (t) { setGmailToken(t); showToast("Gmail connected!"); }
+        if (t) { setGmailToken(t); setNeedsReconnect(t.needs_reconnect || false); showToast("Gmail connected!"); }
         else showToast("Connection incomplete — try again", "error");
       }
     }, 1000);
@@ -198,6 +200,7 @@ export default function Email({
           pendingSyncs={pendingSyncs}
           setPendingSyncs={setPendingSyncs}
           accounts={accounts}
+          setAccounts={setAccounts}
           categories={categories}
           user={user}
           ledger={ledger}
@@ -214,9 +217,29 @@ export default function Email({
       {tab === "sync" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
 
+          {/* Reconnect banner — shown when refresh_token is invalid */}
+          {needsReconnect && (
+            <div style={{
+              background: "#FCEBEB", border: "1px solid #F7C1C1", borderRadius: 10,
+              padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center",
+            }}>
+              <span style={{ fontSize: 12, color: "#791F1F", fontWeight: 500 }}>
+                Gmail authentication expired. Auto-sync has stopped.
+              </span>
+              <button onClick={connectGmail}
+                style={{
+                  fontSize: 11, fontWeight: 700, padding: "5px 12px", borderRadius: 6,
+                  border: "none", background: "#A32D2D", color: "#fff", cursor: "pointer",
+                  fontFamily: "Figtree, sans-serif", flexShrink: 0, marginLeft: 12,
+                }}>
+                Reconnect Gmail
+              </button>
+            </div>
+          )}
+
           {/* Status card */}
-          <div style={{ ...card, borderColor: gmailToken ? "#059669" : T.border }}>
-            <SectionHeader title={gmailToken ? "✅ Gmail Connected" : "📧 Gmail Not Connected"} />
+          <div style={{ ...card, borderColor: gmailToken ? (needsReconnect ? "#DC2626" : "#059669") : T.border }}>
+            <SectionHeader title={gmailToken ? (needsReconnect ? "⚠ Gmail Auth Expired" : "✅ Gmail Connected") : "📧 Gmail Not Connected"} />
             {gmailToken ? (
               <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{gmailToken.gmail_email || user?.email}</div>
@@ -366,7 +389,7 @@ export default function Email({
 // ─── EMAIL PENDING TAB ────────────────────────────────────────────
 const GMAIL_NO_CAT = new Set(["transfer","pay_cc","give_loan","collect_loan","fx_exchange","reimburse_in","reimburse_out","buy_asset","sell_asset","pay_liability"]);
 
-function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, user, ledger, setLedger, onRefresh, dark, T: theme, employeeLoans = [], merchantMaps = [] }) {
+function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, setAccounts, categories, user, ledger, setLedger, onRefresh, dark, T: theme, employeeLoans = [], merchantMaps = [] }) {
   const T = theme || LIGHT;
 
   // Local editable rows (mirrors pendingSyncs but editable)
@@ -644,6 +667,8 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
           T={T}
           busy={importing}
           onMergeTransfer={handleMergeTransfer}
+          onAccountCreated={newAcct => setAccounts?.(prev => [...prev, newAcct])}
+          user={user}
         />
       )}
 

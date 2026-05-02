@@ -20,6 +20,7 @@ import { useState, useEffect, Fragment } from "react";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST, REIMBURSE_ENTITIES } from "../../constants";
 import { showToast } from "./Card";
 import { supabase } from "../../lib/supabase";
+import AddNewPicker from "./AddNewPicker";
 
 // ── TX Types (13 total) ─────────────────────────────────────────
 export const TX_HORIZONTAL_TYPES = [
@@ -224,12 +225,14 @@ const BADGE = (bg, color) => ({
 
 // ─── COLLECT LOAN CELL ──────────────────────────────────────────
 // Separate component so useEffect can be called unconditionally (React hook rules)
-function CollectLoanCell({ r, onUpdate, T, accounts, employeeLoans }) {
+function CollectLoanCell({ r, onUpdate, T, accounts, employeeLoans, onAccountCreated, user }) {
   const activeLoans = (employeeLoans || []).filter(l => {
     const s = (l.status || "active").toLowerCase();
     return s === "active" || s === "partial";
   });
   const bc = accounts.filter(a => ["bank", "cash"].includes(a.type));
+  // Also offer receivable accounts as borrowers (the accounts-based approach)
+  const receivableAccts = accounts.filter(a => a.type === "receivable" && !REIMBURSE_ENTITY_NAMES.includes(a.name));
 
   // Auto-detect borrower from description on first render
   useEffect(() => {
@@ -241,22 +244,33 @@ function CollectLoanCell({ r, onUpdate, T, accounts, employeeLoans }) {
     if (match) onUpdate({ employee_loan_id: match.id, from_id: match.id });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Build combined options: employee_loans + receivable accounts
+  const borrowerOptions = [
+    ...activeLoans.map(l => ({
+      id:   l.id,
+      name: `${l.employee_name} (${fmtAmt(Math.max(0, Number(l.total_amount || 0) - Number(l.paid_months || 0) * Number(l.monthly_installment || 0)))})`,
+    })),
+    ...receivableAccts.filter(a => !activeLoans.some(l => l.id === a.id)).map(a => ({
+      id:   a.id,
+      name: a.name,
+    })),
+  ];
+
   return (
     <div style={{ display: "flex", gap: 4, alignItems: "flex-start" }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <select style={{ ...inSel(T), width: "100%" }}
-          value={r.employee_loan_id || ""}
-          onChange={e => onUpdate({ employee_loan_id: e.target.value, from_id: e.target.value })}>
-          <option value="">Borrower…</option>
-          {activeLoans.map(l => {
-            const outstanding = Math.max(0, Number(l.total_amount || 0) - Number(l.paid_months || 0) * Number(l.monthly_installment || 0));
-            return (
-              <option key={l.id} value={l.id}>
-                {l.employee_name} ({fmtAmt(outstanding)})
-              </option>
-            );
-          })}
-        </select>
+        <AddNewPicker
+          kind="receivable"
+          value={r.employee_loan_id || r.from_id || ""}
+          onChange={v => onUpdate({ employee_loan_id: v, from_id: v })}
+          options={borrowerOptions}
+          onItemCreated={newAcct => onAccountCreated?.(newAcct)}
+          user={user}
+          defaultAmount={Number(r.amount_idr || r.amount || 0) || undefined}
+          placeholder="Borrower…"
+          style={{ width: "100%" }}
+          T={T}
+        />
       </div>
       <span style={{ fontSize: 10, color: T.text3, flexShrink: 0 }}>→</span>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -274,12 +288,117 @@ function CollectLoanCell({ r, onUpdate, T, accounts, employeeLoans }) {
 }
 
 // ─── ACCOUNT CELL ───────────────────────────────────────────────
-function AccountCell({ r, onUpdate, T, accounts, employeeLoans }) {
+function AccountCell({ r, onUpdate, T, accounts, employeeLoans, onAccountCreated, user }) {
   const cfg = getAcctCfg(r.tx_type, accounts);
 
   // ── collect_loan: rendered by dedicated component to satisfy hook rules ──
   if (r.tx_type === "collect_loan") {
-    return <CollectLoanCell r={r} onUpdate={onUpdate} T={T} accounts={accounts} employeeLoans={employeeLoans} />;
+    return (
+      <CollectLoanCell
+        r={r} onUpdate={onUpdate} T={T}
+        accounts={accounts} employeeLoans={employeeLoans}
+        onAccountCreated={onAccountCreated} user={user}
+      />
+    );
+  }
+
+  // ── give_loan: from bank → to receivable (Add New Borrower) ──
+  if (r.tx_type === "give_loan" && cfg.mode === "from_to") {
+    return (
+      <div style={{ display: "flex", gap: 4, alignItems: "flex-start" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <TabbedAcctSelect
+            accounts={cfg.from}
+            value={r.from_id || ""}
+            onChange={v => onUpdate({ from_id: v })}
+            placeholder="From…"
+            showLast4
+            T={T}
+          />
+        </div>
+        <span style={{ fontSize: 10, color: T.text3, flexShrink: 0 }}>→</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <AddNewPicker
+            kind="receivable"
+            value={r.to_id || ""}
+            onChange={v => onUpdate({ to_id: v })}
+            options={cfg.to.map(a => ({ id: a.id, name: a.name }))}
+            onItemCreated={newAcct => onAccountCreated?.(newAcct)}
+            user={user}
+            defaultAmount={Number(r.amount_idr || r.amount || 0) || undefined}
+            placeholder="To Borrower…"
+            style={{ width: "100%" }}
+            T={T}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // ── buy_asset: from bank → to asset (Add New Asset) ──
+  if (r.tx_type === "buy_asset" && cfg.mode === "from_to") {
+    return (
+      <div style={{ display: "flex", gap: 4, alignItems: "flex-start" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <TabbedAcctSelect
+            accounts={cfg.from}
+            value={r.from_id || ""}
+            onChange={v => onUpdate({ from_id: v })}
+            placeholder="From…"
+            showLast4
+            T={T}
+          />
+        </div>
+        <span style={{ fontSize: 10, color: T.text3, flexShrink: 0 }}>→</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <AddNewPicker
+            kind="asset"
+            value={r.to_id || ""}
+            onChange={v => onUpdate({ to_id: v })}
+            options={cfg.to.map(a => ({ id: a.id, name: a.name }))}
+            onItemCreated={newAcct => onAccountCreated?.(newAcct)}
+            user={user}
+            defaultAmount={Number(r.amount_idr || r.amount || 0) || undefined}
+            placeholder="To Asset…"
+            style={{ width: "100%" }}
+            T={T}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // ── sell_asset: from asset (Add New Asset) → to bank ──
+  if (r.tx_type === "sell_asset" && cfg.mode === "from_to") {
+    return (
+      <div style={{ display: "flex", gap: 4, alignItems: "flex-start" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <AddNewPicker
+            kind="asset"
+            value={r.from_id || ""}
+            onChange={v => onUpdate({ from_id: v })}
+            options={cfg.from.map(a => ({ id: a.id, name: a.name }))}
+            onItemCreated={newAcct => onAccountCreated?.(newAcct)}
+            user={user}
+            defaultAmount={Number(r.amount_idr || r.amount || 0) || undefined}
+            placeholder="From Asset…"
+            style={{ width: "100%" }}
+            T={T}
+          />
+        </div>
+        <span style={{ fontSize: 10, color: T.text3, flexShrink: 0 }}>→</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <TabbedAcctSelect
+            accounts={cfg.to}
+            value={r.to_id || ""}
+            onChange={v => onUpdate({ to_id: v })}
+            placeholder="To…"
+            showLast4
+            T={T}
+          />
+        </div>
+      </div>
+    );
   }
 
   if (cfg.mode === "to") return (
@@ -337,6 +456,7 @@ function TxHorizontalCard({
   source, accounts, employeeLoans, txTypes,
   onUpdate, onConfirm, onSkip, onToggleSelect, onToggleNotes,
   onCreateInstallment, confirmingId, onMergeTransfer,
+  onAccountCreated, user,
 }) {
   const [validErr, setValidErr] = useState(null);
   const [dupDismissed, setDupDismissed] = useState(false);
@@ -504,7 +624,11 @@ function TxHorizontalCard({
 
         {/* Account cell — TabbedAcctSelect renders [B][C][CC] tabs inline */}
         <div style={{ flex: 1, minWidth: 120, overflow: "hidden" }}>
-          <AccountCell r={r} onUpdate={onUpdate} T={T} accounts={accounts} employeeLoans={employeeLoans} />
+          <AccountCell
+            r={r} onUpdate={onUpdate} T={T}
+            accounts={accounts} employeeLoans={employeeLoans}
+            onAccountCreated={onAccountCreated} user={user}
+          />
         </div>
       </div>
 
@@ -667,6 +791,8 @@ export default function TxHorizontal({
   onCreateInstallment,
   onMergeTransfer,
   hideBatchFooter = false,
+  onAccountCreated,
+  user,
 }) {
   const [notesOpen,    setNotesOpen]    = useState(new Set());
   const [confirmingId, setConfirmingId] = useState(null);
@@ -911,6 +1037,8 @@ export default function TxHorizontal({
                     onCreateInstallment={onCreateInstallment}
                     onMergeTransfer={onMergeTransfer}
                     confirmingId={confirmingId}
+                    onAccountCreated={onAccountCreated}
+                    user={user}
                   />
                 </Fragment>
               );

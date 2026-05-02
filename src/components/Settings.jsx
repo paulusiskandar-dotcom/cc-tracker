@@ -757,7 +757,7 @@ export default function Settings({
       {subTab === "estatement" && (
         <EStatementTab
           T={T} card={card} user={user}
-          accounts={accounts} categories={categories} ledger={ledger}
+          accounts={accounts} setAccounts={setAccounts} categories={categories} ledger={ledger}
           installments={installments} setInstallments={setInstallments}
           employeeLoans={employeeLoans}
           fxRates={fxRates}
@@ -1639,7 +1639,7 @@ const ESTMT_NO_CAT = new Set([
 // ─── E-STATEMENT TAB ─────────────────────────────────────────
 function EStatementTab({
   T, card, user,
-  accounts, categories = [], ledger, installments = [], setInstallments,
+  accounts, setAccounts, categories = [], ledger, installments = [], setInstallments,
   employeeLoans = [],
   fxRates = {},
   merchantMaps = [],
@@ -2395,6 +2395,7 @@ function EStatementTab({
               user={user}
               T={T} card={card}
               accounts={accounts}
+              setAccounts={setAccounts}
               employeeLoans={employeeLoans}
               onProcess={() => processFile(item.id)}
               onSetAccount={(accountId) => setItemAccount(item.id, accountId)}
@@ -2485,7 +2486,7 @@ const OUTLINE_BTN = {
 
 // ─── QUEUE FILE ITEM (card wrapper + preview) ─────────────────
 function EStmtQueueItem({
-  item, user, T, card, accounts, employeeLoans = [],
+  item, user, T, card, accounts, setAccounts, employeeLoans = [],
   onProcess, onSetAccount, onSetCurrency,
   onUpdateRow, onToggleSel, onToggleAll,
   onSave, onSaveRow, onSkipRow, onMergeTransfer, onCreateInstallment, onRemove,
@@ -2692,6 +2693,8 @@ function EStmtQueueItem({
                     T={T}
                     onCreateInstallment={(row) => onCreateInstallment(row)}
                     onMergeTransfer={onMergeTransfer}
+                    onAccountCreated={newAcct => setAccounts?.(prev => [...prev, newAcct])}
+                    user={user}
                   />
                 </div>
               )}

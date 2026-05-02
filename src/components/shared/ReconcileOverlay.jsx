@@ -651,7 +651,7 @@ function buildRow(stmtRow, currentAccountId, merchantMapsArg = []) {
   };
 }
 
-export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans, user, onRefresh, onClose }) {
+export function ReconcileAddPanel({ stmtRow, reconcile, accounts, setAccounts, employeeLoans, user, onRefresh, onClose }) {
   const T = LIGHT;
   const [rows, setRows] = useState(() => [buildRow(stmtRow, reconcile.currentAccountId, reconcile.merchantMaps || [])]);
   const [selected, setSelected] = useState(() => {
@@ -784,13 +784,15 @@ export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans,
         employeeLoans={employeeLoans || []}
         T={T}
         onMergeTransfer={() => reconcile.mergeTransferPair?.(stmtRow._id)}
+        onAccountCreated={newAcct => setAccounts?.(prev => [...prev, newAcct])}
+        user={user}
       />
     </div>
   );
 }
 
 // ── Inline missing row with accordion add panel ───────────────
-export function ReconcileMissingRowInline({ missingRow, reconcile, accounts, employeeLoans, user, onRefresh, COLS, ROW_PAD, FF: FF_PROP }) {
+export function ReconcileMissingRowInline({ missingRow, reconcile, accounts, setAccounts, employeeLoans, user, onRefresh, COLS, ROW_PAD, FF: FF_PROP }) {
   const expanded = reconcile.expandedIds.has(missingRow._id);
   const [dupDismissed, setDupDismissed] = useState(false);
   const FF_USED = FF_PROP || FF;
@@ -856,6 +858,7 @@ export function ReconcileMissingRowInline({ missingRow, reconcile, accounts, emp
           stmtRow={missingRow}
           reconcile={reconcile}
           accounts={accounts}
+          setAccounts={setAccounts}
           employeeLoans={employeeLoans}
           user={user}
           onRefresh={onRefresh}

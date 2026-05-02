@@ -72,7 +72,7 @@ const fmtDateShort = (d) => {
 };
 
 // ─────────────────────────────────────────────────────────────────
-export default function AIImport({ user, accounts, categories = [], ledger, onRefresh, setLedger, dark, merchantMaps = [], fxRates = {}, CURRENCIES = [], setPendingSyncs, employeeLoans = [] }) {
+export default function AIImport({ user, accounts, setAccounts, categories = [], ledger, onRefresh, setLedger, dark, merchantMaps = [], fxRates = {}, CURRENCIES = [], setPendingSyncs, employeeLoans = [] }) {
   const T = dark ? DARK : LIGHT;
   const fileRef = useRef();
 
@@ -756,6 +756,8 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
             retrySonnet={retrySonnet}
             onClearAll={handleClearAll}
             onMergeTransfer={handleMergeTransfer}
+            onAccountCreated={newAcct => setAccounts?.(prev => [...prev, newAcct])}
+            user={user}
           />}
         </div>
       )}
