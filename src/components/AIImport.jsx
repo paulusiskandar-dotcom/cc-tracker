@@ -467,15 +467,20 @@ export default function AIImport({ user, accounts, setAccounts, categories = [],
     const fxRate  = isFX ? (Number(r.fx_rate) || 1) : 1;
     const amtOrig = Number(r.amount) || 0;
     const amtIDR  = isFX ? (Number(r.amount_idr) || Math.round(amtOrig * fxRate)) : amtOrig;
-    // collect_loan: from_id holds employee_loan_id; ledger from_id is null
+    // collect_loan: employee_loan_id may be an integer (employee_loans table) or UUID (accounts table)
     if (r.tx_type === "collect_loan") {
+      const loanRef   = r.employee_loan_id || r.from_id || null;
+      const isAcctUUID = loanRef && loanRef.includes("-"); // UUIDs have dashes; integer IDs don't
       return {
         tx_date: r.tx_date, description: r.description,
         amount: amtOrig, currency: r.currency || "IDR",
         fx_rate_used: isFX ? fxRate : null, amount_idr: amtIDR,
-        tx_type: "collect_loan", from_type: "employee_loan", to_type: "account",
-        from_id: null, to_id: r.to_id || null,
-        employee_loan_id: r.employee_loan_id || r.from_id || null,
+        tx_type: "collect_loan",
+        from_type: isAcctUUID ? "account" : "employee_loan",
+        to_type: "account",
+        from_id: isAcctUUID ? loanRef : null,
+        to_id: r.to_id || null,
+        employee_loan_id: isAcctUUID ? null : loanRef,
         entity: "Personal", category_id: null, category_name: null,
         notes: r.notes || "", source: "ai_scan", scan_batch_id: batchId || null,
       };
@@ -517,9 +522,11 @@ export default function AIImport({ user, accounts, setAccounts, categories = [],
         if (created) {
           if (created.id) newLedgerIds.push(created.id);
           setLedger(prev => [created, ...prev]); ok++;
-          if (r.tx_type === "collect_loan" && (r.employee_loan_id || r.from_id)) {
+          const loanRef = r.employee_loan_id || r.from_id;
+          if (r.tx_type === "collect_loan" && loanRef && !loanRef.includes("-")) {
+            // Only record payment for employee_loans table entries (integer IDs, not UUID accounts)
             loanPaymentsApi.recordAndIncrement(user.id, {
-              loanId: r.employee_loan_id || r.from_id, payDate: r.tx_date,
+              loanId: loanRef, payDate: r.tx_date,
               amount: Number(r.amount_idr || r.amount || 0),
               notes: r.description || "Collected via import",
             }).catch(e => console.error("[collect_loan payment]", e));
@@ -560,7 +567,7 @@ export default function AIImport({ user, accounts, setAccounts, categories = [],
       const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
       if (created) {
         setLedger(prev => [created, ...prev]);
-        if (r.tx_type === "collect_loan" && r.from_id) {
+        if (r.tx_type === "collect_loan" && r.from_id && !r.from_id.includes("-")) {
           loanPaymentsApi.recordAndIncrement(user.id, {
             loanId: r.from_id, payDate: r.tx_date,
             amount: Number(r.amount_idr || r.amount || 0),

@@ -164,8 +164,9 @@ export default function Receivables({
   const [newLoanEmployeeName,  setNewLoanEmployeeName]  = useState("");
 
   // ── DERIVED ────────────────────────────────────────────────
-  const receivables    = useMemo(() => accounts.filter(a => a.type === "receivable"), [accounts]);
-  const reimburseAccs  = useMemo(() => receivables, [receivables]);
+  const receivables       = useMemo(() => accounts.filter(a => a.type === "receivable"), [accounts]);
+  const reimburseAccs     = useMemo(() => receivables.filter(r => REIMBURSE_ENTITIES.includes(r.name)), [receivables]);
+  const personalLoanAccts = useMemo(() => receivables.filter(r => !REIMBURSE_ENTITIES.includes(r.name)), [receivables]);
   const bankAccounts   = useMemo(() => accounts.filter(a => a.type === "bank"), [accounts]);
   const spendAccounts  = useMemo(() => accounts.filter(a => ["bank", "credit_card"].includes(a.type)), [accounts]);
 
@@ -1202,6 +1203,81 @@ export default function Receivables({
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {/* ── Personal Loans (accounts-based receivables) ── */}
+          {personalLoanAccts.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif", marginBottom: 8 }}>
+                Personal Loans
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
+                {personalLoanAccts.map(acct => {
+                  const outstanding = Number(acct.receivable_outstanding || 0);
+                  const given    = ledger.filter(e => e.to_id === acct.id && e.tx_type === "give_loan")
+                                         .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
+                  const collected = ledger.filter(e => e.from_id === acct.id && e.tx_type === "collect_loan")
+                                          .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
+                  const initials = acct.name.split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase();
+                  const isSettled = outstanding <= 0 && given > 0;
+                  const accentColor = isSettled ? "#059669" : outstanding > 0 ? "#d97706" : "#6b7280";
+
+                  return (
+                    <div key={acct.id} style={{
+                      background: "#ffffff", borderRadius: 16,
+                      border: "0.5px solid #e5e7eb",
+                      overflow: "hidden",
+                      display: "flex", flexDirection: "column",
+                    }}>
+                      <div style={{ height: 3, background: accentColor }} />
+                      <div style={{ padding: "14px 14px 12px", flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <div style={{
+                            width: 36, height: 36, borderRadius: 10, flexShrink: 0,
+                            background: isSettled ? "#dcfce7" : "#fef3c7",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            fontSize: 13, fontWeight: 800, color: accentColor, fontFamily: "Figtree, sans-serif",
+                          }}>
+                            {initials}
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {acct.name}
+                            </div>
+                            <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
+                              {isSettled ? "Settled" : outstanding > 0 ? "Active" : "No activity"}
+                            </div>
+                          </div>
+                          {isSettled && (
+                            <span style={{ fontSize: 9, fontWeight: 700, background: "#dcfce7", color: "#059669", padding: "2px 6px", borderRadius: 99, flexShrink: 0 }}>SETTLED</span>
+                          )}
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 20, fontWeight: 900, color: "#111827", fontFamily: "Figtree, sans-serif", lineHeight: 1.2 }}>
+                            {fmtIDR(outstanding)}
+                          </div>
+                          <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
+                            outstanding
+                          </div>
+                        </div>
+                        {given > 0 && (
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
+                            <span>Given</span>
+                            <span style={{ fontWeight: 600, color: "#d97706" }}>{fmtIDR(given)}</span>
+                          </div>
+                        )}
+                        {collected > 0 && (
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
+                            <span>Collected</span>
+                            <span style={{ fontWeight: 600, color: "#059669" }}>{fmtIDR(collected)}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>

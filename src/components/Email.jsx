@@ -476,13 +476,17 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, setAccounts,
     const amount = Number(r.amount || 0);
     const amount_idr = Number(r.amount_idr || r.amount || 0);
     const notes  = r.notes || `Imported from Gmail: ${r.subject || ""}`;
-    // collect_loan: from_id holds employee_loan_id; ledger from_id is null
+    // collect_loan: employee_loan_id may be an integer (employee_loans) or UUID (accounts)
     if (r.tx_type === "collect_loan") {
+      const loanRef    = r.employee_loan_id || r.from_id || null;
+      const isAcctUUID = loanRef && loanRef.includes("-");
       return {
         tx_date: r.tx_date, description: desc, amount, currency: r.currency || "IDR", amount_idr,
-        tx_type: "collect_loan", from_type: "employee_loan", to_type: "account",
-        from_id: null, to_id: r.to_id || null,
-        employee_loan_id: r.employee_loan_id || r.from_id || null,
+        tx_type: "collect_loan",
+        from_type: isAcctUUID ? "account" : "employee_loan",
+        to_type: "account",
+        from_id: isAcctUUID ? loanRef : null, to_id: r.to_id || null,
+        employee_loan_id: isAcctUUID ? null : loanRef,
         entity: "Personal", category_id: null, category_name: null,
         notes, source: "gmail", email_sync_id: r.email_sync_id || r._id,
       };
@@ -518,9 +522,10 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, setAccounts,
     try {
       const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
       setLedger(p => [created, ...p]);
-      if (r.tx_type === "collect_loan" && (r.employee_loan_id || r.from_id)) {
+      const loanRefEmail = r.employee_loan_id || r.from_id;
+      if (r.tx_type === "collect_loan" && loanRefEmail && !loanRefEmail.includes("-")) {
         loanPaymentsApi.recordAndIncrement(user.id, {
-          loanId: r.employee_loan_id || r.from_id, payDate: r.tx_date,
+          loanId: loanRefEmail, payDate: r.tx_date,
           amount: Number(r.amount_idr || r.amount || 0),
           notes: r.description || "Collected via import",
         }).catch(e => console.error("[collect_loan payment]", e));
@@ -562,7 +567,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, setAccounts,
         const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
         if (created?.id) newLedgerIds.push(created.id);
         setLedger(p => [created, ...p]);
-        if (r.tx_type === "collect_loan" && r.from_id) {
+        if (r.tx_type === "collect_loan" && r.from_id && !r.from_id.includes("-")) {
           loanPaymentsApi.recordAndIncrement(user.id, {
             loanId: r.from_id, payDate: r.tx_date,
             amount: Number(r.amount_idr || r.amount || 0),
