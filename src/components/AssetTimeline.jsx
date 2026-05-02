@@ -136,11 +136,15 @@ export default function AssetTimeline({
   , [ledger, asset.id]);
 
   const costBasis = useMemo(() => {
-    const base = Number(asset.purchase_price || 0);
-    const adds = assetLedger
+    const buyTotal = assetLedger
       .filter(e => e.tx_type === "buy_asset" && e.to_id === asset.id)
       .reduce((s, e) => s + Number(e.amount_idr || 0), 0);
-    return base + adds;
+    const sellTotal = assetLedger
+      .filter(e => e.tx_type === "sell_asset" && e.from_id === asset.id)
+      .reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+    // Ledger entries are source of truth. purchase_price is fallback for manually-added assets.
+    const ledgerBasis = buyTotal - sellTotal;
+    return ledgerBasis > 0 ? ledgerBasis : Number(asset.purchase_price || 0);
   }, [asset, assetLedger]);
 
   const currentValue = Number(asset.current_value || 0);
