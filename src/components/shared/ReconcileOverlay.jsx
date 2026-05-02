@@ -744,10 +744,11 @@ export function ReconcileAddPanel({ stmtRow, reconcile, accounts, setAccounts, e
         }).catch(e => console.error("[cicilan]", e));
       }
 
-      // Collect loan support
-      if (r.tx_type === "collect_loan" && (r.employee_loan_id || r.from_id)) {
+      // Collect loan support (skip UUID-based accounts — they're not employee_loans rows)
+      const loanRef = r.employee_loan_id || r.from_id;
+      if (r.tx_type === "collect_loan" && loanRef && !loanRef.includes("-")) {
         loanPaymentsApi.recordAndIncrement(user.id, {
-          loanId: r.employee_loan_id || r.from_id, payDate: r.tx_date,
+          loanId: loanRef, payDate: r.tx_date,
           amount: Number(r.amount_idr || r.amount || 0),
           notes: r.description || "Added via reconcile",
         }).catch(e => console.error("[collect_loan]", e));
@@ -775,7 +776,12 @@ export function ReconcileAddPanel({ stmtRow, reconcile, accounts, setAccounts, e
         onUpdateRow={updateRow}
         onConfirmRow={confirmRow}
         onSkipRow={onClose}
-        onConfirmAll={async (sel) => { for (const r of sel) await confirmRow(r); }}
+        onConfirmAll={async (sel) => {
+          const CHUNK = 5;
+          for (let i = 0; i < sel.length; i += CHUNK) {
+            await Promise.allSettled(sel.slice(i, i + CHUNK).map(r => confirmRow(r)));
+          }
+        }}
         onToggleSelect={id => setSelected(s => ({ ...s, [id]: !s[id] }))}
         onToggleAll={() => {}}
         source="reconcile"
