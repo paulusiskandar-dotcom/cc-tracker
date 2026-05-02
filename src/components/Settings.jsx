@@ -1922,7 +1922,7 @@ function EStatementTab({
       } else {
         // Fallback: try card_last4 matching then first CC/bank
         const matchedAcc = last4
-          ? accounts.find(a => a.last4 === last4 || a.card_last4 === last4)
+          ? accounts.find(a => a.card_last4 === last4)
           : null;
         const defaultCC   = matchedAcc || ccAccounts[0] || null;
         const defaultBank = bankAccounts[0] || null;
@@ -2543,7 +2543,7 @@ function EStmtQueueItem({
           <optgroup key={g.type} label={g.label}>
             {grp.map(a => (
               <option key={a.id} value={a.id}>
-                {a.name}{(a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
+                {a.name}{a.card_last4 ? ` ···${a.card_last4}` : ""}
               </option>
             ))}
           </optgroup>

@@ -845,7 +845,7 @@ export const scanApi = {
           const mime   = file.type || "image/jpeg";
 
           const accountsCtx = accounts.map(a =>
-            `- ${a.name} (${a.type}${a.bank_name ? ", " + a.bank_name : ""}${a.last4 ? " ****" + a.last4 : ""}) id:${a.id}`
+            `- ${a.name} (${a.type}${a.bank_name ? ", " + a.bank_name : ""}${a.card_last4 ? " ****" + a.card_last4 : ""}) id:${a.id}`
           ).join("\n");
           const loansCtx = employeeLoans.map(l =>
             `- ${l.employee_name} id:${l.id}`

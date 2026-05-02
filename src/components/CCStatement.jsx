@@ -419,7 +419,7 @@ export default function CCStatement({
               .sort((a, b) => (a.name || "").localeCompare(b.name || ""))
               .map(cc => (
                 <option key={cc.id} value={cc.id}>
-                  {cc.name}{cc.last4 ? ` ···${cc.last4}` : ""}
+                  {cc.name}{cc.card_last4 ? ` ···${cc.card_last4}` : ""}
                 </option>
               ))
             }

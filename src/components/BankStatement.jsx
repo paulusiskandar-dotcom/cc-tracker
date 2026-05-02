@@ -78,8 +78,8 @@ function AccountOptions({ accounts }) {
             {grp.map(a => (
               <option key={a.id} value={a.id}>
                 {a.name}
-                {(a.last4 || a.account_no)
-                  ? ` ···${a.last4 || String(a.account_no || "").slice(-4)}`
+                {(a.card_last4 || a.account_no)
+                  ? ` ···${a.card_last4 || String(a.account_no || "").slice(-4)}`
                   : ""}
               </option>
             ))}

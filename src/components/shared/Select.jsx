@@ -220,7 +220,7 @@ export function NativeAccountSelect({
         <optgroup label="CREDIT CARDS">
           {cards.map(a => (
             <option key={a.id} value={a.id}>
-              {a.name}{(a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
+              {a.name}{a.card_last4 ? ` ···${a.card_last4}` : ""}
             </option>
           ))}
         </optgroup>

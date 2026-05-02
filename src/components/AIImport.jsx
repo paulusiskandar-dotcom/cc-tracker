@@ -149,7 +149,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
     const no = String(accountNo).replace(/\s/g, "");
     return accounts.some(a => {
       const aNo = String(a.account_no || "").replace(/\s/g, "");
-      return (aNo && (aNo.includes(no) || no.includes(aNo))) || (a.last4 && no.slice(-4) === a.last4);
+      return (aNo && (aNo.includes(no) || no.includes(aNo))) || (a.card_last4 && no.slice(-4) === a.card_last4);
     });
   };
 
@@ -703,7 +703,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
                 <optgroup key={g.type} label={g.label}>
                   {grp.map(a => (
                     <option key={a.id} value={a.id}>
-                      {a.name}{a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : ""}{(a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
+                      {a.name}{a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : ""}{a.card_last4 ? ` ···${a.card_last4}` : ""}
                     </option>
                   ))}
                 </optgroup>

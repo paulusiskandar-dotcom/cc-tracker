@@ -77,7 +77,7 @@ export function matchDetectedAccount(detected, accounts) {
 
   if (detected.last4) {
     const byLast4 = accounts.find(a =>
-      String(a.card_last4 || a.last4 || "") === String(detected.last4)
+      String(a.card_last4 || "") === String(detected.last4)
     );
     if (byLast4) return byLast4;
   }

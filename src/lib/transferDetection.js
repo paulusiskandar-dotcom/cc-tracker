@@ -11,7 +11,7 @@ export function detectTransferPairs(rows, accounts, existingLedger = []) {
   const accName  = new Map();
 
   accounts.forEach(a => {
-    const l4 = a.card_last4 || a.last4;
+    const l4 = a.card_last4;
     if (l4) accLast4.set(l4, a);
     const name = normalize(a.name);
     if (name.length >= 4) accName.set(name, a);

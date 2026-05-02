@@ -767,7 +767,7 @@ export default function TxVerticalBig({
               {g.items.map(a => {
                 let extra = "";
                 if (type === "sell_asset" || g.label === "CREDIT CARD") {
-                  extra = (a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : "";
+                  extra = a.card_last4 ? ` ···${a.card_last4}` : "";
                 } else {
                   extra = a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : "";
                 }
@@ -806,7 +806,7 @@ export default function TxVerticalBig({
               {g.items.map(a => {
                 let extra = "";
                 if (type === "pay_cc" || g.label === "CREDIT CARD") {
-                  extra = (a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : "";
+                  extra = a.card_last4 ? ` ···${a.card_last4}` : "";
                 } else {
                   extra = a.bank_name && a.bank_name !== a.name ? ` · ${a.bank_name}` : "";
                 }

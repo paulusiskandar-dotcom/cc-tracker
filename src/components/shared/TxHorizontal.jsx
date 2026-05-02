@@ -106,7 +106,7 @@ function TabbedAcctSelect({ accounts, value, onChange, placeholder = "Select…"
         <option value="">{placeholder}</option>
         {activeAccs.map(a => (
           <option key={a.id} value={a.id}>
-            {a.name}{showLast4 && (a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
+            {a.name}{showLast4 && a.card_last4 ? ` ···${a.card_last4}` : ""}
           </option>
         ))}
         {/* Non-bank/cash/cc accounts (assets, receivables, liabilities) always visible */}
@@ -117,7 +117,7 @@ function TabbedAcctSelect({ accounts, value, onChange, placeholder = "Select…"
             <optgroup key={g.type} label={g.label}>
               {grp.map(a => (
                 <option key={a.id} value={a.id}>
-                  {a.name}{showLast4 && (a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
+                  {a.name}{showLast4 && a.card_last4 ? ` ···${a.card_last4}` : ""}
                 </option>
               ))}
             </optgroup>

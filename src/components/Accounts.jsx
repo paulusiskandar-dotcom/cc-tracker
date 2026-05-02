@@ -135,7 +135,7 @@ export default function Accounts({
       sharedLimitAmount: String(a.shared_limit || ""),
       joinGroupId:       a.is_limit_group_master ? "" : (a.shared_limit_group_id || ""),
     } : {};
-    setForm({ ...a, fxBalances, ...ccExtra });
+    setForm({ ...a, last4: a.card_last4 || "", fxBalances, ...ccExtra });
     setStep(2); // go straight to form when editing
     setModal("edit");
   };
@@ -158,11 +158,13 @@ export default function Accounts({
         hasSharedLimit: _hs, sharedLimitMode: _slm, groupName: _gn,
         sharedLimitAmount: _sla, joinGroupId: _jgi,
         deductFromBank: _dfb, bankDeductId: _bdi,
+        last4: _l4,
         ...formWithoutSynthetic
       } = form;
       // Sanitize all numeric fields before insert/update
       const clean = {
         ...formWithoutSynthetic,
+        card_last4:         form.last4 || null,
         current_balance:    sn(form.current_balance),
         initial_balance:    sn(form.initial_balance),
         current_value:      sn(form.current_value),
@@ -1137,7 +1139,7 @@ function AccountCard({ account: a, ledger, accounts, accountCurrencies = [], fxR
             <span style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
               {a.bank_name || a.subtype || ACC_TYPE_LABEL[a.type]}
             </span>
-            {a.last4 && <span style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>····{a.last4}</span>}
+            {a.card_last4 && <span style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>····{a.card_last4}</span>}
             {a.account_no && <span style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>···{String(a.account_no).slice(-4)}</span>}
             {a.currency && a.currency !== "IDR" && (
               <span style={{

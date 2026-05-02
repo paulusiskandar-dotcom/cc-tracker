@@ -387,7 +387,7 @@ export function TxForm({ form, set, fromOptions, toOptions, accounts, categories
       return {
         value: a.id,
         label: a.type === "credit_card"
-          ? `${a.name}${(a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}`
+          ? `${a.name}${a.card_last4 ? ` ···${a.card_last4}` : ""}`
           : accLabel(a),
       };
     });
@@ -537,7 +537,7 @@ export function TxForm({ form, set, fromOptions, toOptions, accounts, categories
                 <optgroup label="CREDIT CARDS">
                   {ccGrp.map(a => (
                     <option key={a.id} value={a.id}>
-                      {a.name}{(a.last4 || a.card_last4) ? ` ···${a.last4 || a.card_last4}` : ""}
+                      {a.name}{a.card_last4 ? ` ···${a.card_last4}` : ""}
                     </option>
                   ))}
                 </optgroup>

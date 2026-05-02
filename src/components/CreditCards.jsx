@@ -400,7 +400,7 @@ export default function CreditCards({
     setEditCardForm({
       name:                  cc.name          || "",
       bank_name:             cc.bank_name     || "",
-      last4:                 cc.last4         || "",
+      last4:                 cc.card_last4    || "",
       network:               cc.network       || "",
       card_limit:            cc.card_limit    != null ? String(cc.card_limit)    : "",
       statement_day:         cc.statement_day != null ? String(cc.statement_day) : "",
@@ -426,7 +426,7 @@ export default function CreditCards({
       const data = {
         name:                  editCardForm.name.trim(),
         bank_name:             editCardForm.bank_name     || null,
-        last4:                 editCardForm.last4          || null,
+        card_last4:            editCardForm.last4          || null,
         network:               editCardForm.network        || null,
         card_limit:            sn(editCardForm.card_limit),
         statement_day:         sn(editCardForm.statement_day),
@@ -469,7 +469,7 @@ export default function CreditCards({
       const data = {
         name:           addCardForm.name.trim(),
         bank_name:      addCardForm.bank_name || null,
-        last4:          addCardForm.last4 || null,
+        card_last4:     addCardForm.last4 || null,
         network:        addCardForm.network || null,
         card_limit:     sn(addCardForm.card_limit),
         monthly_target: sn(addCardForm.monthly_target),
@@ -754,7 +754,7 @@ export default function CreditCards({
                       </div>
                       <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
                         {e.tx_date}
-                        {cc && <span style={{ color: cc.color || "#3b5bdb" }}> · ····{cc.last4}</span>}
+                        {cc && <span style={{ color: cc.color || "#3b5bdb" }}> · ····{cc.card_last4}</span>}
                         {(cat || e.category_name) && ` · ${cat?.name || e.category_name}`}
                         {e.entity && e.entity !== "Personal" && ` · ${e.entity}`}
                         {e.is_reimburse && <span style={{ color: "#d97706" }}> · ↗ Reimb</span>}
@@ -1342,7 +1342,7 @@ function SharedLimitGroupCard({ group, cardStats, paletteStart = 0, onPay, onTra
                     )}
                   </div>
                   <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
-                    {(cc.bank_name && cc.bank_name !== "Other") ? cc.bank_name : ""}{cc.last4 ? `${(cc.bank_name && cc.bank_name !== "Other") ? " · " : ""}···· ${cc.last4}` : ""}
+                    {(cc.bank_name && cc.bank_name !== "Other") ? cc.bank_name : ""}{cc.card_last4 ? `${(cc.bank_name && cc.bank_name !== "Other") ? " · " : ""}···· ${cc.card_last4}` : ""}
                     {dueIn !== null && (
                       <span style={{ marginLeft: 6, fontWeight: 600, color: dueIn <= 3 ? "#dc2626" : dueIn <= 7 ? "#d97706" : "#9ca3af" }}>
                         · Due {dueIn}d
@@ -1566,14 +1566,14 @@ function WalletCard({ cc, color, isActive, onPay, onTransactions, onInstallments
         >✏️</button>
 
         {/* Last4 — bottom left, only visible when image fully shows */}
-        {cc.last4 && (
+        {cc.card_last4 && (
           <div style={{
             position: "absolute", bottom: 16, left: 16,
             fontFamily: "Figtree, sans-serif", fontSize: 12,
             color: "rgba(255,255,255,0.88)", letterSpacing: 3, fontWeight: 600,
             textShadow: "0 1px 3px rgba(0,0,0,0.45)",
           }}>
-            ···· {cc.last4}
+            ···· {cc.card_last4}
           </div>
         )}
       </div>
