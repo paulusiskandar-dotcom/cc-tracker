@@ -149,7 +149,7 @@ function AssetHistory({ asset, ledger, accounts }) {
 }
 
 // ─── ASSET CARD ───────────────────────────────────────────────
-function AssetCard({ asset: a, ledger, valueHistoryCount = 0, color, onUpdate, onTimeline }) {
+function AssetCard({ asset: a, ledger, valueHistoryCount = 0, color, onUpdate, onTimeline, onEdit }) {
   const cur      = Number(a.current_value || 0);
   const bought   = Number(a.purchase_price || 0);
   const gain     = cur - bought;
@@ -198,6 +198,7 @@ function AssetCard({ asset: a, ledger, valueHistoryCount = 0, color, onUpdate, o
         {/* Actions */}
         <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
           <button onClick={onUpdate}   style={ACCT_BTN}>Update Value</button>
+          <button onClick={onEdit}     style={ACCT_BTN}>✏️ Edit</button>
           <button onClick={onTimeline} style={{ ...ACCT_BTN, flex: 1 }}>📋 Timeline</button>
         </div>
       </div>
@@ -331,6 +332,11 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
   const [editDepositoModal, setEditDepositoModal] = useState(null); // deposito account
   const [editDepositoForm,  setEditDepositoForm]  = useState({});
   const setEDF = (k, v) => setEditDepositoForm(f => ({ ...f, [k]: v }));
+
+  // Edit general asset modal (Property, Vehicle, Investment, Electronics, Other)
+  const [editAssetModal, setEditAssetModal] = useState(null); // asset account
+  const [editAssetForm,  setEditAssetForm]  = useState({});
+  const setEAF = (k, v) => setEditAssetForm(f => ({ ...f, [k]: v }));
 
   // ── DERIVED ─────────────────────────────────────────────────
   const assets = useMemo(() => accounts.filter(a => a.type === "asset"), [accounts]);
@@ -490,6 +496,34 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
     setSaving(false);
   };
 
+  const openEditAsset = (asset) => {
+    setEditAssetModal(asset);
+    setEditAssetForm({
+      name:           asset.name || "",
+      subtype:        asset.subtype || "",
+      purchase_price: String(asset.purchase_price || ""),
+      notes:          asset.notes || "",
+    });
+  };
+
+  const handleSaveAsset = async () => {
+    if (!editAssetModal) return;
+    setSaving(true);
+    try {
+      const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? null : n; };
+      const updated = await accountsApi.update(editAssetModal.id, {
+        name:           editAssetForm.name.trim(),
+        subtype:        editAssetForm.subtype || null,
+        purchase_price: sn(editAssetForm.purchase_price) ?? 0,
+        notes:          editAssetForm.notes || null,
+      });
+      if (updated) setAccounts(prev => prev.map(a => a.id === editAssetModal.id ? { ...a, ...updated } : a));
+      showToast(`${editAssetForm.name} updated`);
+      setEditAssetModal(null);
+    } catch (e) { showToast(e.message, "error"); }
+    setSaving(false);
+  };
+
   if (timelineAsset) {
     return (
       <AssetTimeline
@@ -588,6 +622,7 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
                   valueHistoryCount={valueHistoryCounts[a.id] || 0}
                   color={color}
                   onUpdate={() => openUpdateModal(a)}
+                  onEdit={() => openEditAsset(a)}
                   onTimeline={() => setTimelineAsset(a)}
                 />
               );
@@ -693,6 +728,37 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
             </div>
           );
         })()}
+      </Modal>
+
+      {/* ── EDIT ASSET MODAL (Property, Vehicle, Investment, etc.) ── */}
+      <Modal
+        isOpen={!!editAssetModal}
+        onClose={() => setEditAssetModal(null)}
+        title={`Edit ${editAssetModal?.subtype || "Asset"}`}
+        footer={
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <Button variant="secondary" size="md" onClick={() => setEditAssetModal(null)}>Cancel</Button>
+            <Button variant="primary" size="md" busy={saving} onClick={handleSaveAsset}>Save</Button>
+          </div>
+        }
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <Input label="Asset Name *" value={editAssetForm.name || ""}
+            onChange={e => setEAF("name", e.target.value)} />
+          <Field label="Type">
+            <Select
+              value={editAssetForm.subtype || ""}
+              onChange={e => setEAF("subtype", e.target.value)}
+              options={ASSET_SUBTYPES.map(s => ({ value: s, label: `${ASSET_ICON[s] || "📦"} ${s}` }))}
+              placeholder="Select type…"
+            />
+          </Field>
+          <AmountInput label="Purchase Price (IDR)" value={editAssetForm.purchase_price || ""}
+            onChange={v => setEAF("purchase_price", v)} currency="IDR" />
+          <Field label="Notes">
+            <Input value={editAssetForm.notes || ""} onChange={e => setEAF("notes", e.target.value)} placeholder="Optional notes…" />
+          </Field>
+        </div>
       </Modal>
 
       {/* ── EDIT DEPOSITO MODAL ──────────────────────────── */}

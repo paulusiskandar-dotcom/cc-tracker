@@ -60,24 +60,26 @@ export default function AddNewPicker({
       let payload;
       if (kind === "receivable") {
         // Loan borrowers are stored as receivable accounts in the accounts table
+        // receivable_outstanding starts at 0 — give_loan ledger's applyBalanceDelta will set it
         payload = {
           user_id:                user.id,
           name:                   name.trim(),
           type:                   "receivable",
           is_active:              true,
-          receivable_outstanding: Number(amount) || 0,
+          receivable_outstanding: 0,
           include_networth:       true,
         };
       } else {
         // Assets are stored as asset accounts in the accounts table
+        // current_value starts at 0 — buy_asset ledger's applyBalanceDelta will set it correctly
         payload = {
           user_id:        user.id,
           name:           name.trim(),
           type:           "asset",
           subtype:        subtype || null,
           is_active:      true,
-          current_value:  Number(amount) || 0,
-          purchase_price: Number(amount) || 0,
+          current_value:  0,
+          purchase_price: 0,
           include_networth: true,
         };
       }
