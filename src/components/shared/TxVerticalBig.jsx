@@ -23,11 +23,11 @@
 import { useState, useEffect } from "react";
 import {
   ledgerApi, merchantApi, getTxFromToTypes,
-  accountCurrenciesApi, assetsApi,
+  assetsApi,
   installmentsApi, recalculateBalance, accountsApi, employeeLoanApi,
 } from "../../api";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST, REIMBURSE_ENTITIES } from "../../constants";
-import { fmtIDR, todayStr, toIDR } from "../../utils";
+import { fmtIDR, fmtCur, todayStr, toIDR } from "../../utils";
 import Modal from "./Modal";
 import { showToast } from "./Card";
 import Input, { Field, AmountInput } from "./Input";
@@ -359,18 +359,24 @@ export default function TxVerticalBig({
   const ccAccs    = creditCards.filter(a => a.is_active !== false);
   const assetAccs = assets.filter(a => a.is_active !== false);
 
-  // FX stuff
+  // FX stuff — accounts are now per-currency; derive currency lists from accounts directly.
   const fxCurrencies = [...new Set(
-    accountCurrencies.map(r => r.currency).filter(c => c && c !== "IDR")
+    accounts
+      .filter(a => a.is_active !== false)
+      .map(a => a.currency)
+      .filter(c => c && c !== "IDR")
   )].sort();
-  const fxRate = Number(form.fx_rate_used || 0);
-  const foreignAmt = Number(form.amount || 0);
-  const idrEquiv   = fxRate > 0 && foreignAmt > 0 ? Math.round(foreignAmt * fxRate) : null;
-  const fxDir = form.fx_direction || "buy";
+  const fxUserRate = Number(form.fx_rate_used || 0);   // form input: "1 foreign = X IDR"
+  const fromAmt    = Number(form.amount || 0);
+  const fxDir      = form.fx_direction || "buy";
   const fxCurrency = form.currency && form.currency !== "IDR" ? form.currency : null;
-  const accsWithCurrency = fxCurrency
-    ? accountCurrencies.filter(r => r.currency === fxCurrency).map(r => r.account_id)
-    : [];
+  // Direction-aware to_amount preview (in to-currency units):
+  //   buy  (from=IDR,     to=foreign): to_amount = amount / userRate
+  //   sell (from=foreign, to=IDR):     to_amount = amount * userRate
+  const toAmtPrev  = fxUserRate > 0 && fromAmt > 0
+    ? (fxDir === "buy" ? fromAmt / fxUserRate : fromAmt * fxUserRate)
+    : null;
+  const toCurPrev  = fxDir === "buy" ? (fxCurrency || "foreign") : "IDR";
 
   // IDR equivalent for non-IDR amounts
   const amtIDR = toIDR ? toIDR(Number(form.amount || 0), form.currency || "IDR", fxRates, allCurrencies) : Number(form.amount || 0);
@@ -404,48 +410,43 @@ export default function TxVerticalBig({
 
       // ── FX Exchange ──────────────────────────────────────────
       if (type === "fx_exchange" && !isEdit) {
-        const currency = form.currency;
-        const rate     = sn(form.fx_rate_used);
+        const fromAcc = accounts.find(a => a.id === form.from_id);
+        const toAcc   = accounts.find(a => a.id === form.to_id);
+        const fromCur = fromAcc?.currency || "IDR";
+        const toCur   = toAcc?.currency   || "IDR";
+        const userRate = sn(form.fx_rate_used);  // user enters "1 foreign = X IDR"
         const fAmt     = sn(form.amount);
-        const iAmt     = Math.round(fAmt * rate);
-        const direction = form.fx_direction || "buy";
 
-        if (!currency || currency === "IDR") { showToast("Select a foreign currency", "error"); setSaving(false); return; }
-        if (!form.from_id)  { showToast("Select From account", "error"); setSaving(false); return; }
-        if (!form.to_id)    { showToast("Select To account", "error"); setSaving(false); return; }
-        if (rate <= 0)      { showToast("Enter a valid rate", "error"); setSaving(false); return; }
-        if (fAmt <= 0)      { showToast("Enter amount", "error"); setSaving(false); return; }
+        if (!fromAcc)            { showToast("Select From account", "error"); setSaving(false); return; }
+        if (!toAcc)              { showToast("Select To account",   "error"); setSaving(false); return; }
+        if (fromCur === toCur)   { showToast("From and To accounts must differ in currency", "error"); setSaving(false); return; }
+        if (userRate <= 0)       { showToast("Enter a valid rate",  "error"); setSaving(false); return; }
+        if (fAmt <= 0)           { showToast("Enter amount",        "error"); setSaving(false); return; }
 
-        if (direction === "buy") {
-          const entry = {
-            tx_date: form.tx_date, description: `Buy ${currency}`,
-            amount: iAmt, currency: "IDR", amount_idr: iAmt, fx_rate_used: rate,
-            tx_type: "fx_exchange", from_type: "account", to_type: "account",
-            from_id: uuid(form.from_id), to_id: uuid(form.to_id),
-            category_id: null, category_name: null, entity: "Personal",
-            is_reimburse: false, merchant_name: null, notes: form.notes || null,
-            attachment_url: null, ai_categorized: false, ai_confidence: null,
-            installment_id: null, scan_batch_id: null, fx_direction: "buy",
-          };
-          const created = await ledgerApi.create(user.id, entry, accounts);
-          setLedger?.(p => [created, ...p]);
-          await accountCurrenciesApi.addBalance(uuid(form.to_id), currency, +fAmt, user.id);
-        } else {
-          await accountCurrenciesApi.addBalance(uuid(form.from_id), currency, -fAmt, user.id);
-          const entry = {
-            tx_date: form.tx_date, description: `Sell ${currency}`,
-            amount: iAmt, currency: "IDR", amount_idr: iAmt, fx_rate_used: rate,
-            tx_type: "fx_exchange", from_type: "account", to_type: "account",
-            from_id: uuid(form.from_id), to_id: uuid(form.to_id),
-            category_id: null, category_name: null, entity: "Personal",
-            is_reimburse: false, merchant_name: null, notes: form.notes || null,
-            attachment_url: null, ai_categorized: false, ai_confidence: null,
-            installment_id: null, scan_batch_id: null, fx_direction: "sell",
-          };
-          const created = await ledgerApi.create(user.id, entry, accounts);
-          setLedger?.(p => [created, ...p]);
-        }
-        showToast(`FX ${direction === "buy" ? "Buy" : "Sell"} saved`);
+        // Convention (see api.js applyBalanceDelta header):
+        //   amount     = quantity in from_currency
+        //   fx_rate    = price of 1 to-unit expressed in from-units
+        //   to_amount  = amount / fx_rate
+        // The form lets the user input a natural "1 foreign = X IDR" rate; we
+        // translate that to the canonical to-in-from rate based on direction:
+        //   buy  (from=IDR, to=foreign): fx_rate = userRate            (IDR per foreign = to-in-from)
+        //   sell (from=foreign, to=IDR): fx_rate = 1 / userRate        (foreign per IDR = to-in-from)
+        const fxRate = fromCur === "IDR" ? userRate : 1 / userRate;
+        const amtIDR = Math.round(toIDR(fAmt, fromCur, fxRates, allCurrencies) || fAmt);
+        const entry = {
+          tx_date: form.tx_date,
+          description: form.description || `${fromCur} → ${toCur}`,
+          amount: fAmt, currency: fromCur, amount_idr: amtIDR, fx_rate_used: fxRate,
+          tx_type: "fx_exchange", from_type: "account", to_type: "account",
+          from_id: uuid(form.from_id), to_id: uuid(form.to_id),
+          category_id: null, category_name: null, entity: "Personal",
+          is_reimburse: false, merchant_name: null, notes: form.notes || null,
+          attachment_url: null, ai_categorized: false, ai_confidence: null,
+          installment_id: null, scan_batch_id: null,
+        };
+        const created = await ledgerApi.create(user.id, entry, accounts);
+        setLedger?.(p => [created, ...p]);
+        showToast(`FX ${fromCur} → ${toCur} saved`);
         await onRefresh?.();
         onSave?.(null);
         onClose();
@@ -625,10 +626,20 @@ export default function TxVerticalBig({
 
       let computedAmtIDR = sn(amtIDR);
       let computedFxRate = null;
+      let computedCurrency = form.currency || "IDR";
       if (type === "fx_exchange") {
-        const rate = sn(form.fx_rate_used);
-        computedFxRate = rate || null;
-        if (rate > 0) computedAmtIDR = Math.round(sn(form.amount) * rate);
+        // See FX add path / api.js header for convention. The form's fx_rate_used
+        // input is "1 foreign = X IDR"; canonical stored fx_rate is "1 to-unit
+        // in from-units" — invert when from is the foreign side.
+        const userRate  = sn(form.fx_rate_used);
+        const fromAccEd = accounts.find(a => a.id === form.from_id);
+        const fromCurEd = fromAccEd?.currency || form.currency || "IDR";
+        computedCurrency = fromCurEd;
+        computedFxRate = userRate > 0
+          ? (fromCurEd === "IDR" ? userRate : 1 / userRate)
+          : null;
+        const fAmt = sn(form.amount);
+        computedAmtIDR = Math.round(toIDR(fAmt, fromCurEd, fxRates, allCurrencies) || fAmt);
       }
 
       // Handle cicilan — create installment record first if enabled
@@ -658,7 +669,7 @@ export default function TxVerticalBig({
         tx_date:        form.tx_date || todayStr(),
         description:    desc,
         amount:         sn(form.amount),
-        currency:       form.currency || "IDR",
+        currency:       computedCurrency,
         amount_idr:     computedAmtIDR,
         fx_rate_used:   computedFxRate,
         tx_type:        type,
@@ -677,7 +688,6 @@ export default function TxVerticalBig({
         ai_confidence:  null,
         installment_id: installmentId,
         scan_batch_id:  null,
-        fx_direction:   type === "fx_exchange" ? (form.fx_direction || "buy") : undefined,
       };
 
       let savedEntry;
@@ -875,12 +885,17 @@ export default function TxVerticalBig({
 
     // ── FX Exchange ──────────────────────────────────────────────
     if (type === "fx_exchange") {
-      const fxFromAccs = fxDir === "sell" && fxCurrency
-        ? accounts.filter(a => a.is_active !== false && accsWithCurrency.includes(a.id))
-        : [...bankAccs, ...cashAccs, ...ccAccs];
-      const fxToAccs = fxDir === "buy"
-        ? accounts.filter(a => a.is_active !== false && accsWithCurrency.includes(a.id))
-        : [...bankAccs, ...cashAccs];
+      // With single-currency accounts:
+      //   buy  = from is IDR, to is foreign (must hold the chosen fxCurrency)
+      //   sell = from is foreign (must hold fxCurrency), to is IDR
+      const idrAccs = accounts.filter(a =>
+        a.is_active !== false && (a.currency || "IDR") === "IDR"
+      );
+      const foreignAccs = accounts.filter(a =>
+        a.is_active !== false && a.currency && a.currency === fxCurrency
+      );
+      const fxFromAccs = fxDir === "sell" && fxCurrency ? foreignAccs : idrAccs;
+      const fxToAccs   = fxDir === "buy"  && fxCurrency ? foreignAccs : idrAccs;
       return (
         <>
           {DIVIDER}
@@ -905,10 +920,9 @@ export default function TxVerticalBig({
             <select value={form.from_id || ""} onChange={e => set("from_id", e.target.value || null)} style={SEL}>
               <option value="">Select account…</option>
               {fxFromAccs.map(a => {
-                const pocket = fxDir === "sell" && fxCurrency
-                  ? accountCurrencies.find(r => r.account_id === a.id && r.currency === fxCurrency)
-                  : null;
-                const suffix = pocket ? ` — ${fxCurrency} ${Number(pocket.balance).toLocaleString("id-ID")}` : "";
+                const bal    = Number(a.current_balance || 0);
+                const accCur = a.currency || "IDR";
+                const suffix = bal ? ` — ${accCur === "IDR" ? fmtIDR(bal) : fmtCur(bal, accCur)}` : "";
                 return <option key={a.id} value={a.id}>{accLabel(a)}{suffix}</option>;
               })}
             </select>
@@ -941,14 +955,14 @@ export default function TxVerticalBig({
               </select>
             </Field>
           </div>
-          {/* 6. Rate + Amount + IDR equiv */}
+          {/* 6. Rate + Amount + to-amount preview */}
           <Input label={`Rate: 1 ${fxCurrency || "foreign"} = ? IDR *`} type="number" min="0" step="any"
             value={form.fx_rate_used || ""} onChange={e => set("fx_rate_used", e.target.value)} placeholder="e.g. 107.5" />
-          <Input label={`Amount (${fxCurrency || "foreign units"}) *`} type="number" min="0" step="any"
+          <Input label={`Amount (${fxDir === "buy" ? "IDR" : (fxCurrency || "foreign units")}) *`} type="number" min="0" step="any"
             value={form.amount || ""} onChange={e => set("amount", e.target.value)} placeholder="0" />
-          {idrEquiv !== null && (
+          {toAmtPrev !== null && (
             <div style={{ background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "#0369a1", fontWeight: 600, fontFamily: FF }}>
-              IDR equivalent: {fmtIDR(idrEquiv)}
+              To amount: {toCurPrev === "IDR" ? fmtIDR(Math.round(toAmtPrev)) : fmtCur(toAmtPrev, toCurPrev)}
             </div>
           )}
           {/* 11. Notes */}

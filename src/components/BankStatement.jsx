@@ -129,8 +129,11 @@ export default function BankStatement({
   const [editEntry,      setEditEntry]      = useState(null);
   const [savingAll,      setSavingAll]      = useState(false);
   const [showPdfPanel,   setShowPdfPanel]   = useState(false);
+  // Multi-currency mode is dormant since account_currencies was retired —
+  // each account is now single-currency. Preserve the references as inert
+  // defaults so existing IDR-path code keeps working.
   const [activeCurrency, setActiveCurrency] = useState("IDR");
-  const [acctCurrencies, setAcctCurrencies] = useState([]);    // rows from account_currencies
+  const acctCurrencies = [];
   const printRef = useRef(null);
 
   // Reconcile mode
@@ -227,19 +230,10 @@ export default function BankStatement({
 
   const selectedAccount = accounts.find(a => a.id === accountId) || null;
 
-  // ── Fetch account_currencies when account changes (multicurrency only) ──
+  // ── Reset raw data when account changes ──
   useEffect(() => {
-    setActiveCurrency("IDR");
-    setAcctCurrencies([]);
     setRawData(null);
-    if (!accountId) return;
-    const acc = accounts.find(a => a.id === accountId);
-    if (!acc?.is_multicurrency) return;
-    supabase.from("account_currencies")
-      .select("currency, balance, initial_balance")
-      .eq("account_id", accountId)
-      .then(({ data: rows }) => { if (rows?.length) setAcctCurrencies(rows); });
-  }, [accountId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [accountId]);
 
   // ── Load raw transaction data ───────────────────────────────
   const load = async () => {

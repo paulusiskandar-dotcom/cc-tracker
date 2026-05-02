@@ -79,6 +79,16 @@ const getDeltas = (txType, amount) => {
   return map[txType] || { from: null, to: null };
 };
 
+// fx_exchange convention (single-currency accounts):
+//   amount     = quantity in from_account.currency
+//   currency   = from_account.currency
+//   fx_rate    = price of 1 to-currency unit expressed in from-currency units
+//                (stored as fx_rate_used on the ledger row)
+//   to_amount  = amount / fx_rate          (applied directly to to_account balance)
+//   amount_idr = amount converted to IDR via global fx_rates[from_currency]
+// Both account balances are updated in their own native currency units —
+// applyBalanceDelta is invoked once for the from side (-amount) and once for the
+// to side (+to_amount). No cross-currency conversion happens inside this helper.
 async function applyBalanceDelta(accountId, accountType, delta) {
   if (!accountId || !accountType || delta === 0) return;
   const field = balField(accountType);
@@ -196,8 +206,10 @@ export const ledgerApi = {
   create: async (userId, entry, accounts = []) => {
     validateLedgerEntry(entry);
 
-    // Strip client-only fields before DB insert
-    const { fx_direction: fxDirection, ...insertEntry } = entry;
+    // Strip client-only fields before DB insert (fx_direction is no longer used
+    // for routing — kept in the destructure so it never reaches Supabase as an
+    // unknown column).
+    const { fx_direction: _ignored, ...insertEntry } = entry;
     const safeEntry = sanitizeUUIDs(insertEntry);
 
     const { data, error } = await supabase
@@ -212,14 +224,18 @@ export const ledgerApi = {
     const toAcc   = accounts.find(a => a.id === safeEntry.to_id);
 
     if (safeEntry.tx_type === "fx_exchange") {
-      // Only update the IDR side — the caller handles account_currencies for the foreign side
-      if ((fxDirection || "buy") === "buy") {
-        // BUY: from-account loses IDR
-        if (fromAcc) await applyBalanceDelta(fromAcc.id, fromAcc.type, -amount);
-      } else {
-        // SELL: to-account gains IDR
-        if (toAcc) await applyBalanceDelta(toAcc.id, toAcc.type, +amount);
+      // See convention header on applyBalanceDelta.
+      const fxRate = Number(safeEntry.fx_rate_used || safeEntry.fx_rate || 1);
+      if (!fromAcc || !toAcc) {
+        throw new Error("fx_exchange requires both from_account and to_account");
       }
+      if (fxRate <= 0) {
+        throw new Error("fx_exchange requires a positive fx_rate");
+      }
+      const fromAmount = Number(safeEntry.amount || 0);
+      const toAmount   = fromAmount / fxRate;
+      await applyBalanceDelta(fromAcc.id, fromAcc.type, -fromAmount);
+      await applyBalanceDelta(toAcc.id,   toAcc.type,   +toAmount);
     } else {
       const deltas = getDeltas(safeEntry.tx_type, amount);
       if (fromAcc && deltas.from?.[fromAcc.type] !== undefined)
@@ -289,15 +305,26 @@ export const ledgerApi = {
     if (error) throw new Error(error.message);
 
     if (entry) {
-      const amount  = Number(entry.amount_idr || entry.amount || 0);
-      const deltas  = getDeltas(entry.tx_type, amount);
       const fromAcc = accounts.find(a => a.id === entry.from_id);
       const toAcc   = accounts.find(a => a.id === entry.to_id);
 
-      if (fromAcc && deltas.from?.[fromAcc.type] !== undefined)
-        await applyBalanceDelta(fromAcc.id, fromAcc.type, -deltas.from[fromAcc.type]);
-      if (toAcc && deltas.to?.[toAcc.type] !== undefined)
-        await applyBalanceDelta(toAcc.id, toAcc.type, -deltas.to[toAcc.type]);
+      if (entry.tx_type === "fx_exchange") {
+        // Reverse both sides in their native currency units (see convention header).
+        const fxRate = Number(entry.fx_rate_used || entry.fx_rate || 1);
+        if (fxRate > 0 && fromAcc && toAcc) {
+          const fromAmount = Number(entry.amount || 0);
+          const toAmount   = fromAmount / fxRate;
+          await applyBalanceDelta(fromAcc.id, fromAcc.type, +fromAmount);
+          await applyBalanceDelta(toAcc.id,   toAcc.type,   -toAmount);
+        }
+      } else {
+        const amount = Number(entry.amount_idr || entry.amount || 0);
+        const deltas = getDeltas(entry.tx_type, amount);
+        if (fromAcc && deltas.from?.[fromAcc.type] !== undefined)
+          await applyBalanceDelta(fromAcc.id, fromAcc.type, -deltas.from[fromAcc.type]);
+        if (toAcc && deltas.to?.[toAcc.type] !== undefined)
+          await applyBalanceDelta(toAcc.id, toAcc.type, -deltas.to[toAcc.type]);
+      }
     }
   },
 };
@@ -312,7 +339,7 @@ export const recalculateBalance = async (accountId, userId) => {
     .from("accounts").select("initial_balance, type").eq("id", accountId).single();
   const { data: txns } = await supabase
     .from("ledger")
-    .select("amount_idr, from_id, from_type, to_id, to_type")
+    .select("tx_type, amount, amount_idr, fx_rate_used, fx_rate, from_id, from_type, to_id, to_type")
     .eq("user_id", userId)
     .or(`from_id.eq.${accountId},to_id.eq.${accountId}`);
   const accType = acc?.type;
@@ -321,6 +348,16 @@ export const recalculateBalance = async (accountId, userId) => {
   let balance = Number(acc?.initial_balance || 0);
   const isCC  = accType === "credit_card";
   for (const tx of (txns || [])) {
+    if (tx.tx_type === "fx_exchange") {
+      // fx_exchange: from-side stored in from_currency (= tx.amount);
+      // to-side derived as amount / fx_rate (see convention header).
+      const fromAmount = Number(tx.amount || 0);
+      const fxRate     = Number(tx.fx_rate_used || tx.fx_rate || 1);
+      const toAmount   = fxRate > 0 ? fromAmount / fxRate : 0;
+      if (tx.from_id === accountId && tx.from_type === "account") balance -= fromAmount;
+      if (tx.to_id   === accountId && tx.to_type   === "account") balance += toAmount;
+      continue;
+    }
     const amt = Number(tx.amount_idr || 0);
     if (isCC) {
       // CC: spending charges add to debt; payments reduce it
@@ -614,79 +651,6 @@ export const merchantApi = {
 
   delete: async (id) => {
     const { error } = await supabase.from("merchant_mappings").delete().eq("id", id);
-    if (error) throw new Error(error.message);
-  },
-};
-
-// ─── ACCOUNT CURRENCIES ───────────────────────────────────────
-export const accountCurrenciesApi = {
-  getForAccount: async (accountId) => {
-    const { data, error } = await supabase
-      .from("account_currencies")
-      .select("*")
-      .eq("account_id", accountId);
-    if (error) throw new Error(error.message);
-    return data || [];
-  },
-  getAll: async (userId) => {
-    const { data, error } = await supabase
-      .from("account_currencies")
-      .select("*, accounts!inner(user_id)")
-      .eq("accounts.user_id", userId);
-    if (error) throw new Error(error.message);
-    return data || [];
-  },
-  upsert: async (accountId, currency, balance, initialBalance, userId) => {
-    let uid = userId;
-    if (!uid) {
-      const { data: { user } } = await supabase.auth.getUser();
-      uid = user?.id;
-    }
-    const { error } = await supabase
-      .from("account_currencies")
-      .upsert(
-        { account_id: accountId, currency, balance, initial_balance: initialBalance ?? balance, user_id: uid },
-        { onConflict: "account_id,currency" }
-      );
-    if (error) throw new Error(error.message);
-  },
-  // Increment (or decrement if delta < 0) a foreign currency balance.
-  // Creates the row if it doesn't exist.
-  addBalance: async (accountId, currency, delta, userId) => {
-    if (!accountId || !currency || !delta) return;
-    const { data: row } = await supabase
-      .from("account_currencies")
-      .select("balance")
-      .eq("account_id", accountId)
-      .eq("currency", currency)
-      .maybeSingle();
-
-    if (row !== null) {
-      const { error } = await supabase
-        .from("account_currencies")
-        .update({ balance: Number(row.balance || 0) + delta })
-        .eq("account_id", accountId)
-        .eq("currency", currency);
-      if (error) throw new Error(error.message);
-    } else {
-      let uid = userId;
-      if (!uid) {
-        const { data: { user } } = await supabase.auth.getUser();
-        uid = user?.id;
-      }
-      const { error } = await supabase.from("account_currencies").insert({
-        account_id: accountId, currency,
-        balance: delta, initial_balance: delta, user_id: uid,
-      });
-      if (error) throw new Error(error.message);
-    }
-  },
-  delete: async (accountId, currency) => {
-    const { error } = await supabase
-      .from("account_currencies")
-      .delete()
-      .eq("account_id", accountId)
-      .eq("currency", currency);
     if (error) throw new Error(error.message);
   },
 };
