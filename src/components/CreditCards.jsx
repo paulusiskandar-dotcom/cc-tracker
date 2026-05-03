@@ -1421,124 +1421,137 @@ function NetworkLogo({ network }) {
 
 // ─── CC CARD (desktop grid) ───────────────────────────────────
 function CCCard({ cc, color, onPay, onHistory, onInstallments, onBill, onEdit }) {
-  const utilColor  = cc.util > 80 ? "#A32D2D" : cc.util > 50 ? "#BA7517" : "#97C459";
-  const dueText    = formatDueDate(cc.due_day);
-  const isDueSoon  = isDueWithin3Days(cc.due_day);
-  const isMaster   = cc.is_limit_group_master;
-  const isMember   = !!(cc.shared_limit_group_id && !isMaster);
+  const utilColor = cc.util > 80 ? "#dc2626" : cc.util > 60 ? "#d97706" : "#059669";
+  const isMaster  = cc.is_limit_group_master;
+
+  // Due/stmt display text from pre-computed daysUntil values
+  const dueBadge = cc.dueIn !== null ? formatDueDate(cc.due_day) : null;
+  const stmtBadge = cc.stmtIn !== null
+    ? (() => {
+        if (cc.stmtIn <= 1) return "Stmt today";
+        if (cc.stmtIn <= 7) return `Stmt in ${cc.stmtIn}d`;
+        const d = new Date(); d.setDate(d.getDate() + cc.stmtIn);
+        const months = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
+        return `Stmt ${d.getDate()} ${months[d.getMonth()]}`;
+      })()
+    : null;
 
   return (
-    <div className="cc-card-v2" style={{
-      background: "#fff", borderRadius: 16, overflow: "hidden",
-      border: "0.5px solid rgba(0,0,0,0.08)",
-      display: "flex", flexDirection: "column",
+    <div className="cc-card" style={{
+      background: "#fff", borderRadius: 16,
+      boxShadow: "0 0 0 0.5px #e5e7eb",
+      overflow: "hidden", display: "flex", flexDirection: "column",
+      WebkitMaskImage: "-webkit-radial-gradient(white, black)",
     }}>
-      {/* ── 130px card image area ── */}
+      {/* ── Hero strip 90px ── */}
       <div style={{
-        height: 130, position: "relative", flexShrink: 0,
-        ...(cc.card_image_url
-          ? { backgroundImage: `url(${cc.card_image_url})`, backgroundSize: "cover", backgroundPosition: "center top" }
-          : { background: `linear-gradient(135deg, ${color || "#3b5bdb"} 0%, ${lightenColor(color || "#3b5bdb", 22)} 100%)` }
-        ),
+        position: "relative", width: "100%", height: 90, flexShrink: 0,
+        backgroundImage: cc.card_image_url ? `url(${cc.card_image_url})` : "none",
+        backgroundSize: "cover", backgroundPosition: "top center",
+        backgroundColor: cc.card_image_url ? undefined : (color || "#3b5bdb"),
       }}>
-        {/* Decorative circles for gradient fallback */}
+        {/* Decorative circles for solid-color fallback */}
         {!cc.card_image_url && (
           <>
-            <div style={{ position: "absolute", top: -24, right: -18, width: 130, height: 130, borderRadius: "50%", background: "rgba(255,255,255,0.09)" }} />
+            <div style={{ position: "absolute", top: -24, right: -18, width: 130, height: 130, borderRadius: "50%", background: "rgba(255,255,255,0.08)" }} />
+            <div style={{ position: "absolute", top: 18,  right: 28,  width: 82,  height: 82,  borderRadius: "50%", background: "rgba(255,255,255,0.06)" }} />
             <div style={{ position: "absolute", bottom: -32, left: -18, width: 110, height: 110, borderRadius: "50%", background: "rgba(255,255,255,0.07)" }} />
           </>
         )}
-        {/* Hover edit button — opacity 0, CSS handles hover */}
-        <button className="cc-card-edit-btn" onClick={(e) => { e.stopPropagation(); onEdit(); }} title="Edit card"
+        {/* Bottom fade */}
+        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.10) 100%)" }} />
+        {/* Edit button — hover-only via CSS class */}
+        <button className="cc-card-edit" onClick={onEdit} title="Edit card"
           style={{
-            position: "absolute", top: 12, right: 12,
-            background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)",
-            width: 28, height: 28, borderRadius: 8, border: "none",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            cursor: "pointer", opacity: 0, transition: "opacity 0.15s",
-          }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2">
-            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-          </svg>
-        </button>
-        {/* Bottom badges */}
-        <div style={{ position: "absolute", bottom: 12, left: 16, display: "flex", gap: 6, alignItems: "center" }}>
-          {dueText && (
-            <div style={{
-              background: isDueSoon ? "#A32D2D" : "rgba(255,255,255,0.25)",
-              color: "#fff", fontSize: 10, fontWeight: 500,
-              padding: "3px 8px", borderRadius: 6, fontFamily: "Figtree, sans-serif",
-            }}>{dueText}</div>
-          )}
-          {isMember && (
-            <div style={{ background: "rgba(255,255,255,0.25)", color: "#fff", fontSize: 10, padding: "3px 8px", borderRadius: 6, fontFamily: "Figtree, sans-serif" }}>
-              Shared
-            </div>
-          )}
-        </div>
+            position: "absolute", top: 8, right: 10, border: "none",
+            background: "rgba(0,0,0,0.28)", borderRadius: 6,
+            cursor: "pointer", padding: "3px 6px", color: "#fff", lineHeight: 1, fontSize: 12,
+            opacity: 0, transition: "opacity 0.15s",
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = "rgba(0,0,0,0.5)"}
+          onMouseLeave={e => e.currentTarget.style.background = "rgba(0,0,0,0.28)"}
+        >✏️</button>
         {/* Network logo — bottom right */}
-        <div style={{ position: "absolute", bottom: 10, right: 14, display: "flex", alignItems: "center" }}>
+        <div style={{ position: "absolute", bottom: 8, right: 12, display: "flex", alignItems: "center" }}>
           <NetworkLogo network={cc.network} />
         </div>
       </div>
 
-      {/* ── Body ── */}
-      <div style={{ padding: "16px 18px", display: "flex", flexDirection: "column", flex: 1 }}>
+      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 11, flex: 1 }}>
         {/* Card name */}
-        <div style={{ fontSize: 14, fontWeight: 500, color: "#111827", fontFamily: "Figtree, sans-serif", marginBottom: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {cc.name}
-          {isMaster && <span style={{ color: "#888780", fontWeight: 400, fontSize: 11, marginLeft: 6 }}>· Master</span>}
+          {isMaster && <span style={{ fontWeight: 400, color: "#9ca3af", fontSize: 11, marginLeft: 6 }}>· Master</span>}
         </div>
 
-        {/* DEBT */}
-        <div style={{ marginBottom: cc.cr > 0 ? 4 : 12 }}>
-          <div style={{ fontSize: 10, letterSpacing: 1, color: "#888780", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>DEBT</div>
-          <div style={{ fontSize: 22, fontWeight: 500, color: cc.debt > 0 ? "#A32D2D" : "#888780", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
-            {fmtIDR(cc.debt, true)}
+        {/* Debt + Available — 2-column */}
+        <div style={{ display: "flex", gap: 10 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>Debt</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: cc.debt > 0 ? "#dc2626" : "#9ca3af", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
+              {fmtIDR(cc.debt, true)}
+            </div>
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>
+              {cc.shared_limit_group_id ? "Group Avail" : "Available"}
+            </div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#059669", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
+              {fmtIDR(cc.avail, true)}
+            </div>
+            {cc.cr > 0 && (
+              <div style={{ fontSize: 10, color: "#0F6E56", fontFamily: "Figtree, sans-serif", marginTop: 2 }}
+                title="Saldo lebih bayar / CR — menambah available limit">
+                +{fmtIDR(cc.cr, true)} top-up
+              </div>
+            )}
           </div>
         </div>
 
-        {/* CR sub-info */}
-        {cc.cr > 0 && (
-          <div style={{ fontSize: 11, color: "#0F6E56", fontFamily: "Figtree, sans-serif", marginBottom: 12 }}>
-            +{fmtIDR(cc.cr, true)} top-up
+        {/* Utilization bar */}
+        {cc.limit > 0 && (
+          <div>
+            <div style={{ height: 4, background: "#f3f4f6", borderRadius: 4, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${Math.min(cc.util, 100)}%`, background: utilColor, borderRadius: 4, transition: "width 0.3s" }} />
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
+              <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+                Limit {fmtIDR(cc.limit, true)}{cc.shared_limit_group_id ? " shared" : ""}
+              </span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: utilColor, fontFamily: "Figtree, sans-serif" }}>{cc.util.toFixed(0)}%</span>
+            </div>
           </div>
         )}
 
-        {/* Progress bar */}
-        <div style={{ background: "#F1EFE8", height: 6, borderRadius: 3, overflow: "hidden", marginBottom: 6 }}>
-          <div style={{ background: utilColor, width: `${Math.min(cc.util, 100)}%`, height: "100%", borderRadius: 3, transition: "width 0.3s" }} />
-        </div>
+        {/* Due + Stmt badges */}
+        {(dueBadge || stmtBadge) && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {dueBadge && (
+              <span style={{
+                fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 6,
+                fontFamily: "Figtree, sans-serif",
+                background: cc.dueIn <= 3 ? "#fee2e2" : cc.dueIn <= 7 ? "#fef3c7" : "#f9fafb",
+                color:      cc.dueIn <= 3 ? "#dc2626" : cc.dueIn <= 7 ? "#d97706" : "#6b7280",
+                border: `1px solid ${cc.dueIn <= 3 ? "#fecaca" : cc.dueIn <= 7 ? "#fde68a" : "#f3f4f6"}`,
+              }}>{dueBadge}</span>
+            )}
+            {stmtBadge && (
+              <span style={{ fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 6, fontFamily: "Figtree, sans-serif", background: "#f9fafb", color: "#6b7280", border: "1px solid #f3f4f6" }}>
+                {stmtBadge}
+              </span>
+            )}
+          </div>
+        )}
 
-        {/* Available + utilization inline */}
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#888780", fontFamily: "Figtree, sans-serif", marginBottom: 14 }}>
-          <span>
-            {cc.shared_limit_group_id ? "Group avail" : "Available"}{" "}
-            <span style={{ color: "#0F6E56", fontWeight: 500 }}>{fmtIDR(cc.avail, true)}</span>
-          </span>
-          <span style={{ color: cc.util > 80 ? "#A32D2D" : "#888780" }}>
-            {cc.util.toFixed(0)}% of {fmtIDR(cc.limit, true)}{cc.shared_limit_group_id ? " shared" : ""}
-          </span>
-        </div>
-
-        {/* Buttons */}
-        <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
-          <button
-            onClick={onPay}
-            disabled={cc.debt === 0}
-            style={{
-              flex: 1, padding: 8, borderRadius: 8, fontSize: 12,
-              fontWeight: 500, fontFamily: "Figtree, sans-serif",
-              background: cc.debt > 0 ? "#2C2C2A" : "transparent",
-              color: cc.debt > 0 ? "#fff" : "#888780",
-              border: cc.debt > 0 ? "none" : "0.5px solid rgba(0,0,0,0.15)",
-              cursor: cc.debt > 0 ? "pointer" : "not-allowed",
-            }}
-          >Pay</button>
-          <button onClick={onHistory}      style={CC_SECONDARY_BTN}>History</button>
-          <button onClick={onInstallments} style={CC_SECONDARY_BTN}>Installments</button>
-          <button onClick={onBill}         style={CC_SECONDARY_BTN}>Bill</button>
+        {/* Action buttons */}
+        <div style={{ display: "flex", gap: 6, marginTop: "auto", flexWrap: "wrap" }}>
+          <button onClick={onPay} disabled={cc.debt === 0}
+            style={{ ...CC_BTN("#fde8e8", "#dc2626", "#fecaca"), opacity: cc.debt === 0 ? 0.5 : 1, cursor: cc.debt === 0 ? "not-allowed" : "pointer" }}>
+            💳 Pay
+          </button>
+          <button onClick={onHistory}      style={CC_BTN("#f3f4f6", "#374151", "#e5e7eb")}>History</button>
+          <button onClick={onInstallments} style={CC_BTN("#f3f4f6", "#374151", "#e5e7eb")}>Installments</button>
+          <button onClick={onBill}         style={CC_BTN("#f0f9ff", "#0369a1", "#bae6fd")}>Statement</button>
         </div>
       </div>
     </div>
