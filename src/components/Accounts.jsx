@@ -5,7 +5,8 @@ import {
   BANKS_L, NETWORKS, ASSET_SUBTYPES, LIAB_SUBTYPES,
   ACC_TYPE_LABEL, ACC_TYPE_ICON, REIMBURSE_ENTITIES,
 } from "../constants";
-import { fmtIDR, fmtCur } from "../utils";
+import { supabase } from "../lib/supabase";
+import { fmtIDR, fmtCur, todayStr } from "../utils";
 import Modal, { ConfirmModal } from "./shared/Modal";
 import Button from "./shared/Button";
 import GlobalReconcileButton from "./shared/GlobalReconcileButton";
@@ -70,10 +71,16 @@ export default function Accounts({
   const [saving,   setSaving]   = useState(false);
   const [histAcc,  setHistAcc]  = useState(null);
   const [deleteAcc, setDeleteAcc] = useState(null);
-  // PT Investment "Update Nilai"
+  // Asset "Update Nilai" (PT Investment) + Deposito "Update Value"
   const [nilaiAcc,  setNilaiAcc]  = useState(null);
   const [nilaiForm, setNilaiForm] = useState({ value: "", date: "", notes: "" });
   const [nilaiSaving, setNilaiSaving] = useState(false);
+
+  // Deposito "Cair" (Withdraw)
+  const [withdrawAcc,    setWithdrawAcc]    = useState(null);
+  const [withdrawForm,   setWithdrawForm]   = useState({ amount: "", to_id: "", date: "", notes: "" });
+  const [withdrawSaving, setWithdrawSaving] = useState(false);
+
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -303,10 +310,12 @@ export default function Accounts({
   const bankAccounts = useMemo(() => accounts.filter(a => a.type === "bank"), [accounts]);
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
-  // ─── UPDATE NILAI (PT Investment) ────────────────────────────
+  const isDepositoAcc = (acc) => acc?.type === "asset" && (acc.subtype === "Deposit" || acc.subtype === "Deposito");
+
+  // ─── UPDATE VALUE (PT Investment + Deposito) ─────────────────
   const openUpdateNilai = (acc) => {
     setNilaiAcc(acc);
-    setNilaiForm({ value: String(acc.current_value || ""), date: new Date().toISOString().slice(0, 10), notes: "" });
+    setNilaiForm({ value: String(acc.current_value || ""), date: todayStr(), notes: "" });
     setModal("updateNilai");
   };
 
@@ -315,12 +324,62 @@ export default function Accounts({
     const newValue = Number(nilaiForm.value) || 0;
     setNilaiSaving(true);
     try {
-      const updated = await accountsApi.update(nilaiAcc.id, { current_value: newValue });
-      setAccounts(p => p.map(a => a.id === nilaiAcc.id ? updated : a));
-      showToast("Nilai updated");
+      const oldValue = Number(nilaiAcc.current_value || 0);
+      const updated  = await accountsApi.update(nilaiAcc.id, { current_value: newValue });
+      setAccounts(p => p.map(a => a.id === nilaiAcc.id ? { ...a, ...updated } : a));
+
+      // For Deposito: also insert asset_value_history
+      if (isDepositoAcc(nilaiAcc)) {
+        await supabase.from("asset_value_history").insert({
+          account_id: nilaiAcc.id, user_id: user.id,
+          old_value: oldValue, new_value: newValue,
+          date:  nilaiForm.date || todayStr(),
+          notes: nilaiForm.notes || "Manual update",
+        });
+      }
+      showToast("Value updated");
       setModal(null);
     } catch (e) { showToast(e.message, "error"); }
     setNilaiSaving(false);
+  };
+
+  // ─── WITHDRAW / CAIR (Deposito) ──────────────────────────────
+  const openWithdraw = (acc) => {
+    setWithdrawAcc(acc);
+    setWithdrawForm({ amount: String(acc.current_value || ""), to_id: "", date: todayStr(), notes: "" });
+    setModal("withdraw");
+  };
+
+  const saveWithdraw = async () => {
+    if (!withdrawAcc) return;
+    const amt  = Number(withdrawForm.amount) || 0;
+    if (!amt)            { showToast("Enter withdrawal amount", "error"); return; }
+    if (!withdrawForm.to_id) { showToast("Select destination bank account", "error"); return; }
+    setWithdrawSaving(true);
+    try {
+      // Insert sell_asset ledger entry
+      await ledgerApi.create(user.id, {
+        tx_date:     withdrawForm.date || todayStr(),
+        description: withdrawForm.notes || `${withdrawAcc.name} — Cair`,
+        amount:      amt, currency: "IDR", fx_rate_used: null, amount_idr: amt,
+        tx_type:     "sell_asset",
+        from_type:   "account", to_type: "account",
+        from_id:     withdrawAcc.id,
+        to_id:       withdrawForm.to_id,
+        entity:      "Personal",
+        category_id: null, category_name: null,
+        notes:       withdrawForm.notes || "",
+      }, accounts);
+      // Mark deposit as closed
+      const updated = await accountsApi.update(withdrawAcc.id, {
+        deposit_status: "closed", is_active: false, current_value: 0,
+      });
+      setAccounts(p => p.map(a => a.id === withdrawAcc.id ? { ...a, ...updated } : a));
+      await onRefresh?.();
+      showToast(`${withdrawAcc.name} — Rp ${amt.toLocaleString("id-ID")} cair ke bank`);
+      setModal(null);
+    } catch (e) { showToast(e.message, "error"); }
+    setWithdrawSaving(false);
   };
 
   // ─── RENDER ──────────────────────────────────────────────────
@@ -444,6 +503,8 @@ export default function Accounts({
                 onDelete={() => setDeleteAcc(a)}
                 onHistory={() => { setHistAcc(a); setModal("history"); }}
                 onUpdateNilai={() => openUpdateNilai(a)}
+                onWithdraw={isDepositoAcc(a) ? () => openWithdraw(a) : undefined}
+                onStatement={() => navigate(`/accounts/${a.id}/statement`)}
               />
             ))}
           </div>
@@ -552,34 +613,96 @@ export default function Accounts({
         danger
       />
 
-      {/* ── UPDATE NILAI MODAL (PT Investment) ── */}
+      {/* ── UPDATE VALUE MODAL (PT Investment + Deposito) ── */}
       <Modal
         isOpen={modal === "updateNilai"}
         onClose={() => setModal(null)}
-        title="Update Nilai Investasi"
+        title={nilaiAcc && isDepositoAcc(nilaiAcc) ? "Tambah Bunga / Update Nilai Deposito" : "Update Nilai Investasi"}
         footer={
-          <Button fullWidth onClick={saveNilai} busy={nilaiSaving}>Update Nilai</Button>
+          <Button fullWidth onClick={saveNilai} busy={nilaiSaving}>
+            {nilaiAcc && isDepositoAcc(nilaiAcc) ? "Update Value" : "Update Nilai"}
+          </Button>
         }
       >
         {nilaiAcc && (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div style={{ background: "#f0f9ff", borderRadius: 10, padding: "10px 14px", fontFamily: "Figtree, sans-serif" }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{nilaiAcc.name}</div>
-              {nilaiAcc.interest_rate > 0 && (
-                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
-                  Kepemilikan {nilaiAcc.interest_rate}% · Modal {fmtIDR(Number(nilaiAcc.purchase_price || 0))}
-                </div>
+              {isDepositoAcc(nilaiAcc) ? (
+                <>
+                  {nilaiAcc.interest_rate > 0 && (
+                    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+                      {nilaiAcc.interest_rate}% p.a. → Net {(nilaiAcc.interest_rate * 0.8).toFixed(2)}%
+                    </div>
+                  )}
+                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+                    Principal: {fmtIDR(Number(nilaiAcc.current_value || 0))}
+                  </div>
+                </>
+              ) : (
+                <>
+                  {nilaiAcc.interest_rate > 0 && (
+                    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+                      Kepemilikan {nilaiAcc.interest_rate}% · Modal {fmtIDR(Number(nilaiAcc.purchase_price || 0))}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+                    Nilai sekarang: {fmtIDR(Number(nilaiAcc.current_value || 0))}
+                  </div>
+                </>
               )}
-              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
-                Nilai sekarang: {fmtIDR(Number(nilaiAcc.current_value || 0))}
-              </div>
             </div>
-            <AmountInput label="Nilai Buku Baru (Rp)" value={nilaiForm.value}
+            <AmountInput
+              label={isDepositoAcc(nilaiAcc) ? "Nilai Terkini (setelah bunga) (Rp)" : "Nilai Buku Baru (Rp)"}
+              value={nilaiForm.value}
               onChange={v => setNilaiForm(f => ({ ...f, value: v }))} />
-            <Input label="Tanggal Update" type="date" value={nilaiForm.date}
+            <Input label="Tanggal" type="date" value={nilaiForm.date}
               onChange={e => setNilaiForm(f => ({ ...f, date: e.target.value }))} />
             <Input label="Catatan (opsional)" value={nilaiForm.notes}
               onChange={e => setNilaiForm(f => ({ ...f, notes: e.target.value }))} />
+          </div>
+        )}
+      </Modal>
+
+      {/* ── WITHDRAW / CAIR MODAL (Deposito) ── */}
+      <Modal
+        isOpen={modal === "withdraw"}
+        onClose={() => setModal(null)}
+        title="Cairkan Deposito"
+        footer={
+          <Button fullWidth onClick={saveWithdraw} busy={withdrawSaving}>💰 Cairkan</Button>
+        }
+      >
+        {withdrawAcc && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ background: "#fef9ec", borderRadius: 10, padding: "10px 14px", fontFamily: "Figtree, sans-serif", border: "1px solid #fde68a" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{withdrawAcc.name}</div>
+              {withdrawAcc.bank_name && (
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{withdrawAcc.bank_name}</div>
+              )}
+              <div style={{ fontSize: 11, color: "#d97706", marginTop: 2, fontWeight: 600 }}>
+                Principal: {fmtIDR(Number(withdrawAcc.current_value || 0))}
+                {withdrawAcc.maturity_date && (
+                  <span style={{ marginLeft: 6, fontWeight: 400, color: "#9ca3af" }}>
+                    · Maturity: {new Date(withdrawAcc.maturity_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                  </span>
+                )}
+              </div>
+            </div>
+            <AmountInput label="Jumlah Cair (Rp)" value={withdrawForm.amount}
+              onChange={v => setWithdrawForm(f => ({ ...f, amount: v }))} />
+            <Field label="Transfer ke Rekening *">
+              <Select
+                value={withdrawForm.to_id}
+                onChange={e => setWithdrawForm(f => ({ ...f, to_id: e.target.value }))}
+                options={[...bankAccounts, ...(accounts || []).filter(a => a.type === "bank" || (a.type === "bank" && a.subtype === "cash"))].filter(a => a.is_active !== false).map(a => ({ value: a.id, label: a.name }))}
+                placeholder="Pilih rekening tujuan…"
+              />
+            </Field>
+            <Input label="Tanggal Cair" type="date" value={withdrawForm.date}
+              onChange={e => setWithdrawForm(f => ({ ...f, date: e.target.value }))} />
+            <Input label="Catatan (opsional)" value={withdrawForm.notes}
+              onChange={e => setWithdrawForm(f => ({ ...f, notes: e.target.value }))} />
           </div>
         )}
       </Modal>
@@ -981,7 +1104,7 @@ function CashPageContent({ accounts, fxRates, CURRENCIES: C = [], ledger, onEdit
 }
 
 // ─── ACCOUNT CARD ────────────────────────────────────────────
-function AccountCard({ account: a, ledger, accounts, fxRates = {}, onEdit, onDelete, onHistory, onUpdateNilai }) {
+function AccountCard({ account: a, ledger, accounts, fxRates = {}, onEdit, onDelete, onHistory, onUpdateNilai, onWithdraw, onStatement }) {
   const isCash = a.type === "bank" && a.subtype === "cash";
   const bg    = isCash ? "#f0fdf4" : (TYPE_BG[a.type]    || "#f9fafb");
   const color = isCash ? "#059669" : (TYPE_COLOR[a.type] || "#6b7280");
@@ -1246,10 +1369,23 @@ function AccountCard({ account: a, ledger, accounts, fxRates = {}, onEdit, onDel
       })()}
 
       {/* Action buttons */}
-      <div style={{ display: "flex", gap: 6 }}>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         {a.type === "asset" && a.subtype === "PT Investment" && (
           <button onClick={onUpdateNilai} style={{ ...ACTION_BTN, background: "#e8f4fd", color: "#3b5bdb", border: "1px solid #bfdbfe" }}>
             📊 Update Nilai
+          </button>
+        )}
+        {(a.subtype === "Deposit" || a.subtype === "Deposito") && a.deposit_status !== "closed" && <>
+          <button onClick={onUpdateNilai} style={{ ...ACTION_BTN, background: "#f0fdf4", color: "#059669", border: "1px solid #bbf7d0" }}>
+            + Bunga
+          </button>
+          <button onClick={onWithdraw} style={{ ...ACTION_BTN, background: "#fef9ec", color: "#d97706", border: "1px solid #fde68a" }}>
+            💰 Cair
+          </button>
+        </>}
+        {a.type === "asset" && onStatement && (
+          <button onClick={onStatement} style={ACTION_BTN}>
+            📄 Statement
           </button>
         )}
         <button onClick={onEdit} style={ACTION_BTN}>
