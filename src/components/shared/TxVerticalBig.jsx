@@ -519,14 +519,15 @@ export default function TxVerticalBig({
         const loan = effectiveLoans.find(l => l.id === form.from_id);
         if (!loan) { showToast("Loan not found", "error"); setSaving(false); return; }
 
+        // Compute for toast display only — actual paid_months increment and
+        // employee_loan_payments insert are handled inside ledgerApi.create
+        // via loan_auto_payment: true → loanPaymentsApi.recordAndIncrement.
+        // recordAndIncrement always increments paid_months by 1 (not prorated).
         const newPaidMonths = Number(loan.paid_months || 0) + 1;
         const totalMonths   = Number(loan.monthly_installment || 0) > 0
           ? Math.ceil(Number(loan.total_amount || 0) / Number(loan.monthly_installment))
           : 0;
         const isFullyPaid = totalMonths > 0 && newPaidMonths >= totalMonths;
-        const updates     = { paid_months: newPaidMonths, ...(isFullyPaid ? { status: "settled" } : {}) };
-        const updated     = await employeeLoanApi.update(loan.id, updates);
-        setEmployeeLoans?.(p => p.map(l => l.id === loan.id ? updated : l));
 
         const autoNotes = totalMonths > 0
           ? `Payment ${newPaidMonths} of ${totalMonths}`
@@ -538,6 +539,7 @@ export default function TxVerticalBig({
           tx_type: "collect_loan", from_type: "employee_loan", to_type: "account",
           from_id: null, to_id: uuid(form.to_id),
           entity: "Personal", employee_loan_id: loan.id,
+          loan_auto_payment: true,
           is_reimburse: false, merchant_name: null,
           notes: form.notes?.trim() || autoNotes,
           attachment_url: null, ai_categorized: false, ai_confidence: null,
@@ -545,7 +547,6 @@ export default function TxVerticalBig({
         };
         const created = await ledgerApi.create(user.id, entry, accounts);
         setLedger?.(p => [created, ...p]);
-        await recalculateBalance(uuid(form.to_id), user.id);
         showToast(isFullyPaid ? "Loan fully paid! 🎉" : `Payment ${newPaidMonths}${totalMonths > 0 ? ` of ${totalMonths}` : ""} recorded`);
         await onRefresh?.();
         onSave?.(created);
