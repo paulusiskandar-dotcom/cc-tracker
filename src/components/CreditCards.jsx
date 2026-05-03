@@ -970,22 +970,38 @@ export default function CreditCards({
 
           {payForm.cardId && (() => {
             const cc = cardStats.find(c => c.id === payForm.cardId);
-            return cc ? (
-              <div style={{ padding: "10px 12px", background: "#fef9ec", borderRadius: 10, border: "1px solid #fde68a" }}>
-                <div style={{ fontSize: 11, color: "#92400e", fontFamily: "Figtree, sans-serif", fontWeight: 600 }}>
-                  Full balance: {fmtIDR(cc.debt)} — you can pay a partial amount
+            if (!cc) return null;
+            const amt = Number(payForm.amount) || 0;
+            const overpay = cc.debt > 0 && amt > cc.debt ? amt - cc.debt : 0;
+            return (
+              <>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: "10px 12px", background: "#f9fafb", borderRadius: 10, border: "1px solid #e5e7eb", fontSize: 12, fontFamily: "Figtree, sans-serif" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#6b7280" }}>Outstanding</span>
+                    <strong style={{ color: cc.debt > 0 ? "#dc2626" : "#9ca3af" }}>{fmtIDR(cc.debt)}</strong>
+                  </div>
+                  {cc.cr > 0 && (
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ color: "#6b7280" }}>Current CR</span>
+                      <strong style={{ color: "#059669" }}>{fmtIDR(cc.cr)}</strong>
+                    </div>
+                  )}
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ color: "#6b7280" }}>Available limit</span>
+                    <strong style={{ color: "#374151" }}>{fmtIDR(cc.avail)}</strong>
+                  </div>
                 </div>
-                <button
-                  onClick={() => setP("amount", cc.debt)}
-                  style={{ fontSize: 11, color: "#d97706", background: "none", border: "none", cursor: "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 700, padding: "4px 0 0" }}
-                >
-                  Pay full balance →
-                </button>
-              </div>
-            ) : null;
+                <AmountInput label="Payment Amount" value={payForm.amount} onChange={v => setP("amount", v)} />
+                {overpay > 0 && (
+                  <div style={{ fontSize: 11, color: "#854F0B", background: "#FAEEDA", borderRadius: 8, padding: "8px 12px", fontFamily: "Figtree, sans-serif" }}>
+                    ⓘ Sisa {fmtIDR(overpay)} akan jadi top-up (CR) yang menambah available limit.
+                  </div>
+                )}
+              </>
+            );
           })()}
 
-          <AmountInput label="Payment Amount" value={payForm.amount} onChange={v => setP("amount", v)} />
+          {!payForm.cardId && <AmountInput label="Payment Amount" value={payForm.amount} onChange={v => setP("amount", v)} />}
 
           <FormRow>
             <AmountInput label="Admin Fee (optional)" value={payForm.admin_fee} onChange={v => setP("admin_fee", v)} style={{ flex: 1 }} />
@@ -1293,7 +1309,7 @@ function SharedLimitGroupCard({ group, cardStats, paletteStart = 0, onPay, onTra
       <div style={{ padding: "12px 14px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
         {members.map((cc, i) => {
           const stats  = cardStats.find(s => s.id === cc.id);
-          const debt   = stats?.debt ?? Number(cc.current_balance || 0);
+          const debt   = stats?.debt ?? Number(cc.outstanding_amount || 0);
           const dueIn  = stats?.dueIn ?? null;
           const color  = CARD_PALETTE[(paletteStart + i) % CARD_PALETTE.length];
           return (

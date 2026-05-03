@@ -256,6 +256,7 @@ export default function CCStatement({
       if (e1) throw e1;
       if (e2) throw e2;
 
+      // initial_balance = initial outstanding when account was created; fall back to 0 if not set
       const initialBal   = Number(selectedAccount?.initial_balance || 0);
       const preTxs       = beforeRange || [];
       // For CC: charges (from_id=cc) increase debt; payments (to_id=cc) reduce debt
@@ -455,6 +456,27 @@ export default function CCStatement({
             }
           </select>
         </div>
+
+        {/* Current outstanding chip (live from account) */}
+        {selectedAccount && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: "1 1 140px" }}>
+            <label style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF }}>Outstanding</label>
+            <div style={{
+              padding: "6px 10px", borderRadius: 8, fontFamily: FF, fontSize: 13, fontWeight: 700,
+              background: Number(selectedAccount.outstanding_amount || 0) > 0 ? "#fff1f2" : "#f0fdf4",
+              color:      Number(selectedAccount.outstanding_amount || 0) > 0 ? "#A32D2D"  : "#3B6D11",
+              border:     `1px solid ${Number(selectedAccount.outstanding_amount || 0) > 0 ? "#fecaca" : "#bbf7d0"}`,
+              lineHeight: "18px",
+            }}>
+              {fmtIDR(Number(selectedAccount.outstanding_amount || 0))}
+              {Number(selectedAccount.current_balance || 0) > 0 && (
+                <span style={{ fontSize: 10, fontWeight: 500, color: "#3B6D11", marginLeft: 6 }}>
+                  +{fmtIDR(Number(selectedAccount.current_balance || 0), true)} CR
+                </span>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Month picker */}
         <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: "1 1 160px" }}>
