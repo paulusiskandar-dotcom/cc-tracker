@@ -41,6 +41,10 @@ input, textarea, [contenteditable], .selectable {
 /* Remove tap highlight on mobile */
 * { -webkit-tap-highlight-color: transparent; }
 
+/* Asset card hover effects */
+.asset-card:hover { border-color: rgba(0,0,0,0.15) !important; }
+.asset-card:hover .asset-card-edit { opacity: 1 !important; }
+
 /* Sidebar: desktop only */
 .sidebar {
   display: flex;

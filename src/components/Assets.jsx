@@ -13,12 +13,13 @@ import {
   SortDropdown,
 } from "./shared/index";
 
-// ─── CONSTANTS ────────────────────────────────────────────────
-const ACCT_BTN = {
-  height: 30, padding: "0 12px", borderRadius: 8, border: "1px solid #e5e7eb",
-  background: "#f9fafb", color: "#374151", fontSize: 12, fontWeight: 600,
-  cursor: "pointer", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap",
-};
+// ─── EDIT ICON SVG ────────────────────────────────────────────
+const EditIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2">
+    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+  </svg>
+);
 
 // ─── PURE DIV DONUT CHART ─────────────────────────────────────
 function DonutChart({ data, colors, size = 120, thickness = 24 }) {
@@ -46,24 +47,36 @@ function DonutChart({ data, colors, size = 120, thickness = 24 }) {
 
 
 // ─── ASSET CARD ───────────────────────────────────────────────
-function AssetCard({ asset: a, ledger, valueHistoryCount = 0, color, onUpdate, onEdit, onTimeline }) {
-  const cur      = Number(a.current_value || 0);
-  const bought   = Number(a.purchase_price || 0);
-  const gain     = cur - bought;
-  const gainPct  = bought > 0 ? (gain / bought) * 100 : 0;
-  const icon     = ASSET_ICON[a.subtype] || "📦";
+function AssetCard({ asset: a, color, onUpdate, onEdit, onTimeline }) {
+  const cur     = Number(a.current_value || 0);
+  const bought  = Number(a.purchase_price || 0);
+  const gain    = bought > 0 ? cur - bought : 0;
+  const gainPct = bought > 0 ? ((gain / bought) * 100).toFixed(1) : null;
+  const icon    = ASSET_ICON[a.subtype] || "📦";
 
   return (
-    <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-      {/* Color bar */}
-      <div style={{ height: 3, background: color }} />
+    <div className="asset-card" onClick={onTimeline} style={{
+      background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb",
+      overflow: "hidden", cursor: "pointer", position: "relative",
+      display: "flex", flexDirection: "column", transition: "border-color 0.15s",
+    }}>
+      <div style={{ height: 3, background: color, flexShrink: 0 }} />
       <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
+
+        {/* Hover edit button */}
+        <button className="asset-card-edit" onClick={(e) => { e.stopPropagation(); onEdit(); }} title="Edit"
+          style={{ position: "absolute", top: 14, right: 12, width: 28, height: 28, borderRadius: 6,
+            background: "#f3f4f6", border: "none", cursor: "pointer", opacity: 0,
+            transition: "opacity 0.15s", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <EditIcon />
+        </button>
+
         {/* Icon + Name */}
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ width: 36, height: 36, borderRadius: 10, background: color + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>
             {icon}
           </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ flex: 1, minWidth: 0, paddingRight: 30 }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {a.name}
             </div>
@@ -73,31 +86,27 @@ function AssetCard({ asset: a, ledger, valueHistoryCount = 0, color, onUpdate, o
           </div>
         </div>
 
-        {/* Value */}
+        {/* Value — click to quick-update */}
         <div>
-          <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 3 }}>Current Value</div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: "#3b5bdb", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 3 }}>
+            Current Value
+          </div>
+          <div onClick={(e) => { e.stopPropagation(); onUpdate(); }} title="Klik untuk update value"
+            style={{ fontSize: 22, fontWeight: 800, color: "#3b5bdb", fontFamily: "Figtree, sans-serif", lineHeight: 1.1, cursor: "pointer", display: "inline-block" }}>
             {fmtIDR(cur)}
           </div>
           {bought > 0 && (
-            <div style={{ marginTop: 5, display: "flex", flexDirection: "column", gap: 2 }}>
-              <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
-                Cost: {fmtIDR(bought, true)}
-              </div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: gain >= 0 ? "#059669" : "#dc2626", fontFamily: "Figtree, sans-serif" }}>
-                {gain >= 0 ? "▲" : "▼"} {fmtIDR(Math.abs(gain), true)}&nbsp;
-                <span style={{ fontWeight: 500 }}>({gain >= 0 ? "+" : ""}{gainPct.toFixed(1)}%)</span>
-              </div>
+            <div style={{ marginTop: 5, fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+              Cost: {fmtIDR(bought, true)}
+              {gainPct !== null && (
+                <span style={{ marginLeft: 6, fontWeight: 700, color: gain >= 0 ? "#059669" : "#dc2626" }}>
+                  · {gain >= 0 ? "▲" : "▼"} {fmtIDR(Math.abs(gain), true)} ({gain >= 0 ? "+" : ""}{gainPct}%)
+                </span>
+              )}
             </div>
           )}
         </div>
 
-        {/* Actions */}
-        <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
-          <button onClick={onUpdate}   style={ACCT_BTN}>Update Value</button>
-          <button onClick={onEdit}     style={ACCT_BTN}>✏️ Edit</button>
-          <button onClick={onTimeline} style={{ ...ACCT_BTN, flex: 1 }}>📋 Timeline</button>
-        </div>
       </div>
     </div>
   );
@@ -113,24 +122,35 @@ function DepositoCard({ asset: a, color, onUpdate, onEdit, onTimeline }) {
     ? Math.ceil((new Date(a.maturity_date + "T00:00:00") - today) / 86400000)
     : null;
   const maturityStr = a.maturity_date
-    ? new Date(a.maturity_date + "T00:00:00").toLocaleDateString("id-ID", {
-        day: "2-digit", month: "short", year: "numeric",
-      })
+    ? new Date(a.maturity_date + "T00:00:00").toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" })
     : null;
   const matColor = daysLeft !== null
     ? (daysLeft <= 0 ? "#dc2626" : daysLeft <= 30 ? "#d97706" : "#9ca3af")
     : "#9ca3af";
 
   return (
-    <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "column" }}>
-      <div style={{ height: 3, background: color }} />
+    <div className="asset-card" onClick={onTimeline} style={{
+      background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb",
+      overflow: "hidden", cursor: "pointer", position: "relative",
+      display: "flex", flexDirection: "column", transition: "border-color 0.15s",
+    }}>
+      <div style={{ height: 3, background: color, flexShrink: 0 }} />
       <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10, flex: 1 }}>
+
+        {/* Hover edit button */}
+        <button className="asset-card-edit" onClick={(e) => { e.stopPropagation(); onEdit(); }} title="Edit"
+          style={{ position: "absolute", top: 14, right: 12, width: 28, height: 28, borderRadius: 6,
+            background: "#f3f4f6", border: "none", cursor: "pointer", opacity: 0,
+            transition: "opacity 0.15s", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <EditIcon />
+        </button>
+
         {/* Header: name + badge */}
         <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
           <div style={{ width: 36, height: 36, borderRadius: 10, background: color + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>
             🏦
           </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ flex: 1, minWidth: 0, paddingRight: 30 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
               <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {a.name}
@@ -147,10 +167,13 @@ function DepositoCard({ asset: a, color, onUpdate, onEdit, onTimeline }) {
           </div>
         </div>
 
-        {/* Value */}
+        {/* Value — click to quick-update */}
         <div>
-          <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 3 }}>Current Value</div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: "#2563eb", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
+          <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 3 }}>
+            Current Value
+          </div>
+          <div onClick={(e) => { e.stopPropagation(); onUpdate(); }} title="Klik untuk update value"
+            style={{ fontSize: 22, fontWeight: 800, color: "#2563eb", fontFamily: "Figtree, sans-serif", lineHeight: 1.1, cursor: "pointer", display: "inline-block" }}>
             {fmtIDR(principal)}
           </div>
         </div>
@@ -175,12 +198,6 @@ function DepositoCard({ asset: a, color, onUpdate, onEdit, onTimeline }) {
           )}
         </div>
 
-        {/* Actions */}
-        <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
-          <button onClick={onUpdate}   style={ACCT_BTN}>Update Value</button>
-          <button onClick={onEdit}     style={ACCT_BTN}>✏️ Edit</button>
-          <button onClick={onTimeline} style={{ ...ACCT_BTN, flex: 1 }}>📋 Timeline</button>
-        </div>
       </div>
     </div>
   );
@@ -485,8 +502,8 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
               onChange={v => setAssetSort(v)}
             />
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
-            {sorted.map(({ a, i }) => {
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
+            {sorted.map(({ a }) => {
               const color = ASSET_COL[a.subtype] || "#9ca3af";
               if (a.subtype === "Deposito") {
                 return (
@@ -504,8 +521,6 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
                 <AssetCard
                   key={a.id}
                   asset={a}
-                  ledger={ledger}
-                  valueHistoryCount={valueHistoryCounts[a.id] || 0}
                   color={color}
                   onUpdate={() => openUpdateModal(a)}
                   onEdit={() => openEditAsset(a)}
