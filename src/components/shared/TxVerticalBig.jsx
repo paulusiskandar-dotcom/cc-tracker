@@ -75,7 +75,7 @@ const EMPTY = () => ({
   // buy_asset extras
   asset_name: "", asset_type: "Investment", asset_mode: "existing", asset_id: null,
   // fx_exchange extras
-  fx_direction: "buy", fx_rate_used: "",
+  fx_rate_used: "",
 });
 
 const ASSET_TYPES = ["Property","Vehicle","Investment","Crypto","Collectible","Other"];
@@ -294,7 +294,6 @@ export default function TxVerticalBig({
         employee_name:    initialData.employee_name || "",
         monthly_installment: initialData.monthly_installment || "",
         loan_start_date:  initialData.loan_start_date || todayStr(),
-        fx_direction:     initialData.fx_direction || "buy",
         fx_rate_used:     initialData.fx_rate_used || "",
       });
       setGroup(groupForType(txType));
@@ -359,24 +358,23 @@ export default function TxVerticalBig({
   const ccAccs    = creditCards.filter(a => a.is_active !== false);
   const assetAccs = assets.filter(a => a.is_active !== false);
 
-  // FX stuff — accounts are now per-currency; derive currency lists from accounts directly.
-  const fxCurrencies = [...new Set(
-    accounts
-      .filter(a => a.is_active !== false)
-      .map(a => a.currency)
-      .filter(c => c && c !== "IDR")
-  )].sort();
-  const fxUserRate = Number(form.fx_rate_used || 0);   // form input: "1 foreign = X IDR"
-  const fromAmt    = Number(form.amount || 0);
-  const fxDir      = form.fx_direction || "buy";
-  const fxCurrency = form.currency && form.currency !== "IDR" ? form.currency : null;
-  // Direction-aware to_amount preview (in to-currency units):
-  //   buy  (from=IDR,     to=foreign): to_amount = amount / userRate
-  //   sell (from=foreign, to=IDR):     to_amount = amount * userRate
-  const toAmtPrev  = fxUserRate > 0 && fromAmt > 0
-    ? (fxDir === "buy" ? fromAmt / fxUserRate : fromAmt * fxUserRate)
+  // FX: derive currencies from selected accounts (bidirectional — no Buy/Sell toggle)
+  const fxFromAcc = accounts.find(a => a.id === form.from_id);
+  const fxToAcc   = accounts.find(a => a.id === form.to_id);
+  const fxFromCur = fxFromAcc?.currency || null;
+  const fxToCur   = fxToAcc?.currency   || null;
+  const fxUserRate = Number(form.fx_rate_used || 0);
+  const fxFromAmt  = Number(form.amount || 0);
+  // Canonical rate convention: fx_rate = "1 to-unit in from-units"
+  // UI always shows "1 [natural foreign] = ? [other]", which is to-in-from except
+  // when foreign→IDR where display uses fromCur and needs inversion.
+  const fxRateCanonical = fxFromCur && fxToCur && fxUserRate > 0
+    ? ((fxFromCur !== "IDR" && fxToCur === "IDR") ? 1 / fxUserRate : fxUserRate)
     : null;
-  const toCurPrev  = fxDir === "buy" ? (fxCurrency || "foreign") : "IDR";
+  // to_amount preview in toCur units
+  const fxToAmtPrev = fxRateCanonical && fxFromAmt > 0
+    ? fxFromAmt / fxRateCanonical
+    : null;
 
   // IDR equivalent for non-IDR amounts
   const amtIDR = toIDR ? toIDR(Number(form.amount || 0), form.currency || "IDR", fxRates, allCurrencies) : Number(form.amount || 0);
@@ -424,14 +422,11 @@ export default function TxVerticalBig({
         if (fAmt <= 0)           { showToast("Enter amount",        "error"); setSaving(false); return; }
 
         // Convention (see api.js applyBalanceDelta header):
-        //   amount     = quantity in from_currency
-        //   fx_rate    = price of 1 to-unit expressed in from-units
-        //   to_amount  = amount / fx_rate
-        // The form lets the user input a natural "1 foreign = X IDR" rate; we
-        // translate that to the canonical to-in-from rate based on direction:
-        //   buy  (from=IDR, to=foreign): fx_rate = userRate            (IDR per foreign = to-in-from)
-        //   sell (from=foreign, to=IDR): fx_rate = 1 / userRate        (foreign per IDR = to-in-from)
-        const fxRate = fromCur === "IDR" ? userRate : 1 / userRate;
+        //   fx_rate = "1 to-unit expressed in from-units" (canonical)
+        // UI label: IDR→foreign "1 toCur = ? IDR" → fxRate = userRate (to-in-from directly)
+        //           foreign→IDR "1 fromCur = ? IDR" → fxRate = 1/userRate (invert to get IDR-in-fromCur)
+        //           foreign→foreign "1 toCur = ? fromCur" → fxRate = userRate (to-in-from directly)
+        const fxRate = (fromCur !== "IDR" && toCur === "IDR") ? 1 / userRate : userRate;
         const amtIDR = Math.round(toIDR(fAmt, fromCur, fxRates, allCurrencies) || fAmt);
         const entry = {
           tx_date: form.tx_date,
@@ -629,15 +624,14 @@ export default function TxVerticalBig({
       let computedFxRate = null;
       let computedCurrency = form.currency || "IDR";
       if (type === "fx_exchange") {
-        // See FX add path / api.js header for convention. The form's fx_rate_used
-        // input is "1 foreign = X IDR"; canonical stored fx_rate is "1 to-unit
-        // in from-units" — invert when from is the foreign side.
         const userRate  = sn(form.fx_rate_used);
         const fromAccEd = accounts.find(a => a.id === form.from_id);
-        const fromCurEd = fromAccEd?.currency || form.currency || "IDR";
+        const toAccEd   = accounts.find(a => a.id === form.to_id);
+        const fromCurEd = fromAccEd?.currency || "IDR";
+        const toCurEd   = toAccEd?.currency   || "IDR";
         computedCurrency = fromCurEd;
         computedFxRate = userRate > 0
-          ? (fromCurEd === "IDR" ? userRate : 1 / userRate)
+          ? ((fromCurEd !== "IDR" && toCurEd === "IDR") ? 1 / userRate : userRate)
           : null;
         const fAmt = sn(form.amount);
         computedAmtIDR = Math.round(toIDR(fAmt, fromCurEd, fxRates, allCurrencies) || fAmt);
@@ -884,89 +878,111 @@ export default function TxVerticalBig({
       </div>
     );
 
-    // ── FX Exchange ──────────────────────────────────────────────
+    // ── FX Exchange (bidirectional — no Buy/Sell toggle) ─────────
     if (type === "fx_exchange") {
-      // With single-currency accounts:
-      //   buy  = from is IDR, to is foreign (must hold the chosen fxCurrency)
-      //   sell = from is foreign (must hold fxCurrency), to is IDR
-      const idrAccs = accounts.filter(a =>
-        a.is_active !== false && (a.currency || "IDR") === "IDR"
-      );
-      const foreignAccs = accounts.filter(a =>
-        a.is_active !== false && a.currency && a.currency === fxCurrency
-      );
-      const fxFromAccs = fxDir === "sell" && fxCurrency ? foreignAccs : idrAccs;
-      const fxToAccs   = fxDir === "buy"  && fxCurrency ? foreignAccs : idrAccs;
+      const fxAllAccs  = accounts.filter(a => a.is_active !== false);
+      const fxToOpts   = fxFromCur
+        ? fxAllAccs.filter(a => (a.currency || "IDR") !== fxFromCur)
+        : fxAllAccs;
+
+      // Rate label: always show the big/natural number
+      //   IDR→foreign:     "1 [toCur] = ? IDR"
+      //   foreign→IDR:     "1 [fromCur] = ? IDR"
+      //   foreign→foreign: "1 [toCur] = ? [fromCur]"
+      let rateLabel = "Exchange Rate *";
+      let rateAutoFill = "";
+      if (fxFromCur && fxToCur) {
+        if (fxFromCur === "IDR") {
+          rateLabel    = `1 ${fxToCur} = ? IDR`;
+          rateAutoFill = fxRates[fxToCur] ? String(fxRates[fxToCur]) : "";
+        } else if (fxToCur === "IDR") {
+          rateLabel    = `1 ${fxFromCur} = ? IDR`;
+          rateAutoFill = fxRates[fxFromCur] ? String(fxRates[fxFromCur]) : "";
+        } else {
+          rateLabel = `1 ${fxToCur} = ? ${fxFromCur}`;
+          const fromR = Number(fxRates[fxFromCur] || 0);
+          const toR   = Number(fxRates[fxToCur]   || 0);
+          rateAutoFill = fromR > 0 ? String(parseFloat((toR / fromR).toFixed(4))) : "";
+        }
+      }
+
+      const handleFxFromChange = (id) => {
+        set("from_id", id || null);
+        set("to_id", null);
+        set("fx_rate_used", "");
+      };
+      const handleFxToChange = (id) => {
+        set("to_id", id || null);
+        if (id && !sn(form.fx_rate_used)) {
+          const toAccNew = accounts.find(a => a.id === id);
+          const toCurNew = toAccNew?.currency || "IDR";
+          if (fxFromCur === "IDR" && fxRates[toCurNew]) {
+            set("fx_rate_used", String(fxRates[toCurNew]));
+          } else if (toCurNew === "IDR" && fxFromCur && fxRates[fxFromCur]) {
+            set("fx_rate_used", String(fxRates[fxFromCur]));
+          } else if (fxFromCur && fxFromCur !== "IDR" && toCurNew !== "IDR") {
+            const fromR = Number(fxRates[fxFromCur] || 0);
+            const toR   = Number(fxRates[toCurNew]  || 0);
+            if (fromR > 0) set("fx_rate_used", String(parseFloat((toR / fromR).toFixed(4))));
+          }
+        }
+      };
+
       return (
         <>
           {DIVIDER}
-          {/* Direction toggle — above FROM since it determines FROM/TO options */}
-          <div style={{ display: "flex", gap: 8 }}>
-            {["buy","sell"].map(d => (
-              <button key={d} type="button"
-                onClick={() => { set("fx_direction", d); set("from_id", null); set("to_id", null); }}
-                style={{
-                  flex: 1, height: 36, borderRadius: 8, border: "1.5px solid",
-                  borderColor: fxDir === d ? "#0891b2" : "#e5e7eb",
-                  background:  fxDir === d ? "#e0f2fe" : "#fff",
-                  color:       fxDir === d ? "#0891b2" : "#6b7280",
-                  fontFamily: FF, fontSize: 13, fontWeight: 700, cursor: "pointer",
-                }}>
-                {d === "buy" ? "Buy Foreign" : "Sell Foreign"}
-              </button>
-            ))}
-          </div>
-          {/* 3. FROM */}
-          <Field label={fxDir === "buy" ? "From Account (IDR) *" : "From Account (foreign) *"}>
-            <select value={form.from_id || ""} onChange={e => set("from_id", e.target.value || null)} style={SEL}>
+          {/* 3. FROM ACCOUNT */}
+          <Field label="From Account *">
+            <select value={form.from_id || ""} onChange={e => handleFxFromChange(e.target.value)} style={SEL}>
               <option value="">Select account…</option>
-              {fxFromAccs.map(a => {
-                const bal    = Number(a.current_balance || 0);
-                const accCur = a.currency || "IDR";
-                const suffix = bal ? ` — ${accCur === "IDR" ? fmtIDR(bal) : fmtCur(bal, accCur)}` : "";
+              {fxAllAccs.map(a => {
+                const cur = a.currency || "IDR";
+                const bal = Number(a.current_balance ?? a.current_value ?? 0);
+                const suffix = bal ? ` — ${cur === "IDR" ? fmtIDR(bal) : fmtCur(bal, cur)}` : "";
                 return <option key={a.id} value={a.id}>{accLabel(a)}{suffix}</option>;
               })}
             </select>
           </Field>
-          {/* 4. TO */}
-          <Field label={fxDir === "buy" ? "To Account (receives foreign) *" : "To Account (receives IDR) *"}>
-            <select value={form.to_id || ""} onChange={e => set("to_id", e.target.value || null)} style={SEL}>
+          {/* 4. AMOUNT in from_currency */}
+          <Input
+            label={`Amount${fxFromCur ? ` (${fxFromCur})` : ""} *`}
+            type="number" min="0" step="any"
+            value={form.amount || ""}
+            onChange={e => set("amount", e.target.value)}
+            placeholder="0"
+          />
+          {/* 5. TO ACCOUNT */}
+          <Field label="To Account *">
+            <select value={form.to_id || ""} onChange={e => handleFxToChange(e.target.value)} style={SEL}>
               <option value="">Select account…</option>
-              {fxToAccs.length > 0
-                ? fxToAccs.map(a => <option key={a.id} value={a.id}>{accLabel(a)}</option>)
-                : fxDir === "buy" && fxCurrency
-                  ? <option disabled>No accounts hold {fxCurrency} yet</option>
-                  : null
+              {!fxFromCur
+                ? <option disabled>Select From Account first</option>
+                : fxToOpts.length > 0
+                  ? fxToOpts.map(a => {
+                      const cur = a.currency || "IDR";
+                      return <option key={a.id} value={a.id}>{accLabel(a)} · {cur}</option>;
+                    })
+                  : <option disabled>No accounts with a different currency</option>
               }
             </select>
           </Field>
-          {/* 5. Date + Currency (foreign) side by side */}
-          <div style={{ display: "flex", gap: 8 }}>
-            <Input label="Date" type="date" value={form.tx_date} onChange={e => set("tx_date", e.target.value)} style={{ flex: 1 }} />
-            <Field label="Currency *" style={{ width: 110, flexShrink: 0 }}>
-              <select value={form.currency || ""} onChange={e => { set("currency", e.target.value); set("from_id", null); set("to_id", null); }} style={{ ...SEL, padding: "0 8px", fontSize: 13, fontWeight: 600 }}>
-                <option value="">— Select —</option>
-                {fxCurrencies.map(c => {
-                  const meta = allCurrencies.find(x => x.code === c);
-                  return <option key={c} value={c}>{meta?.flag ? `${meta.flag} ` : ""}{c}</option>;
-                })}
-                {allCurrencies.filter(c => c.code !== "IDR" && !fxCurrencies.includes(c.code)).map(c => (
-                  <option key={c.code} value={c.code}>{c.flag ? `${c.flag} ` : ""}{c.code}</option>
-                ))}
-              </select>
-            </Field>
-          </div>
-          {/* 6. Rate + Amount + to-amount preview */}
-          <Input label={`Rate: 1 ${fxCurrency || "foreign"} = ? IDR *`} type="number" min="0" step="any"
-            value={form.fx_rate_used || ""} onChange={e => set("fx_rate_used", e.target.value)} placeholder="e.g. 107.5" />
-          <Input label={`Amount (${fxDir === "buy" ? "IDR" : (fxCurrency || "foreign units")}) *`} type="number" min="0" step="any"
-            value={form.amount || ""} onChange={e => set("amount", e.target.value)} placeholder="0" />
-          {toAmtPrev !== null && (
+          {/* 6. Date */}
+          <Input label="Date" type="date" value={form.tx_date} onChange={e => set("tx_date", e.target.value)} />
+          {/* 7. EXCHANGE RATE */}
+          <Input
+            label={rateLabel}
+            type="number" min="0" step="any"
+            value={form.fx_rate_used || ""}
+            onChange={e => set("fx_rate_used", e.target.value)}
+            placeholder={rateAutoFill || "e.g. 16000"}
+          />
+          {/* 8. YOU WILL RECEIVE (read-only preview) */}
+          {fxToAmtPrev !== null && fxToCur && (
             <div style={{ background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "#0369a1", fontWeight: 600, fontFamily: FF }}>
-              To amount: {toCurPrev === "IDR" ? fmtIDR(Math.round(toAmtPrev)) : fmtCur(toAmtPrev, toCurPrev)}
+              You will receive: {fxToCur === "IDR" ? fmtIDR(Math.round(fxToAmtPrev)) : fmtCur(fxToAmtPrev, fxToCur)}
             </div>
           )}
-          {/* 11. Notes */}
+          {/* 9. Notes */}
           {notesField}
         </>
       );
