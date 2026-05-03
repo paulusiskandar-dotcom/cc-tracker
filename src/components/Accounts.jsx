@@ -1541,6 +1541,7 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
         <Select label="Currency" value={form.currency || "IDR"} onChange={e => set("currency", e.target.value)}
           options={C.map(c => ({ value: c.code, label: `${c.flag} ${c.code}` }))} />
         <AmountInput label="Initial Balance" value={form.initial_balance || ""}
+          currency={form.currency || "IDR"}
           onChange={v => { set("initial_balance", v); set("current_balance", v); }} />
       </>}
 
@@ -1556,6 +1557,7 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
             style={{ flex: 1 }} />
         </FormRow>
         <AmountInput label="Initial Balance" value={form.initial_balance || ""}
+          currency={form.currency || "IDR"}
           onChange={v => { set("initial_balance", v); set("current_balance", v); }} />
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
