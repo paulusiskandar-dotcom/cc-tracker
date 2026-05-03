@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import { undoManager } from "../lib/undoManager";
 import { merchantRules } from "../lib/merchantRules";
-import { ledgerApi, scanApi, getTxFromToTypes, loanPaymentsApi, installmentsApi } from "../api";
+import { ledgerApi, scanApi, getTxFromToTypes, installmentsApi } from "../api";
 import { fmtIDR, todayStr, checkDuplicateTransaction, resolveCategoryIds } from "../utils";
 import { LIGHT, DARK } from "../theme";
 import { Button, EmptyState, Spinner, showToast, TxHorizontal } from "./shared/index";
@@ -478,6 +478,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
         employee_loan_id: r.employee_loan_id || r.from_id || null,
         entity: "Personal", category_id: null, category_name: null,
         notes: r.notes || "", source: "ai_scan", scan_batch_id: batchId || null,
+        loan_auto_payment: true,
       };
     }
     const { from_type, to_type } = getTxFromToTypes(r.tx_type);
@@ -498,6 +499,8 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       notes:          r.notes || "",
       source:         "ai_scan",
       scan_batch_id:  batchId || null,
+      ...(r.tx_type === "give_loan" && r.new_loan  ? { new_loan:  r.new_loan  } : {}),
+      ...(r.tx_type === "buy_asset"  && r.new_asset ? { new_asset: r.new_asset } : {}),
     };
   };
 
@@ -517,13 +520,6 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
         if (created) {
           if (created.id) newLedgerIds.push(created.id);
           setLedger(prev => [created, ...prev]); ok++;
-          if (r.tx_type === "collect_loan" && (r.employee_loan_id || r.from_id)) {
-            loanPaymentsApi.recordAndIncrement(user.id, {
-              loanId: r.employee_loan_id || r.from_id, payDate: r.tx_date,
-              amount: Number(r.amount_idr || r.amount || 0),
-              notes: r.description || "Collected via import",
-            }).catch(e => console.error("[collect_loan payment]", e));
-          }
           if (r._cicilan && r._cicilanMonths >= 2) {
             installmentsApi.createFromImport(user.id, {
               ledgerId: created.id, description: r.description || "", accountId: r.from_id,
@@ -560,13 +556,6 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
       if (created) {
         setLedger(prev => [created, ...prev]);
-        if (r.tx_type === "collect_loan" && r.from_id) {
-          loanPaymentsApi.recordAndIncrement(user.id, {
-            loanId: r.from_id, payDate: r.tx_date,
-            amount: Number(r.amount_idr || r.amount || 0),
-            notes: r.description || "Collected via import",
-          }).catch(e => console.error("[collect_loan payment]", e));
-        }
         if (r._cicilan && r._cicilanMonths >= 2) {
           installmentsApi.createFromImport(user.id, {
             ledgerId: created.id, description: r.description || "", accountId: r.from_id,
