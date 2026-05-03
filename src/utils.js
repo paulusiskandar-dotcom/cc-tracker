@@ -7,9 +7,9 @@ export const fmt = (n) =>
 
 export const fmtIDR = (n, short = false) => {
   const v = Math.round(Math.abs(Number(n || 0)));
-  if (short && v >= 1e9) return "Rp " + (v / 1e9).toFixed(1) + "B";
-  if (short && v >= 1e6) return "Rp " + (v / 1e6).toFixed(1) + "M";
-  if (short && v >= 1e3) return "Rp " + (v / 1e3).toFixed(0) + "K";
+  if (short && v >= 1e9) return "Rp " + (v / 1e9).toLocaleString("id-ID", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "B";
+  if (short && v >= 1e6) return "Rp " + (v / 1e6).toLocaleString("id-ID", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "M";
+  if (short && v >= 1e3) return "Rp " + Math.round(v / 1e3).toLocaleString("id-ID") + "K";
   return "Rp " + v.toLocaleString("id-ID");
 };
 
@@ -90,7 +90,7 @@ export const agingLabel = (dateStr) => {
 
 // ─── NET WORTH CALCULATION ───────────────────────────────────
 export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], fxRates = {}, reimburseSettlements = [] } = {}) => {
-  let bank = 0, assets = 0, receivables = 0, ccDebt = 0, liabilities = 0;
+  let bank = 0, cash = 0, assets = 0, receivables = 0, liabilities = 0, ccBalance = 0;
 
   const toIDRValue = (amount, currency) => {
     if (!currency || currency === "IDR") return Number(amount || 0);
@@ -101,9 +101,14 @@ export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], 
   for (const a of accounts) {
     if (!a.is_active) continue;
     if (a.type === "bank") {
-      bank += toIDRValue(a.current_balance, a.currency);
+      if (a.subtype === "cash") {
+        cash += toIDRValue(a.current_balance, a.currency);
+      } else {
+        bank += toIDRValue(a.current_balance, a.currency);
+      }
     } else if (a.type === "credit_card") {
-      ccDebt += Number(a.current_balance || 0);
+      // current_balance is negative when debt (e.g. -197M = owes 197M)
+      ccBalance += toIDRValue(a.current_balance, a.currency);
     } else if (a.type === "asset") {
       assets += Number(a.current_value || 0);
     } else if (a.type === "receivable") {
@@ -112,6 +117,9 @@ export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], 
       liabilities += Number(a.outstanding_amount || 0);
     }
   }
+
+  // ccDebt = absolute debt (positive); ccBalance is negative when net debt
+  const ccDebt = Math.max(0, -ccBalance);
 
   const employeeLoanTotal = employeeLoans
     .filter(l => l.status !== "settled")
@@ -125,8 +133,9 @@ export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], 
   const reimburseOutstanding = reimburseSettlements
     .reduce((sum, s) => sum + Math.max(0, Number(s.total_out || 0) - Number(s.total_in || 0)), 0);
 
-  const total = bank + assets + receivables + employeeLoanTotal + reimburseOutstanding - ccDebt - liabilities;
-  return { total, bank, assets, receivables, ccDebt, liabilities, employeeLoanTotal, reimburseOutstanding };
+  // ccBalance is negative when debt, so +ccBalance correctly subtracts debt
+  const total = bank + cash + assets + receivables + employeeLoanTotal + reimburseOutstanding + ccBalance - liabilities;
+  return { total, bank, cash, assets, receivables, ccDebt, liabilities, employeeLoanTotal, reimburseOutstanding };
 };
 
 // ─── CATEGORY HELPERS ─────────────────────────────────────────

@@ -249,7 +249,7 @@ export default function Dashboard({
   const [paySaving,     setPaySaving]     = useState(false);
   const [showAddTxModal, setShowAddTxModal] = useState(false);
   // ─── DERIVED STATS ───────────────────────────────────────────
-  const nw = netWorth || { total: 0, bank: 0, assets: 0, receivables: 0, ccDebt: 0, liabilities: 0, reimburseOutstanding: 0 };
+  const nw = netWorth || { total: 0, bank: 0, cash: 0, assets: 0, receivables: 0, ccDebt: 0, liabilities: 0, reimburseOutstanding: 0 };
 
   const thisMonthIncome = useMemo(() =>
     thisMonthLedger
@@ -1029,25 +1029,34 @@ export default function Dashboard({
           })()}
 
           <div style={{
-            ...DARK_STATS,
-            gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)",
+            display: "grid",
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: "20px 24px",
+            paddingTop: 12,
+            borderTop: "0.5px solid rgba(255,255,255,0.15)",
+            marginTop: 4,
           }}>
-            {[
-              { label: "Bank",    raw: nw.bank,              color: "#a5f3fc" },
-              { label: "Assets",  raw: nw.assets,            color: "#86efac" },
-              { label: "Recv",    raw: nw.receivables,       color: "#fde68a" },
-              { label: "Loans",   raw: nw.employeeLoanTotal, color: "#fde68a" },
-              { label: "CC Debt", raw: nw.ccDebt,            color: "#fca5a5" },
-            ].filter(s => Number(s.raw) > 0).map(s => (
-              <div key={s.label}>
-                <div style={{ fontSize: 9, fontWeight: 600, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>
-                  {s.label}
+            {(() => {
+              const totalRecv = (nw.receivables || 0) + (nw.employeeLoanTotal || 0) + (nw.reimburseOutstanding || 0);
+              const items = [
+                { label: "BANK",           raw: nw.bank || 0,      display: fmtIDR(nw.bank || 0, true),                                       color: "#85B7EB" },
+                { label: "CASH",           raw: nw.cash || 0,      display: fmtIDR(nw.cash || 0, true),                                       color: "#85B7EB" },
+                { label: "ASSETS",         raw: nw.assets || 0,    display: fmtIDR(nw.assets || 0, true),                                     color: "#97C459" },
+                { label: "RECEIVABLES",    raw: totalRecv,          display: fmtIDR(totalRecv, true),                                         color: "#5DCAA5" },
+                { label: "CC OUTSTANDING", raw: nw.ccDebt || 0,    display: (nw.ccDebt > 0 ? "-" : "") + fmtIDR(nw.ccDebt || 0, true),       color: "#F09595" },
+                { label: "LIABILITY",      raw: nw.liabilities || 0, display: fmtIDR(nw.liabilities || 0, true),                             color: "rgba(255,255,255,0.5)" },
+              ];
+              return items.map(s => (
+                <div key={s.label}>
+                  <div style={{ fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "1.2px", fontFamily: "Figtree, sans-serif", marginBottom: 4 }}>
+                    {s.label}
+                  </div>
+                  <div style={{ fontSize: 16, fontWeight: 500, color: s.raw === 0 ? "rgba(255,255,255,0.35)" : s.color, fontFamily: "Figtree, sans-serif" }}>
+                    {s.display}
+                  </div>
                 </div>
-                <div style={{ fontSize: isMobile ? 11 : 12, fontWeight: 700, color: s.color, fontFamily: "Figtree, sans-serif" }}>
-                  {isMobile ? fmtM(s.raw) : fmtIDR(s.raw, true)}
-                </div>
-              </div>
-            ))}
+              ));
+            })()}
           </div>
         </div>
 
@@ -1144,8 +1153,8 @@ export default function Dashboard({
         {(() => {
           const cashAccs  = bankAccounts.filter(a => a.subtype === "cash");
           const bankOnly  = bankAccounts.filter(a => a.subtype !== "cash");
-          const cashTotal = cashAccs.reduce((s, a) => s + Number(a.current_balance || 0), 0);
-          const bankTotal = nw.bank - cashTotal;
+          const cashTotal = nw.cash || 0;
+          const bankTotal = nw.bank || 0;
           const sub = cashTotal > 0
             ? `Bank: ${fmtIDR(bankTotal, true)} · Cash: ${fmtIDR(cashTotal, true)}`
             : `${bankOnly.length} account${bankOnly.length !== 1 ? "s" : ""}`;
@@ -1153,7 +1162,7 @@ export default function Dashboard({
             <BentoTile
               bg="#e8f4fd" icon="🏦" iconBg="rgba(59,91,219,0.12)"
               label="Bank & Cash"
-              value={fmtIDR(nw.bank)}
+              value={fmtIDR(bankTotal + cashTotal)}
               sub={sub}
               badge={bankAccounts.length > 0 ? `${bankAccounts.length} accs` : null}
               badgeColor="#3b5bdb"
