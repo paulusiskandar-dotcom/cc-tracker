@@ -389,9 +389,9 @@ function TxRow({ entry: e, accounts, categories = [], onEdit, onDelete }) {
   const isIn     = ["income","sell_asset","reimburse_in","collect_loan"].includes(e.tx_type);
   const isMove   = ["transfer","fx_exchange"].includes(e.tx_type);
 
-  // Lookup: try slug match (EXPENSE_CATEGORIES) first, then DB category (UUID match)
-  const catDef   = EXPENSE_CATEGORIES.find(c => c.id === e.category_id || c.id === e.category)
-                || categories?.find(c => c.id === e.category_id);
+  // Lookup: DB UUID first (has correct icon+color), then constants fallback for legacy slugs
+  const catDef   = categories?.find(c => c.id === e.category_id)
+                || EXPENSE_CATEGORIES.find(c => c.id === e.category_id || c.id === e.category);
   const amtColor = isOut ? "#dc2626" : isIn ? "#059669" : "#3b5bdb";
   const prefix   = isOut ? "−" : isIn ? "+" : "";
 

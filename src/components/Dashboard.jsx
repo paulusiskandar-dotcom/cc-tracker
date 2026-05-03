@@ -1311,6 +1311,7 @@ export default function Dashboard({
           <GroupedTransactionList
             groups={recentGroups}
             accounts={accounts}
+            categories={categories}
             compact
           />
         )}
@@ -1501,8 +1502,10 @@ export default function Dashboard({
 
           // ── Reminder (income / expense) ──
           const tmpl = confirmTarget.tmpl || {};
-          const allCats = [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES_LIST];
-          const cat = allCats.find(c => c.id === tmpl.category_id);
+          // Lookup by UUID from DB first; fall back to constants for legacy slugs
+          const cat = (categories || []).find(c => c.id === tmpl.category_id)
+            || incomeSrcs?.find(c => c.id === tmpl.category_id)
+            || [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES_LIST].find(c => c.id === tmpl.category_id);
           const fromAcc = accounts.find(a => a.id === tmpl.from_id);
           const toAcc   = accounts.find(a => a.id === tmpl.to_id);
           return (
@@ -1517,7 +1520,7 @@ export default function Dashboard({
                 background: "#f9fafb", borderRadius: 10, padding: "10px 14px",
                 display: "flex", flexDirection: "column", gap: 4,
               }}>
-                {cat && <div style={{ fontSize: 11, color: "#6b7280" }}>{cat.icon} {cat.label}</div>}
+                {cat && <div style={{ fontSize: 11, color: "#6b7280" }}>{cat.icon} {cat.name || cat.label}</div>}
                 {fromAcc && <div style={{ fontSize: 11, color: "#6b7280" }}>From: {fromAcc.name}</div>}
                 {toAcc && tmpl.tx_type !== "income" && <div style={{ fontSize: 11, color: "#6b7280" }}>To: {toAcc.name}</div>}
               </div>

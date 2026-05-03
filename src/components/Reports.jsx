@@ -52,22 +52,45 @@ function last6Months() {
   });
 }
 
-// Get icon+color for a category name (from constants fallback)
-function catMeta(name, isIncome = false) {
-  if (!name) return { icon: "❓", color: "#9ca3af" };
-  const lower = name.toLowerCase();
-  const list = isIncome ? INCOME_CATEGORIES_LIST : EXPENSE_CATEGORIES;
-  const hit  = list.find(c => c.label.toLowerCase() === lower || (c.name?.toLowerCase() === lower));
-  return { icon: hit?.icon || (isIncome ? "💰" : "❓"), color: hit?.color || (isIncome ? "#059669" : "#9ca3af") };
+// Resolve icon+color from DB category list first, then constants fallback.
+// Priority: 1) DB by category_id UUID  2) DB by name  3) constants by label  4) default
+function resolveCatMeta(categoryId, categoryName, dbList = [], isIncome = false) {
+  const constList = isIncome ? INCOME_CATEGORIES_LIST : EXPENSE_CATEGORIES;
+  const name = categoryName || "";
+
+  // 1. DB match by UUID
+  if (categoryId) {
+    const hit = dbList.find(c => c.id === categoryId);
+    if (hit?.icon) return { icon: hit.icon, color: hit.color || "#9ca3af" };
+  }
+
+  // 2. DB match by name (case-insensitive)
+  if (name) {
+    const lower = name.toLowerCase().trim();
+    const hit = dbList.find(c => c.name?.toLowerCase().trim() === lower);
+    if (hit?.icon) return { icon: hit.icon, color: hit.color || "#9ca3af" };
+  }
+
+  // 3. Constants fallback by label match (handles legacy data)
+  if (name) {
+    const lower = name.toLowerCase().trim();
+    const hit = constList.find(c => c.label?.toLowerCase().trim() === lower);
+    if (hit?.icon) return { icon: hit.icon, color: hit.color || "#9ca3af" };
+  }
+
+  return { icon: isIncome ? "💰" : "📝", color: isIncome ? "#059669" : "#9ca3af" };
 }
 
-function groupByCategory(txs, type = "expense") {
+function groupByCategory(txs, type = "expense", dbCategories = []) {
   const map = {};
   const isIncome = type === "income";
   txs.filter(t => t.tx_type === type).forEach(t => {
     const key  = t.category_id || t.category_name || "other";
     const name = t.category_name || "Other";
-    if (!map[key]) { map[key] = { id: key, name, ...catMeta(name, isIncome), total: 0, count: 0, txs: [] }; }
+    if (!map[key]) {
+      const meta = resolveCatMeta(t.category_id, name, dbCategories, isIncome);
+      map[key] = { id: key, name, ...meta, total: 0, count: 0, txs: [] };
+    }
     map[key].total += Number(t.amount_idr || 0);
     map[key].count++;
     map[key].txs.push(t);
@@ -97,7 +120,9 @@ function groupByIncomeSource(txs, incomeSrcs) {
     const srcId = t.from_id || t.category_id || "unknown";
     const src   = incomeSrcs.find(s => s.id === srcId);
     const name  = src?.name || t.category_name || "Other Income";
-    if (!map[srcId]) { map[srcId] = { id: srcId, name, icon: "💰", color: "#059669", total: 0, count: 0, txs: [] }; }
+    const icon  = src?.icon || "💰";
+    const color = src?.color || "#059669";
+    if (!map[srcId]) { map[srcId] = { id: srcId, name, icon, color, total: 0, count: 0, txs: [] }; }
     map[srcId].total += Number(t.amount_idr || 0);
     map[srcId].count++;
     map[srcId].txs.push(t);
@@ -291,7 +316,7 @@ function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeri
   const prevSav   = prevInc > 0 ? Math.round(((prevInc - prevExp) / prevInc) * 100) : null;
   const savDelta  = prevSav !== null && savRate !== null ? savRate - prevSav : null;
 
-  const catBreak  = useMemo(() => groupByCategory(txs, "expense"), [txs]);
+  const catBreak  = useMemo(() => groupByCategory(txs, "expense", categories), [txs, categories]);
   const merchants = useMemo(() => groupByMerchant(txs), [txs]);
   const catTotal  = catBreak.reduce((s, c) => s + c.total, 0);
 
@@ -435,11 +460,11 @@ function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeri
 
 const PIE_COLORS = ["#dc2626","#d97706","#3b5bdb","#059669","#7c3aed","#0891b2","#e11d48","#ca8a04","#16a34a","#1d4ed8"];
 
-function ExpenseTab({ ledger, period, dark }) {
+function ExpenseTab({ ledger, categories = [], period, dark }) {
   const T = dark ? DARK : LIGHT;
   const range   = useMemo(() => getDateRange(period), [period]);
   const txs     = useMemo(() => filterByRange(ledger, range).filter(t => t.tx_type === "expense"), [ledger, range]);
-  const cats    = useMemo(() => groupByCategory(txs, "expense"), [txs]);
+  const cats    = useMemo(() => groupByCategory(txs, "expense", categories), [txs, categories]);
   const [search, setSearch] = useState("");
   const [drill,  setDrill]  = useState(null);
   const catTotal = cats.reduce((s, c) => s + c.total, 0);
@@ -670,7 +695,7 @@ function ComparisonCard({ label, thisVal, prevVal, format = "idr", inverse = fal
   );
 }
 
-function ComparisonTab({ ledger, period, dark }) {
+function ComparisonTab({ ledger, categories = [], period, dark }) {
   const T = dark ? DARK : LIGHT;
   const range     = useMemo(() => getDateRange(period), [period]);
   const prevRange = useMemo(() => getPreviousRange(range), [range]);
@@ -687,8 +712,8 @@ function ComparisonTab({ ledger, period, dark }) {
   const prevNet  = prevInc - prevExp;
   const prevSav  = prevInc > 0 ? Math.round((prevNet / prevInc) * 100) : 0;
 
-  const thisCats = useMemo(() => groupByCategory(txs, "expense"), [txs]);
-  const prevCats = useMemo(() => groupByCategory(prevTxs, "expense"), [prevTxs]);
+  const thisCats = useMemo(() => groupByCategory(txs, "expense", categories), [txs, categories]);
+  const prevCats = useMemo(() => groupByCategory(prevTxs, "expense", categories), [prevTxs, categories]);
 
   // Merge categories
   const allCatNames = [...new Set([...thisCats.map(c => c.name), ...prevCats.map(c => c.name)])];
@@ -832,13 +857,13 @@ export default function Reports({ user, ledger = [], accounts = [], categories =
         />
       )}
       {activeTab === "expense" && (
-        <ExpenseTab ledger={ledger} period={period} dark={dark} />
+        <ExpenseTab ledger={ledger} categories={categories} period={period} dark={dark} />
       )}
       {activeTab === "income" && (
         <IncomeTab ledger={ledger} incomeSrcs={incomeSrcs} period={period} dark={dark} />
       )}
       {activeTab === "comparison" && (
-        <ComparisonTab ledger={ledger} period={period} dark={dark} />
+        <ComparisonTab ledger={ledger} categories={categories} period={period} dark={dark} />
       )}
     </div>
   );

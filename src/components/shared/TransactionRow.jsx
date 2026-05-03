@@ -49,18 +49,27 @@ function getExpandedContent(entry, accounts) {
 }
 
 // ─── CATEGORY ICON ────────────────────────────────────────────
-function CategoryIcon({ categoryId, txType, size = 36 }) {
+// categories = DB expense_categories array (id, name, icon, color)
+function CategoryIcon({ categoryId, categoryName, txType, size = 36, categories = [] }) {
   let icon  = "💸";
   let color = "#9ca3af";
   let bg    = "#f3f4f6";
 
-  const cat = EXPENSE_CATEGORIES.find(c => c.id === categoryId);
-  const tx  = TX_TYPE_MAP[txType];
+  // 1. DB lookup by UUID
+  let hit = categories.find(c => c.id === categoryId);
+  // 2. DB lookup by name (case-insensitive)
+  if (!hit && categoryName) {
+    const lower = categoryName.toLowerCase().trim();
+    hit = categories.find(c => c.name?.toLowerCase().trim() === lower);
+  }
+  // 3. Constants fallback by slug or label
+  if (!hit) hit = EXPENSE_CATEGORIES.find(c => c.id === categoryId || c.label === categoryName);
+  const tx = TX_TYPE_MAP[txType];
 
-  if (cat) {
-    icon  = cat.icon;
-    color = cat.color;
-    bg    = cat.color + "18";
+  if (hit?.icon) {
+    icon  = hit.icon;
+    color = hit.color || "#9ca3af";
+    bg    = (hit.color || "#9ca3af") + "18";
   } else if (tx) {
     icon  = tx.icon;
     color = tx.color;
@@ -102,6 +111,7 @@ function amountPrefix(txType) {
 export default function TransactionRow({
   entry,
   accounts = [],
+  categories = [],
   onClick,
   onDelete,
   compact = false,
@@ -247,7 +257,7 @@ export default function TransactionRow({
           position:   "relative",
         }}
       >
-        <CategoryIcon categoryId={entry.category} txType={entry.tx_type} size={iconSize} />
+        <CategoryIcon categoryId={entry.category_id || entry.category} categoryName={entry.category_name} txType={entry.tx_type} size={iconSize} categories={categories} />
 
         {/* Center: name + meta */}
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -368,7 +378,7 @@ export function DateGroupHeader({ dateStr, style = {} }) {
 }
 
 // ─── GROUPED TRANSACTION LIST ─────────────────────────────────
-export function GroupedTransactionList({ groups, accounts, onRowClick, compact = false }) {
+export function GroupedTransactionList({ groups, accounts, categories = [], onRowClick, compact = false }) {
   if (!groups || groups.length === 0) return null;
 
   return (
@@ -382,6 +392,7 @@ export function GroupedTransactionList({ groups, accounts, onRowClick, compact =
                 key={e.id}
                 entry={e}
                 accounts={accounts}
+                categories={categories}
                 onClick={() => onRowClick?.(e)}
                 compact={compact}
               />
