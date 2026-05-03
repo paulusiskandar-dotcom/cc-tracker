@@ -304,32 +304,32 @@ function GiveLoanCell({ r, onUpdate, T, accounts, employeeLoans }) {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <TabbedAcctSelect accounts={bc} value={r.from_id || ""} onChange={v => onUpdate({ from_id: v })} placeholder="From…" T={T} />
-        </div>
-        <button type="button" onClick={toggleMode}
-          style={{ fontSize: 9, padding: "2px 5px", borderRadius: 4, border: `1px solid ${T.border}`, background: isNew ? "#3b5bdb" : T.sur2, color: isNew ? "#fff" : T.text2, cursor: "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 700, flexShrink: 0 }}>
-          {isNew ? "Existing" : "+New"}
-        </button>
+    <div style={{ display: "flex", gap: 3, alignItems: "flex-start" }}>
+      {/* Left column: From (top) + Borrower/Name (bottom) — same width */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: 1, minWidth: 0 }}>
+        <TabbedAcctSelect accounts={bc} value={r.from_id || ""} onChange={v => onUpdate({ from_id: v })} placeholder="From…" T={T} />
+        {isNew ? (
+          <div style={{ display: "flex", gap: 3 }}>
+            <input style={{ ...inInp(T), flex: 1 }} placeholder="Employee name *"
+              value={r.new_loan_name || ""} onChange={e => onUpdate({ new_loan_name: e.target.value })} />
+            <input type="number" style={{ ...inInp(T), width: 52 }} placeholder="Months"
+              value={r.new_loan_months || ""} onChange={e => onUpdate({ new_loan_months: e.target.value })} />
+          </div>
+        ) : (
+          <select style={{ ...inSel(T), width: "100%" }} value={r.employee_loan_id || ""}
+            onChange={e => onUpdate({ employee_loan_id: e.target.value })}>
+            <option value="">Borrower…</option>
+            {activeLoans.map(l => (
+              <option key={l.id} value={l.id}>{l.employee_name}</option>
+            ))}
+          </select>
+        )}
       </div>
-      {isNew ? (
-        <div style={{ display: "flex", gap: 3 }}>
-          <input style={{ ...inInp(T), flex: 1 }} placeholder="Employee name *"
-            value={r.new_loan_name || ""} onChange={e => onUpdate({ new_loan_name: e.target.value })} />
-          <input type="number" style={{ ...inInp(T), width: 52 }} placeholder="Months"
-            value={r.new_loan_months || ""} onChange={e => onUpdate({ new_loan_months: e.target.value })} />
-        </div>
-      ) : (
-        <select style={{ ...inSel(T), width: "100%" }} value={r.employee_loan_id || ""}
-          onChange={e => onUpdate({ employee_loan_id: e.target.value })}>
-          <option value="">Borrower…</option>
-          {activeLoans.map(l => (
-            <option key={l.id} value={l.id}>{l.employee_name}</option>
-          ))}
-        </select>
-      )}
+      {/* Right: +New toggle — spans both rows */}
+      <button type="button" onClick={toggleMode}
+        style={{ fontSize: 9, padding: "2px 5px", borderRadius: 4, border: `1px solid ${T.border}`, background: isNew ? "#3b5bdb" : T.sur2, color: isNew ? "#fff" : T.text2, cursor: "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 700, flexShrink: 0, alignSelf: "flex-start" }}>
+        {isNew ? "Existing" : "+New"}
+      </button>
     </div>
   );
 }
@@ -346,32 +346,32 @@ function BuyAssetCell({ r, onUpdate, T, accounts }) {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-      <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <TabbedAcctSelect accounts={bc} value={r.from_id || ""} onChange={v => onUpdate({ from_id: v })} placeholder="From…" T={T} />
-        </div>
-        <button type="button" onClick={toggleMode}
-          style={{ fontSize: 9, padding: "2px 5px", borderRadius: 4, border: `1px solid ${T.border}`, background: isNew ? "#3b5bdb" : T.sur2, color: isNew ? "#fff" : T.text2, cursor: "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 700, flexShrink: 0 }}>
-          {isNew ? "Existing" : "+New"}
-        </button>
-      </div>
-      {isNew ? (
-        <div style={{ display: "flex", gap: 3 }}>
-          <input style={{ ...inInp(T), flex: 1 }} placeholder="Asset name *"
-            value={r.new_asset_name || ""} onChange={e => onUpdate({ new_asset_name: e.target.value })} />
-          <select style={{ ...inSel(T), width: 88 }} value={r.new_asset_subtype || "Other"}
-            onChange={e => onUpdate({ new_asset_subtype: e.target.value })}>
-            {ASSET_SUBTYPES_H.map(s => <option key={s} value={s}>{s}</option>)}
+    <div style={{ display: "flex", gap: 3, alignItems: "flex-start" }}>
+      {/* Left column: From (top) + Asset select/Name (bottom) — same width */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: 1, minWidth: 0 }}>
+        <TabbedAcctSelect accounts={bc} value={r.from_id || ""} onChange={v => onUpdate({ from_id: v })} placeholder="From…" T={T} />
+        {isNew ? (
+          <div style={{ display: "flex", gap: 3 }}>
+            <input style={{ ...inInp(T), flex: 1 }} placeholder="Asset name *"
+              value={r.new_asset_name || ""} onChange={e => onUpdate({ new_asset_name: e.target.value })} />
+            <select style={{ ...inSel(T), width: 88 }} value={r.new_asset_subtype || "Other"}
+              onChange={e => onUpdate({ new_asset_subtype: e.target.value })}>
+              {ASSET_SUBTYPES_H.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+        ) : (
+          <select style={{ ...inSel(T), width: "100%" }} value={r.to_id || ""}
+            onChange={e => onUpdate({ to_id: e.target.value })}>
+            <option value="">Select asset…</option>
+            {assets.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
           </select>
-        </div>
-      ) : (
-        <select style={{ ...inSel(T), width: "100%" }} value={r.to_id || ""}
-          onChange={e => onUpdate({ to_id: e.target.value })}>
-          <option value="">Select asset…</option>
-          {assets.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-        </select>
-      )}
+        )}
+      </div>
+      {/* Right: +New toggle — spans both rows */}
+      <button type="button" onClick={toggleMode}
+        style={{ fontSize: 9, padding: "2px 5px", borderRadius: 4, border: `1px solid ${T.border}`, background: isNew ? "#3b5bdb" : T.sur2, color: isNew ? "#fff" : T.text2, cursor: "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 700, flexShrink: 0, alignSelf: "flex-start" }}>
+        {isNew ? "Existing" : "+New"}
+      </button>
     </div>
   );
 }
