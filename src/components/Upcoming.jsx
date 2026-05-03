@@ -163,8 +163,8 @@ export default function Upcoming({
         raw: cc,
         date: dueDate.toISOString().slice(0, 10),
         title: `${cc.name} — Jatuh Tempo`,
-        amount: Math.max(0, Number(cc.current_balance || 0)),
-        sub: `Balance: ${fmtIDR(Math.abs(Number(cc.current_balance || 0)))}`,
+        amount: Number(cc.outstanding_amount || 0),
+        sub: `Balance: ${fmtIDR(Number(cc.outstanding_amount || 0))}`,
         actionable: true,
       });
     });
@@ -308,7 +308,7 @@ export default function Upcoming({
   // ── CC Pay ──────────────────────────────────────────────────
   const openCCPay = (cc) => {
     setCcPayCard(cc);
-    setCcPayForm({ bankId: bankAccounts[0]?.id || "", amount: String(Math.max(0, Number(cc.current_balance || 0))), date: todayStr() });
+    setCcPayForm({ bankId: bankAccounts[0]?.id || "", amount: "", date: todayStr() });
     setCcPayModal(true);
   };
 
@@ -658,8 +658,12 @@ export default function Upcoming({
       >
         {ccPayCard && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ background: "#f9fafb", borderRadius: 10, padding: "10px 14px", fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
-              Balance: <strong style={{ color: "#7c3aed" }}>{fmtIDR(Math.abs(Number(ccPayCard.current_balance || 0)))}</strong>
+            <div style={{ background: "#f9fafb", borderRadius: 10, padding: "10px 14px", fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif", display: "flex", flexDirection: "column", gap: 4 }}>
+              <div>Outstanding: <strong style={{ color: "#dc2626" }}>{fmtIDR(Number(ccPayCard.outstanding_amount || 0))}</strong></div>
+              {Number(ccPayCard.current_balance || 0) > 0 && (
+                <div>Current CR: <strong style={{ color: "#059669" }}>{fmtIDR(Number(ccPayCard.current_balance || 0))}</strong></div>
+              )}
+              <div>Available limit: <strong style={{ color: "#374151" }}>{fmtIDR(Math.max(0, Number(ccPayCard.card_limit || 0) - Number(ccPayCard.outstanding_amount || 0) + Number(ccPayCard.current_balance || 0)))}</strong></div>
             </div>
             <FormRow>
               <AmountInput label="Amount *" value={ccPayForm.amount} onChange={v => setCcPayForm(f => ({ ...f, amount: v }))} currency="IDR" />
@@ -667,6 +671,11 @@ export default function Upcoming({
                 <Input type="date" value={ccPayForm.date} onChange={e => setCcPayForm(f => ({ ...f, date: e.target.value }))} />
               </Field>
             </FormRow>
+            {Number(ccPayForm.amount) > Number(ccPayCard.outstanding_amount || 0) && Number(ccPayForm.amount) > 0 && (
+              <div style={{ fontSize: 11, color: "#854F0B", background: "#FAEEDA", borderRadius: 8, padding: "8px 12px", fontFamily: "Figtree, sans-serif" }}>
+                ⓘ Bayar {fmtIDR(Number(ccPayForm.amount))}. Sisa {fmtIDR(Number(ccPayForm.amount) - Number(ccPayCard.outstanding_amount || 0))} akan jadi top-up (CR) yang menambah available limit.
+              </div>
+            )}
             <Field label="From Bank Account">
               <Select
                 value={ccPayForm.bankId}

@@ -107,8 +107,8 @@ export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], 
         bank += toIDRValue(a.current_balance, a.currency);
       }
     } else if (a.type === "credit_card") {
-      // current_balance is negative when debt (e.g. -197M = owes 197M)
-      ccBalance += toIDRValue(a.current_balance, a.currency);
+      // outstanding_amount = debt (>= 0); current_balance = CR, not net worth
+      ccBalance += toIDRValue(a.outstanding_amount || 0, a.currency);
     } else if (a.type === "asset") {
       assets += Number(a.current_value || 0);
     } else if (a.type === "receivable") {
@@ -118,8 +118,8 @@ export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], 
     }
   }
 
-  // ccDebt = absolute debt (positive); ccBalance is negative when net debt
-  const ccDebt = Math.max(0, -ccBalance);
+  // ccDebt = total outstanding (positive)
+  const ccDebt = ccBalance;
 
   const employeeLoanTotal = employeeLoans
     .filter(l => l.status !== "settled")
@@ -133,8 +133,8 @@ export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], 
   const reimburseOutstanding = reimburseSettlements
     .reduce((sum, s) => sum + Math.max(0, Number(s.total_out || 0) - Number(s.total_in || 0)), 0);
 
-  // ccBalance is negative when debt, so +ccBalance correctly subtracts debt
-  const total = bank + cash + assets + receivables + employeeLoanTotal + reimburseOutstanding + ccBalance - liabilities;
+  // subtract outstanding from net worth
+  const total = bank + cash + assets + receivables + employeeLoanTotal + reimburseOutstanding - ccBalance - liabilities;
   return { total, bank, cash, assets, receivables, ccDebt, liabilities, employeeLoanTotal, reimburseOutstanding };
 };
 

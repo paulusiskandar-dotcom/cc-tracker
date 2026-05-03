@@ -242,7 +242,7 @@ export default function Dashboard({
   const surplus = thisMonthIncome - thisMonthExpense;
 
   const totalCCDebt = useMemo(() =>
-    creditCards.reduce((s, c) => s + Number(c.current_balance || 0), 0),
+    creditCards.reduce((s, c) => s + Number(c.outstanding_amount || 0), 0),
   [creditCards]);
 
   const thisMonthCCSpend = useMemo(() =>
@@ -266,7 +266,7 @@ export default function Dashboard({
       }
       const g = gm[cc.shared_limit_group_id];
       g.members.push(cc);
-      g.totalDebt += Number(cc.current_balance || 0);
+      g.totalDebt += Number(cc.outstanding_amount || 0);
       if (cc.is_limit_group_master) {
         g.sharedLimit = Number(cc.shared_limit || 0);
         g.name = cc.notes || cc.name || "Shared Group";
@@ -338,14 +338,14 @@ export default function Dashboard({
     const result = [];
     const now = new Date();
     // CC due soon
-    (accounts || []).filter(a => a.type === "credit_card" && a.due_day && Number(a.current_balance) < 0).forEach(a => {
+    (accounts || []).filter(a => a.type === "credit_card" && a.due_day && Number(a.outstanding_amount || 0) > 0).forEach(a => {
       const nextDue   = getNextDueDate(a.due_day);
       const daysUntil = Math.ceil((nextDue - now) / 86400000);
       if (daysUntil <= 7 && daysUntil >= 0) {
         result.push({
           icon: "⚠",
           message: `CC due in ${daysUntil}d`,
-          value: `${a.name} · ${fmtIDR(Math.abs(Number(a.current_balance)))}`,
+          value: `${a.name} · ${fmtIDR(Number(a.outstanding_amount || 0))}`,
           severity: daysUntil <= 3 ? "high" : "medium",
         });
       }
@@ -518,7 +518,7 @@ export default function Dashboard({
 
     // G) CC payment due dates within next 7 days
     creditCards
-      .filter(cc => cc.due_day && Number(cc.current_balance || 0) > 0)
+      .filter(cc => cc.due_day && Number(cc.outstanding_amount || 0) > 0)
       .forEach(cc => {
         const dueDateStr = nextDueDateStr(cc.due_day);
         if (dueDateStr > cutoffDate.toISOString().slice(0, 10)) return;
@@ -527,7 +527,7 @@ export default function Dashboard({
           date: dueDateStr,
           title: cc.name,
           sub: "Payment due",
-          amount: Number(cc.current_balance || 0),
+          amount: Number(cc.outstanding_amount || 0),
           amountColor: "#dc2626", amountSign: "−",
           icon: "💳", iconBg: "#fee2e2", iconColor: "#dc2626",
           actionable: false,
@@ -1100,8 +1100,8 @@ export default function Dashboard({
           })}
 
           {/* ── standalone cards (not in any group) ── */}
-          {creditCards.filter(c => !ccGroupedIds.has(c.id) && Number(c.current_balance || 0) > 0).map(c => {
-            const debt  = Number(c.current_balance || 0);
+          {creditCards.filter(c => !ccGroupedIds.has(c.id) && Number(c.outstanding_amount || 0) > 0).map(c => {
+            const debt  = Number(c.outstanding_amount || 0);
             const limit = Number(c.card_limit || 0);
             const util  = limit > 0 ? Math.min(100, (debt / limit) * 100) : 0;
             const utilColor = util > 80 ? "#dc2626" : util > 50 ? "#d97706" : "#059669";

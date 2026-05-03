@@ -49,7 +49,7 @@ const sanitizeUUIDs = (obj) => {
 // ─── BALANCE FIELD PER ACCOUNT TYPE ───────────────────────────
 const balField = (type) => {
   if (type === "bank")                               return "current_balance";
-  if (type === "credit_card")                        return "current_balance";
+  if (type === "credit_card")  return "outstanding_amount";
   if (type === "asset")                              return "current_value";
   if (type === "liability")  return "outstanding_amount";
   if (type === "receivable") return "receivable_outstanding";
@@ -91,16 +91,39 @@ const getDeltas = (txType, amount) => {
 // to side (+to_amount). No cross-currency conversion happens inside this helper.
 async function applyBalanceDelta(accountId, accountType, delta) {
   if (!accountId || !accountType || delta === 0) return;
+
+  if (accountType === "credit_card") {
+    if (delta >= 0) {
+      // Charge: add to outstanding_amount
+      const { error } = await supabase.rpc("increment_account_balance", {
+        p_account_id: accountId, p_field: "outstanding_amount", p_delta: delta,
+      });
+      if (error) {
+        const { data } = await supabase.from("accounts").select("outstanding_amount").eq("id", accountId).single();
+        if (data) await supabase.from("accounts").update({ outstanding_amount: Number(data.outstanding_amount || 0) + delta }).eq("id", accountId);
+      }
+    } else {
+      // Payment: reduce outstanding, overpayment → current_balance (CR)
+      const payment = -delta;
+      const { data: acc } = await supabase.from("accounts").select("outstanding_amount, current_balance").eq("id", accountId).single();
+      const outstanding = Number(acc?.outstanding_amount || 0);
+      const cr = Number(acc?.current_balance || 0);
+      if (payment <= outstanding) {
+        await supabase.from("accounts").update({ outstanding_amount: outstanding - payment }).eq("id", accountId);
+      } else {
+        await supabase.from("accounts").update({ outstanding_amount: 0, current_balance: cr + (payment - outstanding) }).eq("id", accountId);
+      }
+    }
+    return;
+  }
+
   const field = balField(accountType);
   if (!field) return;
-
-  // Try atomic RPC first, fallback to read-modify-write
   const { error } = await supabase.rpc("increment_account_balance", {
     p_account_id: accountId,
     p_field:      field,
     p_delta:      delta,
   });
-
   if (error) {
     const { data } = await supabase
       .from("accounts").select(field).eq("id", accountId).single();
@@ -474,14 +497,29 @@ export const recalculateBalance = async (accountId, userId) => {
     .eq("user_id", userId)
     .or(`from_id.eq.${accountId},to_id.eq.${accountId}`);
   const accType = acc?.type;
-  const field   = balField(accType);
-  if (!field) return null; // unknown type — nothing to write
+
+  if (accType === "credit_card") {
+    let outstanding = Number(acc?.initial_balance || 0);
+    let cr = 0;
+    for (const tx of (txns || [])) {
+      const amt = Number(tx.amount_idr || tx.amount || 0);
+      if (tx.from_id === accountId && tx.from_type === "account") {
+        outstanding += amt; // charge
+      }
+      if (tx.to_id === accountId && tx.to_type === "account") {
+        if (amt <= outstanding) { outstanding -= amt; }
+        else { cr += (amt - outstanding); outstanding = 0; }
+      }
+    }
+    await supabase.from("accounts").update({ outstanding_amount: outstanding, current_balance: cr }).eq("id", accountId);
+    return outstanding;
+  }
+
+  const field = balField(accType);
+  if (!field) return null;
   let balance = Number(acc?.initial_balance || 0);
-  const isCC  = accType === "credit_card";
   for (const tx of (txns || [])) {
     if (tx.tx_type === "fx_exchange") {
-      // fx_exchange: from-side stored in from_currency (= tx.amount);
-      // to-side derived as amount / fx_rate (see convention header).
       const fromAmount = Number(tx.amount || 0);
       const fxRate     = Number(tx.fx_rate_used || tx.fx_rate || 1);
       const toAmount   = fxRate > 0 ? fromAmount / fxRate : 0;
@@ -490,15 +528,8 @@ export const recalculateBalance = async (accountId, userId) => {
       continue;
     }
     const amt = Number(tx.amount_idr || 0);
-    if (isCC) {
-      // CC: spending charges add to debt; payments reduce it
-      if (tx.from_id === accountId && tx.from_type === "account") balance += amt;
-      if (tx.to_id   === accountId && tx.to_type   === "account") balance -= amt;
-    } else {
-      // Bank/cash/receivable/asset/liability: incoming credits add; outgoing debits subtract
-      if (tx.to_id   === accountId && tx.to_type   === "account") balance += amt;
-      if (tx.from_id === accountId && tx.from_type === "account") balance -= amt;
-    }
+    if (tx.to_id   === accountId && tx.to_type   === "account") balance += amt;
+    if (tx.from_id === accountId && tx.from_type === "account") balance -= amt;
   }
   await supabase.from("accounts").update({ [field]: balance }).eq("id", accountId);
   return balance;

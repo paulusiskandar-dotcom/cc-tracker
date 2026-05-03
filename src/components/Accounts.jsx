@@ -103,7 +103,7 @@ export default function Accounts({
     bank:       accounts.filter(a => a.type === "bank")
                   .reduce((s, a) => s + Number(a.current_balance || 0), 0),
     cc:         accounts.filter(a => a.type === "credit_card")
-                  .reduce((s, a) => s + Number(a.current_balance || 0), 0),
+                  .reduce((s, a) => s + Number(a.outstanding_amount || 0), 0),
     assets:     accounts.filter(a => a.type === "asset")
                   .reduce((s, a) => s + Number(a.current_value || 0), 0),
     liabilities: accounts.filter(a => a.type === "liability")
@@ -1118,10 +1118,18 @@ function AccountCard({ account: a, ledger, accounts, fxRates = {}, onEdit, onDel
       return { label: "Balance", value: v, color: v >= 0 ? "#059669" : "#dc2626" };
     }
     if (a.type === "credit_card") {
-      const v = Number(a.current_balance || 0);
-      const limit = Number(a.card_limit || 0);
-      const util = limit > 0 ? (v / limit) * 100 : 0;
-      return { label: "Debt", value: v, color: util > 80 ? "#dc2626" : util > 60 ? "#d97706" : "#374151", util, limit };
+      const outstanding = Number(a.outstanding_amount || 0);
+      const cr = Number(a.current_balance || 0);
+      const effectiveLimit = (() => {
+        if (a.shared_limit_group_id) {
+          const master = accounts.find(x => x.shared_limit_group_id === a.shared_limit_group_id && x.is_limit_group_master);
+          return Number(master?.shared_limit || a.card_limit || 0);
+        }
+        return Number(a.card_limit || 0);
+      })();
+      const avail = effectiveLimit - outstanding + cr;
+      const util = effectiveLimit > 0 ? (outstanding / effectiveLimit) * 100 : 0;
+      return { label: "Outstanding", value: outstanding, cr, avail, effectiveLimit, color: util > 80 ? "#dc2626" : util > 60 ? "#d97706" : "#374151", util };
     }
     if (a.type === "asset") {
       const v    = Number(a.current_value || 0);
@@ -1229,19 +1237,25 @@ function AccountCard({ account: a, ledger, accounts, fxRates = {}, onEdit, onDel
             </div>
           )}
           {/* CC utilization % */}
-          {a.type === "credit_card" && bal.limit > 0 && (
+          {a.type === "credit_card" && bal.effectiveLimit > 0 && (
             <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
-              {bal.util?.toFixed(0)}% of {fmtIDR(bal.limit, true)}
+              Available: {fmtIDR(bal.avail, true)} dari {fmtIDR(bal.effectiveLimit, true)}
+            </div>
+          )}
+          {a.type === "credit_card" && bal.cr > 0 && (
+            <div style={{ fontSize: 10, color: "#059669", fontFamily: "Figtree, sans-serif", marginTop: 1 }}
+              title="Saldo lebih bayar / CR — menambah available limit">
+              +{fmtIDR(bal.cr, true)} top-up
             </div>
           )}
         </div>
       </div>
 
       {/* CC progress bar */}
-      {a.type === "credit_card" && bal.limit > 0 && (
+      {a.type === "credit_card" && bal.effectiveLimit > 0 && (
         <ProgressBar
-          value={Number(a.current_balance || 0)}
-          max={bal.limit}
+          value={Number(a.outstanding_amount || 0)}
+          max={bal.effectiveLimit}
           color={bal.util > 80 ? "#dc2626" : bal.util > 60 ? "#d97706" : "#059669"}
         />
       )}
