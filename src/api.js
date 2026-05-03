@@ -202,15 +202,59 @@ export const ledgerApi = {
     return data || [];
   },
 
-  // Create entry + update balances
+  // Create entry + update balances + auto-link side effects.
+  //
+  // Optional fields (stripped before DB insert, never reach Supabase):
+  //   new_asset   { name, type/subtype, currency, purchase_price, purchase_date, notes }
+  //               → creates a new asset account, injects its id as to_id (buy_asset only)
+  //   new_loan    { employee_name, monthly_installment, total_months, start_date }
+  //               → creates a new employee_loans row, injects id as employee_loan_id (give_loan only)
+  //   loan_auto_payment   true
+  //               → calls loanPaymentsApi.recordAndIncrement after insert (collect_loan only)
+  //   loan_increment_principal  true
+  //               → increments existing loan.total_amount after insert (give_loan with existing loan)
   create: async (userId, entry, accounts = []) => {
     validateLedgerEntry(entry);
 
-    // Strip client-only fields before DB insert (fx_direction is no longer used
-    // for routing — kept in the destructure so it never reaches Supabase as an
-    // unknown column).
-    const { fx_direction: _ignored, ...insertEntry } = entry;
-    const safeEntry = sanitizeUUIDs(insertEntry);
+    // Strip client-only and opt-in side-effect fields — none must reach Supabase.
+    const {
+      fx_direction:             _ignored,
+      new_asset,
+      new_loan,
+      loan_auto_payment,
+      loan_increment_principal,
+      ...insertEntry
+    } = entry;
+    let safeEntry = sanitizeUUIDs(insertEntry);
+
+    // ── Pre-insert: create new asset account (buy_asset + new_asset) ──────
+    let localAccounts = accounts;
+    if (entry.tx_type === "buy_asset" && new_asset) {
+      try {
+        const assetAcc = await assetsApi.create(userId, new_asset);
+        safeEntry       = { ...safeEntry, to_id: assetAcc.id };
+        localAccounts   = [...accounts, assetAcc];
+      } catch (e) {
+        throw new Error(`Asset creation failed: ${e.message}`);
+      }
+    }
+
+    // ── Pre-insert: create new employee loan (give_loan + new_loan) ────────
+    if (entry.tx_type === "give_loan" && new_loan) {
+      try {
+        const loan = await employeeLoanApi.create(userId, {
+          employee_name:       new_loan.employee_name,
+          total_amount:        Number(new_loan.monthly_installment) * Number(new_loan.total_months),
+          monthly_installment: Number(new_loan.monthly_installment),
+          start_date:          new_loan.start_date || safeEntry.tx_date,
+          status:              "active",
+          paid_months:         0,
+        });
+        safeEntry = { ...safeEntry, employee_loan_id: loan.id };
+      } catch (e) {
+        throw new Error(`Loan creation failed: ${e.message}`);
+      }
+    }
 
     const { data, error } = await supabase
       .from("ledger")
@@ -220,8 +264,8 @@ export const ledgerApi = {
     if (error) throw new Error(error.message);
 
     const amount  = Number(safeEntry.amount_idr || safeEntry.amount || 0);
-    const fromAcc = accounts.find(a => a.id === safeEntry.from_id);
-    const toAcc   = accounts.find(a => a.id === safeEntry.to_id);
+    const fromAcc = localAccounts.find(a => a.id === safeEntry.from_id);
+    const toAcc   = localAccounts.find(a => a.id === safeEntry.to_id);
 
     if (safeEntry.tx_type === "fx_exchange") {
       // See convention header on applyBalanceDelta.
@@ -242,6 +286,39 @@ export const ledgerApi = {
         await applyBalanceDelta(fromAcc.id, fromAcc.type, deltas.from[fromAcc.type]);
       if (toAcc && deltas.to?.[toAcc.type] !== undefined)
         await applyBalanceDelta(toAcc.id, toAcc.type, deltas.to[toAcc.type]);
+    }
+
+    // ── sell_asset: deactivate the asset account ──────────────────────────
+    if (safeEntry.tx_type === "sell_asset" && safeEntry.from_id) {
+      try {
+        await accountsApi.update(safeEntry.from_id, { is_active: false, current_value: 0 });
+      } catch (e) { console.error("[ledgerApi.create] sell_asset deactivate failed:", e); }
+    }
+
+    // ── collect_loan: record payment + auto-settle (opt-in: loan_auto_payment) ──
+    if (safeEntry.tx_type === "collect_loan" && safeEntry.employee_loan_id && loan_auto_payment && data?.id) {
+      try {
+        await loanPaymentsApi.recordAndIncrement(userId, {
+          loanId:   safeEntry.employee_loan_id,
+          payDate:  safeEntry.tx_date,
+          amount:   Number(safeEntry.amount || 0),
+          ledgerId: data.id,
+          notes:    safeEntry.description || null,
+        });
+      } catch (e) { console.error("[ledgerApi.create] collect_loan payment record failed:", e); }
+    }
+
+    // ── give_loan: increment existing loan principal (opt-in: loan_increment_principal) ──
+    if (safeEntry.tx_type === "give_loan" && safeEntry.employee_loan_id && loan_increment_principal && !new_loan) {
+      try {
+        const { data: loan } = await supabase
+          .from("employee_loans").select("total_amount").eq("id", safeEntry.employee_loan_id).single();
+        if (loan) {
+          await supabase.from("employee_loans")
+            .update({ total_amount: Number(loan.total_amount || 0) + amount })
+            .eq("id", safeEntry.employee_loan_id);
+        }
+      } catch (e) { console.error("[ledgerApi.create] give_loan increment failed:", e); }
     }
 
     // Auto-create/update reimburse settlements
@@ -299,7 +376,7 @@ export const ledgerApi = {
     return data;
   },
 
-  // Delete entry + reverse balance updates
+  // Delete entry + reverse balance updates + reverse auto-link side effects
   delete: async (id, entry, accounts = []) => {
     const { error } = await supabase.from("ledger").delete().eq("id", id);
     if (error) throw new Error(error.message);
@@ -324,6 +401,60 @@ export const ledgerApi = {
           await applyBalanceDelta(fromAcc.id, fromAcc.type, -deltas.from[fromAcc.type]);
         if (toAcc && deltas.to?.[toAcc.type] !== undefined)
           await applyBalanceDelta(toAcc.id, toAcc.type, -deltas.to[toAcc.type]);
+      }
+
+      // ── sell_asset: restore the asset account ─────────────────────────
+      if (entry.tx_type === "sell_asset" && entry.from_id) {
+        try {
+          await accountsApi.update(entry.from_id, { is_active: true });
+        } catch (e) { console.error("[ledgerApi.delete] sell_asset restore failed:", e); }
+      }
+
+      // ── collect_loan: decrement paid_months + delete payment record ────
+      if (entry.tx_type === "collect_loan" && entry.employee_loan_id) {
+        try {
+          const { data: loan } = await supabase
+            .from("employee_loans")
+            .select("paid_months, status")
+            .eq("id", entry.employee_loan_id)
+            .maybeSingle();
+          if (loan != null) {
+            const newPaid    = Math.max(0, (loan.paid_months || 0) - 1);
+            const wasSettled = loan.status === "settled";
+            await supabase.from("employee_loans").update({
+              paid_months: newPaid,
+              ...(wasSettled ? { status: "active" } : {}),
+            }).eq("id", entry.employee_loan_id);
+          }
+          // Best-effort: delete the most recent payment for this loan on this date
+          const { data: payments } = await supabase
+            .from("employee_loan_payments")
+            .select("id")
+            .eq("loan_id", entry.employee_loan_id)
+            .eq("pay_date", entry.tx_date)
+            .order("created_at", { ascending: false })
+            .limit(1);
+          if (payments?.length) {
+            await supabase.from("employee_loan_payments").delete().eq("id", payments[0].id);
+          }
+        } catch (e) { console.error("[ledgerApi.delete] collect_loan reverse failed:", e); }
+      }
+
+      // ── give_loan: decrement loan total_amount ────────────────────────
+      if (entry.tx_type === "give_loan" && entry.employee_loan_id) {
+        try {
+          const amount = Number(entry.amount_idr || entry.amount || 0);
+          const { data: loan } = await supabase
+            .from("employee_loans")
+            .select("total_amount")
+            .eq("id", entry.employee_loan_id)
+            .maybeSingle();
+          if (loan != null) {
+            await supabase.from("employee_loans")
+              .update({ total_amount: Math.max(0, Number(loan.total_amount || 0) - amount) })
+              .eq("id", entry.employee_loan_id);
+          }
+        } catch (e) { console.error("[ledgerApi.delete] give_loan reverse failed:", e); }
       }
     }
   },
@@ -656,28 +787,33 @@ export const merchantApi = {
 };
 
 // ─── ASSETS ───────────────────────────────────────────────────
+// Backed by accounts WHERE type='asset' (the separate assets table was dropped).
 export const assetsApi = {
   getAll: async (userId) => {
     const { data, error } = await supabase
-      .from("assets")
+      .from("accounts")
       .select("*")
       .eq("user_id", userId)
+      .eq("type", "asset")
+      .eq("is_active", true)
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
     return data || [];
   },
+  // d = { name, type (subtype), current_value, purchase_price, purchase_date, notes, currency }
   create: async (userId, d) => {
-    const { data, error } = await supabase
-      .from("assets")
-      .insert([{ ...d, user_id: userId }])
-      .select()
-      .single();
-    if (error) throw new Error(error.message);
-    return data;
+    return accountsApi.create(userId, {
+      name:            d.name,
+      type:            "asset",
+      subtype:         d.type || d.subtype || null,
+      currency:        d.currency || "IDR",
+      current_value:   Number(d.current_value || 0),
+      initial_balance: Number(d.purchase_price || d.current_value || 0),
+      notes:           d.notes || (d.purchase_date ? `Purchased ${d.purchase_date}` : null),
+    });
   },
   update: async (id, d) => {
-    const { error } = await supabase.from("assets").update(d).eq("id", id);
-    if (error) throw new Error(error.message);
+    return accountsApi.update(id, d);
   },
 };
 
@@ -1285,18 +1421,31 @@ export const loanPaymentsApi = {
     if (error) throw new Error(error.message);
   },
 
-  // Insert a payment record AND increment employee_loans.paid_months by 1
-  recordAndIncrement: async (userId, { loanId, payDate, amount, notes }) => {
+  // Insert a payment record AND increment employee_loans.paid_months by 1.
+  // Auto-settles the loan if paid_months reaches the computed total_months.
+  recordAndIncrement: async (userId, { loanId, payDate, amount, ledgerId, notes }) => {
     const { error: payErr } = await supabase.from("employee_loan_payments").insert({
-      user_id: userId, loan_id: loanId,
-      pay_date: payDate, amount, notes: notes || "Collected via import",
+      user_id:  userId,
+      loan_id:  loanId,
+      pay_date: payDate,
+      amount,
+      notes: notes || (ledgerId ? `ledger:${ledgerId}` : "Collected via import"),
     });
     if (payErr) throw new Error(payErr.message);
     const { data: loan } = await supabase
-      .from("employee_loans").select("paid_months").eq("id", loanId).maybeSingle();
+      .from("employee_loans")
+      .select("paid_months, total_amount, monthly_installment")
+      .eq("id", loanId)
+      .maybeSingle();
     if (loan != null) {
+      const newPaid     = (loan.paid_months || 0) + 1;
+      const totalMonths = Number(loan.monthly_installment || 0) > 0
+        ? Math.ceil(Number(loan.total_amount || 0) / Number(loan.monthly_installment))
+        : 0;
+      const isSettled = totalMonths > 0 && newPaid >= totalMonths;
       await supabase.from("employee_loans")
-        .update({ paid_months: (loan.paid_months || 0) + 1 }).eq("id", loanId);
+        .update({ paid_months: newPaid, ...(isSettled ? { status: "settled" } : {}) })
+        .eq("id", loanId);
     }
   },
 };
