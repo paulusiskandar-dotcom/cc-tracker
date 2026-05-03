@@ -14,16 +14,6 @@ import BudgetWidget from "./shared/BudgetWidget";
 import SpendingBreakdown from "./shared/SpendingBreakdown";
 
 // ── Reconcile Status widget ────────────────────────────────────
-const RS_FF = "Figtree, sans-serif";
-const rsFmtAgo = iso => {
-  if (!iso) return "never";
-  const days = Math.round((Date.now() - new Date(iso).getTime()) / 86400000);
-  if (days === 0) return "today";
-  if (days === 1) return "yesterday";
-  if (days < 30)  return `${days}d ago`;
-  return `${Math.round(days / 30)}mo ago`;
-};
-
 function ReconcileStatusWidget({ user, accounts }) {
   const [lastReconciled, setLastReconciled] = useState({});
 
@@ -41,41 +31,27 @@ function ReconcileStatusWidget({ user, accounts }) {
       });
   }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const bankAndCC = accounts.filter(a => a.type === "bank" || a.type === "credit_card");
-  if (!bankAndCC.length) return null;
-
-  const needsAttention = bankAndCC.filter(a => {
+  const needCount = accounts.filter(a => {
+    if (!a.is_active) return false;
+    if (a.type !== "bank" && a.type !== "credit_card") return false;
     const last = lastReconciled[a.id];
     if (!last) return true;
-    return (Date.now() - new Date(last).getTime()) / 86400000 > 45;
-  });
+    return (Date.now() - new Date(last).getTime()) / 86400000 > 7;
+  }).length;
 
   return (
-    <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 14, padding: 16, fontFamily: RS_FF }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: "#111827", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-          Reconcile Status
-        </span>
-        {needsAttention.length > 0 && (
-          <span style={{ fontSize: 10, fontWeight: 700, background: "#fef3c7", color: "#d97706", padding: "2px 8px", borderRadius: 10 }}>
-            {needsAttention.length} need attention
-          </span>
-        )}
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 8 }}>
-        {bankAndCC.map(a => {
-          const iso   = lastReconciled[a.id];
-          const stale = !iso || (Date.now() - new Date(iso).getTime()) / 86400000 > 45;
-          return (
-            <div key={a.id} style={{ padding: "8px 10px", background: stale ? "#fffbeb" : "#f9fafb", border: `1px solid ${stale ? "#fde68a" : "#e5e7eb"}`, borderRadius: 8 }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{a.name}</div>
-              <div style={{ fontSize: 10, color: stale ? "#d97706" : "#6b7280", marginTop: 2 }}>
-                {!iso ? "⚠ never reconciled" : stale ? `⚠ ${rsFmtAgo(iso)}` : rsFmtAgo(iso)}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+    <div style={{
+      background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 16,
+      padding: "14px 18px", display: "flex", alignItems: "center", gap: 10,
+      fontFamily: "Figtree, sans-serif",
+    }}>
+      <span style={{
+        width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+        background: needCount > 0 ? "#BA7517" : "#0F6E56",
+      }} />
+      <span style={{ fontSize: 14, fontWeight: 500, color: "#111827" }}>
+        {needCount} account{needCount !== 1 ? "s" : ""} need to reconcile
+      </span>
     </div>
   );
 }
