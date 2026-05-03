@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 
 // ─── FIELD WRAPPER ────────────────────────────────────────────
 export function Field({ label, children, error, hint, style = {} }) {
@@ -180,31 +180,52 @@ const CURRENCY_SYMBOLS = {
 
 export function AmountInput({ label, value, onChange, currency = "IDR", allowDecimal = false, error, hint, style = {} }) {
   const [focused, setFocused] = useState(false);
+  const inputRef = useRef(null);
 
-  // Show raw number while focused, formatted otherwise
-  const display = focused
-    ? (value || "")
-    : value !== "" && value !== null && value !== undefined && value !== false
-      ? allowDecimal
-        ? Number(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-        : Number(value).toLocaleString("id-ID")
-      : "";
+  const prefix = CURRENCY_SYMBOLS[currency] || currency;
+
+  // Decimal mode keeps format-on-blur; integer mode always shows formatted
+  const display = allowDecimal
+    ? (focused
+        ? (value || "")
+        : (value !== "" && value !== null && value !== undefined && value !== false
+            ? Number(value).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+            : ""))
+    : (value === "" || value === null || value === undefined || value === false
+        ? ""
+        : Number(value).toLocaleString("id-ID"));
 
   const handleChange = (e) => {
     if (allowDecimal) {
-      // Allow digits, one decimal point, up to 2 decimal places
       const raw = e.target.value.replace(/[^\d.]/g, "");
       const parts = raw.split(".");
       const cleaned = parts[0] + (parts.length > 1 ? "." + parts[1].slice(0, 2) : "");
       onChange(cleaned);
-    } else {
-      // Strip everything except digits
-      const raw = e.target.value.replace(/\D/g, "");
-      onChange(raw ? Number(raw) : "");
+      return;
     }
-  };
 
-  const prefix = CURRENCY_SYMBOLS[currency] || currency;
+    const tentative = e.target.value;
+    const cursorPos = e.target.selectionStart;
+
+    const raw = tentative.replace(/\D/g, "");
+    const num = raw === "" ? "" : Number(raw);
+    onChange(num);
+
+    const newDisplay = num === "" ? "" : Number(num).toLocaleString("id-ID");
+
+    // Count digits before cursor in tentative value, then map to new formatted position
+    const digitsBeforeCursor = tentative.slice(0, cursorPos).replace(/\D/g, "").length;
+    let newCursor = newDisplay.length;
+    let digitCount = 0;
+    for (let i = 0; i < newDisplay.length; i++) {
+      if (digitCount === digitsBeforeCursor) { newCursor = i; break; }
+      if (/\d/.test(newDisplay[i])) digitCount++;
+    }
+
+    requestAnimationFrame(() => {
+      inputRef.current?.setSelectionRange(newCursor, newCursor);
+    });
+  };
 
   return (
     <Field label={label} error={error} hint={hint} style={style}>
@@ -230,6 +251,7 @@ export function AmountInput({ label, value, onChange, currency = "IDR", allowDec
           {prefix}
         </span>
         <input
+          ref={inputRef}
           type="text"
           inputMode={allowDecimal ? "decimal" : "numeric"}
           value={display}

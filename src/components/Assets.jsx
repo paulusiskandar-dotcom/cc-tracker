@@ -44,112 +44,9 @@ function DonutChart({ data, colors, size = 120, thickness = 24 }) {
   );
 }
 
-// ─── ASSET HISTORY MODAL CONTENT ─────────────────────────────
-function AssetHistory({ asset, ledger, accounts }) {
-  const [valueHistory, setValueHistory] = useState([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!asset?.id) return;
-    setLoading(true);
-    supabase
-      .from("asset_value_history")
-      .select("*")
-      .eq("account_id", asset.id)
-      .order("date", { ascending: false })
-      .then(({ data, error }) => {
-        setValueHistory(data || []);
-        setLoading(false);
-      });
-  }, [asset?.id]);
-
-  const txEntries = ledger.filter(e => e.from_id === asset.id || e.to_id === asset.id);
-
-  // Merge: value history rows + ledger tx rows, sorted by date desc
-  const allRows = [
-    ...valueHistory.map(h => ({ _type: "value", _date: h.date || h.created_at || "", ...h })),
-    ...txEntries.map(e  => ({ _type: "tx",    _date: e.tx_date || "",                 ...e })),
-  ].sort((a, b) => (b._date > a._date ? 1 : b._date < a._date ? -1 : 0));
-
-  if (loading) return (
-    <div style={{ textAlign: "center", padding: 24, color: "#9ca3af", fontFamily: "Figtree, sans-serif", fontSize: 13 }}>
-      Loading…
-    </div>
-  );
-
-  if (allRows.length === 0) return (
-    <EmptyState icon="📋" message="No history for this asset yet" />
-  );
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      {allRows.map(row => {
-        if (row._type === "value") {
-          const oldVal = Number(row.old_value || 0);
-          const newVal = Number(row.new_value || 0);
-          const diff   = newVal - oldVal;
-          const up     = diff >= 0;
-          return (
-            <div key={`vh-${row.id}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: "#f9fafb", borderRadius: 10 }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
-                    Value Updated
-                  </span>
-                  <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 4, background: "#f3f4f6", color: "#6b7280", textTransform: "uppercase" }}>
-                    UPDATE
-                  </span>
-                </div>
-                <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
-                  {row.date} · {fmtIDR(oldVal, true)} → {fmtIDR(newVal, true)}
-                  {row.notes && row.notes !== "Manual update" ? ` · ${row.notes}` : ""}
-                </div>
-              </div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: up ? "#059669" : "#dc2626", fontFamily: "Figtree, sans-serif", flexShrink: 0, marginLeft: 12 }}>
-                {up ? "▲ +" : "▼ −"}{fmtIDR(Math.abs(diff), true)}
-              </div>
-            </div>
-          );
-        }
-
-        // Ledger tx row
-        const e = row;
-        const isFrom = e.from_id === asset.id;
-        const amt    = Number(e.amount_idr || e.amount || 0);
-        const other  = accounts.find(a => a.id === (isFrom ? e.to_id : e.from_id));
-        const isBuy  = e.tx_type === "buy_asset";
-        const isSell = e.tx_type === "sell_asset";
-        const typeLabel = isBuy ? "Buy" : isSell ? "Sell" : e.tx_type || "";
-        const color = isFrom ? "#dc2626" : "#059669";
-        return (
-          <div key={`tx-${e.id}`} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: "#f9fafb", borderRadius: 10 }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
-                  {e.description || "—"}
-                </span>
-                {typeLabel && (
-                  <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 5px", borderRadius: 4, background: isBuy ? "#e0f2fe" : isSell ? "#fef9c3" : "#f3f4f6", color: isBuy ? "#0369a1" : isSell ? "#92400e" : "#6b7280", textTransform: "uppercase" }}>
-                    {typeLabel}
-                  </span>
-                )}
-              </div>
-              <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
-                {e.tx_date}{other && ` · ${isFrom ? "→" : "←"} ${other.name}`}
-              </div>
-            </div>
-            <div style={{ fontSize: 14, fontWeight: 700, color, fontFamily: "Figtree, sans-serif", flexShrink: 0, marginLeft: 12 }}>
-              {isFrom ? "−" : "+"}{fmtIDR(amt, true)}
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 // ─── ASSET CARD ───────────────────────────────────────────────
-function AssetCard({ asset: a, ledger, valueHistoryCount = 0, color, onUpdate, onTimeline }) {
+function AssetCard({ asset: a, ledger, valueHistoryCount = 0, color, onUpdate, onEdit, onTimeline }) {
   const cur      = Number(a.current_value || 0);
   const bought   = Number(a.purchase_price || 0);
   const gain     = cur - bought;
@@ -198,6 +95,7 @@ function AssetCard({ asset: a, ledger, valueHistoryCount = 0, color, onUpdate, o
         {/* Actions */}
         <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
           <button onClick={onUpdate}   style={ACCT_BTN}>Update Value</button>
+          <button onClick={onEdit}     style={ACCT_BTN}>✏️ Edit</button>
           <button onClick={onTimeline} style={{ ...ACCT_BTN, flex: 1 }}>📋 Timeline</button>
         </div>
       </div>
@@ -206,7 +104,7 @@ function AssetCard({ asset: a, ledger, valueHistoryCount = 0, color, onUpdate, o
 }
 
 // ─── DEPOSITO CARD ────────────────────────────────────────────
-function DepositoCard({ asset: a, color, onUpdate, onEdit }) {
+function DepositoCard({ asset: a, color, onUpdate, onEdit, onTimeline }) {
   const principal = Number(a.current_value || 0);
   const rate      = Number(a.interest_rate || 0);
 
@@ -279,8 +177,9 @@ function DepositoCard({ asset: a, color, onUpdate, onEdit }) {
 
         {/* Actions */}
         <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
-          <button onClick={onUpdate} style={ACCT_BTN}>Update Value</button>
-          <button onClick={onEdit}   style={{ ...ACCT_BTN, flex: 1 }}>✏️ Edit</button>
+          <button onClick={onUpdate}   style={ACCT_BTN}>Update Value</button>
+          <button onClick={onEdit}     style={ACCT_BTN}>✏️ Edit</button>
+          <button onClick={onTimeline} style={{ ...ACCT_BTN, flex: 1 }}>📋 Timeline</button>
         </div>
       </div>
     </div>
@@ -330,6 +229,11 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
   const [editDepositoModal, setEditDepositoModal] = useState(null); // deposito account
   const [editDepositoForm,  setEditDepositoForm]  = useState({});
   const setEDF = (k, v) => setEditDepositoForm(f => ({ ...f, [k]: v }));
+
+  // Edit asset modal (non-deposito)
+  const [editAssetModal, setEditAssetModal] = useState(null);
+  const [editAssetForm,  setEditAssetForm]  = useState({});
+  const setEAF = (k, v) => setEditAssetForm(f => ({ ...f, [k]: v }));
 
   // ── DERIVED ─────────────────────────────────────────────────
   const assets = useMemo(() => accounts.filter(a => a.type === "asset"), [accounts]);
@@ -461,9 +365,10 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
     setEditDepositoModal(asset);
     setEditDepositoForm({
       name:          asset.name || "",
+      subtype:       asset.subtype || "Deposito",
       bank_name:     asset.bank_name || "",
-      current_value: String(asset.current_value || ""),
-      interest_rate: String(asset.interest_rate || ""),
+      current_value: asset.current_value || "",
+      interest_rate: asset.interest_rate || "",
       maturity_date: asset.maturity_date || "",
       notes:         asset.notes || "",
     });
@@ -476,6 +381,7 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
       const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? null : n; };
       const updated = await accountsApi.update(editDepositoModal.id, {
         name:          editDepositoForm.name.trim(),
+        subtype:       editDepositoForm.subtype || "Deposito",
         bank_name:     editDepositoForm.bank_name || null,
         current_value: sn(editDepositoForm.current_value) ?? 0,
         interest_rate: sn(editDepositoForm.interest_rate),
@@ -485,6 +391,38 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
       if (updated) setAccounts(prev => prev.map(a => a.id === editDepositoModal.id ? { ...a, ...updated } : a));
       showToast("Deposito updated");
       setEditDepositoModal(null);
+    } catch (e) { showToast(e.message, "error"); }
+    setSaving(false);
+  };
+
+  const openEditAsset = (asset) => {
+    setEditAssetModal(asset);
+    setEditAssetForm({
+      name:           asset.name || "",
+      subtype:        asset.subtype || "",
+      current_value:  asset.current_value || "",
+      purchase_price: asset.purchase_price || "",
+      purchase_date:  asset.purchase_date || "",
+      notes:          asset.notes || "",
+    });
+  };
+
+  const handleSaveAsset = async () => {
+    if (!editAssetModal) return;
+    setSaving(true);
+    try {
+      const sn = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? null : n; };
+      const updated = await accountsApi.update(editAssetModal.id, {
+        name:           editAssetForm.name.trim(),
+        subtype:        editAssetForm.subtype || null,
+        current_value:  sn(editAssetForm.current_value) ?? 0,
+        purchase_price: sn(editAssetForm.purchase_price),
+        purchase_date:  editAssetForm.purchase_date || null,
+        notes:          editAssetForm.notes || null,
+      });
+      if (updated) setAccounts(prev => prev.map(a => a.id === editAssetModal.id ? { ...a, ...updated } : a));
+      showToast("Asset updated");
+      setEditAssetModal(null);
     } catch (e) { showToast(e.message, "error"); }
     setSaving(false);
   };
@@ -558,6 +496,7 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
                     color={color}
                     onUpdate={() => openUpdateModal(a)}
                     onEdit={() => openEditDeposito(a)}
+                    onTimeline={() => navigate(`/accounts/${a.id}/statement`)}
                   />
                 );
               }
@@ -569,6 +508,7 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
                   valueHistoryCount={valueHistoryCounts[a.id] || 0}
                   color={color}
                   onUpdate={() => openUpdateModal(a)}
+                  onEdit={() => openEditAsset(a)}
                   onTimeline={() => navigate(`/accounts/${a.id}/statement`)}
                 />
               );
@@ -691,9 +631,17 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <Input label="Nama *" value={editDepositoForm.name || ""}
             onChange={e => setEDF("name", e.target.value)} />
+          <Field label="Type">
+            <Select
+              value={editDepositoForm.subtype || ""}
+              onChange={e => setEDF("subtype", e.target.value)}
+              options={ASSET_SUBTYPES.map(s => ({ value: s, label: `${ASSET_ICON[s] || "📦"} ${s}` }))}
+              placeholder="Select type…"
+            />
+          </Field>
           <Input label="Nama Bank" value={editDepositoForm.bank_name || ""}
             onChange={e => setEDF("bank_name", e.target.value)} placeholder="e.g. BCA, Mandiri" />
-          <AmountInput label="Nominal (IDR)" value={editDepositoForm.current_value || ""}
+          <AmountInput label="Nominal *" value={editDepositoForm.current_value || ""}
             onChange={v => setEDF("current_value", v)} currency="IDR" />
           <FormRow>
             <Input label="Bunga (% p.a.)" type="number" value={editDepositoForm.interest_rate || ""}
@@ -703,6 +651,48 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
           </FormRow>
           <Field label="Notes">
             <Input value={editDepositoForm.notes || ""} onChange={e => setEDF("notes", e.target.value)} placeholder="Optional notes…" />
+          </Field>
+        </div>
+      </Modal>
+
+      {/* ── EDIT ASSET MODAL (non-deposito) ─────────────── */}
+      <Modal
+        isOpen={!!editAssetModal}
+        onClose={() => setEditAssetModal(null)}
+        title="Edit Asset"
+        footer={
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <Button variant="secondary" size="md" onClick={() => setEditAssetModal(null)}>Cancel</Button>
+            <Button variant="primary" size="md" busy={saving} onClick={handleSaveAsset}>Save</Button>
+          </div>
+        }
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <Field label="Asset Name *">
+            <Input value={editAssetForm.name || ""} onChange={e => setEAF("name", e.target.value)}
+              placeholder="e.g. Rumah Jagakarsa" />
+          </Field>
+          <Field label="Type">
+            <Select
+              value={editAssetForm.subtype || ""}
+              onChange={e => setEAF("subtype", e.target.value)}
+              options={ASSET_SUBTYPES.map(s => ({ value: s, label: `${ASSET_ICON[s] || "📦"} ${s}` }))}
+              placeholder="Select type…"
+            />
+          </Field>
+          <FormRow>
+            <AmountInput label="Current Value *" value={editAssetForm.current_value || ""}
+              onChange={v => setEAF("current_value", v)} currency="IDR" />
+            <AmountInput label="Purchase Price" value={editAssetForm.purchase_price || ""}
+              onChange={v => setEAF("purchase_price", v)} currency="IDR" />
+          </FormRow>
+          <Field label="Purchase Date">
+            <Input type="date" value={editAssetForm.purchase_date || ""}
+              onChange={e => setEAF("purchase_date", e.target.value)} />
+          </Field>
+          <Field label="Notes">
+            <Input value={editAssetForm.notes || ""} onChange={e => setEAF("notes", e.target.value)}
+              placeholder="Optional notes…" />
           </Field>
         </div>
       </Modal>
