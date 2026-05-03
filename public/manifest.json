@@ -1,31 +1,38 @@
 {
-  "short_name": "PaulFin",
-  "name": "Paulus Finance",
-  "description": "Personal Financial OS",
+  "short_name": "Paulus Finance",
+  "name": "Paulus Finance — Personal Financial OS",
+  "description": "Personal finance tracker for accounts, cards, assets, and reimbursements",
   "icons": [
     {
-      "src": "favicon.ico",
-      "sizes": "64x64 32x32 24x24 16x16",
-      "type": "image/x-icon"
-    },
-    {
-      "src": "logo192.png",
+      "src": "/icons/icon-192.png",
       "type": "image/png",
       "sizes": "192x192",
-      "purpose": "any maskable"
+      "purpose": "any"
     },
     {
-      "src": "logo512.png",
+      "src": "/icons/icon-512.png",
       "type": "image/png",
       "sizes": "512x512",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/apple-touch-icon.png",
+      "type": "image/png",
+      "sizes": "180x180"
     }
   ],
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "orientation": "portrait-primary",
-  "theme_color": "#111827",
-  "background_color": "#f8f9fb",
-  "lang": "en",
+  "orientation": "portrait",
+  "theme_color": "#1e2563",
+  "background_color": "#ffffff",
+  "lang": "id",
   "categories": ["finance", "productivity"]
 }

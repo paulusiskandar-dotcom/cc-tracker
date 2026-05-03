@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Offline — Paulus Finance</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Figtree', sans-serif;
+      background: #1e2563;
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px;
+      text-align: center;
+    }
+    .container { max-width: 400px; }
+    h1 { font-size: 24px; font-weight: 500; margin-bottom: 12px; }
+    p { font-size: 15px; line-height: 1.5; opacity: 0.7; margin-bottom: 24px; }
+    button {
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      border: 0.5px solid rgba(255,255,255,0.3);
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    button:active { transform: scale(0.98); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Offline</h1>
+    <p>Tidak ada koneksi internet. Cek koneksi Anda lalu coba lagi.</p>
+    <button onclick="window.location.reload()">Coba Lagi</button>
+  </div>
+</body>
+</html>
