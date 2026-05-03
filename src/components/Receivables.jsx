@@ -731,7 +731,7 @@ export default function Receivables({
                 e.tx_type === "reimburse_in" && e.entity === r.entity
               ).sort((a, b) => b.tx_date.localeCompare(a.tx_date));
               const outRows = entityShowSettled ? allOutRows : allOutRows.filter(e => !e.reimburse_settlement_id);
-              const inRows  = entityShowSettled ? allInRows  : allInRows.filter(e => !e.reimburse_settlement_id);
+              const inRows  = allInRows;
               const hasSettled = allOutRows.some(e => e.reimburse_settlement_id) || allInRows.some(e => e.reimburse_settlement_id);
 
               const entitySettlements = settlements.filter(s => s.entity === r.entity);
@@ -1351,7 +1351,7 @@ export default function Receivables({
         <LoanFormFields form={loanForm} setForm={setLoanForm} T={T} />
       </Modal>
 
-      {/* Loan Statement → /loans/:id/statement */}}
+      {/* Loan Statement → /loans/:id/statement */}
 
       {/* ── TRANSACTION MODAL (+ Payment) ─────────────────────── */}
       <TxVerticalBig
@@ -1500,10 +1500,10 @@ export default function Receivables({
                       <div style={{ fontSize: 11, color: "#6b7280" }}>{e.tx_date}</div>
                       <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.description}</div>
                       <div style={{ fontSize: 12, fontWeight: 700, color: "#dc2626", textAlign: "right" }}>
-                        {isOut ? fmtIDR(amt, true) : "—"}
+                        {isOut ? fmtIDR(amt) : "—"}
                       </div>
                       <div style={{ fontSize: 12, fontWeight: 700, color: "#059669", textAlign: "right" }}>
-                        {!isOut ? `+${fmtIDR(amt, true)}` : "—"}
+                        {!isOut ? `+${fmtIDR(amt)}` : "—"}
                       </div>
                     </div>
                   );
