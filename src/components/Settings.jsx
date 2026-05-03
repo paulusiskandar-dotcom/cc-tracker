@@ -829,9 +829,9 @@ export default function Settings({
             <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, flex: 1 }}>
                 {[
-                  { label: "Monthly Income",  value: fmtIDR(totalIncome, true),  color: "#059669" },
-                  { label: "Monthly Expense", value: fmtIDR(totalExpense, true), color: "#dc2626" },
-                  { label: "Net Monthly",     value: fmtIDR(net, true),          color: net >= 0 ? "#059669" : "#dc2626" },
+                  { label: "Monthly Income",  value: fmtIDR(totalIncome),  color: "#059669" },
+                  { label: "Monthly Expense", value: fmtIDR(totalExpense), color: "#dc2626" },
+                  { label: "Net Monthly",     value: fmtIDR(net),          color: net >= 0 ? "#059669" : "#dc2626" },
                 ].map(s => (
                   <div key={s.label} style={{ background: s.color + "14", borderRadius: 14, padding: "14px 14px" }}>
                     <div style={{ fontSize: 9, fontWeight: 700, color: s.color, textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 5, opacity: 0.8 }}>{s.label}</div>
@@ -896,7 +896,7 @@ export default function Settings({
                         {/* Amount */}
                         <div style={{ marginTop: 2 }}>
                           <div style={{ fontSize: 20, fontWeight: 900, color: accentColor, fontFamily: "Figtree, sans-serif", lineHeight: 1.2 }}>
-                            {fmtIDR(Number(t.amount || 0), true)}
+                            {fmtIDR(Number(t.amount || 0))}
                           </div>
                           <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>{t.currency || "IDR"}</div>
                         </div>
@@ -1370,7 +1370,7 @@ function AccountsSection({ user, T, card, accounts, setAccounts, onRefresh }) {
               <div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>{a.name}</div>
                 <div style={{ fontSize: 11, color: "#dc2626", fontFamily: "Figtree, sans-serif" }}>
-                  {fmtIDR(Number(a.current_balance || 0), true)}
+                  {fmtIDR(Number(a.current_balance || 0))}
                 </div>
               </div>
               <div style={{ display: "flex", gap: 6 }}>
@@ -1394,7 +1394,7 @@ function AccountsSection({ user, T, card, accounts, setAccounts, onRefresh }) {
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>{a.name}</div>
                   <div style={{ fontSize: 11, color: "#d97706", fontFamily: "Figtree, sans-serif" }}>
-                    {fmtIDR(Number(a.current_balance || 0), true)}
+                    {fmtIDR(Number(a.current_balance || 0))}
                   </div>
                 </div>
                 <div style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, sans-serif" }}>{a.entity || "—"}</div>

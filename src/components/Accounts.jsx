@@ -405,7 +405,7 @@ export default function Accounts({
                 {s.label}
               </div>
               <div style={{ fontSize: 14, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
-                {fmtIDR(s.value, true)}
+                {fmtIDR(s.value)}
               </div>
             </div>
           ))}
@@ -567,11 +567,11 @@ export default function Accounts({
               <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{nilaiAcc.name}</div>
               {nilaiAcc.interest_rate > 0 && (
                 <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
-                  Kepemilikan {nilaiAcc.interest_rate}% · Modal {fmtIDR(Number(nilaiAcc.purchase_price || 0), true)}
+                  Kepemilikan {nilaiAcc.interest_rate}% · Modal {fmtIDR(Number(nilaiAcc.purchase_price || 0))}
                 </div>
               )}
               <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
-                Nilai sekarang: {fmtIDR(Number(nilaiAcc.current_value || 0), true)}
+                Nilai sekarang: {fmtIDR(Number(nilaiAcc.current_value || 0))}
               </div>
             </div>
             <AmountInput label="Nilai Buku Baru (Rp)" value={nilaiForm.value}
@@ -842,9 +842,9 @@ function BankPageContent({ accounts, ledger, fxRates, CURRENCIES: C = [], onEdit
       {/* 3 Summary cards — same style as Cash page */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
         {[
-          { label: "IDR Bank",           value: fmtIDR(totalIDR, true),   color: "#3b5bdb", bg: "#e8f4fd" },
-          { label: "Foreign Bank (≈IDR)", value: fmtIDR(foreignIDR, true), color: "#0891b2", bg: "#e0f7fa" },
-          { label: "Total Bank",          value: fmtIDR(grandTotal, true), color: "#059669", bg: "#e8fdf0" },
+          { label: "IDR Bank",           value: fmtIDR(totalIDR),   color: "#3b5bdb", bg: "#e8f4fd" },
+          { label: "Foreign Bank (≈IDR)", value: fmtIDR(foreignIDR), color: "#0891b2", bg: "#e0f7fa" },
+          { label: "Total Bank",          value: fmtIDR(grandTotal), color: "#059669", bg: "#e8fdf0" },
         ].map(s => (
           <div key={s.label} style={{ background: s.bg, borderRadius: 14, padding: "14px 14px" }}>
             <div style={{ fontSize: 9, fontWeight: 700, color: s.color, textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 5, opacity: 0.8 }}>{s.label}</div>
@@ -938,9 +938,9 @@ function CashPageContent({ accounts, fxRates, CURRENCIES: C = [], ledger, onEdit
       {/* 3 Summary cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
         {[
-          { label: "IDR Cash", value: fmtIDR(totalIDR, true), color: "#059669", bg: "#e8fdf0" },
-          { label: "Foreign Cash (≈IDR)", value: fmtIDR(foreignIDR, true), color: "#0891b2", bg: "#e0f7fa" },
-          { label: "Total Cash", value: fmtIDR(grandTotal, true), color: "#3b5bdb", bg: "#e8f4fd" },
+          { label: "IDR Cash", value: fmtIDR(totalIDR), color: "#059669", bg: "#e8fdf0" },
+          { label: "Foreign Cash (≈IDR)", value: fmtIDR(foreignIDR), color: "#0891b2", bg: "#e0f7fa" },
+          { label: "Total Cash", value: fmtIDR(grandTotal), color: "#3b5bdb", bg: "#e8f4fd" },
         ].map(s => (
           <div key={s.label} style={{ background: s.bg, borderRadius: 14, padding: "14px 14px" }}>
             <div style={{ fontSize: 9, fontWeight: 700, color: s.color, textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 5, opacity: 0.8 }}>{s.label}</div>
@@ -1729,9 +1729,9 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
                 Interest Projection
               </div>
               {[
-                ["Monthly gross", fmtIDR(depositGrossMonthly, true)],
-                ["PPh 20%", "−" + fmtIDR(depositGrossMonthly * 0.2, true)],
-                ["Net monthly", fmtIDR(depositNetMonthly, true)],
+                ["Monthly gross", fmtIDR(depositGrossMonthly)],
+                ["PPh 20%", "−" + fmtIDR(depositGrossMonthly * 0.2)],
+                ["Net monthly", fmtIDR(depositNetMonthly)],
                 ["Effective yield", depositNetYield.toFixed(2) + "% p.a."],
               ].map(([label, val]) => (
                 <div key={label} style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>

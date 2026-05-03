@@ -1215,16 +1215,16 @@ export default function Dashboard({
           <div style={{ display: "flex", gap: 20, marginBottom: 14 }}>
             <div>
               <div style={STAT_LABEL}>Income</div>
-              <div style={{ ...STAT_VAL, color: "#059669" }}>{fmtIDR(thisMonthIncome, true)}</div>
+              <div style={{ ...STAT_VAL, color: "#059669" }}>{fmtIDR(thisMonthIncome)}</div>
             </div>
             <div>
               <div style={STAT_LABEL}>Expense</div>
-              <div style={{ ...STAT_VAL, color: "#dc2626" }}>{fmtIDR(thisMonthExpense, true)}</div>
+              <div style={{ ...STAT_VAL, color: "#dc2626" }}>{fmtIDR(thisMonthExpense)}</div>
             </div>
             <div>
               <div style={STAT_LABEL}>Surplus</div>
               <div style={{ ...STAT_VAL, color: surplus >= 0 ? "#059669" : "#dc2626" }}>
-                {surplus >= 0 ? "+" : ""}{fmtIDR(surplus, true)}
+                {surplus >= 0 ? "+" : ""}{fmtIDR(surplus)}
               </div>
             </div>
           </div>

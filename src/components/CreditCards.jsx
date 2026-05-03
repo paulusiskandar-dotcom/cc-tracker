@@ -602,11 +602,11 @@ export default function CreditCards({
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
                     <div style={{ background: "#fde8e8", borderRadius: 14, padding: "14px 14px" }}>
                       <div style={{ fontSize: 9, fontWeight: 700, color: "#dc2626", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 5, opacity: 0.8 }}>Total Debt</div>
-                      <div style={{ fontSize: 15, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif" }}>{fmtIDR(totalDebt, true)}</div>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif" }}>{fmtIDR(totalDebt)}</div>
                     </div>
                     <div style={{ background: "#e8f4fd", borderRadius: 14, padding: "14px 14px" }}>
                       <div style={{ fontSize: 9, fontWeight: 700, color: "#3b5bdb", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 5, opacity: 0.8 }}>Total Limit</div>
-                      <div style={{ fontSize: 15, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif" }}>{fmtIDR(totalLimit, true)}</div>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif" }}>{fmtIDR(totalLimit)}</div>
                     </div>
                     <div style={{ background: overallUtil > 80 ? "#fde8e8" : "#e8fdf0", borderRadius: 14, padding: "14px 14px" }}>
                       <div style={{ fontSize: 9, fontWeight: 700, color: utilColor, textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 5, opacity: 0.8 }}>Utilization</div>
@@ -1278,7 +1278,7 @@ function SharedLimitGroupCard({ group, cardStats, paletteStart = 0, onPay, onTra
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
           <span style={{ fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
-            {fmtIDR(totalDebt, true)} / {fmtIDR(sharedLimit, true)} used · Available: <strong style={{ color: "#059669" }}>{fmtIDR(available, true)}</strong>
+            {fmtIDR(totalDebt)} / {fmtIDR(sharedLimit)} used · Available: <strong style={{ color: "#059669" }}>{fmtIDR(available)}</strong>
           </span>
           <span style={{ fontSize: 12, fontWeight: 800, color: utilColor, fontFamily: "Figtree, sans-serif" }}>
             {util.toFixed(0)}%

@@ -351,12 +351,12 @@ export default function Income({
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <div style={{ ...card, background: "#e8fdf0", border: "none" }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: "#059669", letterSpacing: "0.05em" }}>ACTUAL</div>
-              <div style={{ fontSize: 20, fontWeight: 900, color: T.text, marginTop: 4 }}>{fmtIDR(totalThisMonth, true)}</div>
+              <div style={{ fontSize: 20, fontWeight: 900, color: T.text, marginTop: 4 }}>{fmtIDR(totalThisMonth)}</div>
               <div style={{ fontSize: 11, color: T.text2 }}>income received</div>
             </div>
             <div style={{ ...card, background: T.sur2, border: "none" }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: T.text3, letterSpacing: "0.05em" }}>EXPECTED</div>
-              <div style={{ fontSize: 20, fontWeight: 900, color: T.text, marginTop: 4 }}>{fmtIDR(expectedThisMonth, true)}</div>
+              <div style={{ fontSize: 20, fontWeight: 900, color: T.text, marginTop: 4 }}>{fmtIDR(expectedThisMonth)}</div>
               <div style={{ fontSize: 11, color: totalThisMonth >= expectedThisMonth ? "#059669" : T.text3 }}>
                 {totalThisMonth >= expectedThisMonth ? "✅ Target met" : "⏳ Pending"}
               </div>

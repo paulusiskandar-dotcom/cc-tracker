@@ -253,21 +253,21 @@ export default function Reports({ user, ledger, accounts, dark }) {
         <MetricCard
           T={T}
           label="Total Expenses"
-          value={fmtIDR(totalExpense, true)}
+          value={fmtIDR(totalExpense)}
           color="#E24B4A"
           sub={`${periodExpenses.length} transactions`}
         />
         <MetricCard
           T={T}
           label="Total Income"
-          value={fmtIDR(totalIncome, true)}
+          value={fmtIDR(totalIncome)}
           color="#1D9E75"
           sub={`${periodIncome.length} transactions`}
         />
         <MetricCard
           T={T}
           label="Net Surplus"
-          value={(netSurplus >= 0 ? "+" : "") + fmtIDR(netSurplus, true)}
+          value={(netSurplus >= 0 ? "+" : "") + fmtIDR(netSurplus)}
           color={netSurplus >= 0 ? "#3b5bdb" : "#E24B4A"}
         />
         <MetricCard
@@ -323,7 +323,7 @@ export default function Reports({ user, ledger, accounts, dark }) {
                 color: d.surplus >= 0 ? "#1D9E75" : "#E24B4A",
                 fontFamily: "Figtree, sans-serif",
               }}>
-                {d.surplus >= 0 ? "+" : ""}{fmtIDR(d.surplus, true)}
+                {d.surplus >= 0 ? "+" : ""}{fmtIDR(d.surplus)}
               </div>
             </div>
           ))}
@@ -338,7 +338,7 @@ export default function Reports({ user, ledger, accounts, dark }) {
           <div style={{ marginBottom: 12 }}>
             <SectionHeader title="Expense by Category" />
             <div style={{ fontSize: 11, color: T.text3, marginTop: 2 }}>
-              Total: <span style={{ color: T.text, fontWeight: 700 }}>{fmtIDR(catTotal, true)}</span>
+              Total: <span style={{ color: T.text, fontWeight: 700 }}>{fmtIDR(catTotal)}</span>
             </div>
           </div>
           {catBreakdown.length === 0 ? (
@@ -379,7 +379,7 @@ export default function Reports({ user, ledger, accounts, dark }) {
                       {m.name}
                     </span>
                     <span style={{ fontSize: 11, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>
-                      {fmtIDR(m.value, true)}
+                      {fmtIDR(m.value)}
                     </span>
                   </div>
                   <div style={{ background: T.border, borderRadius: 99, height: 4 }}>

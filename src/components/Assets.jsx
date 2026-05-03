@@ -502,9 +502,9 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
       {/* ── SUMMARY CARDS ────────────────────────────────── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
         {[
-          { label: "Total Value",  value: fmtIDR(totalValue, true), color: "#059669", bg: "#e8fdf0" },
-          { label: "Total Cost",   value: fmtIDR(totalCost,  true), color: "#6b7280", bg: T.surface, border: `1px solid ${T.border}` },
-          { label: "Unrealised P&L", value: (totalPL >= 0 ? "+" : "") + fmtIDR(Math.abs(totalPL), true), color: totalPL >= 0 ? "#059669" : "#dc2626", bg: T.surface, border: `1px solid ${T.border}` },
+          { label: "Total Value",  value: fmtIDR(totalValue), color: "#059669", bg: "#e8fdf0" },
+          { label: "Total Cost",   value: fmtIDR(totalCost),  color: "#6b7280", bg: T.surface, border: `1px solid ${T.border}` },
+          { label: "Unrealised P&L", value: (totalPL >= 0 ? "+" : "") + fmtIDR(Math.abs(totalPL)), color: totalPL >= 0 ? "#059669" : "#dc2626", bg: T.surface, border: `1px solid ${T.border}` },
         ].map(s => (
           <div key={s.label} style={{ background: s.bg, border: s.border, borderRadius: 14, padding: "14px 14px" }}>
             <div style={{ fontSize: 9, fontWeight: 700, color: s.color, textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 5, opacity: 0.85 }}>{s.label}</div>
@@ -615,7 +615,7 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
             {updateForm.value && (
               <div style={{ fontSize: 12, fontWeight: 700, color: Number(updateForm.value) >= Number(selectedAsset.current_value || 0) ? "#059669" : "#dc2626", padding: "6px 10px", borderRadius: 8, background: T.sur2, fontFamily: "Figtree, sans-serif" }}>
                 Change: {Number(updateForm.value) >= Number(selectedAsset.current_value || 0) ? "+" : ""}
-                {fmtIDR(Number(updateForm.value) - Number(selectedAsset.current_value || 0), true)}
+                {fmtIDR(Number(updateForm.value) - Number(selectedAsset.current_value || 0))}
               </div>
             )}
           </div>
