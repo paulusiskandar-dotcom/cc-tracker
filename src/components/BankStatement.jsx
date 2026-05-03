@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import { fmtIDR } from "../utils";
+import { detectAccount } from "../lib/accountDetection";
+import AutoDetectBadge from "./shared/AutoDetectBadge";
 import { TX_TYPE_MAP } from "../constants";
 import { showToast } from "./shared/Card";
 import { undoManager } from "../lib/undoManager";
@@ -126,6 +128,7 @@ export default function BankStatement({
   const [toDate,         setToDate]         = useState(initialToDate   || todayStr());
   const [loading,        setLoading]        = useState(false);
   const [rawData,        setRawData]        = useState(null);  // { allTxs, allPreTxs }
+  const [autoDetect,     setAutoDetect]     = useState(null);
   const [editEntry,      setEditEntry]      = useState(null);
   const [savingAll,      setSavingAll]      = useState(false);
   const [showPdfPanel,   setShowPdfPanel]   = useState(false);
@@ -229,6 +232,17 @@ export default function BankStatement({
   useEffect(() => {
     setRawData(null);
   }, [accountId]);
+
+  // ── Auto-detect account when reconcile PDF is loaded ──────────
+  useEffect(() => {
+    if (!reconcile.stmtRows.length) { setAutoDetect(null); return; }
+    const pdfText  = reconcile.stmtRows.map(r => r.description || r.merchant || "").join(" ");
+    const detected = detectAccount({ subject: reconcile.pdfSource, pdfText, accounts: bankAccs });
+    setAutoDetect(detected && (detected.confidence === 'high' || detected.confidence === 'medium') ? detected : null);
+    if (detected && (detected.confidence === 'high' || detected.confidence === 'medium') && !accountId) {
+      setAccountId(detected.accountId);
+    }
+  }, [reconcile.stmtRows]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Load raw transaction data ───────────────────────────────
   const load = async () => {
@@ -453,8 +467,11 @@ export default function BankStatement({
       }}>
         {/* Account */}
         <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: "2 1 200px" }}>
-          <label style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF }}>Account</label>
-          <select style={SEL_STYLE} value={accountId} onChange={e => setAccountId(e.target.value)}>
+          <label style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF }}>
+            Account
+            {autoDetect && <AutoDetectBadge confidence={autoDetect.confidence} matchedBy={autoDetect.matchedBy} style={{ marginLeft: 6, fontSize: 10 }} />}
+          </label>
+          <select style={SEL_STYLE} value={accountId} onChange={e => { setAccountId(e.target.value); setAutoDetect(null); }}>
             <AccountOptions accounts={accounts} />
           </select>
         </div>

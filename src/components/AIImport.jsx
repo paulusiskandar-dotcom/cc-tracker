@@ -4,6 +4,8 @@ import { undoManager } from "../lib/undoManager";
 import { merchantRules } from "../lib/merchantRules";
 import { ledgerApi, scanApi, getTxFromToTypes, installmentsApi } from "../api";
 import { fmtIDR, todayStr, checkDuplicateTransaction, resolveCategoryIds } from "../utils";
+import { detectAccount } from "../lib/accountDetection";
+import AutoDetectBadge from "./shared/AutoDetectBadge";
 import { LIGHT, DARK } from "../theme";
 import { Button, EmptyState, Spinner, showToast, TxHorizontal } from "./shared/index";
 import ProgressIndicator from "./shared/ProgressIndicator";
@@ -77,6 +79,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
   const fileRef = useRef();
 
   const [defaultAccountId, setDefaultAccountId] = useState("");
+  const [autoDetected,     setAutoDetected]     = useState(null); // { accountId, confidence, matchedBy }
   const [scanning,         setScanning]         = useState(false);
   const [retrySonnet,      setRetrySonnet]      = useState(false);
   const [results,          setResults]          = useState([]);
@@ -352,7 +355,18 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       const bankAcc  = defaultAccountId ? spendAccounts.find(a => a.id === defaultAccountId) : null;
       const bankHint = bankAcc?.bank_name || bankAcc?.name || "";
       const parsed = await scanApi.scan(user.id, file, { accounts, bankHint });
-      const items  = enrichTransfers(buildRows(parsed, defaultAccountId).map(r => ({ ...r, _sourceFile: file.name })));
+
+      // Auto-detect account from filename + extracted descriptions
+      const pdfText  = (parsed || []).map(r => r.description || r.merchant_name || "").join(" ");
+      const detected = detectAccount({ subject: file.name, pdfText, accounts: spendAccounts });
+      const effectiveAccId = (detected && (detected.confidence === 'high' || detected.confidence === 'medium'))
+        ? detected.accountId : defaultAccountId;
+      if (detected && (detected.confidence === 'high' || detected.confidence === 'medium')) {
+        setAutoDetected(detected);
+        setDefaultAccountId(detected.accountId);
+      }
+
+      const items  = enrichTransfers(buildRows(parsed, effectiveAccId).map(r => ({ ...r, _sourceFile: file.name })));
 
       // 4. Save results to DB
       if (newBatchId) {
@@ -594,6 +608,7 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
   // Change default account — patches all rows without a specific AI-matched account
   const handleDefaultAccountChange = (id) => {
     setDefaultAccountId(id);
+    setAutoDetected(null); // user override clears auto-detect badge
     setResults(prev => prev.map(r =>
       r._hasAccountMatch ? r : { ...r, from_id: id }
     ));
@@ -699,6 +714,9 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
               );
             })}
           </select>
+          {autoDetected && (
+            <AutoDetectBadge confidence={autoDetected.confidence} matchedBy={autoDetected.matchedBy} />
+          )}
           <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
             (applies to all rows)
           </span>

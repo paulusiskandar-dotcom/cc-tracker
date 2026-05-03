@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { gmailApi, settingsApi, ledgerApi, getTxFromToTypes, flattenEmailSync, loanPaymentsApi, installmentsApi } from "../api";
 import { undoManager } from "../lib/undoManager";
 import { merchantRules } from "../lib/merchantRules";
+import { detectAccount } from "../lib/accountDetection";
 import { todayStr, resolveCategoryIds } from "../utils";
 import { LIGHT, DARK } from "../theme";
 import {
@@ -402,11 +403,24 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
 
   // Sync rows when pendingSyncs changes from parent (new sync, refresh)
   useEffect(() => {
+    const spendAccounts = accounts.filter(a =>
+      (a.type === "bank" && a.subtype !== "reimburse") ||
+      a.type === "credit_card"
+    );
     setRows(prev => {
       const prevMap = new Map(prev.map(r => [r._id, r]));
       const built = (pendingSyncs || []).map(s => {
         if (prevMap.has(s.id)) return prevMap.get(s.id);
-        return applyMerchantRule(syncToRow(s));
+        const row = applyMerchantRule(syncToRow(s));
+        // Per-row auto-detect if server didn't match an account
+        if (!row.from_id) {
+          const sender = s.ai_raw_result?.sender_email || s.sender_email || "";
+          const detected = detectAccount({ subject: s.subject, sender, accounts: spendAccounts });
+          if (detected && (detected.confidence === 'high' || detected.confidence === 'medium')) {
+            return { ...row, from_id: detected.accountId, _autoDetect: detected };
+          }
+        }
+        return row;
       });
       return enrichTransfers(built);
     });
@@ -415,7 +429,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       (pendingSyncs || []).forEach(s => { next[s.id] = s.id in prev ? prev[s.id] : true; });
       return next;
     });
-  }, [pendingSyncs]);
+  }, [pendingSyncs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const enrichTransfers = (items) => {
     const pairs = detectTransferPairs(items, accounts, ledger || []);

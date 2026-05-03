@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import { fmtIDR } from "../utils";
+import { detectAccount } from "../lib/accountDetection";
+import AutoDetectBadge from "./shared/AutoDetectBadge";
 import { TX_TYPE_MAP } from "../constants";
 import { showToast } from "./shared/Card";
 import { undoManager } from "../lib/undoManager";
@@ -86,7 +88,9 @@ export default function CCStatement({
   initialReconcileBlobUrl = null, initialReconcileClosingBal = null, initialReconcileOpeningBal = null,
 }) {
   const hasInitialDates = useRef(!!(initialFromDate));
-  const [accountId, setAccountId] = useState(initialAccount?.id || "");
+  const [accountId,   setAccountId]   = useState(initialAccount?.id || "");
+  const [autoDetect,  setAutoDetect]  = useState(null);
+  const prevAccountRef = useRef(initialAccount?.id || null);
   const [fromDate,  setFromDate]  = useState(initialFromDate || firstOfMonthStr());
   const [toDate,    setToDate]    = useState(initialToDate   || todayStr());
   const [selectedMonth, setSelectedMonth] = useState(
@@ -130,6 +134,23 @@ export default function CCStatement({
       });
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Auto-detect card when reconcile PDF is loaded ─────────────
+  useEffect(() => {
+    if (!reconcile.stmtRows.length) { setAutoDetect(null); return; }
+    const pdfText  = reconcile.stmtRows.map(r => r.description || r.merchant || "").join(" ");
+    const detected = detectAccount({ subject: reconcile.pdfSource, pdfText, accounts: creditCardsProp });
+    if (detected && (detected.confidence === 'high' || detected.confidence === 'medium')) {
+      setAutoDetect(detected);
+      // For card_last4 match: auto-change even if already set, with revert support
+      if (!accountId || detected.matchedBy.includes('card_last4')) {
+        prevAccountRef.current = accountId || null;
+        setAccountId(detected.accountId);
+      }
+    } else {
+      setAutoDetect(null);
+    }
+  }, [reconcile.stmtRows]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveAll = async () => {
     const missing = reconcile.missing;
@@ -412,8 +433,17 @@ export default function CCStatement({
       }}>
         {/* Card selector */}
         <div style={{ display: "flex", flexDirection: "column", gap: 4, flex: "2 1 200px" }}>
-          <label style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF }}>Credit Card</label>
-          <select style={SEL_STYLE} value={accountId} onChange={e => setAccountId(e.target.value)}>
+          <label style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF }}>
+            Credit Card
+            {autoDetect && <AutoDetectBadge confidence={autoDetect.confidence} matchedBy={autoDetect.matchedBy} style={{ marginLeft: 6, fontSize: 10 }} />}
+            {autoDetect && prevAccountRef.current && prevAccountRef.current !== accountId && (
+              <button
+                onClick={() => { setAccountId(prevAccountRef.current); setAutoDetect(null); }}
+                style={{ marginLeft: 6, fontSize: 10, color: "#6b7280", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: FF, textDecoration: "underline" }}
+              >revert</button>
+            )}
+          </label>
+          <select style={SEL_STYLE} value={accountId} onChange={e => { setAccountId(e.target.value); setAutoDetect(null); }}>
             <option value="">— Select card —</option>
             {creditCards
               .sort((a, b) => (a.name || "").localeCompare(b.name || ""))

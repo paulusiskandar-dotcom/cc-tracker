@@ -536,6 +536,15 @@ function TxHorizontalCard({
         {r._transferPair && (
           <span style={BADGE("#dbeafe","#1d4ed8")}>🔄 Transfer</span>
         )}
+        {r._autoDetect?.confidence && (
+          <span
+            title={`Auto-detected · Matched by: ${(r._autoDetect.matchedBy || []).join(', ')}`}
+            style={BADGE(
+              r._autoDetect.confidence === 'high' ? '#E1F5EE' : '#FAEEDA',
+              r._autoDetect.confidence === 'high' ? '#0F6E56' : '#854F0B',
+            )}
+          >✨</span>
+        )}
 
         <span style={{ fontSize: 12, fontWeight: 800, color, fontFamily: "Figtree, sans-serif", flexShrink: 0, whiteSpace: "nowrap" }}>
           {amtStr}
