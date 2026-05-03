@@ -880,7 +880,7 @@ export default function TxVerticalBig({
 
     // ── FX Exchange (bidirectional — no Buy/Sell toggle) ─────────
     if (type === "fx_exchange") {
-      const fxAllAccs  = accounts.filter(a => a.is_active !== false);
+      const fxAllAccs  = accounts.filter(a => a.is_active !== false && ["bank", "cash"].includes(a.type));
       const fxToOpts   = fxFromCur
         ? fxAllAccs.filter(a => (a.currency || "IDR") !== fxFromCur)
         : fxAllAccs;

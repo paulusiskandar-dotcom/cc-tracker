@@ -150,7 +150,7 @@ function getAcctCfg(txType, accounts) {
     case "buy_asset":     return { mode: "from_to",  from: bc,    to: asset };
     case "give_loan":     return { mode: "from_to",  from: bc,    to: loanRecv };
     case "pay_liability": return { mode: "from_to",  from: bc,    to: liab };
-    case "fx_exchange":   return { mode: "from_to",  from: all,   to: all };
+    case "fx_exchange":   return { mode: "from_to",  from: bc,    to: bc  };
     case "cc_installment":return { mode: "from",     from: cc };
     default:              return { mode: "from",     from: bccc }; // expense, reimburse_out
   }
