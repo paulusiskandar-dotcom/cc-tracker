@@ -26,6 +26,28 @@ export const fmtPct = (n) => {
   return (v >= 0 ? "+" : "") + v.toFixed(1) + "%";
 };
 
+// Foreign currency: native symbol + id-ID locale (dot thousand, comma decimal)
+// e.g. fmtCurNative(1000, "SGD") → "S$1.000"
+const NATIVE_SYMBOLS = {
+  USD: "US$", SGD: "S$", EUR: "€", JPY: "¥", GBP: "£", AUD: "A$",
+  HKD: "HK$", CHF: "CHF", MYR: "RM", THB: "฿", KRW: "₩", CNY: "¥",
+};
+export const fmtCurNative = (amount, currency) => {
+  if (!currency || currency === "IDR") return fmtIDR(amount);
+  const sym = NATIVE_SYMBOLS[currency] || (currency + " ");
+  const v = Number(amount || 0);
+  return sym + v.toLocaleString("id-ID", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+};
+export const fmtCurNativeShort = (amount, currency) => {
+  if (!currency || currency === "IDR") return fmtIDR(amount, true);
+  const sym = NATIVE_SYMBOLS[currency] || (currency + " ");
+  const abs = Math.abs(Number(amount || 0));
+  if (abs >= 1e9) return sym + (abs / 1e9).toLocaleString("id-ID", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "B";
+  if (abs >= 1e6) return sym + (abs / 1e6).toLocaleString("id-ID", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "M";
+  if (abs >= 1e3) return sym + Math.round(abs / 1e3).toLocaleString("id-ID") + "K";
+  return sym + abs.toLocaleString("id-ID", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+};
+
 // ─── FX ──────────────────────────────────────────────────────
 export const toIDR = (amount, currency, fxRates = {}, CURRENCIES = []) => {
   if (currency === "IDR") return amount;

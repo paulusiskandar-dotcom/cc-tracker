@@ -1369,24 +1369,24 @@ function AccountsSection({ user, T, card, accounts, setAccounts, onRefresh }) {
 
   const [liabModal,  setLiabModal]  = useState(false);
   const [editLiab,   setEditLiab]   = useState(null);
-  const [liabForm,   setLiabForm]   = useState({ name: "", current_balance: "" });
+  const [liabForm,   setLiabForm]   = useState({ name: "", outstanding_amount: "" });
   const [liabSaving, setLiabSaving] = useState(false);
   const [delLiab,    setDelLiab]    = useState(null);
 
-  const openAdd  = () => { setEditLiab(null); setLiabForm({ name: "", current_balance: "" }); setLiabModal(true); };
-  const openEdit = (a) => { setEditLiab(a); setLiabForm({ name: a.name, current_balance: String(a.current_balance || 0) }); setLiabModal(true); };
+  const openAdd  = () => { setEditLiab(null); setLiabForm({ name: "", outstanding_amount: "" }); setLiabModal(true); };
+  const openEdit = (a) => { setEditLiab(a); setLiabForm({ name: a.name, outstanding_amount: String(a.outstanding_amount || 0) }); setLiabModal(true); };
 
   const saveLiab = async () => {
     if (!liabForm.name.trim()) return showToast("Name required", "error");
     setLiabSaving(true);
     try {
       if (editLiab) {
-        await accountsApi.update(editLiab.id, { name: liabForm.name.trim(), current_balance: Number(liabForm.current_balance) || 0 });
-        setAccounts(prev => prev.map(a => a.id === editLiab.id ? { ...a, name: liabForm.name.trim(), current_balance: Number(liabForm.current_balance) || 0 } : a));
+        await accountsApi.update(editLiab.id, { name: liabForm.name.trim(), outstanding_amount: Number(liabForm.outstanding_amount) || 0 });
+        setAccounts(prev => prev.map(a => a.id === editLiab.id ? { ...a, name: liabForm.name.trim(), outstanding_amount: Number(liabForm.outstanding_amount) || 0 } : a));
       } else {
         const created = await accountsApi.create(user.id, {
           name: liabForm.name.trim(), type: "liability",
-          current_balance: Number(liabForm.current_balance) || 0,
+          outstanding_amount: Number(liabForm.outstanding_amount) || 0,
         });
         if (created) setAccounts(prev => [...prev, created]);
       }
@@ -1427,7 +1427,7 @@ function AccountsSection({ user, T, card, accounts, setAccounts, onRefresh }) {
               <div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>{a.name}</div>
                 <div style={{ fontSize: 11, color: "#dc2626", fontFamily: "Figtree, sans-serif" }}>
-                  {fmtIDR(Number(a.current_balance || 0))}
+                  {fmtIDR(Number(a.outstanding_amount || 0))}
                 </div>
               </div>
               <div style={{ display: "flex", gap: 6 }}>
@@ -1451,7 +1451,7 @@ function AccountsSection({ user, T, card, accounts, setAccounts, onRefresh }) {
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>{a.name}</div>
                   <div style={{ fontSize: 11, color: "#d97706", fontFamily: "Figtree, sans-serif" }}>
-                    {fmtIDR(Number(a.current_balance || 0))}
+                    {fmtIDR(Number(a.receivable_outstanding || 0))}
                   </div>
                 </div>
                 <div style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, sans-serif" }}>{a.entity || "—"}</div>
@@ -1465,7 +1465,7 @@ function AccountsSection({ user, T, card, accounts, setAccounts, onRefresh }) {
       <Modal open={liabModal} onClose={() => setLiabModal(false)} title={editLiab ? "Edit Liability" : "Add Liability"}>
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <Input label="Name" value={liabForm.name} onChange={e => setLiabForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. KPR BCA" />
-          <AmountInput label="Current Balance" value={liabForm.current_balance} onChange={v => setLiabForm(f => ({ ...f, current_balance: v }))} />
+          <AmountInput label="Outstanding Amount" value={liabForm.outstanding_amount} onChange={v => setLiabForm(f => ({ ...f, outstanding_amount: v }))} />
           <Button variant="primary" busy={liabSaving} onClick={saveLiab}>{editLiab ? "Save Changes" : "Add Liability"}</Button>
         </div>
       </Modal>

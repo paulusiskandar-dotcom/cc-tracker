@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { accountsApi, ledgerApi, getTxFromToTypes } from "../api";
 import { supabase } from "../lib/supabase";
-import { fmtIDR, todayStr } from "../utils";
+import { fmtIDR, fmtCurNative, fmtCurNativeShort, todayStr } from "../utils";
 import { ASSET_SUBTYPES, ASSET_ICON, ASSET_COL } from "../constants";
 import { LIGHT, DARK } from "../theme";
 import {
@@ -47,12 +47,16 @@ function DonutChart({ data, colors, size = 120, thickness = 24 }) {
 
 
 // ─── ASSET CARD ───────────────────────────────────────────────
-function AssetCard({ asset: a, color, onUpdate, onEdit, onTimeline }) {
-  const cur     = Number(a.current_value || 0);
-  const bought  = Number(a.purchase_price || 0);
-  const gain    = bought > 0 ? cur - bought : 0;
-  const gainPct = bought > 0 ? ((gain / bought) * 100).toFixed(1) : null;
-  const icon    = ASSET_ICON[a.subtype] || "📦";
+function AssetCard({ asset: a, color, onUpdate, onEdit, onTimeline, fxRates = {} }) {
+  const isForeign = !!(a.currency && a.currency !== "IDR");
+  const rate      = isForeign ? (fxRates[a.currency] || 1) : 1;
+  const cur       = Number(a.current_value || 0);
+  const bought    = Number(a.purchase_price || 0);
+  const valueIdr  = cur * rate;
+  const costIdr   = bought * rate;
+  const gain      = costIdr > 0 ? valueIdr - costIdr : 0;
+  const gainPct   = costIdr > 0 ? ((gain / costIdr) * 100).toFixed(1) : null;
+  const icon      = ASSET_ICON[a.subtype] || "📦";
 
   return (
     <div className="asset-card" onClick={onTimeline} style={{
@@ -93,12 +97,21 @@ function AssetCard({ asset: a, color, onUpdate, onEdit, onTimeline }) {
           </div>
           <div onClick={(e) => { e.stopPropagation(); onUpdate(); }} title="Klik untuk update value"
             style={{ fontSize: 22, fontWeight: 800, color: "#3b5bdb", fontFamily: "Figtree, sans-serif", lineHeight: 1.1, cursor: "pointer", display: "inline-block" }}>
-            {fmtIDR(cur)}
+            {fmtIDR(valueIdr)}
           </div>
+          {isForeign && (
+            <div style={{ fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
+              {fmtCurNative(cur, a.currency)}
+            </div>
+          )}
           {bought > 0 && (
-            <div style={{ marginTop: 5, fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
-              Cost: {fmtIDR(bought, true)}
-              {gainPct !== null && (
+            <div style={{ marginTop: isForeign ? 3 : 5, fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+              {isForeign ? (
+                <>Cost {fmtCurNativeShort(bought, a.currency)} ({fmtIDR(costIdr, true)})</>
+              ) : (
+                <>Cost {fmtIDR(costIdr, true)}</>
+              )}
+              {gainPct !== null && Math.abs(gain) >= 1 && (
                 <span style={{ marginLeft: 6, fontWeight: 700, color: gain >= 0 ? "#059669" : "#dc2626" }}>
                   · {gain >= 0 ? "▲" : "▼"} {fmtIDR(Math.abs(gain), true)} ({gain >= 0 ? "+" : ""}{gainPct}%)
                 </span>
@@ -522,6 +535,7 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
                   key={a.id}
                   asset={a}
                   color={color}
+                  fxRates={fxRates}
                   onUpdate={() => openUpdateModal(a)}
                   onEdit={() => openEditAsset(a)}
                   onTimeline={() => navigate(`/accounts/${a.id}/statement`)}
