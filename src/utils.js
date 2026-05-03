@@ -280,37 +280,126 @@ export const checkDuplicateTransaction = (ledger, {
   return orangeResult || greenResult || null;
 };
 
-// ─── CATEGORY RESOLUTION ─────────────────────────────────────
-// Converts a slug (e.g. "food") or label to a DB UUID + display name.
-// dbCategories: array of { id: uuid, name: string } from expense_categories table.
-// Falls back to constants EXPENSE_CATEGORIES / INCOME_CATEGORIES_LIST by label match.
+// ─── CATEGORY / INCOME-SOURCE LOOKUP (DB-FIRST) ──────────────
+// Source of truth = expense_categories / income_sources tables (per-user UUIDs).
+// All import flows resolve AI/scan name strings → DB UUIDs via these helpers.
+
+const SLUG_TO_LABEL_LEGACY = {
+  food: "Food & Drinks", home: "Home & Utilities", transport: "Transport",
+  health: "Health", shopping: "Shopping", education: "Education",
+  entertainment: "Entertainment", business: "Business & Ops", finance: "Finance",
+  family: "Family", social: "Social & Gifts", cash_advance_fee: "Cash Advance Fee",
+  bank_charges: "Bank Charges", materai: "Stamp Duty", tax: "Tax", other: "Other",
+  salary: "Salary", rental_income: "Rental Income", dividend: "Dividend",
+  freelance: "Freelance", loan_collection: "Loan Collection",
+  bank_interest: "Bank Interest", cashback: "Cashback", other_income: "Other Income",
+  personal_shopping: "Personal Shopping",
+};
+
+const _norm = (s) => String(s ?? "").trim().toLowerCase();
+
+// Generic name → entity lookup with plural-tolerant + legacy-slug fallback.
+function _lookupByName(nameOrSlug, list, fallbackNames = []) {
+  if (!nameOrSlug || !list?.length) return null;
+  const t = _norm(nameOrSlug);
+
+  // 1. Exact match
+  let hit = list.find(c => _norm(c.name) === t);
+  if (hit) return { id: hit.id, name: hit.name, source: "exact" };
+
+  // 2. Legacy slug → label, then exact match
+  const slugLabel = SLUG_TO_LABEL_LEGACY[t];
+  if (slugLabel) {
+    hit = list.find(c => _norm(c.name) === _norm(slugLabel));
+    if (hit) return { id: hit.id, name: hit.name, source: "fuzzy" };
+  }
+
+  // 3. Plural-tolerant ("Food & Drinks" ↔ "Food & Drink")
+  const singular = t.endsWith("s") ? t.slice(0, -1) : t;
+  const plural   = t.endsWith("s") ? t : t + "s";
+  hit = list.find(c => {
+    const n = _norm(c.name);
+    return n === singular || n === plural;
+  });
+  if (hit) return { id: hit.id, name: hit.name, source: "fuzzy" };
+
+  // 4. Fallback names (e.g. "Other", "Other Income")
+  for (const fb of fallbackNames) {
+    hit = list.find(c => _norm(c.name) === _norm(fb));
+    if (hit) return { id: hit.id, name: hit.name, source: "fallback" };
+  }
+  return null;
+}
+
+/** Lookup expense category UUID by name (case-insensitive, plural-tolerant, slug-tolerant). */
+export const lookupExpenseCategory = (nameOrSlug, userCategories = []) =>
+  _lookupByName(nameOrSlug, userCategories, ["Other"]);
+
+/** Lookup income source UUID by name. */
+export const lookupIncomeSource = (nameOrSlug, userIncomeSources = []) =>
+  _lookupByName(nameOrSlug, userIncomeSources, ["Other Income", "Other"]);
+
+/**
+ * 3-Layer auto-categorize for import flows.
+ *   Layer 1 — merchant_mappings (per-user learned).
+ *   Layer 2 — AI suggested name → DB lookup.
+ *   Layer 3 — fallback to "Other" / "Other Income".
+ *
+ * Returns { id, name, source: 'merchant'|'ai'|'fallback'|null, confidence }.
+ */
+export const autoCategorize = ({
+  merchantName,
+  txType = "expense",
+  aiSuggestedName,
+  merchantMappings = [],
+  userCategories = [],
+}) => {
+  const isIncome = txType === "income";
+  const lookup = isIncome ? lookupIncomeSource : lookupExpenseCategory;
+
+  // Layer 1 — merchant_mappings (must match tx_type)
+  if (merchantName) {
+    const m = _norm(merchantName);
+    const mapping = merchantMappings.find(x =>
+      x.tx_type === txType && _norm(x.merchant_name) === m
+    );
+    if (mapping?.category_id) {
+      const cat = userCategories.find(c => c.id === mapping.category_id);
+      if (cat) {
+        return {
+          id: cat.id, name: cat.name, source: "merchant",
+          confidence: Number(mapping.confidence) || 90,
+        };
+      }
+    }
+  }
+
+  // Layer 2 — AI suggested name → DB lookup
+  if (aiSuggestedName) {
+    const hit = lookup(aiSuggestedName, userCategories);
+    if (hit && hit.source !== "fallback") {
+      return {
+        id: hit.id, name: hit.name, source: "ai",
+        confidence: hit.source === "exact" ? 80 : 60,
+      };
+    }
+  }
+
+  // Layer 3 — fallback to "Other" / "Other Income"
+  const fb = lookup(isIncome ? "Other Income" : "Other", userCategories);
+  if (fb) return { id: fb.id, name: fb.name, source: "fallback", confidence: 0 };
+
+  return { id: null, name: null, source: null, confidence: 0 };
+};
+
+/**
+ * @deprecated Use lookupExpenseCategory / lookupIncomeSource instead.
+ * Kept for backward compat — callers in older flows still rely on this signature.
+ */
 export const resolveCategoryIds = (slugOrLabel, dbCategories = []) => {
   if (!slugOrLabel) return { category_id: null, category_name: null };
-
-  // Direct DB match by name (case-insensitive)
-  const byName = dbCategories.find(
-    c => c.name?.toLowerCase() === slugOrLabel.toLowerCase()
-  );
-  if (byName) return { category_id: byName.id, category_name: byName.name };
-
-  // Slug → label via constants, then DB match
-  const SLUG_TO_LABEL = {
-    food: "Food & Drinks", home: "Home & Utilities", transport: "Transport",
-    health: "Health", shopping: "Shopping", education: "Education",
-    entertainment: "Entertainment", business: "Business & Ops", finance: "Finance",
-    family: "Family", social: "Social & Gifts", cash_advance_fee: "Cash Advance Fee",
-    bank_charges: "Bank Charges", materai: "Stamp Duty", tax: "Tax", other: "Other",
-    salary: "Salary", rental_income: "Rental Income", dividend: "Dividend",
-    freelance: "Freelance", loan_collection: "Loan Collection",
-    bank_interest: "Bank Interest", cashback: "Cashback", other_income: "Other Income",
-    // personal_shopping maps to shopping
-    personal_shopping: "Personal Shopping",
-  };
-  const label = SLUG_TO_LABEL[slugOrLabel] || slugOrLabel;
-  const byLabel = dbCategories.find(
-    c => c.name?.toLowerCase() === label.toLowerCase()
-  );
-  if (byLabel) return { category_id: byLabel.id, category_name: byLabel.name };
-
+  const hit = _lookupByName(slugOrLabel, dbCategories);
+  if (hit) return { category_id: hit.id, category_name: hit.name };
+  const label = SLUG_TO_LABEL_LEGACY[_norm(slugOrLabel)] || slugOrLabel;
   return { category_id: null, category_name: label };
 };

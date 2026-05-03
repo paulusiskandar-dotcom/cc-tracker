@@ -2,8 +2,8 @@ import { useState, useRef, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import { undoManager } from "../lib/undoManager";
 import { merchantRules } from "../lib/merchantRules";
-import { ledgerApi, scanApi, getTxFromToTypes, installmentsApi } from "../api";
-import { fmtIDR, todayStr, checkDuplicateTransaction, resolveCategoryIds } from "../utils";
+import { ledgerApi, scanApi, merchantApi, getTxFromToTypes, installmentsApi } from "../api";
+import { fmtIDR, todayStr, checkDuplicateTransaction, autoCategorize } from "../utils";
 import { detectAccount } from "../lib/accountDetection";
 import AutoDetectBadge from "./shared/AutoDetectBadge";
 import { LIGHT, DARK } from "../theme";
@@ -74,7 +74,7 @@ const fmtDateShort = (d) => {
 };
 
 // ─────────────────────────────────────────────────────────────────
-export default function AIImport({ user, accounts, categories = [], ledger, onRefresh, setLedger, dark, merchantMaps = [], fxRates = {}, CURRENCIES = [], setPendingSyncs, employeeLoans = [] }) {
+export default function AIImport({ user, accounts, categories = [], incomeSrcs = [], ledger, onRefresh, setLedger, dark, merchantMaps = [], fxRates = {}, CURRENCIES = [], setPendingSyncs, employeeLoans = [] }) {
   const T = dark ? DARK : LIGHT;
   const fileRef = useRef();
 
@@ -496,6 +496,34 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       };
     }
     const { from_type, to_type } = getTxFromToTypes(r.tx_type);
+    // 3-Layer auto-categorize. For income, route via incomeSrcs (not expense categories).
+    const isIncome  = r.tx_type === "income";
+    const isReimburseOut = r.tx_type === "reimburse_out";
+    const noCat     = NO_CAT.has(r.tx_type) || isReimburseOut;
+    let category_id   = null;
+    let category_name = null;
+    let from_id       = r.from_id || null;
+    if (!noCat) {
+      const list = isIncome ? incomeSrcs : categories;
+      // Direct UUID match first
+      if (r.category_id) {
+        const hit = list.find(c => c.id === r.category_id);
+        if (hit) { category_id = hit.id; category_name = hit.name; }
+      }
+      // Otherwise: autoCategorize via merchant_mappings → AI suggested name → fallback
+      if (!category_id) {
+        const lookup = autoCategorize({
+          merchantName:    r.description,
+          txType:          r.tx_type,
+          aiSuggestedName: r.category_name || r.category_id, // legacy slug or AI label
+          merchantMappings: merchantMaps,
+          userCategories:  list,
+        });
+        category_id   = lookup.id;
+        category_name = lookup.name;
+      }
+      if (isIncome && !from_id && category_id) from_id = category_id;
+    }
     return {
       tx_date:        r.tx_date,
       description:    r.description,
@@ -505,11 +533,11 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
       amount_idr:     amtIDR,
       tx_type:        r.tx_type,
       from_type, to_type,
-      from_id:        r.from_id || null,
+      from_id,
       to_id:          r.to_id   || null,
       entity:         REIMBURSE_TYPES.has(r.tx_type) ? (r.entity || "Hamasa") : "Personal",
       is_reimburse:   r.tx_type === "reimburse_out" || r.tx_type === "reimburse_in",
-      ...(r.tx_type === "reimburse_out" ? { category_id: null, category_name: null } : resolveCategoryIds(r.category_id, categories)),
+      category_id, category_name,
       notes:          r.notes || "",
       source:         "ai_scan",
       scan_batch_id:  batchId || null,
@@ -530,16 +558,22 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
     const newLedgerIds = [];
     for (const r of validRows) {
       try {
-        const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
+        const entry = buildEntry(r);
+        const created = await ledgerApi.create(user.id, entry, accounts);
         if (created) {
           if (created.id) newLedgerIds.push(created.id);
           setLedger(prev => [created, ...prev]); ok++;
+          // Silent learning: persist merchant → category mapping for next time.
+          if (entry.category_id && r.description && (entry.tx_type === "expense" || entry.tx_type === "income")) {
+            merchantApi.upsert(user.id, r.description, entry.category_id, entry.category_name, entry.tx_type)
+              .catch(e => console.warn("[merchant_mapping upsert]", e?.message));
+          }
           if (r._cicilan && r._cicilanMonths >= 2) {
             installmentsApi.createFromImport(user.id, {
               ledgerId: created.id, description: r.description || "", accountId: r.from_id,
               amount: Number(r.amount_idr || r.amount || 0), totalMonths: r._cicilanMonths,
               paidMonths: r._cicilanKe || 1,
-              currency: r.currency || "IDR", txDate: r.tx_date, categoryId: r.category_id || null,
+              currency: r.currency || "IDR", txDate: r.tx_date, categoryId: entry.category_id || null,
             }).catch(e => console.error("[cicilan import]", e));
           }
         }
@@ -567,15 +601,21 @@ export default function AIImport({ user, accounts, categories = [], ledger, onRe
   const importOne = async (r) => {
     if (r._invalidAmount) return showToast("Amount is required — edit the row first", "error");
     try {
-      const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
+      const entry = buildEntry(r);
+      const created = await ledgerApi.create(user.id, entry, accounts);
       if (created) {
         setLedger(prev => [created, ...prev]);
+        // Silent learning
+        if (entry.category_id && r.description && (entry.tx_type === "expense" || entry.tx_type === "income")) {
+          merchantApi.upsert(user.id, r.description, entry.category_id, entry.category_name, entry.tx_type)
+            .catch(e => console.warn("[merchant_mapping upsert]", e?.message));
+        }
         if (r._cicilan && r._cicilanMonths >= 2) {
           installmentsApi.createFromImport(user.id, {
             ledgerId: created.id, description: r.description || "", accountId: r.from_id,
             amount: Number(r.amount_idr || r.amount || 0), totalMonths: r._cicilanMonths,
             paidMonths: r._cicilanKe || 1,
-            currency: r.currency || "IDR", txDate: r.tx_date, categoryId: r.category_id || null,
+            currency: r.currency || "IDR", txDate: r.tx_date, categoryId: entry.category_id || null,
           }).catch(e => console.error("[cicilan import]", e));
         }
         setResults(prev => prev.filter(x => x._id !== r._id));

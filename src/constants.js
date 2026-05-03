@@ -100,6 +100,16 @@ export const TX_TYPES = [
 export const TX_TYPE_MAP = Object.fromEntries(TX_TYPES.map(t => [t.id, t]));
 
 // ─── EXPENSE CATEGORIES ───────────────────────────────────────
+/**
+ * @deprecated as primary UI source — DB tables (expense_categories, income_sources)
+ * are now the source of truth. These constants are kept for:
+ *   1. Legacy slug → label fallback in lookupExpenseCategory / lookupIncomeSource
+ *   2. Initial keyword matching in suggestCategory()
+ *   3. Bootstrap defaults for first-time users (Phase 3 will seed DB from these)
+ * Do NOT use these as dropdown sources in new code — fetch from DB via
+ * categoriesApi.getAll() / incomeSrcApi.getAll() instead.
+ * Migration plan: Phase 3 cleanup (TODO) will remove these once all flows are DB-only.
+ */
 export const EXPENSE_CATEGORIES = [
   { id: "food",          label: "Food & Drinks",    icon: "🍽️",  color: "#d97706",
     keywords: ["restaurant","cafe","coffee","food","warung","grab food","gofood","mcdonalds","kfc","indomaret","alfamart","supermarket","bakery","pizza","sushi"] },

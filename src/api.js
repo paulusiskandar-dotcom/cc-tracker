@@ -1,5 +1,6 @@
 import { supabase } from "./lib/supabase";
 import { REIMBURSE_ENTITIES } from "./constants";
+import { lookupExpenseCategory, lookupIncomeSource } from "./utils";
 
 // ─── FROM_TYPE / TO_TYPE MAPPING ─────────────────────────────
 export const getTxFromToTypes = (txType) => {
@@ -249,6 +250,32 @@ export const ledgerApi = {
       ...insertEntry
     } = entry;
     let safeEntry = sanitizeUUIDs(insertEntry);
+
+    // ── Resolve category_name → category_id (DB lookup) when needed ──────
+    // Triggered by callers that pass a name but no UUID (e.g. legacy slug input,
+    // or AI suggested name from import flow). Only runs for expense / income.
+    if (
+      (safeEntry.tx_type === "expense" || safeEntry.tx_type === "reimburse_out" || safeEntry.tx_type === "income")
+      && !safeEntry.category_id
+      && safeEntry.category_name
+    ) {
+      try {
+        const isIncome = safeEntry.tx_type === "income";
+        const table = isIncome ? "income_sources" : "expense_categories";
+        const { data: cats } = await supabase
+          .from(table).select("id, name")
+          .or(`user_id.is.null,user_id.eq.${userId}`);
+        const lookup = isIncome ? lookupIncomeSource : lookupExpenseCategory;
+        const hit = lookup(safeEntry.category_name, cats || []);
+        if (hit?.id) {
+          safeEntry.category_id   = hit.id;
+          safeEntry.category_name = hit.name;
+          if (isIncome && !safeEntry.from_id) safeEntry.from_id = hit.id;
+        }
+      } catch (e) {
+        console.warn("[ledgerApi.create] category resolution failed:", e?.message);
+      }
+    }
 
     // ── Pre-insert: create new asset account (buy_asset + new_asset) ──────
     let localAccounts = accounts;
@@ -575,12 +602,13 @@ export const categoriesApi = {
 };
 
 // ─── INCOME SOURCES ───────────────────────────────────────────
+// Mirrors categoriesApi pattern: include user-owned + system (user_id IS NULL) rows.
 export const incomeSrcApi = {
   getAll: async (userId) => {
     const { data, error } = await supabase
       .from("income_sources")
       .select("*")
-      .eq("user_id", userId)
+      .or(`user_id.is.null,user_id.eq.${userId}`)
       .order("created_at");
     if (error) throw new Error(error.message);
     return data || [];
@@ -774,40 +802,54 @@ export const merchantApi = {
     return data || [];
   },
 
-  upsert: async (userId, merchantName, categoryId, categoryLabel) => {
-    // Use raw SQL increment for confidence so it accumulates across calls
+  // Silent learning. categoryId MUST be a DB UUID. tx_type required ("expense" or "income").
+  // categoryLabel is denormalized name for audit/debug; kept (column still exists) but no longer the source of truth.
+  upsert: async (userId, merchantName, categoryId, categoryLabel, txType = "expense") => {
+    if (!categoryId) {
+      // Don't pollute merchant_mappings with null category_id — caller must resolve first.
+      console.warn("[merchantApi.upsert] skipped — category_id missing");
+      return;
+    }
+    const lcMerchant = String(merchantName || "").toLowerCase();
+    if (!lcMerchant) return;
     const { data: existing } = await supabase
       .from("merchant_mappings")
       .select("confidence")
       .eq("user_id", userId)
-      .eq("merchant_name", merchantName.toLowerCase())
+      .eq("merchant_name", lcMerchant)
+      .eq("tx_type", txType)
       .maybeSingle();
     const newConfidence = (existing?.confidence || 0) + 1;
     const { error } = await supabase.from("merchant_mappings").upsert(
       {
         user_id:       userId,
-        merchant_name: merchantName.toLowerCase(),
+        merchant_name: lcMerchant,
+        tx_type:       txType,
         category_id:   categoryId,
-        category_name: categoryLabel,
+        category_name: categoryLabel || null,
         confidence:    newConfidence,
         last_seen:     new Date().toISOString(),
       },
-      { onConflict: "user_id,merchant_name" }
+      { onConflict: "user_id,merchant_name,tx_type" }
     );
     if (error) throw new Error(error.message);
   },
 
   bulkUpsert: async (userId, mappings) => {
     if (!mappings.length) return;
-    const rows = mappings.map(m => ({
-      user_id:        userId,
-      merchant_name:  m.merchant.toLowerCase(),
-      category_id:    m.categoryId,
-      category_name:  m.categoryLabel,
-    }));
+    const rows = mappings
+      .filter(m => m.categoryId)
+      .map(m => ({
+        user_id:        userId,
+        merchant_name:  m.merchant.toLowerCase(),
+        tx_type:        m.txType || "expense",
+        category_id:    m.categoryId,
+        category_name:  m.categoryLabel || null,
+      }));
+    if (!rows.length) return;
     const { error } = await supabase
       .from("merchant_mappings")
-      .upsert(rows, { onConflict: "user_id,merchant_name" });
+      .upsert(rows, { onConflict: "user_id,merchant_name,tx_type" });
     if (error) throw new Error(error.message);
   },
 

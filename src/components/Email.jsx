@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
-import { gmailApi, settingsApi, ledgerApi, getTxFromToTypes, flattenEmailSync, loanPaymentsApi, installmentsApi } from "../api";
+import { gmailApi, settingsApi, ledgerApi, merchantApi, getTxFromToTypes, flattenEmailSync, loanPaymentsApi, installmentsApi } from "../api";
 import { undoManager } from "../lib/undoManager";
 import { merchantRules } from "../lib/merchantRules";
 import { detectAccount } from "../lib/accountDetection";
-import { todayStr, resolveCategoryIds } from "../utils";
+import { todayStr, autoCategorize } from "../utils";
 import { LIGHT, DARK } from "../theme";
 import {
   Button, EmptyState, showToast,
@@ -56,7 +56,7 @@ const SETUP_STEPS = [
 ];
 
 export default function Email({
-  user, accounts, categories, ledger, setLedger,
+  user, accounts, categories, incomeSrcs = [], ledger, setLedger,
   pendingSyncs, setPendingSyncs,
   dark, onRefresh,
   employeeLoans = [],
@@ -200,6 +200,7 @@ export default function Email({
           setPendingSyncs={setPendingSyncs}
           accounts={accounts}
           categories={categories}
+          incomeSrcs={incomeSrcs}
           user={user}
           ledger={ledger}
           setLedger={setLedger}
@@ -367,7 +368,7 @@ export default function Email({
 // ─── EMAIL PENDING TAB ────────────────────────────────────────────
 const GMAIL_NO_CAT = new Set(["transfer","pay_cc","give_loan","collect_loan","fx_exchange","reimburse_in","reimburse_out","buy_asset","sell_asset","pay_liability"]);
 
-function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, user, ledger, setLedger, onRefresh, dark, T: theme, employeeLoans = [], merchantMaps = [] }) {
+function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, incomeSrcs = [], user, ledger, setLedger, onRefresh, dark, T: theme, employeeLoans = [], merchantMaps = [] }) {
   const T = theme || LIGHT;
 
   // Local editable rows (mirrors pendingSyncs but editable)
@@ -479,13 +480,35 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       };
     }
     const { from_type, to_type } = getTxFromToTypes(r.tx_type);
-    // Resolve category slug (from user selection or AI suggestion) to DB UUID + label
-    // reimburse_out never has a category
+    // 3-Layer auto-categorize: merchant_mappings → AI suggested name → fallback "Other".
+    // reimburse_out / collect_loan never have a category.
     const isReimburseOut = r.tx_type === "reimburse_out";
-    const catSlug = r.category_id || r.suggested_category_label || null;
-    const { category_id, category_name } = isReimburseOut
-      ? { category_id: null, category_name: null }
-      : resolveCategoryIds(catSlug, categories);
+    const isIncome       = r.tx_type === "income";
+    let category_id   = null;
+    let category_name = null;
+    let from_id       = r.from_id || null;
+    if (!isReimburseOut) {
+      // For income, the "category" is an income_source; user dropdown stores its UUID
+      // directly into r.category_id, so prefer that.
+      if (r.category_id) {
+        const list = isIncome ? incomeSrcs : categories;
+        const hit  = list.find(c => c.id === r.category_id);
+        if (hit) { category_id = hit.id; category_name = hit.name; }
+      }
+      if (!category_id) {
+        const aiName = r.suggested_category_label || r.suggested_category || null;
+        const lookup = autoCategorize({
+          merchantName:    r.description || r.merchant_name,
+          txType:          r.tx_type,
+          aiSuggestedName: aiName,
+          merchantMappings: merchantMaps,
+          userCategories:  isIncome ? incomeSrcs : categories,
+        });
+        category_id   = lookup.id;
+        category_name = lookup.name;
+      }
+      if (isIncome && !from_id && category_id) from_id = category_id;
+    }
     return {
       tx_date:       r.tx_date,
       description:   desc,
@@ -493,7 +516,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       currency:      r.currency || "IDR",
       amount_idr,
       tx_type:       r.tx_type, from_type, to_type,
-      from_id:       r.from_id || null,
+      from_id,
       to_id:         r.to_id   || null,
       category_id,
       category_name,
@@ -507,8 +530,18 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
 
   const confirm = async (r) => {
     try {
-      const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
+      const entry = buildEntry(r);
+      const created = await ledgerApi.create(user.id, entry, accounts);
       setLedger(p => [created, ...p]);
+      // Silent learning: persist merchant → category mapping for next time.
+      if (entry.category_id && entry.merchant_name && (entry.tx_type === "expense" || entry.tx_type === "income")) {
+        merchantApi.upsert(user.id, entry.merchant_name, entry.category_id, entry.category_name, entry.tx_type)
+          .catch(e => console.warn("[merchant_mapping upsert]", e?.message));
+      } else if (entry.category_id && r.description && (entry.tx_type === "expense" || entry.tx_type === "income")) {
+        // Fallback to description if merchant_name missing
+        merchantApi.upsert(user.id, r.description, entry.category_id, entry.category_name, entry.tx_type)
+          .catch(e => console.warn("[merchant_mapping upsert]", e?.message));
+      }
       if (r.tx_type === "collect_loan" && (r.employee_loan_id || r.from_id)) {
         loanPaymentsApi.recordAndIncrement(user.id, {
           loanId: r.employee_loan_id || r.from_id, payDate: r.tx_date,

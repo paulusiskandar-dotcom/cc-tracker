@@ -116,23 +116,26 @@ export default function Income({
     } catch (e) { showToast(e.message, "error"); }
   };
 
-  const openIncModal = () => {
+  const openIncModal = (presetSrcId = "") => {
+    const defaultSrcId = presetSrcId || incomeSrcs.find(s => s.is_active)?.id || incomeSrcs[0]?.id || "";
     setIncForm({
       tx_date: todayStr(), description: "",
       amount: "", currency: "IDR",
       to_account_id: bankAccounts[0]?.id || "",
       entity: "Personal", notes: "",
+      income_source_id: defaultSrcId,
     });
     setIncModal(true);
   };
 
   const addIncome = async () => {
-    if (!incForm.description || !incForm.amount || !incForm.to_account_id)
+    if (!incForm.description || !incForm.amount || !incForm.to_account_id || !incForm.income_source_id)
       return showToast("Fill all required fields", "error");
     setSaving(true);
     try {
       const sn2 = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
       const amt = sn2(incForm.amount);
+      const src = incomeSrcs.find(s => s.id === incForm.income_source_id);
       const entry = {
         tx_date:          incForm.tx_date,
         description:      incForm.description,
@@ -142,12 +145,13 @@ export default function Income({
         tx_type:          "income",
         from_type:        "income_source",
         to_type:          "account",
-        from_id:          null,
+        from_id:          incForm.income_source_id,
         to_id:            incForm.to_account_id,
         entity:           incForm.entity || "Personal",
         notes:            incForm.notes || "",
-        category_name:    "Salary",
-        category_id:      null,
+        category_id:      incForm.income_source_id,
+        category_name:    src?.name || null,
+        source:           "manual",
       };
       const r = await ledgerApi.create(user.id, entry, accounts);
       if (r) setLedger(prev => [r, ...prev]);
@@ -584,6 +588,15 @@ export default function Income({
               />
             </Field>
           </FormRow>
+
+          <Field label="Income Source *">
+            <Select
+              value={incForm.income_source_id || ""}
+              onChange={e => setIncForm(f => ({ ...f, income_source_id: e.target.value }))}
+              options={incomeSrcs.filter(s => s.is_active !== false).map(s => ({ value: s.id, label: s.name }))}
+              placeholder="Select income source…"
+            />
+          </Field>
 
           <Field label="To Account *">
             <Select

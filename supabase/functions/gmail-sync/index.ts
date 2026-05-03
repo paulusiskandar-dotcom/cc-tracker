@@ -114,7 +114,12 @@ const FORCE_INCLUDE_PATTERNS = [
   /debit\s+alert/i,
 ];
 
-const AI_EXTRACTION_PROMPT = (emailContent: string, accounts: any[], merchantContext: string) => `
+const AI_EXTRACTION_PROMPT = (
+  emailContent: string,
+  accounts: any[],
+  merchantContext: string,
+  categoryContext: string = "",
+) => `
 You are a financial transaction extractor for an Indonesian personal finance app.
 Analyze this bank email and extract ALL transactions.
 
@@ -123,6 +128,8 @@ ${JSON.stringify(accounts.map(a => ({
   id: a.id, name: a.name, type: a.type,
   last4: a.last4, account_no: a.account_no, bank_name: a.bank_name,
 })))}
+
+${categoryContext}
 
 ${merchantContext}
 
@@ -185,18 +192,25 @@ For each transaction return a JSON array:
   "is_cc_payment": false,
   "from_account_id": "null - leave null, will be matched by post-processing",
   "to_account_id": "null - leave null, will be matched by post-processing",
-  "suggested_category": "Food & Drinks",
-  "category_id": "food",
+  "suggested_category": "Food & Drink",
+  "category_is_new": false,
   "suggested_entity": "Personal",
   "suggested_tx_type": "expense",
   "confidence": 0.95,
   "reasoning": "Grab Food is food delivery"
 }]
 
+Category rules:
+- "suggested_category" MUST be the exact name (string) of one of the user's categories listed above for this tx_type — NEVER a slug like "food" or "salary".
+- For tx_type=expense or reimburse_out: pick from the user's expense categories.
+- For tx_type=income: pick from the user's income sources.
+- If no existing category fits well, set "category_is_new": true and put a short suggested NEW category name in "suggested_category" (the app may then create it). Otherwise set "category_is_new": false.
+- Do NOT include a "category_id" field in your output — the app resolves the name to a UUID server-side.
+
 Rules:
 - Extract from_account_masked: look in "Source of Fund", "Card number", "Sumber Dana", "Account" fields. Copy the raw masked string exactly as it appears (e.g. "TAHAPAN - 0831****88", "437896******5130", "Kartu Kredit - ****1234").
 - Leave from_account_id and to_account_id as null — account matching is done by post-processing code.
-- If merchant_name matches a known merchant above, use that mapping's category_id exactly.
+- If merchant_name matches a known merchant above, use that mapping's category exactly.
 - QRIS/QR payment → is_qris=true, suggested_tx_type=qris_debit
 - Transfer to own account → is_transfer=true, suggested_tx_type=transfer
 - CC payment → is_cc_payment=true, suggested_tx_type=pay_cc
@@ -308,21 +322,36 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
   const { data: accounts } = await supabase.from("accounts").select("id,name,type,last4,account_no,bank_name").eq("user_id", userId).eq("is_active", true);
   const userAccounts = accounts || [];
 
-  // Load merchant mappings for AI context
-  const { data: merchantMappings } = await supabase
-    .from("merchant_mappings")
-    .select("merchant_name,canonical_name,category_id,account_id")
-    .eq("user_id", userId);
+  // Load merchant mappings + categories + income sources for AI context
+  const [
+    { data: merchantMappings },
+    { data: expenseCats },
+    { data: incomeSrcs },
+  ] = await Promise.all([
+    supabase.from("merchant_mappings")
+      .select("merchant_name,canonical_name,category_id,category_name,tx_type,account_id")
+      .eq("user_id", userId),
+    supabase.from("expense_categories")
+      .select("name").or(`user_id.is.null,user_id.eq.${userId}`),
+    supabase.from("income_sources")
+      .select("name").or(`user_id.is.null,user_id.eq.${userId}`),
+  ]);
   const mappingsMap = new Map<string, any>();
   (merchantMappings || []).forEach((m: any) => {
-    if (m.merchant_name) mappingsMap.set(m.merchant_name.toLowerCase(), m);
+    if (m.merchant_name) mappingsMap.set(`${m.tx_type || "expense"}|${m.merchant_name.toLowerCase()}`, m);
   });
   const merchantContext = mappingsMap.size > 0
-    ? `Known merchants (use these to auto-assign category_id):\n` +
+    ? `Known merchants (use the matching tx_type's category name exactly):\n` +
       [...mappingsMap.values()].map((m: any) =>
-        `- "${m.merchant_name}" → canonical: "${m.canonical_name}", category_id: ${m.category_id}`
+        `- "${m.merchant_name}" [${m.tx_type || "expense"}] → "${m.category_name || ""}"`
       ).join("\n")
     : "No merchant mappings yet.";
+
+  const expenseCatNames = (expenseCats || []).map((c: any) => c.name).filter(Boolean);
+  const incomeSrcNames  = (incomeSrcs  || []).map((s: any) => s.name).filter(Boolean);
+  const categoryContext =
+    `User's expense categories: ${expenseCatNames.join(" | ") || "(none)"}\n` +
+    `User's income sources: ${incomeSrcNames.join(" | ") || "(none)"}`;
 
   // Build Gmail search query with date range
   let afterDate: string;
@@ -493,7 +522,7 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
           max_tokens: 2048,
           messages: [{
             role: "user",
-            content: AI_EXTRACTION_PROMPT(plainBody, userAccounts, merchantContext),
+            content: AI_EXTRACTION_PROMPT(plainBody, userAccounts, merchantContext, categoryContext),
           }],
         }),
       });
@@ -613,21 +642,40 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
 // Re-run AI extraction for specific email_sync rows (by ID).
 // Used by the "Re-Process" button in the Email Pending UI.
 async function reprocessEmails(supabase: any, userId: string, ids: string[], anthropicKey: string) {
-  // Load accounts and merchant mappings
-  const { data: accounts } = await supabase.from("accounts")
-    .select("id,name,type,last4,account_no,bank_name").eq("user_id", userId).eq("is_active", true);
+  // Load accounts, merchant mappings, expense categories, income sources
+  const [
+    { data: accounts },
+    { data: merchantMappings },
+    { data: expenseCats },
+    { data: incomeSrcs },
+  ] = await Promise.all([
+    supabase.from("accounts")
+      .select("id,name,type,last4,account_no,bank_name").eq("user_id", userId).eq("is_active", true),
+    supabase.from("merchant_mappings")
+      .select("merchant_name,canonical_name,category_id,category_name,tx_type,account_id").eq("user_id", userId),
+    supabase.from("expense_categories")
+      .select("name").or(`user_id.is.null,user_id.eq.${userId}`),
+    supabase.from("income_sources")
+      .select("name").or(`user_id.is.null,user_id.eq.${userId}`),
+  ]);
   const userAccounts = accounts || [];
 
-  const { data: merchantMappings } = await supabase.from("merchant_mappings")
-    .select("merchant_name,canonical_name,category_id,account_id").eq("user_id", userId);
   const mappingsMap = new Map<string, any>();
   (merchantMappings || []).forEach((m: any) => {
-    if (m.merchant_name) mappingsMap.set(m.merchant_name.toLowerCase(), m);
+    if (m.merchant_name) mappingsMap.set(`${m.tx_type || "expense"}|${m.merchant_name.toLowerCase()}`, m);
   });
   const merchantContext = mappingsMap.size > 0
-    ? `Known merchants (use these to auto-assign category_id):\n` +
-      [...mappingsMap.values()].map((m: any) => `- "${m.merchant_name}" → category_id: ${m.category_id}`).join("\n")
+    ? `Known merchants (use the matching tx_type's category name exactly):\n` +
+      [...mappingsMap.values()].map((m: any) =>
+        `- "${m.merchant_name}" [${m.tx_type || "expense"}] → "${m.category_name || ""}"`
+      ).join("\n")
     : "No merchant mappings yet.";
+
+  const expenseCatNames = (expenseCats || []).map((c: any) => c.name).filter(Boolean);
+  const incomeSrcNames  = (incomeSrcs  || []).map((s: any) => s.name).filter(Boolean);
+  const categoryContext =
+    `User's expense categories: ${expenseCatNames.join(" | ") || "(none)"}\n` +
+    `User's income sources: ${incomeSrcNames.join(" | ") || "(none)"}`;
 
   // Fetch the rows to reprocess
   const { data: rows } = await supabase.from("email_sync")
@@ -650,7 +698,7 @@ async function reprocessEmails(supabase: any, userId: string, ids: string[], ant
           max_tokens: 2048,
           messages: [{
             role: "user",
-            content: AI_EXTRACTION_PROMPT(plainBody, userAccounts, merchantContext),
+            content: AI_EXTRACTION_PROMPT(plainBody, userAccounts, merchantContext, categoryContext),
           }],
         }),
       });
