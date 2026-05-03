@@ -551,7 +551,7 @@ function TxHorizontalCard({
       </div>
 
       {/* ── ROW 2: type [cat/entity] [fx] [B][C][CC] account — single line ── */}
-      <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "2px 10px 8px 32px", flexWrap: "nowrap", overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 5, padding: "2px 10px 8px 32px", flexWrap: "nowrap" }}>
 
         {/* Type dropdown */}
         <select
