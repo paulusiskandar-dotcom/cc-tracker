@@ -764,7 +764,7 @@ export default function Receivables({
                           {outstanding < 0 ? "lebih bayar" : "outstanding"}
                         </div>
                       </div>
-                      <div style={{ display: "flex", gap: 6 }}>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                         {hasSettled && (
                           <button
                             onClick={() => setShowSettled(prev => ({ ...prev, [r.entity]: !prev[r.entity] }))}
@@ -773,6 +773,12 @@ export default function Receivables({
                             {entityShowSettled ? "Hide settled" : "Show settled"}
                           </button>
                         )}
+                        <button
+                          onClick={() => navigate(`/reimburse/${r.entity}/statement`)}
+                          style={{ height: 30, padding: "0 12px", border: "1px solid #e5e7eb", borderRadius: 8, cursor: "pointer", background: "#fff", color: "#374151", fontSize: 11, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
+                        >
+                          📄 Statement
+                        </button>
                         <button
                           onClick={() => { setHistoryEntity(r.entity); setHistoryModal(true); }}
                           style={{ height: 30, padding: "0 12px", border: `1px solid ${entCol}`, borderRadius: 8, cursor: "pointer", background: "transparent", color: entCol, fontSize: 12, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}

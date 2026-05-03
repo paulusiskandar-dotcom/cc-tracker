@@ -13,12 +13,12 @@ import * as XLSX from "xlsx";
 
 const FF = "Figtree, sans-serif";
 
-const fmtMonthYear = (d) => {
-  try { return new Date(d + "T00:00:00").toLocaleDateString("id-ID", { month: "long", year: "numeric" }); }
-  catch { return d; }
-};
 const fmtDateShort = (d) => {
   try { return new Date(d + "T00:00:00").toLocaleDateString("id-ID", { day: "2-digit", month: "short", year: "numeric" }); }
+  catch { return d; }
+};
+const fmtDateLabel = (d) => {
+  try { return new Date(d + "T00:00:00").toLocaleDateString("id-ID", { weekday: "long", day: "2-digit", month: "long", year: "numeric" }); }
   catch { return d; }
 };
 const ym = (d) => (d || "").slice(0, 7);
@@ -34,47 +34,6 @@ function MetricCard({ label, value, extra, color, bg }) {
         {value}
       </div>
       {extra && <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, marginTop: 3 }}>{extra}</div>}
-    </div>
-  );
-}
-
-// ─── TIMELINE EVENT ROW ───────────────────────────────────────
-function EventRow({ icon, iconBg, title, badge, badgeColor, badgeBg, subtitle, valueStr, valueColor, onEdit, onDelete }) {
-  return (
-    <div style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "10px 0", borderBottom: "1px solid #f3f4f6" }}>
-      <div style={{ width: 34, height: 34, borderRadius: "50%", flexShrink: 0, background: iconBg || "#f3f4f6", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>
-        {icon}
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: FF }}>{title}</span>
-          {badge && (
-            <span style={{ fontSize: 9, fontWeight: 700, padding: "1px 6px", borderRadius: 4, background: badgeBg || "#f3f4f6", color: badgeColor || "#6b7280", textTransform: "uppercase", fontFamily: FF }}>
-              {badge}
-            </span>
-          )}
-        </div>
-        {subtitle && <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, marginTop: 2 }}>{subtitle}</div>}
-        {(onEdit || onDelete) && (
-          <div style={{ display: "flex", gap: 6, marginTop: 5 }}>
-            {onEdit && (
-              <button onClick={onEdit} style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, border: "1px solid #e5e7eb", background: "#f9fafb", color: "#374151", cursor: "pointer", fontFamily: FF, fontWeight: 600 }}>
-                Edit
-              </button>
-            )}
-            {onDelete && (
-              <button onClick={onDelete} style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, border: "1px solid #fee2e2", background: "#fff5f5", color: "#dc2626", cursor: "pointer", fontFamily: FF, fontWeight: 600 }}>
-                Delete
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-      {valueStr && (
-        <div style={{ fontSize: 13, fontWeight: 700, color: valueColor || "#111827", fontFamily: FF, flexShrink: 0 }}>
-          {valueStr}
-        </div>
-      )}
     </div>
   );
 }
@@ -114,9 +73,7 @@ export default function AssetTimeline({
   const [delConfirm,  setDelConfirm]  = useState(false);
   const [delSaving,   setDelSaving]   = useState(false);
 
-  const bankAccounts = useMemo(() => accounts.filter(a => a.type === "bank" || a.subtype === "cash"), [accounts]);
-  const ccAccounts   = useMemo(() => accounts.filter(a => a.type === "credit_card"), [accounts]);
-  const assetAccs    = useMemo(() => accounts.filter(a => a.type === "asset"), [accounts]);
+  const assetAccs = useMemo(() => accounts.filter(a => a.type === "asset"), [accounts]);
   const icon = ASSET_ICON[asset.subtype] || "📦";
 
   useEffect(() => {
@@ -155,36 +112,43 @@ export default function AssetTimeline({
     if (asset.purchase_date && Number(asset.purchase_price || 0) > 0)
       points.push({ date: asset.purchase_date, value: Number(asset.purchase_price) });
     valueHistory.forEach(h => points.push({ date: h.date, value: Number(h.new_value || 0) }));
-    const lastDate = todayStr();
     if (points.length === 0 || points[points.length - 1].value !== currentValue)
-      points.push({ date: lastDate, value: currentValue });
+      points.push({ date: todayStr(), value: currentValue });
     return points.map(p => ({ date: p.date, label: fmtDateShort(p.date), value: p.value }));
   }, [asset, valueHistory, currentValue]);
 
-  // ── Timeline rows (newest first, grouped by month) ───────────
+  // ── All events sorted chronologically (oldest first) ─────────
   const allEvents = useMemo(() => {
     const events = [];
     valueHistory.forEach((h, i) => {
       const oldVal = Number(h.old_value || 0);
       const newVal = Number(h.new_value || 0);
-      events.push({ _type: "value_update", _date: h.date, _sort: `${h.date}_${i}`, data: h, oldVal, newVal });
+      events.push({ _type: "value_update", _date: h.date, _sort: `${h.date}_v${i}`, data: h, oldVal, newVal });
     });
     assetLedger.forEach(e => {
-      events.push({ _type: "ledger", _date: e.tx_date, _sort: `${e.tx_date}_${e.id}`, data: e });
+      events.push({ _type: "ledger", _date: e.tx_date, _sort: `${e.tx_date}_l${e.id}`, data: e });
     });
-    events.sort((a, b) => b._sort.localeCompare(a._sort));
-    return events;
+    return events.sort((a, b) => a._sort.localeCompare(b._sort));
   }, [valueHistory, assetLedger]);
 
+  // ── Attach running value to each event ────────────────────────
+  const eventsWithValue = useMemo(() => {
+    let runVal = Number(asset.purchase_price || 0);
+    return allEvents.map(ev => {
+      if (ev._type === "value_update") runVal = ev.newVal;
+      return { ...ev, _runValue: runVal };
+    });
+  }, [allEvents, asset]);
+
+  // ── Group by date ─────────────────────────────────────────────
   const grouped = useMemo(() => {
     const map = {};
-    allEvents.forEach(ev => {
-      const m = ym(ev._date);
-      if (!map[m]) map[m] = [];
-      map[m].push(ev);
+    eventsWithValue.forEach(ev => {
+      if (!map[ev._date]) map[ev._date] = [];
+      map[ev._date].push(ev);
     });
-    return Object.entries(map).sort(([a], [b]) => b.localeCompare(a));
-  }, [allEvents]);
+    return Object.entries(map).sort(([a], [b]) => a.localeCompare(b));
+  }, [eventsWithValue]);
 
   // ── Update Value ─────────────────────────────────────────────
   const handleUpdateValue = async () => {
@@ -220,8 +184,7 @@ export default function AssetTimeline({
       const ids = [delEntry.from_id, delEntry.to_id].filter(Boolean);
       await Promise.all(ids.map(id => recalculateBalance(id, user.id)));
       showToast("Transaction deleted");
-      setDelConfirm(false);
-      setDelEntry(null);
+      setDelConfirm(false); setDelEntry(null);
       onRefresh?.();
     } catch (e) { showToast(e.message, "error"); }
     setDelSaving(false);
@@ -235,8 +198,7 @@ export default function AssetTimeline({
       await supabase.from("asset_value_history").delete().eq("id", delVH.id);
       setValueHistory(p => p.filter(h => h.id !== delVH.id));
       showToast("Value record deleted");
-      setDelConfirm(false);
-      setDelVH(null);
+      setDelConfirm(false); setDelVH(null);
     } catch (e) { showToast(e.message, "error"); }
     setDelSaving(false);
   };
@@ -245,42 +207,31 @@ export default function AssetTimeline({
   const exportPDF = () => window.print();
 
   const exportExcel = () => {
-    const wb  = XLSX.utils.book_new();
-    const nm  = (asset.name || "Asset").replace(/[^a-zA-Z0-9]/g, "_");
-
-    const summaryRows = [
-      ["Asset Timeline — Paulus Finance"],
-      ["Asset",        asset.name],
-      ["Type",         asset.subtype || "Asset"],
-      [],
-      ["Current Value", currentValue],
-      ["Cost Basis",    costBasis],
-      ["Unrealized P&L", unrealizedPL],
-      ["Return %",      returnPct.toFixed(2) + "%"],
-    ];
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), "Summary");
-
-    const txHdr = ["Date", "Type", "Description", "Amount (IDR)", "From / To"];
-    const txRows = assetLedger.map(e => [
-      e.tx_date,
-      e.tx_type,
-      e.description || "",
-      Number(e.amount_idr || 0),
-      accounts.find(a => a.id === (e.to_id === asset.id ? e.from_id : e.to_id))?.name || "",
-    ]);
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([txHdr, ...txRows]), "Transactions");
-
-    const vhHdr = ["Date", "Old Value", "New Value", "Change", "Notes"];
-    const vhRows = valueHistory.map(h => [
-      h.date,
-      Number(h.old_value || 0),
-      Number(h.new_value || 0),
-      Number(h.new_value || 0) - Number(h.old_value || 0),
-      h.notes || "",
-    ]);
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([vhHdr, ...vhRows]), "Value History");
-
-    XLSX.writeFile(wb, `${nm}_Timeline_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    const wb = XLSX.utils.book_new();
+    const nm = (asset.name || "Asset").replace(/[^a-zA-Z0-9]/g, "_");
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+      ["Asset Statement — Paulus Finance"],
+      ["Asset", asset.name], ["Type", asset.subtype || "Asset"], [],
+      ["Current Value", currentValue], ["Cost Basis", costBasis],
+      ["Unrealized P&L", unrealizedPL], ["Return %", returnPct.toFixed(2) + "%"],
+    ]), "Summary");
+    const hdr = ["Tanggal", "Keterangan", "Jenis", "Debit", "Kredit", "Nilai"];
+    const rows = eventsWithValue.map(ev => {
+      if (ev._type === "value_update") {
+        const diff = ev.newVal - ev.oldVal;
+        return [ev._date, ev.data.notes || "Update Nilai", "Value Update",
+          diff < 0 ? Math.abs(diff) : "", diff >= 0 ? diff : "", ev.newVal];
+      }
+      const e = ev.data;
+      const isBuy  = e.tx_type === "buy_asset"  && e.to_id   === asset.id;
+      const isSell = e.tx_type === "sell_asset" && e.from_id === asset.id;
+      const amt = Number(e.amount_idr || 0);
+      return [e.tx_date, e.description || e.tx_type,
+        isBuy ? "Purchase" : isSell ? "Sale" : e.tx_type,
+        isBuy ? amt : "", isSell ? amt : "", ev._runValue];
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([hdr, ...rows]), "Transactions");
+    XLSX.writeFile(wb, `${nm}_Statement_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   const BTN = (extra = {}) => ({
@@ -289,10 +240,21 @@ export default function AssetTimeline({
     cursor: "pointer", fontFamily: FF, ...extra,
   });
 
-  // Derived account lists for TransactionModal
-  const bankAccs  = accounts.filter(a => a.type === "bank" && a.subtype !== "cash" && a.is_active !== false);
-  const cashAccs  = accounts.filter(a => a.is_active !== false && a.subtype === "cash");
-  const ccAccs    = accounts.filter(a => a.is_active !== false && a.type === "credit_card");
+  const ccAccs   = accounts.filter(a => a.is_active !== false && a.type === "credit_card");
+  const bankAccs = accounts.filter(a => a.type === "bank" && a.subtype !== "cash" && a.is_active !== false);
+  const cashAccs = accounts.filter(a => a.is_active !== false && a.subtype === "cash");
+
+  // ── Grid constants ────────────────────────────────────────────
+  const COLS    = "90px 1fr 90px 130px 130px 130px";
+  const RP      = "0 14px";
+  const HDR     = [
+    { label: "Tanggal",    align: "left"  },
+    { label: "Keterangan", align: "left"  },
+    { label: "Jenis",      align: "left"  },
+    { label: "Debit (▼)", align: "right" },
+    { label: "Kredit (▲)", align: "right" },
+    { label: "Nilai",      align: "right" },
+  ];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, fontFamily: FF }}>
@@ -313,7 +275,8 @@ export default function AssetTimeline({
           <button style={BTN()} onClick={() => { setUpdateForm({ value: String(asset.current_value || ""), date: todayStr(), notes: "" }); setUpdateModal(true); }}>
             📈 Update Value
           </button>
-          <button style={BTN({ background: "#111827", color: "#fff", border: "none" })} onClick={() => { setTxMode("add"); setTxInitial(null); setTxOpen(true); }}>
+          <button style={BTN({ background: "#111827", color: "#fff", border: "none" })}
+            onClick={() => { setTxMode("add"); setTxInitial(null); setTxOpen(true); }}>
             + Transaction
           </button>
         </div>
@@ -321,10 +284,10 @@ export default function AssetTimeline({
 
       {/* ── Metrics ── */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <MetricCard label="Current Value"   value={fmtIDR(currentValue)} color="#3b5bdb" bg="#eff6ff" />
-        <MetricCard label="Cost Basis"      value={fmtIDR(costBasis)}    color="#111827" bg="#f9fafb" />
-        <MetricCard label="Unrealized P&L"  value={`${unrealizedPL >= 0 ? "+" : ""}${fmtIDR(Math.abs(unrealizedPL))}`} color={plColor} bg={plBg} />
-        <MetricCard label="Return %"        value={`${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(1)}%`} color={plColor} bg={plBg} />
+        <MetricCard label="Current Value"  value={fmtIDR(currentValue)} color="#3b5bdb" bg="#eff6ff" />
+        <MetricCard label="Cost Basis"     value={fmtIDR(costBasis)}    color="#111827" bg="#f9fafb" />
+        <MetricCard label="Unrealized P&L" value={`${unrealizedPL >= 0 ? "+" : ""}${fmtIDR(Math.abs(unrealizedPL))}`} color={plColor} bg={plBg} />
+        <MetricCard label="Return %"       value={`${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(1)}%`} color={plColor} bg={plBg} />
       </div>
 
       {/* ── Sparkline chart ── */}
@@ -333,7 +296,7 @@ export default function AssetTimeline({
           <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 10 }}>
             Value History
           </div>
-          <ResponsiveContainer width="100%" height={140}>
+          <ResponsiveContainer width="100%" height={120}>
             <AreaChart data={sparkData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
               <defs>
                 <linearGradient id="assetGrad" x1="0" y1="0" x2="0" y2="1">
@@ -351,70 +314,165 @@ export default function AssetTimeline({
         </div>
       )}
 
-      {/* ── Timeline ── */}
-      <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", padding: "16px 20px" }}>
-        <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 12 }}>
-          Timeline
+      {/* ── Statement grid ── */}
+      <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden" }}>
+
+        {/* Column headers */}
+        <div style={{ display: "grid", gridTemplateColumns: COLS, background: "#f9fafb", borderBottom: "0.5px solid #e5e7eb", padding: RP }}>
+          {HDR.map(({ label, align }) => (
+            <div key={label} style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF, padding: "9px 6px", textAlign: align }}>
+              {label}
+            </div>
+          ))}
         </div>
 
         {histLoading ? (
-          <div style={{ textAlign: "center", padding: 24, color: "#9ca3af", fontSize: 13 }}>Loading…</div>
+          <div style={{ textAlign: "center", padding: 32, color: "#9ca3af", fontSize: 13 }}>Loading…</div>
         ) : allEvents.length === 0 ? (
-          <EmptyState icon="📋" message="No history for this asset yet" />
+          <div style={{ padding: "40px 20px", textAlign: "center" }}>
+            <EmptyState icon="📋" message="No history for this asset yet" />
+          </div>
         ) : (
-          grouped.map(([month, events]) => (
-            <div key={month}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", padding: "8px 0 4px", marginTop: 8 }}>
-                {fmtMonthYear(month + "-01")}
-              </div>
+          <>
+            {grouped.map(([date, events]) => (
+              <div key={date}>
+                {/* Date header */}
+                <div style={{ background: "#f3f4f6", borderBottom: "0.5px solid #e5e7eb", padding: "5px 20px", fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF }}>
+                  {fmtDateLabel(date)}
+                </div>
 
-              {events.map((ev, idx) => {
-                if (ev._type === "value_update") {
-                  const h    = ev.data;
-                  const diff = ev.newVal - ev.oldVal;
-                  const up   = diff >= 0;
+                {events.map((ev, idx) => {
+                  if (ev._type === "value_update") {
+                    const h    = ev.data;
+                    const diff = ev.newVal - ev.oldVal;
+                    const up   = diff >= 0;
+                    return (
+                      <div key={`vh-${h.id || idx}`} style={{ display: "grid", gridTemplateColumns: COLS, borderBottom: "0.5px solid #f3f4f6", padding: RP, alignItems: "center" }}>
+                        {/* Tanggal */}
+                        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, padding: "8px 6px", whiteSpace: "nowrap" }}>
+                          {fmtDateShort(date)}
+                        </div>
+                        {/* Keterangan */}
+                        <div style={{ padding: "8px 6px", minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 500, color: "#111827", fontFamily: FF }}>
+                            {h.notes && h.notes !== "Manual update" ? h.notes : "Update Nilai"}
+                          </div>
+                          <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, marginTop: 2 }}>
+                            {fmtIDR(ev.oldVal)} → {fmtIDR(ev.newVal)}
+                          </div>
+                          {h.id && (
+                            <button onClick={() => { setDelVH(h); setDelEntry(null); setDelConfirm(true); }}
+                              style={{ marginTop: 3, fontSize: 9, padding: "1px 7px", borderRadius: 5, border: "1px solid #fee2e2", background: "#fff5f5", color: "#dc2626", cursor: "pointer", fontFamily: FF, fontWeight: 600 }}>
+                              Delete
+                            </button>
+                          )}
+                        </div>
+                        {/* Jenis */}
+                        <div style={{ padding: "8px 6px" }}>
+                          <span style={{ fontSize: 9, fontWeight: 700, fontFamily: FF, background: "#f0f9ff", color: "#0369a1", borderRadius: 4, padding: "2px 6px" }}>
+                            Update
+                          </span>
+                        </div>
+                        {/* Debit */}
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#dc2626", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
+                          {!up ? fmtIDR(Math.abs(diff)) : <span style={{ color: "#d1d5db" }}>—</span>}
+                        </div>
+                        {/* Kredit */}
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#059669", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
+                          {up ? fmtIDR(diff) : <span style={{ color: "#d1d5db" }}>—</span>}
+                        </div>
+                        {/* Nilai */}
+                        <div style={{ fontSize: 12, fontWeight: 700, color: "#3b5bdb", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
+                          {fmtIDR(ev.newVal)}
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  // Ledger row
+                  const e     = ev.data;
+                  const isBuy  = e.tx_type === "buy_asset"  && e.to_id   === asset.id;
+                  const isSell = e.tx_type === "sell_asset" && e.from_id === asset.id;
+                  const other  = accounts.find(a => a.id === (isBuy ? e.from_id : e.to_id));
+                  const amt    = Number(e.amount_idr || 0);
+                  const badge  = isBuy ? { label: "Purchase", bg: "#e0f2fe", color: "#0369a1" }
+                               : isSell ? { label: "Sale", bg: "#fef9c3", color: "#92400e" }
+                               : { label: e.tx_type, bg: "#f3f4f6", color: "#6b7280" };
                   return (
-                    <EventRow
-                      key={`vh-${h.id || idx}`}
-                      icon="📈"
-                      iconBg={up ? "#f0fdf4" : "#fff1f2"}
-                      title="Value Updated"
-                      badge="Update"
-                      badgeBg="#f0f9ff" badgeColor="#0369a1"
-                      subtitle={`${fmtDateShort(h.date)} · ${fmtIDR(ev.oldVal)} → ${fmtIDR(ev.newVal)}${h.notes && h.notes !== "Manual update" ? ` · ${h.notes}` : ""}`}
-                      valueStr={`${up ? "▲ +" : "▼ −"}${fmtIDR(Math.abs(diff))}`}
-                      valueColor={up ? "#059669" : "#dc2626"}
-                      onDelete={h.id ? () => { setDelVH(h); setDelEntry(null); setDelConfirm(true); } : undefined}
-                    />
+                    <div key={`tx-${e.id}`} style={{ display: "grid", gridTemplateColumns: COLS, borderBottom: "0.5px solid #f3f4f6", padding: RP, alignItems: "center" }}>
+                      {/* Tanggal */}
+                      <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, padding: "8px 6px", whiteSpace: "nowrap" }}>
+                        {fmtDateShort(e.tx_date)}
+                      </div>
+                      {/* Keterangan */}
+                      <div style={{ padding: "8px 6px", minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 500, color: "#111827", fontFamily: FF, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {e.description || (isBuy ? "Asset Purchase" : isSell ? "Asset Sale" : e.tx_type)}
+                        </div>
+                        {other && (
+                          <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, marginTop: 2 }}>
+                            {isBuy ? `← from ${other.name}` : `→ to ${other.name}`}
+                          </div>
+                        )}
+                        <div style={{ display: "flex", gap: 5, marginTop: 3 }}>
+                          <button onClick={() => { setTxMode("edit"); setTxInitial(e); setTxOpen(true); }}
+                            style={{ fontSize: 9, padding: "1px 7px", borderRadius: 5, border: "1px solid #e5e7eb", background: "#f9fafb", color: "#374151", cursor: "pointer", fontFamily: FF, fontWeight: 600 }}>
+                            Edit
+                          </button>
+                          <button onClick={() => { setDelEntry(e); setDelVH(null); setDelConfirm(true); }}
+                            style={{ fontSize: 9, padding: "1px 7px", borderRadius: 5, border: "1px solid #fee2e2", background: "#fff5f5", color: "#dc2626", cursor: "pointer", fontFamily: FF, fontWeight: 600 }}>
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                      {/* Jenis */}
+                      <div style={{ padding: "8px 6px" }}>
+                        <span style={{ fontSize: 9, fontWeight: 700, fontFamily: FF, background: badge.bg, color: badge.color, borderRadius: 4, padding: "2px 6px", whiteSpace: "nowrap" }}>
+                          {badge.label}
+                        </span>
+                      </div>
+                      {/* Debit */}
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#dc2626", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
+                        {isBuy ? fmtIDR(amt) : <span style={{ color: "#d1d5db" }}>—</span>}
+                      </div>
+                      {/* Kredit */}
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#059669", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
+                        {isSell ? fmtIDR(amt) : <span style={{ color: "#d1d5db" }}>—</span>}
+                      </div>
+                      {/* Nilai */}
+                      <div style={{ fontSize: 12, fontWeight: 700, color: "#374151", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
+                        <span style={{ color: "#d1d5db" }}>—</span>
+                      </div>
+                    </div>
                   );
-                }
+                })}
+              </div>
+            ))}
 
-                const e     = ev.data;
-                const isBuy  = e.tx_type === "buy_asset"  && e.to_id   === asset.id;
-                const isSell = e.tx_type === "sell_asset" && e.from_id === asset.id;
-                const other  = accounts.find(a => a.id === (isBuy ? e.from_id : e.to_id));
-                const amt    = Number(e.amount_idr || 0);
-                return (
-                  <EventRow
-                    key={`tx-${e.id}`}
-                    icon={isBuy ? "💰" : isSell ? "💵" : "💸"}
-                    iconBg={isBuy ? "#e0f2fe" : isSell ? "#fef9c3" : "#fde8e8"}
-                    title={e.description || (isBuy ? "Asset Purchase" : isSell ? "Asset Sale" : e.tx_type)}
-                    badge={isBuy ? "Purchase" : isSell ? "Sale" : "Expense"}
-                    badgeBg={isBuy ? "#e0f2fe" : isSell ? "#fef9c3" : "#fde8e8"}
-                    badgeColor={isBuy ? "#0369a1" : isSell ? "#92400e" : "#b91c1c"}
-                    subtitle={`${fmtDateShort(e.tx_date)}${other ? ` · ${isBuy ? "from" : "to"} ${other.name}` : ""}`}
-                    valueStr={`${isSell ? "+" : "-"}${fmtIDR(amt)}`}
-                    valueColor={isSell ? "#059669" : "#A32D2D"}
-                    onEdit={() => { setTxMode("edit"); setTxInitial(e); setTxOpen(true); }}
-                    onDelete={() => { setDelEntry(e); setDelVH(null); setDelConfirm(true); }}
-                  />
-                );
-              })}
+            {/* Closing row */}
+            <div style={{ display: "grid", gridTemplateColumns: COLS, background: "#f9fafb", borderTop: "1.5px solid #e5e7eb", padding: RP }}>
+              <div style={{ padding: "9px 6px" }} />
+              <div style={{ fontSize: 11, fontWeight: 800, color: "#111827", fontFamily: FF, padding: "9px 6px" }}>Current Value</div>
+              <div /><div /><div />
+              <div style={{ fontSize: 13, fontWeight: 800, color: "#3b5bdb", fontFamily: FF, padding: "9px 6px", textAlign: "right" }}>
+                {fmtIDR(currentValue)}
+              </div>
             </div>
-          ))
+          </>
         )}
       </div>
+
+      {/* ── Footer ── */}
+      {allEvents.length > 0 && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "4px 0", flexWrap: "wrap", gap: 8 }}>
+          <span style={{ fontSize: 12, color: "#9ca3af", fontFamily: FF }}>
+            {allEvents.length} event{allEvents.length !== 1 ? "s" : ""}
+          </span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: plColor, fontFamily: FF }}>
+            P&L: {unrealizedPL >= 0 ? "+" : ""}{fmtIDR(Math.abs(unrealizedPL))} ({returnPct >= 0 ? "+" : ""}{returnPct.toFixed(1)}%)
+          </span>
+        </div>
+      )}
 
       {/* ── Update Value Modal ── */}
       <Modal isOpen={updateModal} onClose={() => setUpdateModal(false)} title="Update Asset Value"
@@ -430,7 +488,7 @@ export default function AssetTimeline({
         </div>
       </Modal>
 
-      {/* ── TxVerticalBig (add + edit) ── */}
+      {/* ── TxVerticalBig ── */}
       <TxVerticalBig
         open={txOpen}
         mode={txMode}
