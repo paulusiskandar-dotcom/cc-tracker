@@ -463,11 +463,11 @@ export default function TxVerticalBig({
 
         if (creatingBorrower) {
           if (!newBorrowerName.trim()) { showToast("Employee name is required", "error"); setSaving(false); return; }
-          if (!sn(newMonthlyInstall))  { showToast("Monthly installment is required", "error"); setSaving(false); return; }
-          if (!sn(newTotalMonths))     { showToast("Total months is required", "error"); setSaving(false); return; }
-          const monthly  = sn(newMonthlyInstall);
+          if (!(amt > 0))              { showToast("Total amount is required", "error"); setSaving(false); return; }
+          if (!sn(newTotalMonths))     { showToast("Tenor (months) is required", "error"); setSaving(false); return; }
           const months   = sn(newTotalMonths);
-          const totalAmt = monthly * months;
+          const monthly  = Math.round(amt / months);
+          const totalAmt = amt;
           const newLoan  = await employeeLoanApi.create(user.id, {
             employee_name:        newBorrowerName.trim(),
             total_amount:         totalAmt,
@@ -1084,9 +1084,9 @@ export default function TxVerticalBig({
       const loanList     = [...effectiveLoans]
         .filter(l => l.status !== "settled")
         .sort((a, b) => (a.employee_name || "").localeCompare(b.employee_name || ""));
-      const prevMonthly  = sn(newMonthlyInstall);
+      const newAmtTotal  = sn(form.amount);
       const prevMonths   = sn(newTotalMonths);
-      const prevTotal    = prevMonthly > 0 && prevMonths > 0 ? prevMonthly * prevMonths : null;
+      const autoMonthly  = newAmtTotal > 0 && prevMonths > 0 ? Math.round(newAmtTotal / prevMonths) : null;
       const pill = (active, onClick, label, color = "#3b5bdb", bg = "#eff3ff") => (
         <button type="button" onClick={onClick} style={{
           flex: 1, height: 34, borderRadius: 8, border: "1.5px solid",
@@ -1129,30 +1129,36 @@ export default function TxVerticalBig({
                 })}
               </select>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <input autoFocus type="text" placeholder="Employee name *"
-                  value={newBorrowerName} onChange={e => setNewBorrowerName(e.target.value)}
-                  style={{ ...SEL }} />
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input type="number" min="0" placeholder="Monthly installment (Rp) *"
-                    value={newMonthlyInstall} onChange={e => setNewMonthlyInstall(e.target.value)}
-                    style={{ ...SEL, flex: 1 }} />
-                  <input type="number" min="1" placeholder="Total months *"
-                    value={newTotalMonths} onChange={e => setNewTotalMonths(e.target.value)}
-                    style={{ ...SEL, width: 110, flexShrink: 0 }} />
-                </div>
-                {prevTotal !== null && (
-                  <div style={{ background: "#eff3ff", border: "1px solid #c7d2fe", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#3b5bdb", fontWeight: 600, fontFamily: FF }}>
-                    {fmtIDR(prevMonthly)}/mo × {prevMonths} months = {fmtIDR(prevTotal)} total
-                  </div>
-                )}
-              </div>
+              <input autoFocus type="text" placeholder="Employee name *"
+                value={newBorrowerName} onChange={e => setNewBorrowerName(e.target.value)}
+                style={{ ...SEL }} />
             )}
           </Field>
+          {/* New Borrower: Total Amount + Tenor + Monthly auto-calc */}
+          {creatingBorrower && (
+            <>
+              {/* 2. Total Amount */}
+              <AmountInput label="Total Amount *" value={form.amount} onChange={v => set("amount", v)} />
+              {/* 3. Tenor */}
+              <Field label="Tenor (months) *">
+                <input type="number" min="1" placeholder="e.g. 12"
+                  value={newTotalMonths} onChange={e => setNewTotalMonths(e.target.value)}
+                  style={{ ...SEL }} />
+              </Field>
+              {/* 4. Monthly auto-calc (read-only) */}
+              {autoMonthly !== null && (
+                <div style={{ background: "#eff3ff", border: "1px solid #c7d2fe", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#3b5bdb", fontWeight: 600, fontFamily: FF }}>
+                  Monthly installment: {fmtIDR(autoMonthly)}/mo × {prevMonths} months = {fmtIDR(newAmtTotal)} total
+                </div>
+              )}
+            </>
+          )}
           {/* 5. Date + Currency */}
           {dateCurrencyRow}
-          {/* 6. Amount */}
-          <AmountInput label="Amount *" value={form.amount} onChange={v => set("amount", v)} />
+          {/* 6. Amount — Existing Borrower only (additional disbursement) */}
+          {!creatingBorrower && (
+            <AmountInput label="Amount *" value={form.amount} onChange={v => set("amount", v)} />
+          )}
           {/* 7. Description */}
           <Input label="Description (optional)" value={form.description || ""} onChange={e => set("description", e.target.value)} placeholder="Optional" />
           {/* 8. Notes */}
