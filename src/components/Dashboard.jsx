@@ -215,7 +215,7 @@ export default function Dashboard({
   employeeLoans = [], loanPayments = [],
   setLoanPayments, setEmployeeLoans,
   reimburseSettlements = [], setReimburseSettlements,
-  budgets = [], fxRates = {}, incomeSrcs = [], accountCurrencies = [], CURRENCIES: allCurrencies = [],
+  budgets = [], fxRates = {}, incomeSrcs = [], CURRENCIES: allCurrencies = [],
 }) {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
   useEffect(() => {
@@ -1352,7 +1352,6 @@ export default function Dashboard({
           incomeSrcs={incomeSrcs}
           employeeLoans={employeeLoans}
           setEmployeeLoans={setEmployeeLoans}
-          accountCurrencies={accountCurrencies}
           onRefresh={onRefresh}
           onSave={() => { setShowAddTxModal(false); onRefresh?.(); }}
           onDelete={null}

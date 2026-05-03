@@ -78,7 +78,7 @@ export default function CCStatement({
   initialAccount, accounts, user, categories = [], onRefresh, onBack,
   bankAccounts: bankAccsProp = [], creditCards: creditCardsProp = [],
   assets = [], liabilities = [], receivables = [],
-  accountCurrencies = [], allCurrencies = [], fxRates = {},
+  allCurrencies = [], fxRates = {},
   incomeSrcs = [], merchantMaps = [],
   initialFromDate = null, initialToDate = null, initialSelectedMonth = null,
   initialReconcileTxs = null, initialReconcileFilename = "",
@@ -744,7 +744,6 @@ export default function CCStatement({
         liabilities={liabilities}
         receivables={receivables}
         incomeSrcs={incomeSrcs}
-        accountCurrencies={accountCurrencies}
         onRefresh={() => { load(); onRefresh?.(); }}
       />
     </div>

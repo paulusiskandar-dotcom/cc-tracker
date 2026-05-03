@@ -17,7 +17,7 @@
  *   Data props (pass from App/parent):
  *   user, accounts, setLedger, categories, fxRates, allCurrencies,
  *   bankAccounts, creditCards, assets, liabilities, receivables,
- *   incomeSrcs, employeeLoans, setEmployeeLoans, accountCurrencies, onRefresh
+ *   incomeSrcs, employeeLoans, setEmployeeLoans, onRefresh
  */
 
 import { useState, useEffect } from "react";
@@ -229,7 +229,7 @@ export default function TxVerticalBig({
   bankAccounts = [], creditCards = [], assets = [],
   liabilities = [], receivables = [], incomeSrcs = [],
   employeeLoans = [], setEmployeeLoans,
-  accountCurrencies = [], onRefresh,
+  onRefresh,
 }) {
   const [form,    setFormState] = useState(EMPTY);
   const [group,   setGroup]     = useState("cashflow");

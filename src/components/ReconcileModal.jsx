@@ -86,7 +86,7 @@ export default function ReconcileModal({
   ledger, setLedger, onRefresh, sessionId,
   dark,
   bankAccounts, creditCards, assets, liabilities, receivables,
-  incomeSrcs, fxRates, allCurrencies, accountCurrencies,
+  incomeSrcs, fxRates, allCurrencies,
   reconSessions = [], earliestTxDate,
 }) {
   // Period selection (managed internally)
@@ -1128,7 +1128,7 @@ export default function ReconcileModal({
           fxRates={fxRates} allCurrencies={allCurrencies}
           bankAccounts={bankAccounts} creditCards={creditCards}
           assets={assets} liabilities={liabilities} receivables={receivables}
-          incomeSrcs={incomeSrcs} accountCurrencies={accountCurrencies} onRefresh={onRefresh}
+          incomeSrcs={incomeSrcs} onRefresh={onRefresh}
         />
       )}
 

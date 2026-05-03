@@ -89,7 +89,7 @@ export const agingLabel = (dateStr) => {
 };
 
 // ─── NET WORTH CALCULATION ───────────────────────────────────
-export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], fxRates = {}, accountCurrencies = [], reimburseSettlements = [] } = {}) => {
+export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], fxRates = {}, reimburseSettlements = [] } = {}) => {
   let bank = 0, assets = 0, receivables = 0, ccDebt = 0, liabilities = 0;
 
   const toIDRValue = (amount, currency) => {
@@ -100,12 +100,7 @@ export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], 
   for (const a of accounts) {
     if (!a.is_active) continue;
     if (a.type === "bank") {
-      if (a.is_multicurrency) {
-        const rows = accountCurrencies.filter(r => r.account_id === a.id);
-        for (const r of rows) bank += toIDRValue(r.balance, r.currency);
-      } else {
-        bank += toIDRValue(a.current_balance, a.currency);
-      }
+      bank += toIDRValue(a.current_balance, a.currency);
     } else if (a.type === "credit_card") {
       ccDebt += Number(a.current_balance || 0);
     } else if (a.type === "asset") {

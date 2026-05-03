@@ -1649,7 +1649,6 @@ function EStatementTab({
   const [historyOpen,    setHistoryOpen]    = useState(false);
   const [dragging,       setDragging]       = useState(false);
   const [dbLoading,      setDbLoading]      = useState(true);
-  const [acctCurrencies, setAcctCurrencies] = useState([]);
   const enrichTransfers = (rows) => {
     const pairs = detectTransferPairs(rows, accounts, ledger || []);
     return rows.map(r => {
@@ -1676,7 +1675,7 @@ function EStatementTab({
     }));
   };
 
-  // ── Load persisted queue + history + account_currencies on mount ─
+  // ── Load persisted queue + history on mount ──────────────────────
   useEffect(() => {
     (async () => {
       setDbLoading(true);
@@ -1749,18 +1748,10 @@ function EStatementTab({
 
   const setItemCurrency = (itemId, currency) => {
     const cur = (currency || "IDR").toUpperCase();
-    const matchedAccountId = cur !== "IDR"
-      ? acctCurrencies.find(ac => ac.currency === cur)?.account_id || null
-      : null;
     setQueue(prev => prev.map(i => {
       if (i.id !== itemId) return i;
-      const rows = i.rows ? i.rows.map(r => {
-        const updated = { ...r, currency: cur };
-        if (matchedAccountId) return applyDefaultAccount(updated, matchedAccountId);
-        return updated;
-      }) : null;
-      const newAccountId = matchedAccountId || i.account_id;
-      return { ...i, currency: cur, account_id: newAccountId, rows };
+      const rows = i.rows ? i.rows.map(r => ({ ...r, currency: cur })) : null;
+      return { ...i, currency: cur, rows };
     }));
   };
 
@@ -1832,8 +1823,7 @@ function EStatementTab({
   // ── Categorize AI output → internal shape ─────────────────
   // statementAccountId: the user-selected account for this statement — overrides
   // any AI-guessed account. Debit txs use it as from_id; credit txs as to_id.
-  const buildRows = (transactions, statementAccountId = "", acctCurrenciesOverride = null) => {
-    const effectiveAcctCurrencies = acctCurrenciesOverride ?? acctCurrencies;
+  const buildRows = (transactions, statementAccountId = "") => {
     return transactions.map((t, idx) => {
       // direction
       const isDebit = t.direction ? t.direction === "out"
@@ -1893,33 +1883,20 @@ function EStatementTab({
         }
       }
 
-      // Account assignment — use the user-selected statement account when available,
-      // otherwise try currency-matching via account_currencies, then fall back to
-      // AI card_last4 matching or first bank/CC account.
+      // Account assignment — prefer user-selected statement account; fall back to
+      // card_last4 match, then first CC/bank account.
       const last4 = t.card_last4 || null;
       const ccAccounts   = accounts.filter(a => a.type === "credit_card");
       const bankAccounts = accounts.filter(a => a.type === "bank");
-
-      // Currency-matched account: find account_id in account_currencies for this currency
       const txCurrencyUpper = (t.currency || "IDR").toUpperCase();
-      const currencyMatchedId = txCurrencyUpper !== "IDR"
-        ? effectiveAcctCurrencies.find(ac => ac.currency === txCurrencyUpper)?.account_id || null
-        : null;
 
       let fromId, toId;
-      if (currencyMatchedId) {
-        // Non-IDR: currency match always wins — use the account that holds this currency
-        fromId = isDebit ? currencyMatchedId : "";
-        toId   = !isDebit ? currencyMatchedId : "";
-      } else if (statementAccountId) {
-        // IDR or no currency match: use the user-selected statement account
+      if (statementAccountId) {
         fromId = isDebit ? statementAccountId : "";
         toId   = !isDebit ? statementAccountId : "";
       } else {
         // Fallback: try card_last4 matching then first CC/bank
-        const matchedAcc = last4
-          ? accounts.find(a => a.card_last4 === last4)
-          : null;
+        const matchedAcc = last4 ? accounts.find(a => a.card_last4 === last4) : null;
         const defaultCC   = matchedAcc || ccAccounts[0] || null;
         const defaultBank = bankAccounts[0] || null;
         fromId = isDebit ? (defaultCC?.id || defaultBank?.id || "") : "";

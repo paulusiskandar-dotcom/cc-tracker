@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../lib/supabase";
-import { fmtIDR, fmtCur } from "../utils";
+import { fmtIDR } from "../utils";
 import { TX_TYPE_MAP } from "../constants";
 import { showToast } from "./shared/Card";
 import { undoManager } from "../lib/undoManager";
@@ -113,7 +113,7 @@ function SummaryCard({ label, value, displayText, color, bg }) {
 export default function BankStatement({
   initialAccount, accounts, user, categories = [], onRefresh, onBack,
   bankAccounts: bankAccsProp = [], creditCards = [], assets = [], liabilities = [],
-  receivables = [], accountCurrencies = [], allCurrencies = [], fxRates = {},
+  receivables = [], allCurrencies = [], fxRates = {},
   incomeSrcs = [], merchantMaps = [],
   initialFromDate = null, initialToDate = null,
   initialReconcileTxs = null, initialReconcileFilename = "",
@@ -129,11 +129,6 @@ export default function BankStatement({
   const [editEntry,      setEditEntry]      = useState(null);
   const [savingAll,      setSavingAll]      = useState(false);
   const [showPdfPanel,   setShowPdfPanel]   = useState(false);
-  // Multi-currency mode is dormant since account_currencies was retired —
-  // each account is now single-currency. Preserve the references as inert
-  // defaults so existing IDR-path code keeps working.
-  const [activeCurrency, setActiveCurrency] = useState("IDR");
-  const acctCurrencies = [];
   const printRef = useRef(null);
 
   // Reconcile mode
@@ -269,57 +264,44 @@ export default function BankStatement({
     if (accountId) load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Compute currency-filtered data from raw transactions ───
+  // ── Compute data from raw transactions ────────────────────
   const data = useMemo(() => {
     if (!rawData || !selectedAccount) return null;
     const { allTxs, allPreTxs } = rawData;
-    const isMulti  = !!selectedAccount.is_multicurrency;
-    const curIsIDR = !isMulti || activeCurrency === "IDR";
+    const getAmt = (t) => Number(t.amount_idr || 0);
+    const initialBal = Number(selectedAccount.initial_balance || 0);
 
-    // Pick the correct amount field: IDR uses amount_idr, foreign currency uses amount
-    const getAmt = (t) => curIsIDR ? Number(t.amount_idr || 0) : Number(t.amount || 0);
-
-    // Filter transactions for the selected currency tab
-    const txs    = isMulti ? allTxs.filter(t => (t.currency || "IDR") === activeCurrency)    : allTxs;
-    const preTxs = isMulti ? allPreTxs.filter(t => (t.currency || "IDR") === activeCurrency) : allPreTxs;
-
-    // Opening balance seed: IDR uses accounts.initial_balance; foreign uses account_currencies.initial_balance
-    const initialBal = curIsIDR
-      ? Number(selectedAccount.initial_balance || 0)
-      : Number(acctCurrencies.find(c => c.currency === activeCurrency)?.initial_balance || 0);
-
-    const beforeCredit = preTxs
+    const beforeCredit = allPreTxs
       .filter(t => t.to_id === accountId && t.to_type === "account")
       .reduce((s, t) => s + getAmt(t), 0);
-    const beforeDebit = preTxs
+    const beforeDebit = allPreTxs
       .filter(t => t.from_id === accountId && t.from_type === "account")
       .reduce((s, t) => s + getAmt(t), 0);
     const openingBal = initialBal + beforeCredit - beforeDebit;
 
-    const totalCredit = txs
+    const totalCredit = allTxs
       .filter(t => t.to_id === accountId && t.to_type === "account")
       .reduce((s, t) => s + getAmt(t), 0);
-    const totalDebit = txs
+    const totalDebit = allTxs
       .filter(t => t.from_id === accountId && t.from_type === "account")
       .reduce((s, t) => s + getAmt(t), 0);
     const closingBal = openingBal + totalCredit - totalDebit;
 
-    return { txs, openingBal, totalCredit, totalDebit, closingBal };
-  }, [rawData, activeCurrency, acctCurrencies, accountId, selectedAccount]);
+    return { txs: allTxs, openingBal, totalCredit, totalDebit, closingBal };
+  }, [rawData, accountId, selectedAccount]);
 
   // ── Compute rows with running balance ─────────────────────
   const rowsWithBalance = useMemo(() => {
-    if (!data || !selectedAccount) return [];
-    const curIsIDR = !selectedAccount.is_multicurrency || activeCurrency === "IDR";
+    if (!data) return [];
     let bal = data.openingBal;
     return data.txs.map(tx => {
       const dir = txDirection(tx, accountId);
-      const amt = curIsIDR ? Number(tx.amount_idr || 0) : Number(tx.amount || 0);
+      const amt = Number(tx.amount_idr || 0);
       if (dir === "debit")  bal -= amt;
       if (dir === "credit") bal += amt;
       return { ...tx, _dir: dir, _runBal: bal, _displayAmt: amt };
     });
-  }, [data, accountId, selectedAccount, activeCurrency]);
+  }, [data, accountId]);
 
   // Group by date
   const grouped = useMemo(() => {
@@ -383,9 +365,8 @@ export default function BankStatement({
     } catch { return `${fromDate} – ${toDate}`; }
   })();
 
-  // ── Currency-aware amount formatters ─────────────────────
-  const curIsIDR = !selectedAccount?.is_multicurrency || activeCurrency === "IDR";
-  const fmtAmt   = (n) => fmtCur(Math.abs(Number(n || 0)), curIsIDR ? "IDR" : activeCurrency);
+  // ── Amount formatters ─────────────────────────────────────
+  const fmtAmt    = (n) => fmtIDR(Math.abs(Number(n || 0)));
   const fmtBalCur = (v) => {
     const n = Number(v || 0);
     return { text: fmtAmt(n), color: n < 0 ? "#A32D2D" : "#111827", sign: n < 0 ? "-" : "" };
@@ -503,27 +484,6 @@ export default function BankStatement({
           {loading ? "Loading…" : "Apply"}
         </button>
 
-        {/* Currency tabs — only for multicurrency accounts */}
-        {selectedAccount?.is_multicurrency && (
-          <div style={{ width: "100%", display: "flex", gap: 4, flexWrap: "wrap", paddingTop: 2 }}>
-            {["IDR", ...acctCurrencies.map(c => c.currency).filter(c => c !== "IDR").sort()]
-              .map(cur => {
-                const active = activeCurrency === cur;
-                return (
-                  <button key={cur} onClick={() => setActiveCurrency(cur)} style={{
-                    height: 30, padding: "0 12px", borderRadius: 20,
-                    border: `1.5px solid ${active ? "#111827" : "#e5e7eb"}`,
-                    background: active ? "#111827" : "#fff",
-                    color: active ? "#fff" : "#6b7280",
-                    fontSize: 12, fontWeight: active ? 700 : 500,
-                    cursor: "pointer", fontFamily: FF, transition: "all 0.15s",
-                  }}>
-                    {cur}
-                  </button>
-                );
-              })}
-          </div>
-        )}
       </div>
 
       {/* ── Summary cards ── */}
@@ -806,7 +766,6 @@ export default function BankStatement({
         liabilities={liabilities}
         receivables={receivables}
         incomeSrcs={incomeSrcs}
-        accountCurrencies={accountCurrencies}
         onRefresh={() => { load(); onRefresh?.(); }}
       />
     </div>

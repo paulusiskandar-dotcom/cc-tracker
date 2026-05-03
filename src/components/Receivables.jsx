@@ -110,7 +110,7 @@ export default function Receivables({
   fxRates = {}, CURRENCIES = [],
   bankAccounts: bankAccountsProp = [],
   creditCards = [], assets = [], liabilities = [],
-  accountCurrencies = [], incomeSrcs = [],
+  incomeSrcs = [],
 }) {
   const T = dark ? DARK : LIGHT;
 
@@ -1489,7 +1489,6 @@ export default function Receivables({
         incomeSrcs={incomeSrcs}
         employeeLoans={employeeLoans}
         setEmployeeLoans={setEmployeeLoans}
-        accountCurrencies={accountCurrencies}
         onRefresh={onRefresh}
       />
 
@@ -1516,7 +1515,6 @@ export default function Receivables({
         incomeSrcs={incomeSrcs}
         employeeLoans={employeeLoans}
         setEmployeeLoans={setEmployeeLoans}
-        accountCurrencies={accountCurrencies}
         onRefresh={onRefresh}
       />
 

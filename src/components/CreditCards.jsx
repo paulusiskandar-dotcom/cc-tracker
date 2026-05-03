@@ -505,7 +505,6 @@ export default function CreditCards({
         assets={[]}
         liabilities={[]}
         receivables={[]}
-        accountCurrencies={[]}
         allCurrencies={[]}
         fxRates={{}}
         incomeSrcs={[]}

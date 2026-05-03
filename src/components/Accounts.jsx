@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { accountsApi, accountCurrenciesApi, ledgerApi, getTxFromToTypes, recalculateBalance } from "../api";
+import { accountsApi, ledgerApi, getTxFromToTypes, recalculateBalance } from "../api";
 import BankStatement from "./BankStatement";
 import {
   BANKS_L, NETWORKS, ASSET_SUBTYPES, LIAB_SUBTYPES,
@@ -14,8 +14,6 @@ import Select from "./shared/Select";
 import SortDropdown from "./shared/SortDropdown";
 import { EmptyState, showToast } from "./shared/Card";
 import ReconcileDraftBanner from "./shared/ReconcileDraftBanner";
-
-const MULTICURRENCY_BANKS = ["BCA", "OCBC", "Jenius", "Danamon"];
 
 // ─── SANITIZE NUMERIC ────────────────────────────────────────
 const sn = (val) => {
@@ -55,7 +53,7 @@ const CARD_PALETTE = [
 
 export default function Accounts({
   user, accounts, ledger, onRefresh, categories = [],
-  setAccounts, setAccountCurrencies, accountCurrencies = [], CURRENCIES = [], fxRates = {},
+  setAccounts, CURRENCIES = [], fxRates = {},
   bankAccounts: bankAccountsProp = [], creditCards = [], assets = [], liabilities = [], receivables = [],
   incomeSrcs = [],
   initialSubTab = "all",
@@ -124,9 +122,6 @@ export default function Accounts({
     setEditAcc(a);
     const ft = (a.type === "bank" && a.subtype === "cash") ? "cash" : a.type;
     setFormType(ft);
-    const fxBalances = accountCurrencies
-      .filter(r => r.account_id === a.id)
-      .map(r => ({ currency: r.currency, balance: r.balance }));
     // CC: populate synthetic shared-limit fields from DB columns
     const ccExtra = ft === "credit_card" && a.shared_limit_group_id ? {
       hasSharedLimit:    true,
@@ -135,7 +130,7 @@ export default function Accounts({
       sharedLimitAmount: String(a.shared_limit || ""),
       joinGroupId:       a.is_limit_group_master ? "" : (a.shared_limit_group_id || ""),
     } : {};
-    setForm({ ...a, last4: a.card_last4 || "", fxBalances, ...ccExtra });
+    setForm({ ...a, last4: a.card_last4 || "", ...ccExtra });
     setStep(2); // go straight to form when editing
     setModal("edit");
   };
@@ -154,7 +149,6 @@ export default function Accounts({
     try {
       // Strip synthetic form-only fields so they never reach the DB
       const {
-        fxBalances: _fb,
         hasSharedLimit: _hs, sharedLimitMode: _slm, groupName: _gn,
         sharedLimitAmount: _sla, joinGroupId: _jgi,
         deductFromBank: _dfb, bankDeductId: _bdi,
@@ -292,19 +286,6 @@ export default function Accounts({
         }
       }
 
-      // Handle multicurrency fx balances
-      if (formType === "bank" && form.is_multicurrency && savedAccount?.id && form.fxBalances?.length) {
-        const upserts = form.fxBalances
-          .filter(r => r.currency && r.balance !== "" && r.balance !== null)
-          .map(r => accountCurrenciesApi.upsert(savedAccount.id, r.currency, Number(r.balance || 0), undefined, user.id));
-        await Promise.all(upserts);
-        const newRows = await accountCurrenciesApi.getForAccount(savedAccount.id);
-        setAccountCurrencies(prev => [
-          ...prev.filter(r => r.account_id !== savedAccount.id),
-          ...newRows,
-        ]);
-      }
-
       setModal(null);
     } catch (e) { showToast(e.message, "error"); }
     setSaving(false);
@@ -361,7 +342,6 @@ export default function Accounts({
         assets={assets}
         liabilities={liabilities}
         receivables={receivables}
-        accountCurrencies={accountCurrencies}
         allCurrencies={CURRENCIES}
         fxRates={fxRates}
         incomeSrcs={incomeSrcs}
@@ -420,7 +400,6 @@ export default function Accounts({
           : <BankPageContent
               accounts={filtered}
               ledger={ledger}
-              accountCurrencies={accountCurrencies}
               fxRates={fxRates}
               CURRENCIES={CURRENCIES}
               onEdit={openEdit}
@@ -495,7 +474,6 @@ export default function Accounts({
                 account={a}
                 ledger={ledger}
                 accounts={accounts}
-                accountCurrencies={accountCurrencies}
                 fxRates={fxRates}
                 onEdit={() => openEdit(a)}
                 onDelete={() => setDeleteAcc(a)}
@@ -735,13 +713,12 @@ function BankLogo({ bankName, color, size = 36 }) {
 }
 
 // ─── BANK ACCOUNT CARD ───────────────────────────────────────
-function BankAccountCard({ account: a, ledger, accountCurrencies = [], fxRates = {}, CURRENCIES: C = [], color, onEdit, onHistory, onStatement }) {
+function BankAccountCard({ account: a, ledger, fxRates = {}, CURRENCIES: C = [], color, onEdit, onHistory, onStatement }) {
   const bal       = Number(a.current_balance || 0);
   const cur       = C.find(c => c.code === (a.currency || "IDR"));
   const isForeign = a.currency && a.currency !== "IDR";
   const rate      = fxRates[a.currency] || cur?.rate || 1;
   const idrEquiv  = isForeign ? Math.round(bal * rate) : bal;
-  const fxRows    = accountCurrencies.filter(r => r.account_id === a.id);
 
   return (
     <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "row" }}>
@@ -767,17 +744,7 @@ function BankAccountCard({ account: a, ledger, accountCurrencies = [], fxRates =
         {/* Balance */}
         <div>
           <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 3 }}>Balance</div>
-          {a.is_multicurrency ? (
-            <>
-              <div style={{ fontSize: 24, fontWeight: 800, color: "#059669", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
-                {fmtIDR(bal + fxRows.reduce((sum, r) => {
-                  const fxRate = fxRates[r.currency];
-                  return fxRate ? sum + Number(r.balance || 0) * fxRate : sum;
-                }, 0))}
-              </div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#3b5bdb", fontFamily: "Figtree, sans-serif", marginTop: 3 }}>Multi-currency</div>
-            </>
-          ) : isForeign ? (
+          {isForeign ? (
             <>
               <div style={{ fontSize: 24, fontWeight: 800, color: "#059669", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
                 {cur?.symbol || a.currency} {bal.toLocaleString("id-ID")}
@@ -868,7 +835,7 @@ const BANK_SORT_PILLS = [
   { key: "bank",    label: "Bank",    defaultDir: "asc"  },
 ];
 
-function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, CURRENCIES: C = [], onEdit, onDelete, onHistory, onStatement }) {
+function BankPageContent({ accounts, ledger, fxRates, CURRENCIES: C = [], onEdit, onDelete, onHistory, onStatement }) {
   const [bankFilter, setBankFilter] = useState("all");
   const [sort, setSort] = useState(() => localStorage.getItem("sort_bank") || "balance_desc");
 
@@ -894,24 +861,15 @@ function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, CURRENC
   const visible = bankFilter === "all" ? sorted : sorted.filter(({ a }) => a.bank_name === bankFilter);
 
   const nonZero      = sorted.filter(({ a }) => Number(a.current_balance || 0) > 0);
-  const accountIds   = new Set(accounts.map(a => a.id));
   const idrAccts     = accounts.filter(a => !a.currency || a.currency === "IDR");
   const foreignAccts = accounts.filter(a => a.currency && a.currency !== "IDR");
   const totalIDR     = idrAccts.reduce((s, a) => s + Number(a.current_balance || 0), 0);
   // Foreign-currency accounts (non-IDR base)
-  const foreignAcctIDR = foreignAccts.reduce((sum, a) => {
+  const foreignIDR = foreignAccts.reduce((sum, a) => {
     const cur  = C.find(c => c.code === a.currency);
     const rate = fxRates[a.currency] || cur?.rate || 1;
     return sum + Math.round(Number(a.current_balance || 0) * rate);
   }, 0);
-  // Multi-currency pockets (account_currencies rows) for all bank accounts in this tab
-  const foreignPocketIDR = accountCurrencies
-    .filter(r => accountIds.has(r.account_id) && r.currency && r.currency !== "IDR")
-    .reduce((sum, r) => {
-      const rate = fxRates[r.currency];
-      return rate ? sum + Number(r.balance || 0) * rate : sum;
-    }, 0);
-  const foreignIDR   = foreignAcctIDR + foreignPocketIDR;
   const grandTotal   = totalIDR + foreignIDR;
 
   return (
@@ -966,7 +924,6 @@ function BankPageContent({ accounts, ledger, accountCurrencies, fxRates, CURRENC
             key={a.id}
             account={a}
             ledger={ledger}
-            accountCurrencies={accountCurrencies}
             fxRates={fxRates}
             CURRENCIES={C}
             color={CARD_PALETTE[i % CARD_PALETTE.length]}
@@ -1059,7 +1016,7 @@ function CashPageContent({ accounts, fxRates, CURRENCIES: C = [], ledger, onEdit
 }
 
 // ─── ACCOUNT CARD ────────────────────────────────────────────
-function AccountCard({ account: a, ledger, accounts, accountCurrencies = [], fxRates = {}, onEdit, onDelete, onHistory, onUpdateNilai }) {
+function AccountCard({ account: a, ledger, accounts, fxRates = {}, onEdit, onDelete, onHistory, onUpdateNilai }) {
   const isCash = a.type === "bank" && a.subtype === "cash";
   const bg    = isCash ? "#f0fdf4" : (TYPE_BG[a.type]    || "#f9fafb");
   const color = isCash ? "#059669" : (TYPE_COLOR[a.type] || "#6b7280");
@@ -1175,10 +1132,6 @@ function AccountCard({ account: a, ledger, accounts, accountCurrencies = [], fxR
                 ≈ {fmtIDR(Math.abs(bal.value) * (fxRates[a.currency] || 1), true)}
               </div>
             </div>
-          ) : a.is_multicurrency ? (
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#3b5bdb", fontFamily: "Figtree, sans-serif" }}>
-              Multi-currency
-            </div>
           ) : (
             <div style={{
               fontSize: 16, fontWeight: 800, color: bal.color,
@@ -1195,31 +1148,6 @@ function AccountCard({ account: a, ledger, accounts, accountCurrencies = [], fxR
           )}
         </div>
       </div>
-
-      {/* Multi-currency balance rows */}
-      {a.is_multicurrency && (() => {
-        const rows = accountCurrencies.filter(r => r.account_id === a.id);
-        if (!rows.length) return null;
-        return (
-          <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 2 }}>
-            {rows.map(r => (
-              <div key={r.currency} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>{r.currency}</span>
-                <div style={{ textAlign: "right" }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
-                    {fmtCur(r.balance, r.currency)}
-                  </span>
-                  {r.currency !== "IDR" && (
-                    <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginLeft: 4 }}>
-                      ≈ {fmtIDR(Number(r.balance || 0) * (fxRates[r.currency] || 1), true)}
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        );
-      })()}
 
       {/* CC progress bar */}
       {a.type === "credit_card" && bal.limit > 0 && (
@@ -1574,11 +1502,6 @@ function AccountHistory({ account, ledger, accounts }) {
 function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = [] }) {
   const FF = 16; // gap between fields
 
-  // FX balance row helpers
-  const addFxRow = () => set("fxBalances", [...(form.fxBalances || []), { currency: "USD", balance: "" }]);
-  const removeFxRow = (i) => set("fxBalances", (form.fxBalances || []).filter((_, idx) => idx !== i));
-  const updateFxRow = (i, key, val) => set("fxBalances", (form.fxBalances || []).map((r, idx) => idx === i ? { ...r, [key]: val } : r));
-
   // Deposit maturity auto-calc
   const calcMaturity = (startDate, tenorMonths) => {
     if (!startDate || !tenorMonths) return "";
@@ -1634,52 +1557,6 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
         </FormRow>
         <AmountInput label="Initial Balance" value={form.initial_balance || ""}
           onChange={v => { set("initial_balance", v); set("current_balance", v); }} />
-
-        {/* Multi-currency toggle — only for supported banks */}
-        {MULTICURRENCY_BANKS.includes(form.bank_name) && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <input type="checkbox" id="is_multi_cur" checked={form.is_multicurrency || false}
-              onChange={e => set("is_multicurrency", e.target.checked)}
-              style={{ accentColor: "#3b5bdb", width: 16, height: 16 }} />
-            <label htmlFor="is_multi_cur" style={{ fontSize: 13, color: "#374151", cursor: "pointer", fontFamily: "Figtree, sans-serif" }}>
-              Multi-currency account
-            </label>
-          </div>
-        )}
-
-        {/* FX balance rows */}
-        {form.is_multicurrency && (
-          <div>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#374151", fontFamily: "Figtree, sans-serif", marginBottom: 8 }}>
-              Foreign Currency Balances
-            </div>
-            {(form.fxBalances || []).map((row, i) => (
-              <div key={i} style={{ display: "flex", gap: 8, marginBottom: 6, alignItems: "flex-end" }}>
-                <Select
-                  label={i === 0 ? "Currency" : ""}
-                  value={row.currency}
-                  onChange={e => updateFxRow(i, "currency", e.target.value)}
-                  options={C.filter(c => c.code !== "IDR").map(c => ({ value: c.code, label: `${c.flag} ${c.code}` }))}
-                  style={{ width: 110 }}
-                />
-                <AmountInput
-                  label={i === 0 ? "Balance" : ""}
-                  value={row.balance}
-                  onChange={v => updateFxRow(i, "balance", v)}
-                  currency={row.currency}
-                  allowDecimal
-                  style={{ flex: 1 }}
-                />
-                <button onClick={() => removeFxRow(i)} style={{
-                  border: "none", background: "#fee2e2", color: "#dc2626",
-                  borderRadius: 7, padding: "6px 10px", cursor: "pointer", fontSize: 13,
-                  marginBottom: 0,
-                }}>✕</button>
-              </div>
-            ))}
-            <Button variant="secondary" size="sm" onClick={addFxRow}>+ Add Currency</Button>
-          </div>
-        )}
 
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <input type="checkbox" id="incl_nw" checked={form.include_networth !== false}
@@ -2007,7 +1884,7 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
 function emptyForm(type) {
   const base = { name: "", color: "#3b5bdb", notes: "", is_active: true };
   switch (type) {
-    case "bank":        return { ...base, bank_name: "BCA", account_no: "", currency: "IDR", initial_balance: "", current_balance: 0, include_networth: true, is_multicurrency: false, fxBalances: [] };
+    case "bank":        return { ...base, bank_name: "BCA", account_no: "", currency: "IDR", initial_balance: "", current_balance: 0, include_networth: true };
     case "cash":        return { ...base, currency: "IDR", initial_balance: "", current_balance: 0 };
     case "credit_card": return { ...base, bank_name: "BCA", last4: "", network: "Visa", card_limit: "", monthly_target: "", statement_day: 25, due_day: 17, current_balance: 0, hasSharedLimit: false, sharedLimitMode: "new", groupName: "", sharedLimitAmount: "", joinGroupId: "" };
     case "asset":       return { ...base, subtype: "Property", current_value: "", purchase_price: "", purchase_date: "", deposit_rollover_type: "non_aro", monthly_interest_payout: false, deposit_status: "active", tenor_months: "6" };

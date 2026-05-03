@@ -11,7 +11,7 @@ import {
   accountsApi, ledgerApi, categoriesApi, incomeSrcApi,
   installmentsApi, recurringApi, merchantApi, fxApi,
   settingsApi, gmailApi, employeeLoanApi, loanPaymentsApi,
-  accountCurrenciesApi, reimburseSettlementsApi, reconcileApi,
+  reimburseSettlementsApi, reconcileApi,
   flattenEmailSync,
 } from "./api";
 import { calcNetWorth, fmtIDR, todayStr, ym } from "./utils";
@@ -206,7 +206,6 @@ function Finance({ user, signOut }) {
   const [reimburseSettlements,  setReimburseSettlements]  = useState([]);
   const [employeeLoans,     setEmployeeLoans]     = useState([]);
   const [loanPayments,      setLoanPayments]      = useState([]);
-  const [accountCurrencies, setAccountCurrencies] = useState([]);
   const [reconSessions,     setReconSessions]     = useState([]);
   const [pendingReconcileNav, setPendingReconcileNav] = useState(null);
   const [budgets,           setBudgets]           = useState([]);
@@ -217,7 +216,7 @@ function Finance({ user, signOut }) {
   const loadData = useCallback(async () => {
     const safe = (p, fallback) => p.catch(e => { console.warn("[loadData]", e.message); return fallback; });
 
-    const [acc, led, cats, inc, inst, rtempl, rem, merch, fx, dark, pending, loans, payments, accs, reimburse, recon, bdg] = await Promise.all([
+    const [acc, led, cats, inc, inst, rtempl, rem, merch, fx, dark, pending, loans, payments, reimburse, recon, bdg] = await Promise.all([
       safe(accountsApi.getAll(user.id),                      []),
       safe(ledgerApi.getAll(user.id, { limit: 10000 }),       []),
       safe(categoriesApi.getAll(user.id),                    []),
@@ -231,7 +230,6 @@ function Finance({ user, signOut }) {
       safe(gmailApi.getPending(user.id),                     []),
       safe(employeeLoanApi.getAll(user.id),                  []),
       safe(loanPaymentsApi.getAll(user.id),                  []),
-      safe(accountCurrenciesApi.getAll(user.id),             []),
       safe(reimburseSettlementsApi.getPending(user.id),      []),
       safe(reconcileApi.getAll(user.id),                     []),
       safe(supabase.from("budgets").select("*").eq("user_id", user.id).then(r => r.data || []), []),
@@ -274,7 +272,6 @@ function Finance({ user, signOut }) {
     setReimburseSettlements(reimburse);
     setEmployeeLoans(loans);
     setLoanPayments(payments);
-    setAccountCurrencies(accs);
     setReconSessions(recon);
     setBudgets(bdg);
     setLoading(false);
@@ -307,7 +304,7 @@ function Finance({ user, signOut }) {
   const assets        = useMemo(() => accounts.filter(a => a.type === "asset"), [accounts]);
   const liabilities   = useMemo(() => accounts.filter(a => a.type === "liability"), [accounts]);
   const receivables   = useMemo(() => accounts.filter(a => a.type === "receivable"), [accounts]);
-  const netWorth      = useMemo(() => calcNetWorth(accounts, { employeeLoans, loanPayments, fxRates, accountCurrencies, reimburseSettlements }), [accounts, employeeLoans, loanPayments, fxRates, accountCurrencies, reimburseSettlements]);
+  const netWorth      = useMemo(() => calcNetWorth(accounts, { employeeLoans, loanPayments, fxRates, reimburseSettlements }), [accounts, employeeLoans, loanPayments, fxRates, reimburseSettlements]);
   const thisMonthLedger = useMemo(
     () => ledger.filter(e => ym(e.tx_date) === curMonth),
     [ledger, curMonth]
@@ -324,7 +321,6 @@ function Finance({ user, signOut }) {
     setTab, setSettingsTab, openEmail, setPendingSyncs,
     reimburseSettlements, setReimburseSettlements,
     employeeLoans, setEmployeeLoans, loanPayments, setLoanPayments,
-    accountCurrencies, setAccountCurrencies,
     reconSessions, setReconSessions,
     pendingReconcileNav, setPendingReconcileNav,
     budgets, setBudgets,
