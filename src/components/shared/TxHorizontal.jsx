@@ -160,10 +160,28 @@ function getAcctCfg(txType, accounts) {
 function validateRow(r, accounts) {
   const cfg = getAcctCfg(r.tx_type, accounts);
   const isUUID = v => typeof v === "string" && v.length === 36;
-  // collect_loan uses a dedicated employee_loan_id field (from_id holds the same value but may also hold a receivable account UUID from AI scan)
   if (r.tx_type === "collect_loan") {
     if (!isUUID(r.employee_loan_id)) return "Pilih borrower";
     if (!isUUID(r.to_id)) return "Pilih akun tujuan";
+    return null;
+  }
+  if (r.tx_type === "give_loan") {
+    if (!isUUID(r.from_id)) return "Pilih akun sumber";
+    if (r.new_loan_name) {
+      if (!r.new_loan_name.trim()) return "Isi nama borrower";
+      if (!(Number(r.new_loan_months) >= 1)) return "Isi tenor (months)";
+    } else if (!isUUID(r.employee_loan_id)) {
+      return "Pilih borrower";
+    }
+    return null;
+  }
+  if (r.tx_type === "buy_asset") {
+    if (!isUUID(r.from_id)) return "Pilih akun sumber";
+    if (r.new_asset_name) {
+      if (!r.new_asset_name.trim()) return "Isi nama asset";
+    } else if (!isUUID(r.to_id)) {
+      return "Pilih asset";
+    }
     return null;
   }
   if ((cfg.mode === "from" || cfg.mode === "from_to") && !isUUID(r.from_id))
@@ -172,7 +190,6 @@ function validateRow(r, accounts) {
     return "Pilih akun tujuan";
   if (!NO_CAT_TYPES.has(r.tx_type) && !r.category_id)
     return "Pilih kategori";
-  // entity required only for reimburse_in (reimburse_out entity is optional)
   if (r.tx_type === "reimburse_in" && !r.entity)
     return "Pilih entity reimburse";
   if (r.tx_type === "fx_exchange" && (!r.fx_rate || Number(r.fx_rate) <= 0))
@@ -273,13 +290,104 @@ function CollectLoanCell({ r, onUpdate, T, accounts, employeeLoans }) {
   );
 }
 
+const ASSET_SUBTYPES_H = ["Property","Vehicle","Investment","Crypto","Collectible","Other"];
+
+// ─── GIVE LOAN CELL ─────────────────────────────────────────────
+function GiveLoanCell({ r, onUpdate, T, accounts, employeeLoans }) {
+  const [isNew, setIsNew] = useState(!!r.new_loan_name);
+  const activeLoans = (employeeLoans || []).filter(l => ["active","partial"].includes((l.status || "active").toLowerCase()));
+  const bc = accounts.filter(a => ["bank","cash"].includes(a.type));
+
+  const toggleMode = () => {
+    setIsNew(x => !x);
+    onUpdate({ employee_loan_id: null, new_loan_name: "", new_loan_months: "" });
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+      <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <TabbedAcctSelect accounts={bc} value={r.from_id || ""} onChange={v => onUpdate({ from_id: v })} placeholder="From…" T={T} />
+        </div>
+        <button type="button" onClick={toggleMode}
+          style={{ fontSize: 9, padding: "2px 5px", borderRadius: 4, border: `1px solid ${T.border}`, background: isNew ? "#3b5bdb" : T.sur2, color: isNew ? "#fff" : T.text2, cursor: "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 700, flexShrink: 0 }}>
+          {isNew ? "Existing" : "+New"}
+        </button>
+      </div>
+      {isNew ? (
+        <div style={{ display: "flex", gap: 3 }}>
+          <input style={{ ...inInp(T), flex: 1 }} placeholder="Employee name *"
+            value={r.new_loan_name || ""} onChange={e => onUpdate({ new_loan_name: e.target.value })} />
+          <input type="number" style={{ ...inInp(T), width: 52 }} placeholder="Months"
+            value={r.new_loan_months || ""} onChange={e => onUpdate({ new_loan_months: e.target.value })} />
+        </div>
+      ) : (
+        <select style={{ ...inSel(T), width: "100%" }} value={r.employee_loan_id || ""}
+          onChange={e => onUpdate({ employee_loan_id: e.target.value })}>
+          <option value="">Borrower…</option>
+          {activeLoans.map(l => (
+            <option key={l.id} value={l.id}>{l.employee_name}</option>
+          ))}
+        </select>
+      )}
+    </div>
+  );
+}
+
+// ─── BUY ASSET CELL ─────────────────────────────────────────────
+function BuyAssetCell({ r, onUpdate, T, accounts }) {
+  const [isNew, setIsNew] = useState(!!r.new_asset_name);
+  const bc     = accounts.filter(a => ["bank","cash"].includes(a.type));
+  const assets = accounts.filter(a => a.type === "asset" && a.is_active !== false);
+
+  const toggleMode = () => {
+    setIsNew(x => !x);
+    onUpdate({ to_id: null, new_asset_name: "", new_asset_subtype: "" });
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+      <div style={{ display: "flex", gap: 3, alignItems: "center" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <TabbedAcctSelect accounts={bc} value={r.from_id || ""} onChange={v => onUpdate({ from_id: v })} placeholder="From…" T={T} />
+        </div>
+        <button type="button" onClick={toggleMode}
+          style={{ fontSize: 9, padding: "2px 5px", borderRadius: 4, border: `1px solid ${T.border}`, background: isNew ? "#3b5bdb" : T.sur2, color: isNew ? "#fff" : T.text2, cursor: "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 700, flexShrink: 0 }}>
+          {isNew ? "Existing" : "+New"}
+        </button>
+      </div>
+      {isNew ? (
+        <div style={{ display: "flex", gap: 3 }}>
+          <input style={{ ...inInp(T), flex: 1 }} placeholder="Asset name *"
+            value={r.new_asset_name || ""} onChange={e => onUpdate({ new_asset_name: e.target.value })} />
+          <select style={{ ...inSel(T), width: 88 }} value={r.new_asset_subtype || "Other"}
+            onChange={e => onUpdate({ new_asset_subtype: e.target.value })}>
+            {ASSET_SUBTYPES_H.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+      ) : (
+        <select style={{ ...inSel(T), width: "100%" }} value={r.to_id || ""}
+          onChange={e => onUpdate({ to_id: e.target.value })}>
+          <option value="">Select asset…</option>
+          {assets.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+      )}
+    </div>
+  );
+}
+
 // ─── ACCOUNT CELL ───────────────────────────────────────────────
 function AccountCell({ r, onUpdate, T, accounts, employeeLoans }) {
   const cfg = getAcctCfg(r.tx_type, accounts);
 
-  // ── collect_loan: rendered by dedicated component to satisfy hook rules ──
   if (r.tx_type === "collect_loan") {
     return <CollectLoanCell r={r} onUpdate={onUpdate} T={T} accounts={accounts} employeeLoans={employeeLoans} />;
+  }
+  if (r.tx_type === "give_loan") {
+    return <GiveLoanCell r={r} onUpdate={onUpdate} T={T} accounts={accounts} employeeLoans={employeeLoans} />;
+  }
+  if (r.tx_type === "buy_asset") {
+    return <BuyAssetCell r={r} onUpdate={onUpdate} T={T} accounts={accounts} />;
   }
 
   if (cfg.mode === "to") return (

@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import { merchantRules } from "../lib/merchantRules";
 import PILogo from "./PILogo";
-import { fxApi, merchantApi, settingsApi, recurringApi, gmailApi, accountsApi, installmentsApi, ledgerApi, getTxFromToTypes, loanPaymentsApi } from "../api";
+import { fxApi, merchantApi, settingsApi, recurringApi, gmailApi, accountsApi, installmentsApi, ledgerApi, getTxFromToTypes } from "../api";
 import { fmtIDR, resolveCategoryIds, checkDuplicateTransaction } from "../utils";
 import { undoManager } from "../lib/undoManager";
 import { CURRENCIES, EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST, TX_TYPES, APP_VERSION, APP_BUILD } from "../constants";
@@ -2060,7 +2060,7 @@ function EStatementTab({
     const isReimburseOut  = txType === "reimburse_out";
     const isReimburseType = isReimburseIn || isReimburseOut;
 
-    // collect_loan: from_id holds employee_loan_id; ledger from_id is null
+    // collect_loan: loan_auto_payment triggers recordAndIncrement inside ledgerApi.create
     if (txType === "collect_loan") {
       const amount     = Math.abs(Number(r.amount || 0));
       const amount_idr = Math.abs(Number(r.amount_idr || r.amount || 0));
@@ -2073,7 +2073,57 @@ function EStatementTab({
         employee_loan_id: isUUID(r.employee_loan_id) ? r.employee_loan_id : (isUUID(r.from_id) ? r.from_id : null),
         entity: "Personal", category_id: null, category_name: null,
         notes: r.notes || null,
+        loan_auto_payment: true,
       };
+    }
+
+    // give_loan: new_loan creates employee_loan; existing increments principal
+    if (txType === "give_loan") {
+      const amount     = Math.abs(Number(r.amount || 0));
+      const amount_idr = Math.abs(Number(r.amount_idr || r.amount || 0));
+      const base = {
+        tx_date: r.tx_date, description: r.description || "Loan disbursement",
+        merchant_name: r.description || null,
+        amount, amount_idr, currency: r.currency || "IDR",
+        tx_type: "give_loan", from_type: "account", to_type: "employee_loan",
+        from_id: isUUID(r.from_id) ? r.from_id : null, to_id: null,
+        entity: "Personal", category_id: null, category_name: null,
+        notes: r.notes || null,
+      };
+      if (r.new_loan_name?.trim()) {
+        const months = Math.max(1, Number(r.new_loan_months) || 1);
+        base.new_loan = {
+          employee_name:       r.new_loan_name.trim(),
+          monthly_installment: Math.round(amount / months),
+          total_months:        months,
+          start_date:          r.tx_date,
+        };
+      } else if (isUUID(r.employee_loan_id)) {
+        base.employee_loan_id      = r.employee_loan_id;
+        base.loan_increment_principal = true;
+      }
+      return base;
+    }
+
+    // buy_asset: new_asset creates account; existing uses to_id directly
+    if (txType === "buy_asset") {
+      const amount     = Math.abs(Number(r.amount || 0));
+      const amount_idr = Math.abs(Number(r.amount_idr || r.amount || 0));
+      const base = {
+        tx_date: r.tx_date, description: r.description || r.new_asset_name || "Asset purchase",
+        merchant_name: r.description || null,
+        amount, amount_idr, currency: "IDR",
+        tx_type: "buy_asset", from_type: "account", to_type: "account",
+        from_id: isUUID(r.from_id) ? r.from_id : null,
+        to_id:   isUUID(r.to_id)   ? r.to_id   : null,
+        entity: "Personal", category_id: null, category_name: null,
+        notes: r.notes || null,
+      };
+      if (r.new_asset_name?.trim()) {
+        base.new_asset = { name: r.new_asset_name.trim(), subtype: r.new_asset_subtype || "Other" };
+        base.to_id     = null; // ledgerApi.create injects to_id after creating the account
+      }
+      return base;
     }
 
     // For reimburse_in: from_type is "expense", from_id is the RE category for the entity
@@ -2138,13 +2188,6 @@ function EStatementTab({
     try {
       const payload = buildPayload(row);
       const inserted = await ledgerApi.create(user.id, payload, accounts);
-      if (row.tx_type === "collect_loan" && (row.employee_loan_id || row.from_id)) {
-        loanPaymentsApi.recordAndIncrement(user.id, {
-          loanId: row.employee_loan_id || row.from_id, payDate: row.tx_date,
-          amount: Math.abs(Number(row.amount_idr || row.amount || 0)),
-          notes: row.description || "Collected via import",
-        }).catch(e => console.error("[collect_loan payment saveRow]", e));
-      }
       if (row._cicilan && row._cicilanMonths >= 2 && inserted?.id) {
         installmentsApi.createFromImport(user.id, {
           ledgerId: inserted.id, description: row.description || "", accountId: row.from_id,
@@ -2190,13 +2233,6 @@ function EStatementTab({
         savedIds.push(r._id);
         if (inserted?.id) newLedgerIds.push(inserted.id);
         count++;
-        if (r.tx_type === "collect_loan" && (r.employee_loan_id || r.from_id)) {
-          loanPaymentsApi.recordAndIncrement(user.id, {
-            loanId: r.employee_loan_id || r.from_id, payDate: r.tx_date,
-            amount: Math.abs(Number(r.amount_idr || r.amount || 0)),
-            notes: r.description || "Collected via import",
-          }).catch(e => console.error("[collect_loan payment saveFile]", e));
-        }
         if (r._cicilan && r._cicilanMonths >= 2 && inserted?.id) {
           installmentsApi.createFromImport(user.id, {
             ledgerId: inserted.id, description: r.description || "", accountId: r.from_id,
