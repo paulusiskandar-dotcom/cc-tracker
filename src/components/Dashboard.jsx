@@ -242,8 +242,8 @@ export default function Dashboard({
   const surplus = thisMonthIncome - thisMonthExpense;
 
   const totalCCDebt = useMemo(() =>
-    creditCards.reduce((s, c) => s + Number(c.outstanding_amount || 0), 0),
-  [creditCards]);
+    creditCards.reduce((s, c) => s + Number(c.outstanding_amount || 0) * (fxRates?.[c.currency] || 1), 0),
+  [creditCards, fxRates]);
 
   const thisMonthCCSpend = useMemo(() =>
     thisMonthLedger
@@ -281,8 +281,8 @@ export default function Dashboard({
   }, [creditCards]);
 
   const totalAssets = useMemo(() =>
-    assets.reduce((s, a) => s + Number(a.current_value || 0), 0),
-  [assets]);
+    assets.reduce((s, a) => s + Number(a.current_value || 0) * (fxRates?.[a.currency] || 1), 0),
+  [assets, fxRates]);
 
   const totalReceivables = useMemo(() =>
     receivables.reduce((s, r) => s + Number(r.receivable_outstanding || 0), 0),
@@ -467,7 +467,7 @@ export default function Dashboard({
 
     // E) CC installments (info only)
     installments
-      .filter(inst => (inst.paid_months || 0) < (inst.months || 0))
+      .filter(inst => (inst.paid_months || 0) < (inst.total_months ?? inst.months ?? 0))
       .slice(0, 3)
       .forEach(inst => {
         const cc = creditCards.find(c => c.id === inst.account_id);
@@ -475,7 +475,7 @@ export default function Dashboard({
           id:   `i-${inst.id}`, type: "installment", raw: inst,
           date: today,
           title: inst.description || "CC Installment",
-          sub: `${cc?.name || "CC"} · Month ${(inst.paid_months || 0) + 1}/${inst.months}`,
+          sub: `${cc?.name || "CC"} · Month ${(inst.paid_months || 0) + 1}/${inst.total_months ?? inst.months ?? "?"}`,
           amount: Number(inst.monthly_amount || 0),
           amountColor: "#9ca3af", amountSign: "−",
           icon: "📅", iconBg: "#f3f4f6", iconColor: "#9ca3af",
@@ -1063,13 +1063,16 @@ export default function Dashboard({
             fontFamily: "Figtree, sans-serif", marginBottom: 4,
           }}>CC This Month</div>
           {/* main value = this month spend */}
+          <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>
+            Spend this month
+          </div>
           <div style={{
             fontSize: 16, fontWeight: 800, color: "#111827",
             fontFamily: "Figtree, sans-serif", lineHeight: 1.2, marginBottom: 2,
           }}>{fmtIDR(thisMonthCCSpend)}</div>
-          {/* total debt */}
+          {/* outstanding debt */}
           <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: 10 }}>
-            Total debt: {fmtIDR(totalCCDebt, true)}
+            Outstanding debt: <strong style={{ color: "#dc2626" }}>{fmtIDR(totalCCDebt, true)}</strong>
           </div>
 
           {/* ── shared limit groups ── */}
