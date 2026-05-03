@@ -139,11 +139,12 @@ export default function CreditCards({
       if (!cc.shared_limit_group_id) return;
       gids.add(cc.id);
       if (!gm[cc.shared_limit_group_id]) {
-        gm[cc.shared_limit_group_id] = { id: cc.shared_limit_group_id, master: null, members: [], totalDebt: 0, sharedLimit: 0, name: "" };
+        gm[cc.shared_limit_group_id] = { id: cc.shared_limit_group_id, master: null, members: [], totalDebt: 0, totalCR: 0, sharedLimit: 0, name: "" };
       }
       const g = gm[cc.shared_limit_group_id];
       g.members.push(cc);
-      g.totalDebt += Number(cc.current_balance || 0);
+      g.totalDebt += Number(cc.outstanding_amount || 0);
+      g.totalCR   += Number(cc.current_balance   || 0);
       if (cc.is_limit_group_master) {
         g.master = cc;
         g.sharedLimit = Number(cc.shared_limit || 0);
@@ -163,16 +164,17 @@ export default function CreditCards({
 
   // ── Card stats (group-aware) ──
   const cardStats = useMemo(() => creditCards.map(cc => {
-    const debt   = Number(cc.current_balance || 0);
+    const debt = Number(cc.outstanding_amount || 0);
+    const cr   = Number(cc.current_balance   || 0);
     let limit, avail, util;
     if (cc.shared_limit_group_id && groupMap[cc.shared_limit_group_id]) {
       const g = groupMap[cc.shared_limit_group_id];
       limit = g.sharedLimit;
-      avail = Math.max(0, g.sharedLimit - g.totalDebt);
+      avail = Math.max(0, g.sharedLimit - g.totalDebt + g.totalCR);
       util  = g.sharedLimit > 0 ? (g.totalDebt / g.sharedLimit) * 100 : 0;
     } else {
       limit = Number(cc.card_limit || 0);
-      avail = Math.max(0, limit - debt);
+      avail = Math.max(0, limit - debt + cr);
       util  = limit > 0 ? (debt / limit) * 100 : 0;
     }
     const target = Number(cc.monthly_target || 0);
@@ -189,7 +191,7 @@ export default function CreditCards({
       .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
     const dueIn  = cc.due_day       ? daysUntil(cc.due_day)       : null;
     const stmtIn = cc.statement_day ? daysUntil(cc.statement_day) : null;
-    return { ...cc, debt, limit, avail, util, target, monthSpent, dueIn, stmtIn };
+    return { ...cc, debt, cr, limit, avail, util, target, monthSpent, dueIn, stmtIn };
   }), [creditCards, groupMap, ledger, filterMonth]);
 
   // Billing cycle date range for a CC card + month (YYYY-MM)
@@ -1417,6 +1419,12 @@ function CCCard({ cc, color, onPay, onTransactions, onInstallments, onStatement,
             <div style={{ fontSize: 14, fontWeight: 700, color: "#059669", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
               {fmtIDR(cc.avail, true)}
             </div>
+            {cc.cr > 0 && (
+              <div style={{ fontSize: 10, color: "#0F6E56", fontFamily: "Figtree, sans-serif", marginTop: 2 }}
+                title="Saldo lebih bayar / CR — menambah available limit">
+                +{fmtIDR(cc.cr, true)} top-up
+              </div>
+            )}
           </div>
         </div>
         {/* Utilization bar */}
@@ -1558,6 +1566,12 @@ function WalletCard({ cc, color, isActive, onPay, onTransactions, onInstallments
             <div style={{ fontSize: 14, fontWeight: 700, color: "#059669", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
               {fmtIDR(cc.avail, true)}
             </div>
+            {cc.cr > 0 && (
+              <div style={{ fontSize: 10, color: "#0F6E56", fontFamily: "Figtree, sans-serif", marginTop: 2 }}
+                title="Saldo lebih bayar / CR — menambah available limit">
+                +{fmtIDR(cc.cr, true)} top-up
+              </div>
+            )}
           </div>
         </div>
 

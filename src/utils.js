@@ -110,7 +110,7 @@ export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], 
       // outstanding_amount = debt (>= 0); current_balance = CR, not net worth
       ccBalance += toIDRValue(a.outstanding_amount || 0, a.currency);
     } else if (a.type === "asset") {
-      assets += Number(a.current_value || 0);
+      assets += toIDRValue(a.current_value || a.current_balance || 0, a.currency);
     } else if (a.type === "receivable") {
       receivables += Number(a.receivable_outstanding || 0);
     } else if (a.type === "liability") {
