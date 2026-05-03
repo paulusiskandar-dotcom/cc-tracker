@@ -400,6 +400,14 @@ export default function Settings({
     } catch (e) { showToast(e.message, "error"); }
   };
 
+  const toggleRecurActive = async (t) => {
+    try {
+      const updated = await recurringApi.updateTemplate(t.id, { is_active: !t.is_active });
+      setRecurTemplates(prev => prev.map(x => x.id === t.id ? { ...x, ...updated } : x));
+      showToast(updated.is_active ? "Template activated" : "Template paused");
+    } catch (e) { showToast(e.message, "error"); }
+  };
+
   // ── Actions: Merchants ─────────────────────────────────────
   const saveMerchantCat = async () => {
     const keyword = (merchantKeyword || editMerchant?.merchant_name || "").trim();
@@ -849,6 +857,7 @@ export default function Settings({
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
                 {recurTemplates.map(t => {
+                  const isPaused    = t.is_active === false;
                   const income      = t.tx_type === "income";
                   const accentColor = income ? "#059669" : "#dc2626";
                   const accentBg    = income ? "#f0fdf4" : "#fff5f5";
@@ -871,15 +880,22 @@ export default function Settings({
                   ].filter(Boolean);
 
                   return (
-                    <div key={t.id} style={{ background: "#ffffff", border: "0.5px solid #e5e7eb", borderRadius: 16, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                    <div key={t.id} style={{ background: "#ffffff", border: "0.5px solid #e5e7eb", borderRadius: 16, overflow: "hidden", display: "flex", flexDirection: "column", opacity: isPaused ? 0.55 : 1 }}>
                       {/* Color bar */}
-                      <div style={{ height: 3, background: accentColor }} />
+                      <div style={{ height: 3, background: isPaused ? "#d1d5db" : accentColor }} />
 
                       <div style={{ padding: "14px 14px 12px", flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
                         {/* Type badge */}
-                        <span style={{ display: "inline-block", alignSelf: "flex-start", background: accentBg, color: accentColor, borderRadius: 6, padding: "2px 8px", fontSize: 10, fontWeight: 700, fontFamily: "Figtree, sans-serif" }}>
-                          {income ? "INCOME" : "EXPENSE"}
-                        </span>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ display: "inline-block", background: accentBg, color: accentColor, borderRadius: 6, padding: "2px 8px", fontSize: 10, fontWeight: 700, fontFamily: "Figtree, sans-serif" }}>
+                            {txDef?.label?.toUpperCase() || t.tx_type.toUpperCase()}
+                          </span>
+                          {isPaused && (
+                            <span style={{ background: "#f3f4f6", color: "#9ca3af", borderRadius: 6, padding: "2px 7px", fontSize: 10, fontWeight: 700, fontFamily: "Figtree, sans-serif" }}>
+                              PAUSED
+                            </span>
+                          )}
+                        </div>
 
                         {/* Name */}
                         <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -904,6 +920,13 @@ export default function Settings({
 
                       {/* Bottom action bar */}
                       <div style={{ borderTop: "0.5px solid #f3f4f6", padding: "8px 14px", display: "flex", gap: 6 }}>
+                        <button
+                          onClick={() => toggleRecurActive(t)}
+                          title={isPaused ? "Activate" : "Pause"}
+                          style={{ width: 30, height: 30, border: "0.5px solid #e5e7eb", borderRadius: 8, cursor: "pointer", background: "#ffffff", color: isPaused ? "#059669" : "#9ca3af", fontSize: 14, fontFamily: "Figtree, sans-serif", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}
+                        >
+                          {isPaused ? "▶" : "⏸"}
+                        </button>
                         <button
                           onClick={() => openRecurModal(t)}
                           style={{ flex: 1, height: 30, border: "0.5px solid #e5e7eb", borderRadius: 8, cursor: "pointer", background: "#ffffff", color: "#374151", fontSize: 12, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
@@ -1092,30 +1115,20 @@ export default function Settings({
         }
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {/* Type toggle */}
-          <div style={{ display: "flex", background: T.sur2, borderRadius: 10, padding: 3, gap: 2 }}>
-            {["income", "expense"].map(t => (
-              <button
-                key={t}
-                onClick={() => setRecurForm(f => ({
-                  ...f, tx_type: t,
-                  frequency: t === "income" ? "Monthly" : "Monthly",
-                  from_id: "", to_id: "", category_id: "",
-                }))}
-                style={{
-                  flex: 1, height: 34, border: "none", borderRadius: 8,
-                  fontFamily: "Figtree, sans-serif", fontSize: 13, cursor: "pointer",
-                  background: recurForm.tx_type === t ? "#fff" : "transparent",
-                  color:      recurForm.tx_type === t ? "#111827" : "#9ca3af",
-                  fontWeight: recurForm.tx_type === t ? 700 : 500,
-                  boxShadow:  recurForm.tx_type === t ? "0 1px 4px rgba(0,0,0,0.08)" : "none",
-                  transition: "all 0.15s",
-                }}
-              >
-                {t === "income" ? "💰 Income" : "↑ Expense"}
-              </button>
-            ))}
-          </div>
+          {/* Type select */}
+          <Field label="Type">
+            <Select
+              value={recurForm.tx_type}
+              onChange={e => setRecurForm(f => ({ ...f, tx_type: e.target.value, from_id: "", to_id: "", category_id: "" }))}
+              options={[
+                { value: "expense",      label: "↑ Expense"      },
+                { value: "income",       label: "↓ Income"       },
+                { value: "transfer",     label: "↔ Transfer"     },
+                { value: "pay_cc",       label: "💳 Pay CC"       },
+                { value: "pay_liability",label: "📉 Pay Liability" },
+              ]}
+            />
+          </Field>
 
           {/* Name */}
           <Field label="Name *">
@@ -1173,70 +1186,72 @@ export default function Settings({
             </Field>
           </FormRow>
 
-          {/* INCOME-specific: To Account + Category */}
+          {/* INCOME: To account + source */}
           {recurForm.tx_type === "income" && (
             <>
               <Field label="To Account (bank)">
-                <Select
-                  value={recurForm.to_id}
-                  onChange={e => setRecurForm(f => ({ ...f, to_id: e.target.value }))}
-                  options={bankAccounts.map(a => ({ value: a.id, label: a.name }))}
-                  placeholder="Select bank account…"
-                />
+                <Select value={recurForm.to_id} onChange={e => setRecurForm(f => ({ ...f, to_id: e.target.value }))}
+                  options={bankAccounts.map(a => ({ value: a.id, label: a.name }))} placeholder="Select bank account…" />
               </Field>
               <Field label="Income Source">
-                <Select
-                  value={recurForm.category_id}
-                  onChange={e => setRecurForm(f => ({ ...f, category_id: e.target.value }))}
-                  options={incomeSrcs.map(s => ({ value: s.id, label: s.name }))}
-                  placeholder="None"
-                />
+                <Select value={recurForm.category_id} onChange={e => setRecurForm(f => ({ ...f, category_id: e.target.value }))}
+                  options={incomeSrcs.map(s => ({ value: s.id, label: s.name }))} placeholder="None" />
               </Field>
             </>
           )}
 
-          {/* EXPENSE-specific: From Account (bank/CC toggle) + Category */}
+          {/* EXPENSE: From account + category */}
           {recurForm.tx_type === "expense" && (
             <>
               <Field label="From Account">
-                {/* Bank/CC toggle */}
-                <div>
-                  <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
-                    {[
-                      { key: "bank", label: "🏦 Bank" },
-                      { key: "cc",   label: "💳 Credit Card" },
-                    ].map(({ key, label }) => {
-                      return (
-                        <button
-                          key={key}
-                          onClick={() => setRecurForm(f => ({ ...f, from_id: "" }))}
-                          style={{
-                            padding: "5px 12px", borderRadius: 8, border: "none",
-                            cursor: "pointer", fontSize: 12, fontWeight: 600,
-                            fontFamily: "Figtree, sans-serif",
-                            background: "#f3f4f6", color: "#6b7280",
-                          }}
-                        >
-                          {label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <Select
-                    value={recurForm.from_id}
-                    onChange={e => setRecurForm(f => ({ ...f, from_id: e.target.value }))}
-                    options={[...bankAccounts, ...creditCards].map(a => ({ value: a.id, label: a.name }))}
-                    placeholder="Select account…"
-                  />
-                </div>
+                <Select value={recurForm.from_id} onChange={e => setRecurForm(f => ({ ...f, from_id: e.target.value }))}
+                  options={[...bankAccounts, ...creditCards].map(a => ({ value: a.id, label: a.name }))} placeholder="Select account…" />
               </Field>
               <Field label="Category">
-                <Select
-                  value={recurForm.category_id}
-                  onChange={e => setRecurForm(f => ({ ...f, category_id: e.target.value }))}
-                  options={categories.map(c => ({ value: c.id, label: c.label || c.name || c.id }))}
-                  placeholder="None"
-                />
+                <Select value={recurForm.category_id} onChange={e => setRecurForm(f => ({ ...f, category_id: e.target.value }))}
+                  options={categories.map(c => ({ value: c.id, label: c.label || c.name || c.id }))} placeholder="None" />
+              </Field>
+            </>
+          )}
+
+          {/* TRANSFER: From + To (bank/cash) */}
+          {recurForm.tx_type === "transfer" && (
+            <>
+              <Field label="From Account">
+                <Select value={recurForm.from_id} onChange={e => setRecurForm(f => ({ ...f, from_id: e.target.value }))}
+                  options={[...bankAccounts, ...accounts.filter(a => a.type === "cash")].map(a => ({ value: a.id, label: a.name }))} placeholder="From…" />
+              </Field>
+              <Field label="To Account">
+                <Select value={recurForm.to_id} onChange={e => setRecurForm(f => ({ ...f, to_id: e.target.value }))}
+                  options={[...bankAccounts, ...accounts.filter(a => a.type === "cash")].map(a => ({ value: a.id, label: a.name }))} placeholder="To…" />
+              </Field>
+            </>
+          )}
+
+          {/* PAY CC: From bank + To credit card */}
+          {recurForm.tx_type === "pay_cc" && (
+            <>
+              <Field label="From Account (bank/cash)">
+                <Select value={recurForm.from_id} onChange={e => setRecurForm(f => ({ ...f, from_id: e.target.value }))}
+                  options={[...bankAccounts, ...accounts.filter(a => a.type === "cash")].map(a => ({ value: a.id, label: a.name }))} placeholder="From…" />
+              </Field>
+              <Field label="Credit Card">
+                <Select value={recurForm.to_id} onChange={e => setRecurForm(f => ({ ...f, to_id: e.target.value }))}
+                  options={creditCards.map(a => ({ value: a.id, label: a.name }))} placeholder="Select card…" />
+              </Field>
+            </>
+          )}
+
+          {/* PAY LIABILITY: From bank + To liability */}
+          {recurForm.tx_type === "pay_liability" && (
+            <>
+              <Field label="From Account (bank/cash)">
+                <Select value={recurForm.from_id} onChange={e => setRecurForm(f => ({ ...f, from_id: e.target.value }))}
+                  options={[...bankAccounts, ...accounts.filter(a => a.type === "cash")].map(a => ({ value: a.id, label: a.name }))} placeholder="From…" />
+              </Field>
+              <Field label="Liability Account">
+                <Select value={recurForm.to_id} onChange={e => setRecurForm(f => ({ ...f, to_id: e.target.value }))}
+                  options={accounts.filter(a => a.type === "liability").map(a => ({ value: a.id, label: a.name }))} placeholder="Select liability…" />
               </Field>
             </>
           )}

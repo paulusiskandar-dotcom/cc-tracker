@@ -17,6 +17,7 @@ import {
   flattenEmailSync,
 } from "./api";
 import { calcNetWorth, fmtIDR, todayStr, ym } from "./utils";
+import { generateMissingReminders } from "./lib/recurringDetection";
 import { Spinner, ToastContainer, showToast } from "./components/shared/index";
 import UndoToast from "./components/shared/UndoToast";
 
@@ -282,6 +283,16 @@ function Finance({ user, signOut }) {
     setInstallments(inst);
     setRecurTemplates(rtempl);
     setReminders(rem);
+
+    // Generate any missing reminder rows for overdue templates (client-side, fire-and-forget)
+    // Re-fetch reminders if new ones were inserted so sidebar badge updates immediately
+    generateMissingReminders(user.id, rtempl, rem).then(async (added) => {
+      if (added > 0) {
+        const fresh = await recurringApi.getReminders(user.id).catch(() => rem);
+        setReminders(fresh);
+      }
+    }).catch(() => {});
+
     setMerchantMaps(merch);
     if (Object.keys(fx).length) setFxRates(fx);
     setIsDark(dark);

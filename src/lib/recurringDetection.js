@@ -1,4 +1,62 @@
+import { supabase } from "./supabase";
+
 const normalize = s => (s || "").toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
+
+/**
+ * Generate recurring_reminders rows for any due date that has passed without
+ * a confirmed or skipped reminder. Called on app load so the sidebar overdue
+ * badge and Upcoming list stay accurate.
+ * Returns the count of newly inserted reminders.
+ */
+export async function generateMissingReminders(userId, templates, existingReminders) {
+  const today   = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayIso = today.toISOString().slice(0, 10);
+
+  // Index existing reminders by "templateId|due_date" for O(1) lookup
+  const existing = new Set(
+    existingReminders.map(r => `${r.template_id}|${r.due_date}`)
+  );
+
+  const toInsert = [];
+
+  for (const tpl of templates) {
+    if (tpl.is_active === false) continue;
+    if (!tpl.day_of_month)       continue;
+
+    const freq = (tpl.frequency || "Monthly").toLowerCase();
+    if (!["monthly", "weekly", "yearly", "annual"].includes(freq)) continue;
+
+    // Start from the month when the template was created
+    const origin = new Date(tpl.created_at || tpl.start_date || todayIso);
+    let cursor   = new Date(origin.getFullYear(), origin.getMonth(), tpl.day_of_month);
+
+    // If the first cursor is before the origin date, step forward one period
+    if (cursor < origin) {
+      if (freq === "monthly")           cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, tpl.day_of_month);
+      else if (freq === "yearly" || freq === "annual") cursor = new Date(cursor.getFullYear() + 1, cursor.getMonth(), tpl.day_of_month);
+      else if (freq === "weekly")       cursor = new Date(cursor.getTime() + 7 * 86400000);
+    }
+
+    let safety = 0;
+    while (cursor <= today && safety++ < 200) {
+      const dueIso = cursor.toISOString().slice(0, 10);
+      if (!existing.has(`${tpl.id}|${dueIso}`)) {
+        toInsert.push({ user_id: userId, template_id: tpl.id, due_date: dueIso, status: "pending" });
+      }
+      if (freq === "monthly")           cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, tpl.day_of_month);
+      else if (freq === "yearly" || freq === "annual") cursor = new Date(cursor.getFullYear() + 1, cursor.getMonth(), tpl.day_of_month);
+      else if (freq === "weekly")       cursor = new Date(cursor.getTime() + 7 * 86400000);
+      else break;
+    }
+  }
+
+  if (toInsert.length > 0) {
+    const { error } = await supabase.from("recurring_reminders").insert(toInsert);
+    if (error) console.warn("[generateMissingReminders]", error.message);
+  }
+  return toInsert.length;
+}
 
 /**
  * Detect recurring transaction patterns in a ledger array.
