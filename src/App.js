@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { BrowserRouter, Routes, Route, useNavigate, useLocation } from "react-router-dom";
 import {
   Home, ArrowUpDown, Landmark, Wallet, CreditCard,
   TrendingUp, ClipboardList, ArrowDown, BarChart2,
@@ -32,6 +33,9 @@ import Settings     from "./components/Settings";
 import AIImport     from "./components/AIImport";
 import Email        from "./components/Email";
 import Reconcile    from "./components/Reconcile";
+import StatementPage          from "./pages/StatementPage";
+import ReimburseStatementPage from "./pages/ReimburseStatementPage";
+import LoanStatementPage      from "./pages/LoanStatementPage";
 
 // ─── AUTH GATE ────────────────────────────────────────────────
 function AuthGate({ children }) {
@@ -166,18 +170,29 @@ function AuthGate({ children }) {
 // ─── MAIN APP ─────────────────────────────────────────────────
 export default function App() {
   return (
-    <AuthGate>
-      {({ user, signOut }) => <Finance user={user} signOut={signOut} />}
-    </AuthGate>
+    <BrowserRouter>
+      <AuthGate>
+        {({ user, signOut }) => <Finance user={user} signOut={signOut} />}
+      </AuthGate>
+    </BrowserRouter>
   );
 }
 
 // ─── FINANCE SHELL ────────────────────────────────────────────
 function Finance({ user, signOut }) {
+  const navigate     = useNavigate();
+  const location     = useLocation();
+  const onMainPage   = location.pathname === "/";
+
   const [tab, setTab]           = useState(() => {
     const hash = window.location.hash.replace("#", "");
     return TABS.some(t => t.id === hash) ? hash : "dashboard";
   });
+
+  const goTab = useCallback((tabId) => {
+    if (!onMainPage) navigate("/");
+    setTab(tabId);
+  }, [onMainPage, navigate]);
   const [settingsInitialTab,  setSettingsInitialTab]  = useState(null);
   const setSettingsTab = (subTabId) => { setSettingsInitialTab(subTabId); setTab("settings"); };
   const [emailInitialTab, setEmailInitialTab] = useState("pending");
@@ -344,7 +359,9 @@ function Finance({ user, signOut }) {
   );
 
   const EXTRA_LABELS = { scan: "AI Scan", aiimport: "AI Scan", email: "Email" };
-  const pageLabel = TABS.find(t => t.id === tab)?.label || EXTRA_LABELS[tab] || "Dashboard";
+  const pageLabel = !onMainPage
+    ? "Statement"
+    : (TABS.find(t => t.id === tab)?.label || EXTRA_LABELS[tab] || "Dashboard");
   const nwColor   = netWorth.total >= 0 ? "#059669" : "#dc2626";
   const overdueReminders = reminders.filter(r => {
     const daysLeft = Math.ceil((new Date(r.due_date) - new Date()) / 86400000);
@@ -387,12 +404,12 @@ function Finance({ user, signOut }) {
         {/* Nav items */}
         <nav style={{ flex: 1, padding: "4px 8px", display: "flex", flexDirection: "column", gap: 2 }}>
           {TABS.map(t => {
-            const active = tab === t.id;
+            const active = tab === t.id && onMainPage;
             const isReminders = t.id === "reminders";
             return (
               <button
                 key={t.id}
-                onClick={() => setTab(t.id)}
+                onClick={() => goTab(t.id)}
                 style={{
                   ...S.navItem,
                   background: active ? "#f3f4f6" : "transparent",
@@ -456,11 +473,16 @@ function Finance({ user, signOut }) {
 
         {/* Page content */}
         <main
-          key={tab}
+          key={onMainPage ? tab : location.pathname}
           className="fade-up page-content"
           style={{ flex: 1, padding: "20px 24px", maxWidth: 840, width: "100%", margin: "0 auto", paddingBottom: 88 }}
         >
-          {renderPage()}
+          <Routes>
+            <Route path="/accounts/:id/statement"         element={<StatementPage          {...shared} />} />
+            <Route path="/reimburse/:entity/statement"    element={<ReimburseStatementPage {...shared} />} />
+            <Route path="/loans/:loanId/statement"        element={<LoanStatementPage      {...shared} />} />
+            <Route path="*"                               element={renderPage()} />
+          </Routes>
         </main>
       </div>
 
@@ -468,9 +490,9 @@ function Finance({ user, signOut }) {
       <nav className="mobile-nav" style={S.mobileNav}>
         {MOBILE_MAIN_TABS.map(id => {
           const t      = TABS.find(s => s.id === id);
-          const active = tab === id;
+          const active = tab === id && onMainPage;
           return (
-            <button key={id} onClick={() => { setTab(id); setShowMore(false); }} style={{
+            <button key={id} onClick={() => { goTab(id); setShowMore(false); }} style={{
               ...S.mobileNavBtn,
               color: active ? "#3b5bdb" : "#9ca3af",
             }}>
@@ -502,11 +524,11 @@ function Finance({ user, signOut }) {
               gap:                 8,
             }}>
               {MOBILE_MORE_TABS.map(t => {
-                const active = tab === t.id;
+                const active = tab === t.id && onMainPage;
                 return (
                   <button
                     key={t.id}
-                    onClick={() => { setTab(t.id); setShowMore(false); }}
+                    onClick={() => { goTab(t.id); setShowMore(false); }}
                     style={{
                       ...S.moreBtn,
                       border:     `1.5px solid ${active ? "#3b5bdb" : "#e5e7eb"}`,

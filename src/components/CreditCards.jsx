@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { ledgerApi, installmentsApi, recurringApi, getTxFromToTypes, accountsApi } from "../api";
 import { supabase } from "../lib/supabase";
-import CCStatement from "./CCStatement";
 import { ENTITIES, BANKS_L, NETWORKS } from "../constants";
 import { fmtIDR, todayStr, ym, daysUntil } from "../utils";
 import Modal, { ConfirmModal } from "./shared/Modal";
@@ -69,15 +69,12 @@ export default function CreditCards({
 
   const [subTab,           setSubTab]           = useState("overview");
   const [selectedCard,     setSelectedCard]     = useState(null);
-  const [ccStatementAcc,      setCcStatementAcc]      = useState(null);
-  const [ccReconcileSeeds,    setCcReconcileSeeds]    = useState(null); // { from, to, txs, filename }
-  const [ccReconcileFullState, setCcReconcileFullState] = useState(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!pendingReconcileNav || pendingReconcileNav.accType !== "credit_card") return;
-    setCcStatementAcc(pendingReconcileNav.acc);
-    setCcReconcileSeeds(pendingReconcileNav.seeds);
-    setCcReconcileFullState(pendingReconcileNav.seeds?.fullState || null);
+    const seeds = pendingReconcileNav.seeds || null;
+    navigate(`/accounts/${pendingReconcileNav.acc.id}/statement`, { state: { reconcileSeeds: seeds } });
     setPendingReconcileNav?.(null);
   }, [pendingReconcileNav]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -491,35 +488,6 @@ export default function CreditCards({
   };
 
   // ─── RENDER ────────────────────────────────────────────────
-  if (ccStatementAcc) {
-    return (
-      <CCStatement
-        initialAccount={ccStatementAcc}
-        accounts={accounts}
-        user={user}
-        categories={[]}
-        onRefresh={onRefresh}
-        onBack={() => { setCcStatementAcc(null); setCcReconcileSeeds(null); }}
-        bankAccounts={bankAccounts}
-        creditCards={creditCards}
-        assets={[]}
-        liabilities={[]}
-        receivables={[]}
-        allCurrencies={[]}
-        fxRates={{}}
-        incomeSrcs={[]}
-        initialFromDate={ccReconcileSeeds?.from || null}
-        initialToDate={ccReconcileSeeds?.to || null}
-        initialSelectedMonth={ccReconcileSeeds?.selectedMonth || null}
-        initialReconcileTxs={ccReconcileSeeds?.txs || null}
-        initialReconcileFilename={ccReconcileSeeds?.filename || ""}
-        initialReconcileFullState={ccReconcileFullState}
-        initialReconcileBlobUrl={ccReconcileSeeds?.blobUrl || null}
-        initialReconcileClosingBal={ccReconcileSeeds?.closingBal ?? null}
-        initialReconcileOpeningBal={ccReconcileSeeds?.openingBal ?? null}
-      />
-    );
-  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -545,8 +513,7 @@ export default function CreditCards({
               to   = new Date(year, month, 0).toISOString().slice(0, 10);
             }
             const selectedMonth = `${year}-${String(month).padStart(2, "0")}`;
-            setCcReconcileSeeds({ from, to, selectedMonth, txs, filename, blobUrl, closingBal, openingBal });
-            setCcStatementAcc(acc);
+            navigate(`/accounts/${acc.id}/statement`, { state: { reconcileSeeds: { from, to, selectedMonth, txs, filename, blobUrl, closingBal, openingBal } } });
           }}
         />
         <Button variant="secondary" size="sm" onClick={() => { setAddCardForm(emptyCardForm()); setModal("add_card"); }}>
@@ -566,9 +533,7 @@ export default function CreditCards({
         accounts={accounts}
         filterType="credit_card"
         onContinue={(acc, state) => {
-          setCcReconcileSeeds(null);
-          setCcReconcileFullState(state || null);
-          setCcStatementAcc(acc);
+          navigate(`/accounts/${acc.id}/statement`, { state: { reconcileSeeds: { fullState: state || null } } });
         }}
       />
 
@@ -686,7 +651,7 @@ export default function CreditCards({
                       onPay={(cc) => { setPayForm(f => ({ ...f, cardId: cc.id, amount: cc.debt })); setModal("pay"); }}
                       onTransactions={(cc) => { setSelectedCard(cc.id); setSubTab("transactions"); }}
                       onInstallments={() => setSubTab("installments")}
-                      onStatement={(cc) => setCcStatementAcc(cc)}
+                      onStatement={(cc) => navigate(`/accounts/${cc.id}/statement`)}
                       onEdit={(cc) => openEditCard(cc)}
                     />
                   ) : (
@@ -697,7 +662,7 @@ export default function CreditCards({
                           onPay={() => { setPayForm(f => ({ ...f, cardId: cc.id, amount: cc.debt })); setModal("pay"); }}
                           onTransactions={() => { setSelectedCard(cc.id); setSubTab("transactions"); }}
                           onInstallments={() => setSubTab("installments")}
-                          onStatement={() => setCcStatementAcc(cc)}
+                          onStatement={() => navigate(`/accounts/${cc.id}/statement`)}
                           onEdit={() => openEditCard(cc)}
                         />
                       ))}

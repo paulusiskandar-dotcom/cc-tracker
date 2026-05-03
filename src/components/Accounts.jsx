@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { accountsApi, ledgerApi, getTxFromToTypes, recalculateBalance } from "../api";
-import BankStatement from "./BankStatement";
 import {
   BANKS_L, NETWORKS, ASSET_SUBTYPES, LIAB_SUBTYPES,
   ACC_TYPE_LABEL, ACC_TYPE_ICON, REIMBURSE_ENTITIES,
@@ -74,15 +74,12 @@ export default function Accounts({
   const [nilaiAcc,  setNilaiAcc]  = useState(null);
   const [nilaiForm, setNilaiForm] = useState({ value: "", date: "", notes: "" });
   const [nilaiSaving, setNilaiSaving] = useState(false);
-  const [statementAcc,          setStatementAcc]          = useState(null);
-  const [bankReconcileSeeds,    setBankReconcileSeeds]    = useState(null); // { from, to, txs, filename }
-  const [bankReconcileFullState, setBankReconcileFullState] = useState(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (!pendingReconcileNav || pendingReconcileNav.accType !== "bank") return;
-    setStatementAcc(pendingReconcileNav.acc);
-    setBankReconcileSeeds(pendingReconcileNav.seeds);
-    setBankReconcileFullState(pendingReconcileNav.seeds?.fullState || null);
+    const seeds = pendingReconcileNav.seeds || null;
+    navigate(`/accounts/${pendingReconcileNav.acc.id}/statement`, { state: { reconcileSeeds: seeds } });
     setPendingReconcileNav?.(null);
   }, [pendingReconcileNav]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -327,35 +324,6 @@ export default function Accounts({
   };
 
   // ─── RENDER ──────────────────────────────────────────────────
-  // Statement view replaces page content when an account is selected
-  if (statementAcc) {
-    return (
-      <BankStatement
-        initialAccount={statementAcc}
-        accounts={accounts}
-        user={user}
-        categories={categories}
-        onRefresh={onRefresh}
-        onBack={() => { setStatementAcc(null); setBankReconcileSeeds(null); }}
-        bankAccounts={bankAccounts}
-        creditCards={creditCards}
-        assets={assets}
-        liabilities={liabilities}
-        receivables={receivables}
-        allCurrencies={CURRENCIES}
-        fxRates={fxRates}
-        incomeSrcs={incomeSrcs}
-        initialFromDate={bankReconcileSeeds?.from || null}
-        initialToDate={bankReconcileSeeds?.to || null}
-        initialReconcileTxs={bankReconcileSeeds?.txs || null}
-        initialReconcileFilename={bankReconcileSeeds?.filename || ""}
-        initialReconcileFullState={bankReconcileFullState}
-        initialReconcileBlobUrl={bankReconcileSeeds?.blobUrl || null}
-        initialReconcileClosingBal={bankReconcileSeeds?.closingBal ?? null}
-        initialReconcileOpeningBal={bankReconcileSeeds?.openingBal ?? null}
-      />
-    );
-  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -372,8 +340,7 @@ export default function Accounts({
               onNavigate={(acc, year, month, txs, filename, blobUrl, closingBal, openingBal) => {
                 const from = `${year}-${String(month).padStart(2, "0")}-01`;
                 const to   = new Date(year, month, 0).toISOString().slice(0, 10);
-                setBankReconcileSeeds({ from, to, txs, filename, blobUrl, closingBal, openingBal });
-                setStatementAcc(acc);
+                navigate(`/accounts/${acc.id}/statement`, { state: { reconcileSeeds: { from, to, txs, filename, blobUrl, closingBal, openingBal } } });
               }}
             />
           )}
@@ -387,9 +354,7 @@ export default function Accounts({
         accounts={accounts}
         filterType="bank"
         onContinue={(acc, state) => {
-          setBankReconcileSeeds(null);
-          setBankReconcileFullState(state || null);
-          setStatementAcc(acc);
+          navigate(`/accounts/${acc.id}/statement`, { state: { reconcileSeeds: { fullState: state || null } } });
         }}
       />
 
@@ -405,7 +370,7 @@ export default function Accounts({
               onEdit={openEdit}
               onDelete={(a) => setDeleteAcc(a)}
               onHistory={(a) => { setHistAcc(a); setModal("history"); }}
-              onStatement={(a) => setStatementAcc(a)}
+              onStatement={(a) => navigate(`/accounts/${a.id}/statement`)}
             />
       )}
 
@@ -421,7 +386,7 @@ export default function Accounts({
               onEdit={openEdit}
               onDelete={(a) => setDeleteAcc(a)}
               onHistory={(a) => { setHistAcc(a); setModal("history"); }}
-              onStatement={(a) => setStatementAcc(a)}
+              onStatement={(a) => navigate(`/accounts/${a.id}/statement`)}
             />
       )}
 

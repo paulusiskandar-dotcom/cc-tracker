@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { accountsApi, ledgerApi, getTxFromToTypes } from "../api";
 import { supabase } from "../lib/supabase";
-import AssetTimeline from "./AssetTimeline";
 import { fmtIDR, todayStr } from "../utils";
 import { ASSET_SUBTYPES, ASSET_ICON, ASSET_COL } from "../constants";
 import { LIGHT, DARK } from "../theme";
@@ -298,8 +298,7 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
   const [selectedAsset, setSelectedAsset] = useState(null);
   const [updateForm,    setUpdateForm]    = useState({ value: "", date: todayStr(), notes: "" });
 
-  // Timeline state
-  const [timelineAsset, setTimelineAsset] = useState(null);
+  const navigate = useNavigate();
 
   // asset_value_history counts per account_id
   const [valueHistoryCounts, setValueHistoryCounts] = useState({});
@@ -490,24 +489,6 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
     setSaving(false);
   };
 
-  if (timelineAsset) {
-    return (
-      <AssetTimeline
-        asset={timelineAsset}
-        user={user}
-        accounts={accounts}
-        ledger={ledger}
-        setLedger={setLedger}
-        onBack={() => setTimelineAsset(null)}
-        onRefresh={onRefresh}
-        setAccounts={setAccounts}
-        categories={categories}
-        fxRates={fxRates}
-        allCurrencies={CURRENCIES}
-      />
-    );
-  }
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
@@ -588,7 +569,7 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
                   valueHistoryCount={valueHistoryCounts[a.id] || 0}
                   color={color}
                   onUpdate={() => openUpdateModal(a)}
-                  onTimeline={() => setTimelineAsset(a)}
+                  onTimeline={() => navigate(`/accounts/${a.id}/statement`)}
                 />
               );
             })}

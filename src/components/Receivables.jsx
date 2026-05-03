@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { ledgerApi, employeeLoanApi, loanPaymentsApi, recalculateBalance } from "../api";
 import { supabase } from "../lib/supabase";
 import { fmtIDR, todayStr, agingLabel } from "../utils";
@@ -150,10 +151,7 @@ export default function Receivables({
   const [selectedLoan,  setSelectedLoan]  = useState(null);
   const [loanForm,      setLoanForm]      = useState(EMPTY_LOAN);
 
-  // Statement modal
-  const [stmtOpen, setStmtOpen] = useState(false);
-  const [stmtLoan, setStmtLoan] = useState(null);
-  const stmtPrintRef = useRef(null);
+  const navigate = useNavigate();
 
   // TransactionModal for + Payment
   const [txModalOpen, setTxModalOpen] = useState(false);
@@ -1178,7 +1176,7 @@ export default function Receivables({
                       {/* Row 2: Statement + Edit + Delete */}
                       <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                         <button
-                          onClick={() => { setStmtLoan(loan); setStmtOpen(true); }}
+                          onClick={() => navigate(`/loans/${loan.id}/statement`)}
                           style={{ flex: 1, height: 28, padding: "0 10px", border: "1px solid #e5e7eb", borderRadius: 7, cursor: "pointer", background: "#fff", color: "#374151", fontSize: 11, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
                         >
                           Statement
@@ -1347,124 +1345,7 @@ export default function Receivables({
         <LoanFormFields form={loanForm} setForm={setLoanForm} T={T} />
       </Modal>
 
-      {/* ── STATEMENT MODAL ──────────────────────────────────── */}
-      {stmtOpen && stmtLoan && (() => {
-        const loan         = stmtLoan;
-        const total        = Number(loan.total_amount || 0);
-        const payments     = loanPayments
-          .filter(p => p.loan_id === loan.id)
-          .sort((a, b) => (a.pay_date || "").localeCompare(b.pay_date || ""));
-        const totalCollected = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
-        const outstanding    = Math.max(0, total - totalCollected);
-        const isSettledLoan  = loan.status === "settled" || outstanding <= 0;
-
-        let runBal = total;
-        const tableRows = payments.map(p => {
-          runBal = Math.max(0, runBal - Number(p.amount || 0));
-          return { ...p, sisa: runBal };
-        });
-
-        const exportPDF = () => {
-          const prev = document.title;
-          document.title = `${loan.employee_name}_LoanStatement`;
-          window.print();
-          document.title = prev;
-        };
-
-        const COL = "Figtree, sans-serif";
-        const TH = { fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.05em", padding: "6px 8px", borderBottom: "1.5px solid #e5e7eb", fontFamily: COL };
-        const TD = { fontSize: 12, padding: "8px 8px", borderBottom: "0.5px solid #f3f4f6", fontFamily: COL, verticalAlign: "top" };
-
-        return (
-          <Modal
-            isOpen={stmtOpen}
-            onClose={() => { setStmtOpen(false); setStmtLoan(null); }}
-            title="Loan Statement"
-            width={600}
-            footer={
-              <div className="no-print" style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                <Button variant="secondary" size="md" onClick={() => { setStmtOpen(false); setStmtLoan(null); }}>Close</Button>
-                <Button variant="primary" size="md" onClick={exportPDF}>🖨 PDF</Button>
-              </div>
-            }
-          >
-            <div ref={stmtPrintRef} style={{ display: "flex", flexDirection: "column", gap: 16, fontFamily: COL }}>
-
-              {/* ── Header ── */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                <div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: "#111827" }}>{loan.employee_name}</div>
-                  {loan.employee_dept && <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 2 }}>{loan.employee_dept}</div>}
-                </div>
-                <span style={{
-                  display: "inline-flex", alignItems: "center",
-                  padding: "4px 12px", borderRadius: 99, fontSize: 11, fontWeight: 700,
-                  background: isSettledLoan ? "#dcfce7" : "#fef3c7",
-                  color:      isSettledLoan ? "#059669" : "#d97706",
-                }}>
-                  {isSettledLoan ? "Settled" : "Active"}
-                </span>
-              </div>
-
-              {/* ── Summary ── */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-                {[
-                  { label: "Total Loaned",     value: fmtIDR(total),          color: "#3b5bdb" },
-                  { label: "Total Collected",  value: fmtIDR(totalCollected), color: "#059669" },
-                  { label: "Outstanding",      value: fmtIDR(outstanding),    color: outstanding > 0 ? "#d97706" : "#059669" },
-                ].map(s => (
-                  <div key={s.label} style={{ background: s.color + "12", borderRadius: 10, padding: "12px 12px" }}>
-                    <div style={{ fontSize: 9, fontWeight: 700, color: s.color, textTransform: "uppercase", letterSpacing: "0.4px", marginBottom: 4, opacity: 0.8 }}>{s.label}</div>
-                    <div style={{ fontSize: 14, fontWeight: 800, color: "#111827" }}>{s.value}</div>
-                  </div>
-                ))}
-              </div>
-
-              {/* ── Table ── */}
-              <div style={{ overflowX: "auto" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr>
-                      <th style={{ ...TH, textAlign: "left", width: 88 }}>Tanggal</th>
-                      <th style={{ ...TH, textAlign: "left" }}>Keterangan</th>
-                      <th style={{ ...TH, textAlign: "right", width: 100 }}>Pinjam</th>
-                      <th style={{ ...TH, textAlign: "right", width: 100 }}>Bayar</th>
-                      <th style={{ ...TH, textAlign: "right", width: 110 }}>Sisa Hutang</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {/* Opening row */}
-                    {loan.start_date && (
-                      <tr style={{ background: "#f0f9ff" }}>
-                        <td style={{ ...TD, color: "#6b7280" }}>{loan.start_date}</td>
-                        <td style={{ ...TD, fontWeight: 600, color: "#111827" }}>Initial Loan</td>
-                        <td style={{ ...TD, textAlign: "right", fontWeight: 700, color: "#3b5bdb" }}>{fmtIDR(total, true)}</td>
-                        <td style={{ ...TD, textAlign: "right" }}>—</td>
-                        <td style={{ ...TD, textAlign: "right", fontWeight: 700, color: "#374151" }}>{fmtIDR(total, true)}</td>
-                      </tr>
-                    )}
-                    {/* Payment rows */}
-                    {tableRows.map(row => (
-                      <tr key={row.id}>
-                        <td style={{ ...TD, color: "#6b7280" }}>{row.pay_date}</td>
-                        <td style={{ ...TD, color: "#374151" }}>{row.notes || "Payment"}</td>
-                        <td style={{ ...TD, textAlign: "right" }}>—</td>
-                        <td style={{ ...TD, textAlign: "right", fontWeight: 700, color: "#059669" }}>{fmtIDR(Number(row.amount || 0), true)}</td>
-                        <td style={{ ...TD, textAlign: "right", fontWeight: 700, color: row.sisa <= 0 ? "#059669" : "#374151" }}>
-                          {row.sisa <= 0 ? <span style={{ color: "#059669" }}>LUNAS</span> : fmtIDR(row.sisa, true)}
-                        </td>
-                      </tr>
-                    ))}
-                    {tableRows.length === 0 && (
-                      <tr><td colSpan={5} style={{ ...TD, textAlign: "center", color: "#9ca3af" }}>No payments recorded yet</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </Modal>
-        );
-      })()}
+      {/* Loan Statement → /loans/:id/statement */}}
 
       {/* ── TRANSACTION MODAL (+ Payment) ─────────────────────── */}
       <TxVerticalBig
