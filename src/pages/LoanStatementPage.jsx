@@ -109,9 +109,9 @@ export default function LoanStatementPage({ employeeLoans = [], loanPayments = [
                 <tr style={{ background: "#f0f9ff" }}>
                   <td style={{ ...TD, color: "#6b7280" }}>{loan.start_date}</td>
                   <td style={{ ...TD, fontWeight: 600, color: "#111827" }}>Initial Loan</td>
-                  <td style={{ ...TD, textAlign: "right", fontWeight: 700, color: "#3b5bdb" }}>{fmtIDR(total, true)}</td>
+                  <td style={{ ...TD, textAlign: "right", fontWeight: 700, color: "#3b5bdb" }}>{fmtIDR(total)}</td>
                   <td style={{ ...TD, textAlign: "right" }}>—</td>
-                  <td style={{ ...TD, textAlign: "right", fontWeight: 700, color: "#374151" }}>{fmtIDR(total, true)}</td>
+                  <td style={{ ...TD, textAlign: "right", fontWeight: 700, color: "#374151" }}>{fmtIDR(total)}</td>
                 </tr>
               )}
               {tableRows.map(row => (
@@ -119,9 +119,9 @@ export default function LoanStatementPage({ employeeLoans = [], loanPayments = [
                   <td style={{ ...TD, color: "#6b7280" }}>{row.pay_date}</td>
                   <td style={{ ...TD, color: "#374151" }}>{row.notes || "Payment"}</td>
                   <td style={{ ...TD, textAlign: "right" }}>—</td>
-                  <td style={{ ...TD, textAlign: "right", fontWeight: 700, color: "#059669" }}>{fmtIDR(Number(row.amount || 0), true)}</td>
+                  <td style={{ ...TD, textAlign: "right", fontWeight: 700, color: "#059669" }}>{fmtIDR(Number(row.amount || 0))}</td>
                   <td style={{ ...TD, textAlign: "right", fontWeight: 700, color: row.sisa <= 0 ? "#059669" : "#374151" }}>
-                    {row.sisa <= 0 ? <span style={{ color: "#059669" }}>LUNAS</span> : fmtIDR(row.sisa, true)}
+                    {row.sisa <= 0 ? <span style={{ color: "#059669" }}>LUNAS</span> : fmtIDR(row.sisa)}
                   </td>
                 </tr>
               ))}
