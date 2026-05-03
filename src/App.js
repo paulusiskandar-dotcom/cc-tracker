@@ -3,6 +3,7 @@ import {
   Home, ArrowUpDown, Landmark, Wallet, CreditCard,
   TrendingUp, ClipboardList, ArrowDown, BarChart2,
   Calendar as CalendarIcon, Settings as SettingsIcon, LayoutGrid,
+  ClipboardCheck,
 } from "lucide-react";
 import PILogo from "./components/PILogo";
 import { supabase } from "./lib/supabase";
@@ -30,6 +31,7 @@ import Calendar     from "./components/Calendar";
 import Settings     from "./components/Settings";
 import AIImport     from "./components/AIImport";
 import Email        from "./components/Email";
+import Reconcile    from "./components/Reconcile";
 
 // ─── AUTH GATE ────────────────────────────────────────────────
 function AuthGate({ children }) {
@@ -363,6 +365,7 @@ function Finance({ user, signOut }) {
       case "reports":      return <Reports      {...shared} />;
       case "calendar":     return <Calendar     {...shared} />;
       case "settings":     return <Settings     {...shared} signOut={signOut} initialTab={settingsInitialTab} />;
+      case "reconcile":    return <Reconcile    {...shared} />;
       case "scan":         return <AIImport     {...shared} />;
       case "aiimport":     return <AIImport     {...shared} />; // legacy redirect
       case "email":        return <Email        {...shared} initialTab={emailInitialTab} />;
@@ -545,6 +548,7 @@ function NAV_ICON({ id }) {
     case "income":       return <ArrowDown      {...LUCIDE_PROPS} />;
     case "reports":      return <BarChart2     {...LUCIDE_PROPS} />;
     case "calendar":     return <CalendarIcon  {...LUCIDE_PROPS} />;
+    case "reconcile":    return <ClipboardCheck {...LUCIDE_PROPS} />;
     case "settings":     return <SettingsIcon  {...LUCIDE_PROPS} />;
     case "more":         return <LayoutGrid    {...LUCIDE_PROPS} />;
     default:             return null;

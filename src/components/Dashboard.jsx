@@ -887,7 +887,6 @@ export default function Dashboard({
           />
           {[
             { label: "Email Sync",  onClick: () => openEmail?.("pending") },
-            { label: "E-Statement", onClick: () => setSettingsTab?.("estatement") },
             { label: "AI Scan",     onClick: () => setTab?.("scan"), icon: true },
           ].map(({ label, onClick, icon }) => (
             <button key={label} onClick={onClick} style={{

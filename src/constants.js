@@ -162,6 +162,7 @@ export const TABS = [
   { id: "income",       label: "Income"       },
   { id: "reports",      label: "Reports"      },
   { id: "calendar",     label: "Calendar"     },
+  { id: "reconcile",    label: "Reconcile"    },
   { id: "settings",     label: "Settings"     },
 ];
 
@@ -173,6 +174,7 @@ export const MOBILE_MORE_TABS = [
   { id: "income",      label: "Income"       },
   { id: "reports",     label: "Reports"      },
   { id: "calendar",    label: "Calendar"     },
+  { id: "reconcile",   label: "Reconcile"    },
   { id: "settings",    label: "Settings"     },
 ];
 
