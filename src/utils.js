@@ -94,6 +94,7 @@ export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], 
 
   const toIDRValue = (amount, currency) => {
     if (!currency || currency === "IDR") return Number(amount || 0);
+    if (!fxRates[currency]) console.warn(`[calcNetWorth] No FX rate for ${currency}, defaulting to 1`);
     return Number(amount || 0) * (fxRates[currency] || 1);
   };
 

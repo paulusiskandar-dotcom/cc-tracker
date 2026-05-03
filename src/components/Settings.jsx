@@ -303,8 +303,20 @@ export default function Settings({
   };
 
   // ── Actions: FX ────────────────────────────────────────────
-  const [fxEditCode, setFxEditCode] = useState(null);
-  const [fxEditVal,  setFxEditVal]  = useState("");
+  const [fxEditCode,   setFxEditCode]   = useState(null);
+  const [fxEditVal,    setFxEditVal]    = useState("");
+  const [refreshingFx, setRefreshingFx] = useState(false);
+  const [fxMeta,       setFxMeta]       = useState({});
+
+  useEffect(() => {
+    if (subTab !== "fx" || !user) return;
+    supabase.from("fx_rates").select("currency,updated_at").eq("user_id", user.id)
+      .then(({ data }) => {
+        const meta = {};
+        (data || []).forEach(r => { meta[r.currency] = r.updated_at; });
+        setFxMeta(meta);
+      });
+  }, [subTab, user?.id]);
 
   const saveFxRates = async () => {
     setSaving(true);
@@ -331,6 +343,28 @@ export default function Settings({
       showToast(`${code} rate updated`);
     } catch (e) { showToast(e.message, "error"); }
     setSaving(false);
+  };
+
+  const handleRefreshFxRates = async () => {
+    setRefreshingFx(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("fx-rates-sync", { body: {} });
+      if (error) throw error;
+      const newRates = await fxApi.getAll(user.id);
+      const rateMap = Object.fromEntries(
+        CURRENCIES.filter(c => c.code !== "IDR").map(c => [c.code, newRates[c.code] || c.rate])
+      );
+      setRates(rateMap);
+      setFxRates(newRates);
+      const { data: metaRows } = await supabase.from("fx_rates").select("currency,updated_at").eq("user_id", user.id);
+      const meta = {};
+      (metaRows || []).forEach(r => { meta[r.currency] = r.updated_at; });
+      setFxMeta(meta);
+      showToast(`✓ ${data?.rates_upserted ?? "?"} rates updated`);
+    } catch (err) {
+      showToast(`Failed to refresh: ${err.message}`, "error");
+    }
+    setRefreshingFx(false);
   };
 
   // ── Actions: Recurring ─────────────────────────────────────
@@ -792,6 +826,11 @@ export default function Settings({
                     <span style={{ fontSize: 14, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>
                       Rp {(rates[c.code] || 0).toLocaleString("id-ID")}
                     </span>
+                    {fxMeta[c.code] && (
+                      <span style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, sans-serif" }}>
+                        {new Date(fxMeta[c.code]).toLocaleString("id-ID", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    )}
                     <button
                       onClick={() => { setFxEditCode(c.code); setFxEditVal(String(rates[c.code] || "")); }}
                       style={{
@@ -810,6 +849,9 @@ export default function Settings({
           <div style={{ marginTop: 14, display: "flex", gap: 8 }}>
             <Button variant="primary" size="md" busy={saving} onClick={saveFxRates}>
               Save All Rates
+            </Button>
+            <Button variant="secondary" size="md" busy={refreshingFx} onClick={handleRefreshFxRates}>
+              {refreshingFx ? "Refreshing..." : "🔄 Refresh from API"}
             </Button>
           </div>
         </div>
