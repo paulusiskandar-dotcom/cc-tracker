@@ -617,7 +617,12 @@ export default function TxVerticalBig({
 
       // ── General path ──────────────────────────────────────────
       const { from_type, to_type } = getTxFromToTypes(type);
-      const desc = form.description?.trim() || null;
+      const _fromAccG = accounts.find(a => a.id === form.from_id);
+      const _toAccG   = accounts.find(a => a.id === form.to_id);
+      const _autoDesc = (type === "pay_cc" || type === "transfer")
+        ? `${_fromAccG?.name || "?"} → ${_toAccG?.name || "?"}`
+        : null;
+      const desc = form.description?.trim() || _autoDesc || null;
       const cat  = categories.find(c => c.id === form.category_id);
 
       let computedAmtIDR = sn(amtIDR);

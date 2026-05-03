@@ -332,7 +332,7 @@ export default function Transactions({
 }
 
 // ─── TWO-DIRECTIONAL TYPES ────────────────────────────────────
-const TWO_DIR_TYPES = new Set(["transfer", "pay_cc"]);
+const TWO_DIR_TYPES = new Set(["transfer", "pay_cc", "fx_exchange"]);
 
 function getTxExpandedContent(e, fromAcc, toAcc) {
   const amtIDR = Number(e.amount_idr || e.amount || 0);
@@ -346,15 +346,15 @@ function getTxExpandedContent(e, fromAcc, toAcc) {
     case "sell_asset":
       return { label: toAcc?.name || "?", amount: `+${fmtIDR(amtIDR)}`, positive: true };
     case "fx_exchange": {
-      const desc = e.description || "";
-      const foreignCurrency = desc.split(" ")[1] || "";
-      const rate = Number(e.fx_rate_used || 0);
-      const isBuy = desc.startsWith("Buy");
-      if (isBuy && foreignCurrency && rate > 0) {
-        const foreignAmt = Math.round((amtIDR / rate) * 100) / 100;
-        return { label: toAcc?.name || "?", amount: `+${fmtCur(foreignAmt, foreignCurrency)}`, positive: true };
-      }
-      return { label: toAcc?.name || "?", amount: `+${fmtIDR(amtIDR)}`, positive: true };
+      // amount = from-currency units, fx_rate_used = "1 to-unit in from-units" (canonical)
+      const toCur  = toAcc?.currency || "IDR";
+      const rate   = Number(e.fx_rate_used || 0);
+      const toAmt  = rate > 0 ? Number(e.amount || 0) / rate : 0;
+      return {
+        label:    toAcc?.name || "?",
+        amount:   toAmt > 0 ? `+${fmtCur(toAmt, toCur)}` : `+${fmtIDR(amtIDR)}`,
+        positive: true,
+      };
     }
     case "reimburse_out": {
       const entityLabel = e.entity && e.entity !== "Personal" ? e.entity : (toAcc?.name || "?");
@@ -413,7 +413,7 @@ function TxRow({ entry: e, accounts, categories = [], onEdit, onDelete }) {
     pay_cc:        { bg: "#EDE8FF", color: "#5B2DC4", label: "Pay CC"        },
     buy_asset:     { bg: "#FDE8E8", color: "#C0392B", label: "Buy Asset"     },
     sell_asset:    { bg: "#DFF5E8", color: "#1A7A42", label: "Sell Asset"    },
-    fx_exchange:   { bg: "#FFF4DC", color: "#A0620A", label: "FX Exchange"   },
+    // fx_exchange: no badge — title already shows "SGD → IDR" direction
     reimburse_out: { bg: "#FDE8E8", color: "#C0392B", label: "Reimburse Out" },
     reimburse_in:  { bg: "#DFF5E8", color: "#1A7A42", label: "Reimburse In"  },
     give_loan:     { bg: "#FDE8E8", color: "#C0392B", label: "Give Loan"     },
