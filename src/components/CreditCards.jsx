@@ -41,6 +41,41 @@ const CC_BTN = (bg, color, border = "transparent") => ({
   fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap",
 });
 
+const CC_SECONDARY_BTN = {
+  background: "transparent", border: "0.5px solid rgba(0,0,0,0.15)",
+  padding: "8px 10px", borderRadius: 8, fontSize: 12, cursor: "pointer",
+  color: "#5F5E5A", fontFamily: "Figtree, sans-serif",
+};
+
+// ─── DUE DATE HELPERS ─────────────────────────────────────────
+function formatDueDate(dueDay) {
+  if (!dueDay) return "";
+  const today = new Date();
+  const due = new Date(today.getFullYear(), today.getMonth(), dueDay);
+  if (due <= today) due.setMonth(due.getMonth() + 1);
+  const d = Math.ceil((due - today) / 86400000);
+  if (d === 0) return "Due today";
+  if (d === 1) return "Due tomorrow";
+  if (d <= 7)  return `Due in ${d}d`;
+  const months = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
+  return `Due ${due.getDate()} ${months[due.getMonth()]}`;
+}
+function isDueWithin3Days(dueDay) {
+  if (!dueDay) return false;
+  const today = new Date();
+  const due = new Date(today.getFullYear(), today.getMonth(), dueDay);
+  if (due <= today) due.setMonth(due.getMonth() + 1);
+  return Math.ceil((due - today) / 86400000) <= 3;
+}
+function lightenColor(hex, pct) {
+  const n = parseInt((hex || "#3b5bdb").replace("#", ""), 16);
+  const amt = Math.round(2.55 * pct);
+  const r = Math.min(255, (n >> 16) + amt);
+  const g = Math.min(255, ((n >> 8) & 0xff) + amt);
+  const b = Math.min(255, (n & 0xff) + amt);
+  return `#${r.toString(16).padStart(2,"0")}${g.toString(16).padStart(2,"0")}${b.toString(16).padStart(2,"0")}`;
+}
+
 // ─── PEEK HEIGHT ─────────────────────────────────────────────
 const PEEK_H = 70;
 
@@ -55,7 +90,7 @@ function darkenHex(hex, amount = 40) {
 
 export default function CreditCards({
   user, accounts, ledger, thisMonthLedger, categories,
-  installments, recurTemplates,
+  installments, recurTemplates, fxRates = {},
   setAccounts, setLedger, setInstallments, setRecurTemplates,
   onRefresh, bankAccounts: propBankAccounts,
   pendingReconcileNav = null, setPendingReconcileNav,
@@ -162,18 +197,19 @@ export default function CreditCards({
     return { groupMap: gm, groupedCardIds: gids };
   }, [creditCards]);
 
-  // ── Card stats (group-aware) ──
+  // ── Card stats (group-aware, FX-converted to IDR) ──
   const cardStats = useMemo(() => creditCards.map(cc => {
-    const debt = Number(cc.outstanding_amount || 0);
-    const cr   = Number(cc.current_balance   || 0);
+    const rate = fxRates[cc.currency] || 1;
+    const debt = Number(cc.outstanding_amount || 0) * rate;
+    const cr   = Number(cc.current_balance   || 0) * rate;
     let limit, avail, util;
     if (cc.shared_limit_group_id && groupMap[cc.shared_limit_group_id]) {
       const g = groupMap[cc.shared_limit_group_id];
-      limit = g.sharedLimit;
-      avail = Math.max(0, g.sharedLimit - g.totalDebt + g.totalCR);
+      limit = g.sharedLimit * rate;
+      avail = Math.max(0, (g.sharedLimit - g.totalDebt + g.totalCR) * rate);
       util  = g.sharedLimit > 0 ? (g.totalDebt / g.sharedLimit) * 100 : 0;
     } else {
-      limit = Number(cc.card_limit || 0);
+      limit = Number(cc.card_limit || 0) * rate;
       avail = Math.max(0, limit - debt + cr);
       util  = limit > 0 ? (debt / limit) * 100 : 0;
     }
@@ -192,7 +228,7 @@ export default function CreditCards({
     const dueIn  = cc.due_day       ? daysUntil(cc.due_day)       : null;
     const stmtIn = cc.statement_day ? daysUntil(cc.statement_day) : null;
     return { ...cc, debt, cr, limit, avail, util, target, monthSpent, dueIn, stmtIn };
-  }), [creditCards, groupMap, ledger, filterMonth]);
+  }), [creditCards, groupMap, ledger, filterMonth, fxRates]);
 
   // Billing cycle date range for a CC card + month (YYYY-MM)
   const getBillingRange = useCallback((cc, monthStr) => {
@@ -565,13 +601,20 @@ export default function CreditCards({
           : (() => {
               const totalDebt  = cardStats.reduce((s, c) => s + c.debt, 0);
               const totalLimit = (() => {
-                // Sum limits without double-counting shared groups
-                const groupedIds = new Set(Object.values(groupMap).flatMap(g => g.members.map(m => m.id)));
-                const standaloneLimitTotal = cardStats
-                  .filter(c => !groupedIds.has(c.id))
-                  .reduce((s, c) => s + (Number(c.card_limit) || 0), 0);
-                const groupLimitTotal = Object.values(groupMap).reduce((s, g) => s + g.sharedLimit, 0);
-                return standaloneLimitTotal + groupLimitTotal;
+                // Sum FX-converted limits, counting each shared group once
+                const seenGroups = new Set();
+                let total = 0;
+                for (const c of cardStats) {
+                  if (c.shared_limit_group_id) {
+                    if (!seenGroups.has(c.shared_limit_group_id)) {
+                      seenGroups.add(c.shared_limit_group_id);
+                      total += c.limit;
+                    }
+                  } else {
+                    total += c.limit;
+                  }
+                }
+                return total;
               })();
               const overallUtil = totalLimit > 0 ? (totalDebt / totalLimit) * 100 : 0;
               const utilColor   = overallUtil > 80 ? "#dc2626" : overallUtil > 60 ? "#d97706" : "#059669";
@@ -604,11 +647,11 @@ export default function CreditCards({
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
                     <div style={{ background: "#fde8e8", borderRadius: 14, padding: "14px 14px" }}>
                       <div style={{ fontSize: 9, fontWeight: 700, color: "#dc2626", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 5, opacity: 0.8 }}>Total Debt</div>
-                      <div style={{ fontSize: 15, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif" }}>{fmtIDR(totalDebt)}</div>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif" }}>{fmtIDR(totalDebt, true)}</div>
                     </div>
                     <div style={{ background: "#e8f4fd", borderRadius: 14, padding: "14px 14px" }}>
                       <div style={{ fontSize: 9, fontWeight: 700, color: "#3b5bdb", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 5, opacity: 0.8 }}>Total Limit</div>
-                      <div style={{ fontSize: 15, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif" }}>{fmtIDR(totalLimit)}</div>
+                      <div style={{ fontSize: 15, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif" }}>{fmtIDR(totalLimit, true)}</div>
                     </div>
                     <div style={{ background: overallUtil > 80 ? "#fde8e8" : "#e8fdf0", borderRadius: 14, padding: "14px 14px" }}>
                       <div style={{ fontSize: 9, fontWeight: 700, color: utilColor, textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 5, opacity: 0.8 }}>Utilization</div>
@@ -662,9 +705,9 @@ export default function CreditCards({
                         <CCCard key={cc.id} cc={cc}
                           color={cc.color || CARD_PALETTE[i % CARD_PALETTE.length]}
                           onPay={() => { setPayForm(f => ({ ...f, cardId: cc.id, amount: cc.debt })); setModal("pay"); }}
-                          onTransactions={() => { setSelectedCard(cc.id); setSubTab("transactions"); }}
+                          onHistory={() => { setSelectedCard(cc.id); setSubTab("transactions"); }}
                           onInstallments={() => setSubTab("installments")}
-                          onStatement={() => navigate(`/accounts/${cc.id}/statement`)}
+                          onBill={() => navigate(`/accounts/${cc.id}/statement`)}
                           onEdit={() => openEditCard(cc)}
                         />
                       ))}
@@ -1377,111 +1420,125 @@ function NetworkLogo({ network }) {
 }
 
 // ─── CC CARD (desktop grid) ───────────────────────────────────
-function CCCard({ cc, color, onPay, onTransactions, onInstallments, onStatement, onEdit }) {
-  const utilColor = cc.util > 80 ? "#dc2626" : cc.util > 60 ? "#d97706" : "#059669";
+function CCCard({ cc, color, onPay, onHistory, onInstallments, onBill, onEdit }) {
+  const utilColor  = cc.util > 80 ? "#A32D2D" : cc.util > 50 ? "#BA7517" : "#97C459";
+  const dueText    = formatDueDate(cc.due_day);
+  const isDueSoon  = isDueWithin3Days(cc.due_day);
+  const isMaster   = cc.is_limit_group_master;
+  const isMember   = !!(cc.shared_limit_group_id && !isMaster);
 
   return (
-    <div style={{ background: "#fff", borderRadius: 16, boxShadow: "0 0 0 0.5px #e5e7eb", overflow: "hidden", display: "flex", flexDirection: "column", WebkitMaskImage: "-webkit-radial-gradient(white, black)" }}>
-      {/* ── Hero peek strip ── */}
+    <div className="cc-card-v2" style={{
+      background: "#fff", borderRadius: 16, overflow: "hidden",
+      border: "0.5px solid rgba(0,0,0,0.08)",
+      display: "flex", flexDirection: "column",
+    }}>
+      {/* ── 130px card image area ── */}
       <div style={{
-        position: "relative",
-        width: "100%",
-        height: 90,
-        flexShrink: 0,
-        backgroundImage: cc.card_image_url ? `url(${cc.card_image_url})` : "none",
-        backgroundSize: "cover",
-        backgroundPosition: "top center",
-        backgroundColor: cc.card_image_url ? undefined : (color || "#3b5bdb"),
+        height: 130, position: "relative", flexShrink: 0,
+        ...(cc.card_image_url
+          ? { backgroundImage: `url(${cc.card_image_url})`, backgroundSize: "cover", backgroundPosition: "center top" }
+          : { background: `linear-gradient(135deg, ${color || "#3b5bdb"} 0%, ${lightenColor(color || "#3b5bdb", 22)} 100%)` }
+        ),
       }}>
-        {/* Decorative circles for solid-color fallback */}
+        {/* Decorative circles for gradient fallback */}
         {!cc.card_image_url && (
           <>
-            <div style={{ position: "absolute", top: -24, right: -18, width: 130, height: 130, borderRadius: "50%", background: "rgba(255,255,255,0.08)" }} />
-            <div style={{ position: "absolute", top: 18, right: 28, width: 82, height: 82, borderRadius: "50%", background: "rgba(255,255,255,0.06)" }} />
+            <div style={{ position: "absolute", top: -24, right: -18, width: 130, height: 130, borderRadius: "50%", background: "rgba(255,255,255,0.09)" }} />
             <div style={{ position: "absolute", bottom: -32, left: -18, width: 110, height: 110, borderRadius: "50%", background: "rgba(255,255,255,0.07)" }} />
           </>
         )}
-        {/* Bottom fade overlay */}
-        <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.10) 100%)" }} />
-        {/* Edit button — top right */}
-        <button
-          onClick={onEdit}
-          title="Edit card"
-          style={{ position: "absolute", top: 8, right: 10, border: "none", background: "rgba(0,0,0,0.28)", borderRadius: 6, cursor: "pointer", padding: "3px 6px", color: "#fff", lineHeight: 1, fontSize: 12 }}
-          onMouseEnter={e => e.currentTarget.style.background = "rgba(0,0,0,0.5)"}
-          onMouseLeave={e => e.currentTarget.style.background = "rgba(0,0,0,0.28)"}
-        >✏️</button>
+        {/* Hover edit button — opacity 0, CSS handles hover */}
+        <button className="cc-card-edit-btn" onClick={(e) => { e.stopPropagation(); onEdit(); }} title="Edit card"
+          style={{
+            position: "absolute", top: 12, right: 12,
+            background: "rgba(0,0,0,0.35)", backdropFilter: "blur(4px)",
+            width: 28, height: 28, borderRadius: 8, border: "none",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            cursor: "pointer", opacity: 0, transition: "opacity 0.15s",
+          }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+          </svg>
+        </button>
+        {/* Bottom badges */}
+        <div style={{ position: "absolute", bottom: 12, left: 16, display: "flex", gap: 6, alignItems: "center" }}>
+          {dueText && (
+            <div style={{
+              background: isDueSoon ? "#A32D2D" : "rgba(255,255,255,0.25)",
+              color: "#fff", fontSize: 10, fontWeight: 500,
+              padding: "3px 8px", borderRadius: 6, fontFamily: "Figtree, sans-serif",
+            }}>{dueText}</div>
+          )}
+          {isMember && (
+            <div style={{ background: "rgba(255,255,255,0.25)", color: "#fff", fontSize: 10, padding: "3px 8px", borderRadius: 6, fontFamily: "Figtree, sans-serif" }}>
+              Shared
+            </div>
+          )}
+        </div>
         {/* Network logo — bottom right */}
-        <div style={{ position: "absolute", bottom: 8, right: 12, display: "flex", alignItems: "center" }}>
+        <div style={{ position: "absolute", bottom: 10, right: 14, display: "flex", alignItems: "center" }}>
           <NetworkLogo network={cc.network} />
         </div>
       </div>
 
-      <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 11, flex: 1 }}>
+      {/* ── Body ── */}
+      <div style={{ padding: "16px 18px", display: "flex", flexDirection: "column", flex: 1 }}>
         {/* Card name */}
-        <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        <div style={{ fontSize: 14, fontWeight: 500, color: "#111827", fontFamily: "Figtree, sans-serif", marginBottom: 14, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {cc.name}
+          {isMaster && <span style={{ color: "#888780", fontWeight: 400, fontSize: 11, marginLeft: 6 }}>· Master</span>}
         </div>
-        {/* Debt + Available */}
-        <div style={{ display: "flex", gap: 10 }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>Debt</div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: cc.debt > 0 ? "#dc2626" : "#9ca3af", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
-              {fmtIDR(cc.debt, true)}
-            </div>
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>Available</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#059669", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
-              {fmtIDR(cc.avail, true)}
-            </div>
-            {cc.cr > 0 && (
-              <div style={{ fontSize: 10, color: "#0F6E56", fontFamily: "Figtree, sans-serif", marginTop: 2 }}
-                title="Saldo lebih bayar / CR — menambah available limit">
-                +{fmtIDR(cc.cr, true)} top-up
-              </div>
-            )}
+
+        {/* DEBT */}
+        <div style={{ marginBottom: cc.cr > 0 ? 4 : 12 }}>
+          <div style={{ fontSize: 10, letterSpacing: 1, color: "#888780", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>DEBT</div>
+          <div style={{ fontSize: 22, fontWeight: 500, color: cc.debt > 0 ? "#A32D2D" : "#888780", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
+            {fmtIDR(cc.debt, true)}
           </div>
         </div>
-        {/* Utilization bar */}
-        {cc.limit > 0 && (
-          <div>
-            <div style={{ height: 4, background: "#f3f4f6", borderRadius: 4, overflow: "hidden" }}>
-              <div style={{ height: "100%", width: `${Math.min(cc.util, 100)}%`, background: utilColor, borderRadius: 4, transition: "width 0.3s" }} />
-            </div>
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
-              <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>Limit {fmtIDR(cc.limit, true)}</span>
-              <span style={{ fontSize: 10, fontWeight: 700, color: utilColor, fontFamily: "Figtree, sans-serif" }}>{cc.util.toFixed(0)}%</span>
-            </div>
+
+        {/* CR sub-info */}
+        {cc.cr > 0 && (
+          <div style={{ fontSize: 11, color: "#0F6E56", fontFamily: "Figtree, sans-serif", marginBottom: 12 }}>
+            +{fmtIDR(cc.cr, true)} top-up
           </div>
         )}
-        {/* Due + Statement badges */}
-        {(cc.dueIn !== null || cc.stmtIn !== null) && (
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {cc.dueIn !== null && (
-              <span style={{
-                fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 6,
-                fontFamily: "Figtree, sans-serif",
-                background: cc.dueIn <= 3 ? "#fee2e2" : cc.dueIn <= 7 ? "#fef3c7" : "#f9fafb",
-                color: cc.dueIn <= 3 ? "#dc2626" : cc.dueIn <= 7 ? "#d97706" : "#6b7280",
-                border: `1px solid ${cc.dueIn <= 3 ? "#fecaca" : cc.dueIn <= 7 ? "#fde68a" : "#f3f4f6"}`,
-              }}>
-                Due {cc.dueIn}d
-              </span>
-            )}
-            {cc.stmtIn !== null && (
-              <span style={{ fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 6, fontFamily: "Figtree, sans-serif", background: "#f9fafb", color: "#6b7280", border: "1px solid #f3f4f6" }}>
-                Stmt {cc.stmtIn}d
-              </span>
-            )}
-          </div>
-        )}
-        {/* Action buttons */}
-        <div style={{ display: "flex", gap: 6, marginTop: "auto", flexWrap: "wrap" }}>
-          <button onClick={onPay}          style={CC_BTN("#fde8e8", "#dc2626", "#fecaca")}>💳 Pay</button>
-          <button onClick={onTransactions} style={CC_BTN("#f3f4f6", "#374151", "#e5e7eb")}>Txns</button>
-          <button onClick={onInstallments} style={CC_BTN("#f3f4f6", "#374151", "#e5e7eb")}>Install.</button>
-          <button onClick={onStatement}    style={CC_BTN("#f0f9ff", "#0369a1", "#bae6fd")}>Statement</button>
+
+        {/* Progress bar */}
+        <div style={{ background: "#F1EFE8", height: 6, borderRadius: 3, overflow: "hidden", marginBottom: 6 }}>
+          <div style={{ background: utilColor, width: `${Math.min(cc.util, 100)}%`, height: "100%", borderRadius: 3, transition: "width 0.3s" }} />
+        </div>
+
+        {/* Available + utilization inline */}
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#888780", fontFamily: "Figtree, sans-serif", marginBottom: 14 }}>
+          <span>
+            {cc.shared_limit_group_id ? "Group avail" : "Available"}{" "}
+            <span style={{ color: "#0F6E56", fontWeight: 500 }}>{fmtIDR(cc.avail, true)}</span>
+          </span>
+          <span style={{ color: cc.util > 80 ? "#A32D2D" : "#888780" }}>
+            {cc.util.toFixed(0)}% of {fmtIDR(cc.limit, true)}{cc.shared_limit_group_id ? " shared" : ""}
+          </span>
+        </div>
+
+        {/* Buttons */}
+        <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
+          <button
+            onClick={onPay}
+            disabled={cc.debt === 0}
+            style={{
+              flex: 1, padding: 8, borderRadius: 8, fontSize: 12,
+              fontWeight: 500, fontFamily: "Figtree, sans-serif",
+              background: cc.debt > 0 ? "#2C2C2A" : "transparent",
+              color: cc.debt > 0 ? "#fff" : "#888780",
+              border: cc.debt > 0 ? "none" : "0.5px solid rgba(0,0,0,0.15)",
+              cursor: cc.debt > 0 ? "pointer" : "not-allowed",
+            }}
+          >Pay</button>
+          <button onClick={onHistory}      style={CC_SECONDARY_BTN}>History</button>
+          <button onClick={onInstallments} style={CC_SECONDARY_BTN}>Installments</button>
+          <button onClick={onBill}         style={CC_SECONDARY_BTN}>Bill</button>
         </div>
       </div>
     </div>
