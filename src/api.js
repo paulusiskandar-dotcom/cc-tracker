@@ -606,6 +606,53 @@ export const categoriesApi = {
   },
 };
 
+// ─── BUDGETS API ─────────────────────────────────────────────
+export const budgetsApi = {
+  getAll: async (userId) => {
+    const { data, error } = await supabase
+      .from("budgets")
+      .select("*")
+      .eq("user_id", userId)
+      .order("period_year", { ascending: false })
+      .order("period_month", { ascending: false });
+    if (error) throw new Error(error.message);
+    return data || [];
+  },
+
+  upsert: async (userId, { category_id, category_name, amount, period_year, period_month }) => {
+    const { data: existing } = await supabase
+      .from("budgets")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("category_id", category_id)
+      .eq("period_year", period_year)
+      .eq("period_month", period_month)
+      .maybeSingle();
+    if (existing) {
+      const { data, error } = await supabase
+        .from("budgets")
+        .update({ amount, category_name, updated_at: new Date().toISOString() })
+        .eq("id", existing.id)
+        .select()
+        .single();
+      if (error) throw new Error(error.message);
+      return data;
+    }
+    const { data, error } = await supabase
+      .from("budgets")
+      .insert({ user_id: userId, category_id, category_name, amount, period_year, period_month })
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return data;
+  },
+
+  delete: async (id) => {
+    const { error } = await supabase.from("budgets").delete().eq("id", id);
+    if (error) throw new Error(error.message);
+  },
+};
+
 // ─── INCOME SOURCES ───────────────────────────────────────────
 // Mirrors categoriesApi pattern: include user-owned + system (user_id IS NULL) rows.
 export const incomeSrcApi = {
