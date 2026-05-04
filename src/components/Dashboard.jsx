@@ -1,6 +1,5 @@
 import { useMemo, useState, useEffect, useCallback } from "react";
 import { ledgerApi, recurringApi, reimburseSettlementsApi, loanPaymentsApi, employeeLoanApi } from "../api";
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
 import { fmtIDR, ym, mlShort, getGreeting, todayStr, groupByDate, checkDuplicateTransaction } from "../utils";
 import { showToast, EmptyState, Modal, Button, AmountInput, Field, Input, FormRow } from "./shared/index";
 import Select from "./shared/Select";
@@ -1613,10 +1612,8 @@ export default function Dashboard({
 
           // ── Reminder (income / expense) ──
           const tmpl = confirmTarget.tmpl || {};
-          // Lookup by UUID from DB first; fall back to constants for legacy slugs
           const cat = (categories || []).find(c => c.id === tmpl.category_id)
-            || incomeSrcs?.find(c => c.id === tmpl.category_id)
-            || [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES_LIST].find(c => c.id === tmpl.category_id);
+            || incomeSrcs?.find(c => c.id === tmpl.category_id);
           const fromAcc = accounts.find(a => a.id === tmpl.from_id);
           const toAcc   = accounts.find(a => a.id === tmpl.to_id);
           return (

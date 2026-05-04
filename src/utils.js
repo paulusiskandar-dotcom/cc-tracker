@@ -160,21 +160,6 @@ export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], 
   return { total, bank, cash, assets, receivables, ccDebt, liabilities, employeeLoanTotal, reimburseOutstanding };
 };
 
-// ─── CATEGORY HELPERS ─────────────────────────────────────────
-export const suggestCategory = (description, merchantMaps, EXPENSE_CATEGORIES) => {
-  const lower = (description || "").toLowerCase();
-
-  // Check merchant mappings first
-  const mapped = merchantMaps?.find(m => lower.includes(m.merchant_name));
-  if (mapped) return mapped.category_id;
-
-  // Keyword matching
-  for (const cat of EXPENSE_CATEGORIES) {
-    if (cat.keywords.some(kw => lower.includes(kw))) return cat.id;
-  }
-  return "other";
-};
-
 // ─── GROUP BY DATE ────────────────────────────────────────────
 export const groupByDate = (entries) => {
   const groups = {};

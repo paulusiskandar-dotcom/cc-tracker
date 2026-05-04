@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { ledgerApi, gmailApi, getTxFromToTypes, recalculateBalance } from "../api";
 import { undoManager } from "../lib/undoManager";
-import { EXPENSE_CATEGORIES, ENTITIES } from "../constants";
+import { ENTITIES } from "../constants";
 import { fmtIDR, fmtCur, todayStr, ym, groupByDate, fmtDateLabel } from "../utils";
 import { ConfirmModal } from "./shared/Modal";
 import { EmptyState, showToast } from "./shared/Card";
@@ -389,9 +389,7 @@ function TxRow({ entry: e, accounts, categories = [], onEdit, onDelete }) {
   const isIn     = ["income","sell_asset","reimburse_in","collect_loan"].includes(e.tx_type);
   const isMove   = ["transfer","fx_exchange"].includes(e.tx_type);
 
-  // Lookup: DB UUID first (has correct icon+color), then constants fallback for legacy slugs
-  const catDef   = categories?.find(c => c.id === e.category_id)
-                || EXPENSE_CATEGORIES.find(c => c.id === e.category_id || c.id === e.category);
+  const catDef   = categories?.find(c => c.id === e.category_id);
   const amtColor = isOut ? "#dc2626" : isIn ? "#059669" : "#3b5bdb";
   const prefix   = isOut ? "−" : isIn ? "+" : "";
 

@@ -26,7 +26,7 @@ import {
   assetsApi,
   installmentsApi, recalculateBalance, accountsApi, employeeLoanApi,
 } from "../../api";
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST, REIMBURSE_ENTITIES } from "../../constants";
+import { REIMBURSE_ENTITIES } from "../../constants";
 import { fmtIDR, fmtCur, todayStr, toIDR } from "../../utils";
 import Modal from "./Modal";
 import { showToast } from "./Card";
@@ -379,18 +379,13 @@ export default function TxVerticalBig({
   // IDR equivalent for non-IDR amounts
   const amtIDR = toIDR ? toIDR(Number(form.amount || 0), form.currency || "IDR", fxRates, allCurrencies) : Number(form.amount || 0);
 
-  // Categories — income uses DB incomeSrcs (falls back to static if empty); expense uses DB categories (falling back to static)
+  // Categories — income uses DB incomeSrcs; expense uses DB categories
   const isIncome = type === "income";
   let catOptions;
   if (isIncome) {
-    catOptions = incomeSrcs.length > 0
-      ? incomeSrcs.map(s => ({ value: s.id, label: `${s.icon || ""} ${s.name}`.trim() }))
-      : INCOME_CATEGORIES_LIST.map(c => ({ value: c.id, label: `${c.icon} ${c.label}` }));
+    catOptions = incomeSrcs.map(s => ({ value: s.id, label: `${s.icon || ""} ${s.name}`.trim() }));
   } else {
     catOptions = categories.filter(c => c.is_active !== false).map(c => ({ value: c.id, label: `${c.icon || ""} ${c.name || c.label}` }));
-    if (!catOptions.length) {
-      EXPENSE_CATEGORIES.forEach(c => catOptions.push({ value: c.id, label: `${c.icon} ${c.label}` }));
-    }
   }
 
   // ── UUID sanitizer ────────────────────────────────────────────

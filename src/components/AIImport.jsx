@@ -13,7 +13,7 @@ import { useImportDraft } from "../lib/useImportDraft";
 import DraftBanner from "./shared/DraftBanner";
 import Modal from "./shared/Modal";
 import { detectTransferPairs } from "../lib/transferDetection";
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST, REIMBURSE_ENTITIES } from "../constants";
+import { REIMBURSE_ENTITIES } from "../constants";
 
 // ── Normalise AI pseudo-types to real tx_type + category ─────────
 const PSEUDO_TYPE_MAP = {
@@ -66,7 +66,6 @@ const NO_CAT          = new Set(["transfer","pay_cc","reimburse_out","reimburse_
 const REIMBURSE_TYPES = new Set(["reimburse_out","reimburse_in"]);
 const INCOME_TYPES    = new Set(["income","collect_loan","reimburse_in"]);
 
-const getCatOptions = (txType) => INCOME_TYPES.has(txType) ? INCOME_CATEGORIES_LIST : EXPENSE_CATEGORIES;
 
 const fmtDateShort = (d) => {
   try { return new Date(d + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short" }); }

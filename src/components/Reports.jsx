@@ -1,6 +1,5 @@
 import { useState, useMemo } from "react";
 import { fmtIDR, mlShort } from "../utils";
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
 import { LIGHT, DARK } from "../theme";
 import { SectionHeader, EmptyState } from "./shared/index";
 import {
@@ -55,7 +54,6 @@ function last6Months() {
 // Resolve icon+color from DB category list first, then constants fallback.
 // Priority: 1) DB by category_id UUID  2) DB by name  3) constants by label  4) default
 function resolveCatMeta(categoryId, categoryName, dbList = [], isIncome = false) {
-  const constList = isIncome ? INCOME_CATEGORIES_LIST : EXPENSE_CATEGORIES;
   const name = categoryName || "";
 
   // 1. DB match by UUID
@@ -68,13 +66,6 @@ function resolveCatMeta(categoryId, categoryName, dbList = [], isIncome = false)
   if (name) {
     const lower = name.toLowerCase().trim();
     const hit = dbList.find(c => c.name?.toLowerCase().trim() === lower);
-    if (hit?.icon) return { icon: hit.icon, color: hit.color || "#9ca3af" };
-  }
-
-  // 3. Constants fallback by label match (handles legacy data)
-  if (name) {
-    const lower = name.toLowerCase().trim();
-    const hit = constList.find(c => c.label?.toLowerCase().trim() === lower);
     if (hit?.icon) return { icon: hit.icon, color: hit.color || "#9ca3af" };
   }
 

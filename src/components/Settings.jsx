@@ -3,7 +3,7 @@ import { supabase } from "../lib/supabase";
 import PILogo from "./PILogo";
 import { fxApi, merchantApi, settingsApi, recurringApi, gmailApi, accountsApi } from "../api";
 import { fmtIDR } from "../utils";
-import { CURRENCIES, EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST, TX_TYPES, APP_VERSION, APP_BUILD } from "../constants";
+import { CURRENCIES, TX_TYPES, APP_VERSION, APP_BUILD } from "../constants";
 import { LIGHT, DARK } from "../theme";
 import {
   Modal, ConfirmModal, Button,
@@ -447,9 +447,9 @@ export default function Settings({
     const keyword = (merchantKeyword || editMerchant?.merchant_name || "").trim();
     if (!keyword) return showToast("Keyword required", "error");
     try {
-      const allCats = [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES_LIST];
+      const allCats = [...categories, ...incomeSrcs];
       const catDef  = allCats.find(c => c.id === merchantCat);
-      const catName = catDef?.label || merchantCat || null;
+      const catName = catDef?.label || catDef?.name || merchantCat || null;
       await supabase.from("merchant_mappings").upsert(
         { user_id: user.id, merchant_name: keyword.toLowerCase(), category_id: merchantCat || null,
           category_name: catName, tx_type: merchantTxType || null, last_seen: new Date().toISOString() },
@@ -1017,7 +1017,7 @@ export default function Settings({
             merchantMaps
               .filter(m => !merchantSearch || m.merchant_name?.toLowerCase().includes(merchantSearch.toLowerCase()))
               .map(m => {
-                const allCats = [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES_LIST];
+                const allCats = [...categories, ...incomeSrcs];
                 const cat = allCats.find(c => c.id === m.category_id);
                 return (
                   <div key={m.merchant_name} style={{
@@ -1027,7 +1027,7 @@ export default function Settings({
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12, fontWeight: 600, color: T.text, fontFamily: "Figtree, sans-serif" }}>{m.merchant_name}</div>
                       <div style={{ fontSize: 10, color: T.text3, fontFamily: "Figtree, sans-serif" }}>
-                        {cat ? `${cat.icon} ${cat.label}` : m.category_name || m.category_id || "—"}
+                        {cat ? `${cat.icon} ${cat.label || cat.name}` : m.category_name || m.category_id || "—"}
                         {m.tx_type ? ` · ${m.tx_type}` : ""}
                         {m.confidence > 1 ? ` · used ${m.confidence}×` : ""}
                       </div>
@@ -1348,9 +1348,9 @@ export default function Settings({
               onChange={e => setMerchantCat(e.target.value)}
               options={[
                 { value: "", label: "— expense categories —", disabled: true },
-                ...EXPENSE_CATEGORIES.map(c => ({ value: c.id, label: `${c.icon} ${c.label}` })),
+                ...categories.map(c => ({ value: c.id, label: `${c.icon || ""} ${c.name}`.trim() })),
                 { value: "", label: "— income categories —", disabled: true },
-                ...INCOME_CATEGORIES_LIST.map(c => ({ value: c.id, label: c.label })),
+                ...incomeSrcs.map(s => ({ value: s.id, label: s.name })),
               ]}
               placeholder="Select category…"
             />
