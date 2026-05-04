@@ -387,13 +387,12 @@ export default function Receivables({
           .eq("tx_type", "expense");
 
         if (newReimbursable > 0) {
-          const fromId = ledger.find(e => mergedOut.includes(e.id))?.from_id || null;
           const { error: lErr } = await supabase.from("ledger").insert([{
             user_id: user.id, tx_date: todayStr(),
             description: `${entity} Reimbursable Loss`,
             amount: newReimbursable, amount_idr: newReimbursable, currency: "IDR",
-            tx_type: "expense", from_type: "account", to_type: "expense",
-            from_id: fromId, to_id: null,
+            tx_type: "expense", from_type: null, to_type: "expense",
+            from_id: null, to_id: null,
             category_id: REIMBURSABLE_LOSS_CATEGORY_ID, category_name: "Reimbursable Loss",
             entity: entity, is_reimburse: false,
             notes: `Settlement: ${entity}`, reimburse_settlement_id: settlement.id,
@@ -430,13 +429,12 @@ export default function Receivables({
         settlement = newSett;
 
         if (reimbursable > 0) {
-          const fromId = outEntries[0]?.from_id || null;
           const { error: lErr } = await supabase.from("ledger").insert([{
             user_id: user.id, tx_date: todayStr(),
             description: `${entity} Reimbursable Loss`,
             amount: reimbursable, amount_idr: reimbursable, currency: "IDR",
-            tx_type: "expense", from_type: "account", to_type: "expense",
-            from_id: fromId, to_id: null,
+            tx_type: "expense", from_type: null, to_type: "expense",
+            from_id: null, to_id: null,
             category_id: REIMBURSABLE_LOSS_CATEGORY_ID, category_name: "Reimbursable Loss",
             entity: entity, is_reimburse: false,
             notes: `Settlement: ${entity}`, reimburse_settlement_id: settlement.id,
