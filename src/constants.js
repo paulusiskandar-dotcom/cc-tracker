@@ -91,63 +91,12 @@ export const TX_TYPES = [
 
 export const TX_TYPE_MAP = Object.fromEntries(TX_TYPES.map(t => [t.id, t]));
 
-// ─── EXPENSE CATEGORIES ───────────────────────────────────────
-/**
- * @deprecated as primary UI source — DB tables (expense_categories, income_sources)
- * are now the source of truth. These constants are kept for:
- *   1. Legacy slug → label fallback in lookupExpenseCategory / lookupIncomeSource
- *   2. Initial keyword matching in suggestCategory()
- *   3. Bootstrap defaults for first-time users (Phase 3 will seed DB from these)
- * Do NOT use these as dropdown sources in new code — fetch from DB via
- * categoriesApi.getAll() / incomeSrcApi.getAll() instead.
- * Migration plan: Phase 3 cleanup (TODO) will remove these once all flows are DB-only.
- */
-export const EXPENSE_CATEGORIES = [
-  { id: "food",          label: "Food & Drinks",    icon: "🍽️",  color: "#d97706",
-    keywords: ["restaurant","cafe","coffee","food","warung","grab food","gofood","mcdonalds","kfc","indomaret","alfamart","supermarket","bakery","pizza","sushi"] },
-  { id: "home",          label: "Home & Utilities", icon: "🏠",  color: "#0891b2",
-    keywords: ["pln","electricity","water","pdam","internet","indihome","firstmedia","telkom","gas","pertamina","rent","kost","iuran","mortgage"] },
-  { id: "transport",     label: "Transport",        icon: "🚗",  color: "#3b5bdb",
-    keywords: ["grab","gojek","uber","parking","toll","gas station","spbu","shell","pertamax","taxi","bus","train","mrt","ojek","bengkel","service"] },
-  { id: "health",        label: "Health",           icon: "💊",  color: "#059669",
-    keywords: ["pharmacy","apotek","clinic","hospital","doctor","gym","fitness","halodoc","insurance","bpjs","medicine"] },
-  { id: "shopping",      label: "Shopping",         icon: "👕",  color: "#7c3aed",
-    keywords: ["shopee","tokopedia","lazada","blibli","zara","uniqlo","samsung","apple","laptop","gadget","fashion","clothes"] },
-  { id: "education",     label: "Education",        icon: "🎓",  color: "#dc2626",
-    keywords: ["school","course","udemy","book","gramedia","ruangguru","tutor","university","spp"] },
-  { id: "entertainment", label: "Entertainment",    icon: "✈️",  color: "#c2255c",
-    keywords: ["hotel","airbnb","traveloka","netflix","spotify","cinema","disney","booking","travel","vacation"] },
-  { id: "business",      label: "Business & Ops",   icon: "💼",  color: "#495057",
-    keywords: ["hamasa","sdc","travelio","vendor","supplier","invoice","operational","office","atk","printing"] },
-  { id: "finance",       label: "Finance",          icon: "💰",  color: "#d4a017",
-    keywords: ["insurance","premium","installment","investment","reksa dana","bibit","admin fee","interest","bank fee"] },
-  { id: "family",        label: "Family",           icon: "👨‍👩‍👧", color: "#059669",
-    keywords: ["housekeeper","allowance","school fee","diapers","toys","family","child","baby"] },
-  { id: "social",        label: "Social & Gifts",   icon: "🎁",  color: "#c2255c",
-    keywords: ["gift","donation","wedding","birthday","charity","flowers","social"] },
-  { id: "cash_advance_fee", label: "Cash Advance Fee", icon: "💸", color: "#dc2626", keywords: ["cash advance", "advance fee", "ca fee"] },
-  { id: "bank_charges",  label: "Bank Charges",     icon: "🏦",  color: "#6b7280", keywords: ["bank charge", "biaya admin", "admin fee", "service charge"] },
-  { id: "materai",       label: "Stamp Duty",       icon: "📋",  color: "#6b7280", keywords: ["materai", "bea materai", "stamp duty"] },
-  { id: "tax",           label: "Tax",              icon: "🧾",  color: "#6b7280", keywords: ["pajak", "pph", "ppn", "tax"] },
-  { id: "other",         label: "Other",            icon: "❓",  color: "#9ca3af", keywords: [] },
-];
-
 // ─── INCOME CATEGORIES ────────────────────────────────────────
 export const INCOME_CATEGORIES = [
   "Salary", "Rent", "Dividend", "Deposit Interest",
   "Freelance", "Bonus", "Transfer In", "Other",
 ];
 
-export const INCOME_CATEGORIES_LIST = [
-  { id: "salary",          label: "Salary",          icon: "💼", color: "#059669" },
-  { id: "rental_income",   label: "Rental Income",   icon: "🏠", color: "#0891b2" },
-  { id: "dividend",        label: "Dividend",        icon: "📈", color: "#7c3aed" },
-  { id: "freelance",       label: "Freelance",       icon: "💻", color: "#d97706" },
-  { id: "loan_collection", label: "Loan Collection", icon: "🔄", color: "#3b5bdb" },
-  { id: "bank_interest",   label: "Bank Interest",   icon: "🏦", color: "#059669" },
-  { id: "cashback",        label: "Cashback",        icon: "💰", color: "#059669" },
-  { id: "other_income",    label: "Other Income",    icon: "💰", color: "#6b7280" },
-];
 
 // ─── RECURRING FREQUENCIES ────────────────────────────────────
 export const FREQUENCIES = ["Daily", "Weekly", "Monthly", "Quarterly", "Yearly"];
