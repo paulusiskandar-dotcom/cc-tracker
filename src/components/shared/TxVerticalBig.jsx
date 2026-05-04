@@ -379,11 +379,13 @@ export default function TxVerticalBig({
   // IDR equivalent for non-IDR amounts
   const amtIDR = toIDR ? toIDR(Number(form.amount || 0), form.currency || "IDR", fxRates, allCurrencies) : Number(form.amount || 0);
 
-  // Categories — income uses static list; expense uses DB categories (falling back to static)
+  // Categories — income uses DB incomeSrcs (falls back to static if empty); expense uses DB categories (falling back to static)
   const isIncome = type === "income";
   let catOptions;
   if (isIncome) {
-    catOptions = INCOME_CATEGORIES_LIST.map(c => ({ value: c.id, label: `${c.icon} ${c.label}` }));
+    catOptions = incomeSrcs.length > 0
+      ? incomeSrcs.map(s => ({ value: s.id, label: `${s.icon || ""} ${s.name}`.trim() }))
+      : INCOME_CATEGORIES_LIST.map(c => ({ value: c.id, label: `${c.icon} ${c.label}` }));
   } else {
     catOptions = categories.filter(c => c.is_active !== false).map(c => ({ value: c.id, label: `${c.icon || ""} ${c.name || c.label}` }));
     if (!catOptions.length) {
