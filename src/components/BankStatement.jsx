@@ -722,6 +722,7 @@ export default function BankStatement({
                       employeeLoans={[]}
                       user={user}
                       onRefresh={() => { load(); onRefresh?.(); }}
+                      onAccountCreated={() => { load(); onRefresh?.(); }}
                     />
                   ))}
                 </div>

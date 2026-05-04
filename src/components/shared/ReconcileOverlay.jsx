@@ -651,7 +651,7 @@ function buildRow(stmtRow, currentAccountId, merchantMapsArg = []) {
   };
 }
 
-export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans, user, onRefresh, onClose }) {
+export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans, user, onRefresh, onClose, onAccountCreated }) {
   const T = LIGHT;
   const [rows, setRows] = useState(() => [buildRow(stmtRow, reconcile.currentAccountId, reconcile.merchantMaps || [])]);
   const [selected, setSelected] = useState(() => {
@@ -736,18 +736,24 @@ export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans,
 
       // Cicilan support
       if (r._cicilan && r._cicilanMonths >= 2 && created?.id) {
-        installmentsApi.createFromImport(user.id, {
-          ledgerId: created.id, description: r.description || "", accountId: r.from_id,
-          amount: Number(r.amount_idr || r.amount || 0), totalMonths: r._cicilanMonths,
-          paidMonths: r._cicilanKe || 1,
-          currency: r.currency || "IDR", txDate: r.tx_date, categoryId: r.category_id || null,
-        }).catch(e => console.error("[cicilan]", e));
+        try {
+          await installmentsApi.createFromImport(user.id, {
+            ledgerId: created.id, description: r.description || "", accountId: r.from_id,
+            amount: Number(r.amount_idr || r.amount || 0), totalMonths: r._cicilanMonths,
+            paidMonths: r._cicilanKe || 1,
+            currency: r.currency || "IDR", txDate: r.tx_date, categoryId: r.category_id || null,
+          });
+        } catch (e) {
+          console.error("[cicilan]", e);
+          showToast(`Cicilan tidak tersimpan: ${e.message || "Unknown error"}`, "error");
+        }
       }
 
-      // Collect loan support
-      if (r.tx_type === "collect_loan" && (r.employee_loan_id || r.from_id)) {
+      // Collect loan support (skip UUID-based accounts — not employee_loans rows)
+      const loanRef = r.employee_loan_id || r.from_id;
+      if (r.tx_type === "collect_loan" && loanRef && !String(loanRef).includes("-")) {
         loanPaymentsApi.recordAndIncrement(user.id, {
-          loanId: r.employee_loan_id || r.from_id, payDate: r.tx_date,
+          loanId: loanRef, payDate: r.tx_date,
           amount: Number(r.amount_idr || r.amount || 0),
           notes: r.description || "Added via reconcile",
         }).catch(e => console.error("[collect_loan]", e));
@@ -783,6 +789,8 @@ export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans,
         accounts={accounts}
         employeeLoans={employeeLoans || []}
         T={T}
+        user={user}
+        onAccountCreated={onAccountCreated}
         onMergeTransfer={() => reconcile.mergeTransferPair?.(stmtRow._id)}
       />
     </div>
@@ -790,7 +798,7 @@ export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans,
 }
 
 // ── Inline missing row with accordion add panel ───────────────
-export function ReconcileMissingRowInline({ missingRow, reconcile, accounts, employeeLoans, user, onRefresh, COLS, ROW_PAD, FF: FF_PROP }) {
+export function ReconcileMissingRowInline({ missingRow, reconcile, accounts, employeeLoans, user, onRefresh, onAccountCreated, COLS, ROW_PAD, FF: FF_PROP }) {
   const expanded = reconcile.expandedIds.has(missingRow._id);
   const [dupDismissed, setDupDismissed] = useState(false);
   const FF_USED = FF_PROP || FF;
@@ -859,6 +867,7 @@ export function ReconcileMissingRowInline({ missingRow, reconcile, accounts, emp
           employeeLoans={employeeLoans}
           user={user}
           onRefresh={onRefresh}
+          onAccountCreated={onAccountCreated}
           onClose={() => reconcile.toggleExpanded(missingRow._id)}
         />
       )}
