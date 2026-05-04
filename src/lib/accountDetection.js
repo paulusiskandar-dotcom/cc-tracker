@@ -40,10 +40,16 @@ export function detectAccount({ subject, sender, pdfText, cardLast4, accounts })
     // 1. card_last4 — highest weight (most specific)
     if (acc.card_last4) {
       const l4 = acc.card_last4;
-      // direct parameter
-      if (cardLast4 && cardLast4 === l4) {
-        score += 100;
-        if (!matchedBy.includes('card_last4')) matchedBy.push('card_last4');
+      // direct parameter — exact match OR suffix match after stripping X/* wildcards
+      // e.g. AI returns "XX87", DB has "8587" → visible "87" → "8587".endsWith("87") ✓
+      if (cardLast4) {
+        const visible = String(cardLast4).replace(/[Xx*\s\-]/g, '');
+        const isExact  = cardLast4 === l4;
+        const isSuffix = visible.length >= 2 && l4.endsWith(visible);
+        if (isExact || isSuffix) {
+          score += 100;
+          if (!matchedBy.includes('card_last4')) matchedBy.push('card_last4');
+        }
       }
       // in pdf text: "****1234", "xxxx 1234", " 1234 " patterns
       if (pdfL) {
