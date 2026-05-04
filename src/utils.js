@@ -392,14 +392,3 @@ export const autoCategorize = ({
   return { id: null, name: null, source: null, confidence: 0 };
 };
 
-/**
- * @deprecated Use lookupExpenseCategory / lookupIncomeSource instead.
- * Kept for backward compat — callers in older flows still rely on this signature.
- */
-export const resolveCategoryIds = (slugOrLabel, dbCategories = []) => {
-  if (!slugOrLabel) return { category_id: null, category_name: null };
-  const hit = _lookupByName(slugOrLabel, dbCategories);
-  if (hit) return { category_id: hit.id, category_name: hit.name };
-  const label = SLUG_TO_LABEL_LEGACY[_norm(slugOrLabel)] || slugOrLabel;
-  return { category_id: null, category_name: label };
-};

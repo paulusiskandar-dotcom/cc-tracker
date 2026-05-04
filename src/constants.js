@@ -24,14 +24,6 @@ export const ENTITIES = ["Personal", "Hamasa", "SDC", "Travelio"];
 export const REIMBURSE_ENTITIES = ["Hamasa", "SDC", "Travelio"];
 
 // ─── ACCOUNT TYPES ────────────────────────────────────────────
-export const ACC_TYPES = {
-  BANK:        "bank",
-  CREDIT_CARD: "credit_card",
-  ASSET:       "asset",
-  LIABILITY:   "liability",
-  RECEIVABLE:  "receivable",
-};
-
 export const ACC_TYPE_LABEL = {
   bank:        "Bank Account",
   credit_card: "Credit Card",
@@ -188,6 +180,3 @@ export const MOBILE_MORE_TABS = [
   { id: "settings",    label: "Settings"     },
 ];
 
-// ─── AI PROXY ─────────────────────────────────────────────────
-export const AI_PROXY    = `${process.env.REACT_APP_SUPABASE_URL}/functions/v1/ai-proxy`;
-export const AI_ANON_KEY = process.env.REACT_APP_SUPABASE_ANON_KEY || "";
