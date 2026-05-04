@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import { fmtIDR, fmtCur } from "../api";
-import { ENT_COL, ENT_BG, TX_TYPE_MAP, EXPENSE_CATEGORIES } from "../constants";
+import { ENT_COL, ENT_BG, TX_TYPE_MAP } from "../constants";
 
 // ─── FONTS + BASE CSS (injected once) ─────────────────────────
 let _cssInjected = false;
@@ -310,13 +310,6 @@ export function StatCard({ label, value, sub, color, th, icon, onClick }) {
 // ─── ACCOUNT COLOR DOT ────────────────────────────────────────
 export function ColorDot({ color, size = 10 }) {
   return <span style={{ display:"inline-block", width:size, height:size, borderRadius:"50%", background:color, flexShrink:0 }}/>;
-}
-
-// ─── CATEGORY PILL ────────────────────────────────────────────
-export function CatPill({ category, small, th }) {
-  const cat = EXPENSE_CATEGORIES.find(c=>c.label===category||c.id===category);
-  if (!cat) return <Tag bg={th?.sur3||"#f0f1f7"} color={th?.tx3||"#8a90aa"} small={small}>{category||"—"}</Tag>;
-  return <Tag bg={cat.color+"22"} color={cat.color} small={small}>{cat.icon} {cat.label}</Tag>;
 }
 
 // ─── SUB-TAB BAR ──────────────────────────────────────────────

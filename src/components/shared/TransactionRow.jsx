@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { fmtIDR, fmtDateLabel, fmtCur } from "../../utils";
-import { EXPENSE_CATEGORIES, TX_TYPE_MAP } from "../../constants";
+import { TX_TYPE_MAP } from "../../constants";
 
 // ─── TWO-DIRECTIONAL TYPES ────────────────────────────────────
 const TWO_DIR_TYPES = new Set(["transfer", "pay_cc"]);
@@ -62,8 +62,6 @@ function CategoryIcon({ categoryId, categoryName, txType, size = 36, categories 
     const lower = categoryName.toLowerCase().trim();
     hit = categories.find(c => c.name?.toLowerCase().trim() === lower);
   }
-  // 3. Constants fallback by slug or label
-  if (!hit) hit = EXPENSE_CATEGORIES.find(c => c.id === categoryId || c.label === categoryName);
   const tx = TX_TYPE_MAP[txType];
 
   if (hit?.icon) {
