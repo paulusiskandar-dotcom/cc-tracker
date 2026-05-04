@@ -153,6 +153,7 @@ export default function Dashboard({
     isOpen: false, onSelect: null, contextLabel: "", contextAmount: "", mode: "default",
   });
   const closeBankPicker = useCallback(() => setBankPickerState(s => ({ ...s, isOpen: false })), []);
+  const [upcomingExpanded, setUpcomingExpanded] = useState(false);
   // ─── DERIVED STATS ───────────────────────────────────────────
   const nw = netWorth || { total: 0, bank: 0, cash: 0, assets: 0, receivables: 0, ccDebt: 0, liabilities: 0, reimburseOutstanding: 0 };
 
@@ -512,15 +513,17 @@ export default function Dashboard({
   }, [reminders, loansWithStats, receivables, installments, creditCards, dismissed, reimburseSettlements, assets, bankAccounts, recurTemplates]);
 
   // Group upcoming by date
+  const UPCOMING_DEFAULT_VISIBLE = 4;
   const upcomingGroups = useMemo(() => {
     const today    = todayStr();
     const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    const visible  = upcomingExpanded ? upcomingItems : upcomingItems.slice(0, UPCOMING_DEFAULT_VISIBLE);
     const groups   = {};
-    upcomingItems.forEach(item => {
+    visible.forEach(item => {
       const d = item.date;
       if (!groups[d]) {
         let label;
-        if (d === today)    label = "TODAY";
+        if (d === today)         label = "TODAY";
         else if (d === tomorrow) label = "TOMORROW";
         else label = new Date(d + "T00:00:00").toLocaleDateString("en-US", {
           weekday: "short", month: "short", day: "numeric",
@@ -530,7 +533,7 @@ export default function Dashboard({
       groups[d].items.push(item);
     });
     return Object.entries(groups).sort(([a], [b]) => a.localeCompare(b));
-  }, [upcomingItems]);
+  }, [upcomingItems, upcomingExpanded]);
 
   // Last sync time — reads from gmail_last_sync_at setting (updated every time gmail-sync runs)
 
@@ -1263,7 +1266,7 @@ export default function Dashboard({
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <span style={SEC_TITLE}>Upcoming — Next 14 Days</span>
             {upcomingItems.length > 0 && (
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 11, fontFamily: "Figtree, sans-serif", alignItems: "center" }}>
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 11, fontFamily: "Figtree, sans-serif", alignItems: "center" }}>
                 <span style={{ color: "#9ca3af" }}>{upcomingItems.length} item{upcomingItems.length !== 1 ? "s" : ""}</span>
                 {upcomingForecast.income > 0 && (
                   <span style={{ color: "#059669" }}>↑ {fmtIDR(upcomingForecast.income, true)}</span>
@@ -1332,6 +1335,21 @@ export default function Dashboard({
                 </div>
               </div>
             ))}
+          </div>
+        )}
+        {upcomingItems.length > UPCOMING_DEFAULT_VISIBLE && (
+          <div style={{ display: "flex", justifyContent: "center", paddingTop: 8, paddingBottom: 2 }}>
+            <button
+              onClick={() => setUpcomingExpanded(p => !p)}
+              style={{
+                background: "transparent", border: "none",
+                color: "#16a34a", fontSize: 12, fontWeight: 500,
+                cursor: "pointer", padding: "6px 12px",
+                fontFamily: "Figtree, sans-serif",
+              }}
+            >
+              {upcomingExpanded ? "Show less ↑" : `View all (${upcomingItems.length}) ↓`}
+            </button>
           </div>
         )}
       </div>
