@@ -371,9 +371,13 @@ export const ledgerApi = {
       } catch (e) { console.error("[ledgerApi.create] give_loan increment failed:", e); }
     }
 
-    // Auto-create/update reimburse settlements
+    // Auto-update reimburse settlements (reimburse_in path kept intact)
+    // BLOCK 1 — DISABLED 2026-05-04
+    // Auto-create produced one duplicate "pending" settlement per reimburse_out ledger entry.
+    // User controls settlement creation manually via Receivables wizard (Receivables.jsx:422).
+    // To re-enable, uncomment block below.
+    /*
     if (safeEntry.tx_type === "reimburse_out" && REIMBURSE_ENTITIES.includes(safeEntry.entity) && data?.id) {
-      // Create a new pending settlement for reimburse_out
       try {
         const { error: settlErr } = await supabase.from("reimburse_settlements").insert([{
           user_id:              userId,
@@ -391,6 +395,7 @@ export const ledgerApi = {
         console.error("[ledgerApi.create] settlement insert exception:", e);
       }
     }
+    */
     if (safeEntry.tx_type === "reimburse_in" && REIMBURSE_ENTITIES.includes(safeEntry.entity) && data?.id) {
       // Find pending settlement for same entity, update total_in
       try {
