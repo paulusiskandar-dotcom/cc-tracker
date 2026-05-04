@@ -1,13 +1,12 @@
 import { useMemo, useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
-import { ledgerApi, recurringApi, reimburseSettlementsApi, settingsApi, loanPaymentsApi, employeeLoanApi } from "../api";
+import { ledgerApi, recurringApi, reimburseSettlementsApi, loanPaymentsApi, employeeLoanApi } from "../api";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
 import { fmtIDR, ym, mlShort, getGreeting, todayStr, groupByDate, checkDuplicateTransaction } from "../utils";
 import { showToast, EmptyState, Modal, Button, AmountInput, Field, Input, FormRow } from "./shared/index";
 import Select from "./shared/Select";
 import { GroupedTransactionList } from "./shared/TransactionRow";
 import GlobalReconcileButton from "./shared/GlobalReconcileButton";
-import ReconcileDraftBanner from "./shared/ReconcileDraftBanner";
 import { detectRecurringPatterns } from "../lib/recurringDetection";
 import TxVerticalBig from "./shared/TxVerticalBig";
 import BudgetWidget from "./shared/BudgetWidget";
@@ -148,30 +147,6 @@ function RecurringSuggestionsWidget({ user, ledger, recurringTemplates, onCreate
   );
 }
 
-// ── Alert Center ──────────────────────────────────────────────
-function AlertCenter({ alerts }) {
-  if (!alerts || alerts.length === 0) return null;
-  const FF = "Figtree, sans-serif";
-  return (
-    <div style={{ background: "#FCEBEB", border: "1px solid #F7C1C1", borderRadius: 12, padding: "12px 14px", fontFamily: FF }}>
-      <div style={{ fontSize: 11, fontWeight: 700, color: "#791F1F", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>
-        Needs Attention · {alerts.length}
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {alerts.map((a, i) => (
-          <div key={i}
-            style={{ display: "flex", justifyContent: "space-between", fontSize: 12, cursor: a.onClick ? "pointer" : "default" }}
-            onClick={a.onClick}>
-            <span style={{ color: a.severity === "high" ? "#791F1F" : a.severity === "medium" ? "#633806" : "#0C447C" }}>
-              {a.icon} {a.message}
-            </span>
-            <span style={{ color: "#501313", fontWeight: 500 }}>{a.value}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 function getNextDueDate(dueDay) {
   const now = new Date();
@@ -198,14 +173,6 @@ export default function Dashboard({
     window.addEventListener("resize", h);
     return () => window.removeEventListener("resize", h);
   }, []);
-
-  const [gmailLastSyncAt, setGmailLastSyncAt] = useState(null);
-  useEffect(() => {
-    if (!user?.id) return;
-    settingsApi.get(user.id, "gmail_last_sync_at", null)
-      .then(v => setGmailLastSyncAt(v))
-      .catch(() => {});
-  }, [user?.id]);
 
   const [confirmModal,    setConfirmModal]    = useState(false);
   const [confirmTarget,   setConfirmTarget]   = useState(null);  // { kind, reminder?, tmpl?, editMode?, settlement? }
@@ -604,16 +571,17 @@ export default function Dashboard({
   }, [upcomingItems]);
 
   // Last sync time — reads from gmail_last_sync_at setting (updated every time gmail-sync runs)
-  const lastSyncMins = useMemo(() => {
-    if (!gmailLastSyncAt) return null;
-    return Math.floor((Date.now() - new Date(gmailLastSyncAt)) / 60000);
-  }, [gmailLastSyncAt]);
 
   const monthlyChange = useMemo(() => {
     const inc  = thisMonthLedger.filter(e => e.tx_type === "income").reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
     const exp  = thisMonthLedger.filter(e => e.tx_type === "expense").reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
     return inc - exp;
   }, [thisMonthLedger]);
+
+  // Aggregate notification count: gmail pending + alert center items
+  const notifCount = useMemo(() =>
+    (pendingSyncs?.length || 0) + (alerts?.length || 0),
+  [pendingSyncs, alerts]);
 
   // ─── REMINDER ACTIONS ────────────────────────────────────────
   const openConfirmModal = (r, editMode = false) => {
@@ -838,9 +806,10 @@ export default function Dashboard({
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, paddingBottom: 24 }}>
 
-      {/* ════════════ SECTION 1 — HERO NET WORTH ════════════ */}
+      {/* ════════════ SECTION 1 — HERO NET WORTH (Soft Mint) ════════════ */}
       <div style={{
-        background: "linear-gradient(135deg, #0f172a 0%, #1e3a5f 45%, #312e81 100%)",
+        background: "linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)",
+        border: "1px solid #bbf7d0",
         borderRadius: 20,
         padding: isMobile ? "18px 16px 20px" : "26px 26px 22px",
         position: "relative",
@@ -848,34 +817,85 @@ export default function Dashboard({
       }}>
         {/* Top row: greeting + icon actions */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18, gap: 10, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.5)", fontFamily: "Figtree, sans-serif" }}>
+          <span style={{ fontSize: 13, fontWeight: 500, color: "#16a34a", fontFamily: "Figtree, sans-serif" }}>
             {getGreeting()}, Paulus
           </span>
+
+          {/* Icon row — order: 🔔 ✉ 📷 ⚖ ➕ */}
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <button onClick={() => setShowAddTxModal(true)} title="Add transaction" style={HERO_ICON_BTN}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-              </svg>
-            </button>
-            <GlobalReconcileButton type="all" accounts={accounts} user={user} onNavigate={handleReconcileNavigate} />
-            <button onClick={() => openEmail?.("pending")} title="Email Sync" style={HERO_ICON_BTN}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-                <polyline points="22,6 12,13 2,6"/>
-              </svg>
-            </button>
-            <button onClick={() => setTab?.("scan")} title="AI Scan" style={HERO_ICON_BTN}>
+
+            {/* 1. Notification Bell */}
+            <div style={{ position: "relative" }}>
+              <button
+                onClick={() => showToast("Notifications coming soon", "info")}
+                title="Notifications"
+                aria-label="Notifications"
+                style={HERO_MINT_BTN}
+              >
+                🔔
+              </button>
+              {notifCount > 0 && <span style={NOTIF_DOT} />}
+            </div>
+
+            {/* 2. Email Sync */}
+            <div style={{ position: "relative" }}>
+              <button
+                onClick={() => openEmail?.("pending")}
+                title="Email Sync"
+                aria-label="Email Sync"
+                style={HERO_MINT_BTN}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                  <polyline points="22,6 12,13 2,6"/>
+                </svg>
+              </button>
+              {(pendingSyncs?.length || 0) > 0 && <span style={NOTIF_DOT} />}
+            </div>
+
+            {/* 3. AI Scan (Camera) */}
+            <button
+              onClick={() => setTab?.("scan")}
+              title="AI Scan"
+              aria-label="AI Scan"
+              style={HERO_MINT_BTN}
+            >
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
                 <circle cx="12" cy="13" r="4"/>
               </svg>
+            </button>
+
+            {/* 4. Reconcile (icon-only ⚖) */}
+            <GlobalReconcileButton
+              type="all"
+              accounts={accounts}
+              user={user}
+              onNavigate={handleReconcileNavigate}
+              iconOnly={true}
+            />
+
+            {/* 5. Add Transaction (primary green) */}
+            <button
+              onClick={() => setShowAddTxModal(true)}
+              title="Add Transaction"
+              aria-label="Add Transaction"
+              style={{
+                width: 32, height: 32, borderRadius: 8, border: "none",
+                background: "#14532d", color: "#fff",
+                cursor: "pointer", fontSize: 18, fontWeight: 500,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                lineHeight: 1,
+              }}
+            >
+              +
             </button>
           </div>
         </div>
 
         {/* Label + period selector */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-          <span style={{ fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.38)", textTransform: "uppercase", letterSpacing: "1.4px", fontFamily: "Figtree, sans-serif" }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: "#16a34a", textTransform: "uppercase", letterSpacing: "1.4px", fontFamily: "Figtree, sans-serif" }}>
             Total Net Worth
           </span>
           <div style={{ display: "flex", gap: 2 }}>
@@ -883,8 +903,8 @@ export default function Dashboard({
               <button key={val} onClick={() => setNwPeriod(val)} style={{
                 fontSize: 10, fontWeight: 700, fontFamily: "Figtree, sans-serif",
                 padding: "3px 8px", borderRadius: 6, border: "none", cursor: "pointer",
-                background: nwPeriod === val ? "rgba(255,255,255,0.18)" : "transparent",
-                color: nwPeriod === val ? "#fff" : "rgba(255,255,255,0.35)",
+                background: nwPeriod === val ? "#14532d" : "rgba(20,83,45,0.08)",
+                color: nwPeriod === val ? "#fff" : "rgba(20,83,45,0.5)",
                 transition: "all 0.15s",
               }}>
                 {lbl}
@@ -897,7 +917,7 @@ export default function Dashboard({
         <div style={{
           fontSize: isMobile ? 30 : 38,
           fontWeight: 900,
-          color: "#ffffff",
+          color: "#14532d",
           fontFamily: "Figtree, sans-serif",
           lineHeight: 1.1,
           marginBottom: 6,
@@ -910,7 +930,7 @@ export default function Dashboard({
 
         {/* Monthly delta */}
         {monthlyChange !== 0 && (
-          <div style={{ fontSize: 12, fontWeight: 600, color: monthlyChange >= 0 ? "#4ade80" : "#f87171", fontFamily: "Figtree, sans-serif", marginBottom: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: monthlyChange >= 0 ? "#059669" : "#dc2626", fontFamily: "Figtree, sans-serif", marginBottom: 16 }}>
             {monthlyChange >= 0 ? "↑" : "↓"} {fmtIDR(Math.abs(monthlyChange), true)} this month
           </div>
         )}
@@ -924,139 +944,42 @@ export default function Dashboard({
           const pts   = vals.map((v, i) => `${4 + (i / (vals.length - 1)) * 292},${38 - ((v - minV) / range) * 30}`).join(" ");
           const area  = `4,42 ${pts} 296,42`;
           return (
-            <svg viewBox="0 0 300 44" style={{ width: "100%", height: 28, marginBottom: 16, opacity: 0.7 }}>
-              <polygon points={area} fill="#AFA9EC" opacity="0.16" />
-              <polyline points={pts} fill="none" stroke="#AFA9EC" strokeWidth="1.5" />
+            <svg viewBox="0 0 300 44" style={{ width: "100%", height: 28, marginBottom: 16, opacity: 0.75 }}>
+              <polygon points={area} fill="#16a34a" opacity="0.12" />
+              <polyline points={pts} fill="none" stroke="#16a34a" strokeWidth="1.5" />
             </svg>
           );
         })()}
 
-        {/* 6 mini-stats */}
+        {/* 5-col stat grid: LIQUIDITY / ASSETS / RECEIVABLES / CC DEBT / LIABILITIES */}
         <div style={{
           display: "grid",
-          gridTemplateColumns: isMobile ? "repeat(3, 1fr)" : "repeat(6, 1fr)",
-          gap: isMobile ? "14px 8px" : "0 20px",
+          gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(5, 1fr)",
+          gap: isMobile ? "14px 12px" : "0 16px",
           paddingTop: 14,
-          borderTop: "0.5px solid rgba(255,255,255,0.1)",
+          borderTop: "1px solid #bbf7d0",
         }}>
           {(() => {
+            const liquidity = (nw.bank || 0) + (nw.cash || 0);
             const totalRecv = (nw.receivables || 0) + (nw.employeeLoanTotal || 0) + (nw.reimburseOutstanding || 0);
             return [
-              { label: "BANK",    v: fmtIDR(nw.bank || 0, true),         raw: nw.bank || 0,         color: "#85B7EB" },
-              { label: "CASH",    v: fmtIDR(nw.cash || 0, true),         raw: nw.cash || 0,         color: "#85B7EB" },
-              { label: "ASSETS",  v: fmtIDR(nw.assets || 0, true),       raw: nw.assets || 0,       color: "#97C459" },
-              { label: "RECV",    v: fmtIDR(totalRecv, true),             raw: totalRecv,             color: "#5DCAA5" },
-              { label: "CC DEBT", v: (nw.ccDebt > 0 ? "−" : "") + fmtIDR(nw.ccDebt || 0, true), raw: nw.ccDebt || 0, color: "#F09595" },
-              { label: "LIAB",    v: fmtIDR(nw.liabilities || 0, true),   raw: nw.liabilities || 0, color: "rgba(255,255,255,0.45)" },
+              { label: "LIQUIDITY",    value: liquidity,          color: "#047857", prefix: "" },
+              { label: "ASSETS",       value: nw.assets || 0,    color: "#047857", prefix: "" },
+              { label: "RECEIVABLES",  value: totalRecv,          color: "#047857", prefix: "" },
+              { label: "CC DEBT",      value: nw.ccDebt || 0,    color: "#b91c1c", prefix: (nw.ccDebt || 0) > 0 ? "−" : "" },
+              { label: "LIABILITIES",  value: nw.liabilities || 0, color: "#9ca3af", prefix: "" },
             ].map(s => (
               <div key={s.label}>
-                <div style={{ fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.35)", textTransform: "uppercase", letterSpacing: "1px", fontFamily: "Figtree, sans-serif", marginBottom: 3 }}>
+                <div style={{ fontSize: 9, fontWeight: 500, color: "#16a34a", letterSpacing: "0.6px", fontFamily: "Figtree, sans-serif", marginBottom: 3, whiteSpace: "nowrap" }}>
                   {s.label}
                 </div>
-                <div style={{ fontSize: isMobile ? 12 : 13, fontWeight: 600, color: s.raw === 0 ? "rgba(255,255,255,0.2)" : s.color, fontFamily: "Figtree, sans-serif" }}>
-                  {s.v}
+                <div style={{ fontSize: isMobile ? 12 : 13, fontWeight: 600, color: s.value === 0 ? "#9ca3af" : s.color, fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
+                  {s.prefix}{fmtIDR(s.value, true)}
                 </div>
               </div>
             ));
           })()}
         </div>
-      </div>
-
-      {/* ════════════ SECTION 2 — ACTION REQUIRED ════════════ */}
-      {/* Reconcile draft banner (manages its own visibility) */}
-      <ReconcileDraftBanner
-        user={user}
-        accounts={accounts}
-        onContinue={(acc, state) => {
-          if (acc.type === "credit_card") {
-            setPendingReconcileNav?.({ accType: "credit_card", acc, seeds: { from: null, to: null, selectedMonth: null, txs: null, filename: "", fullState: state } });
-            setTab?.("cards");
-          } else {
-            setPendingReconcileNav?.({ accType: "bank", acc, seeds: { from: null, to: null, txs: null, filename: "", fullState: state } });
-            setTab?.("bank");
-          }
-        }}
-      />
-
-      {/* Gmail pending + CC urgent + alerts */}
-      {(() => {
-        const gmailCount = (pendingSyncs || []).length;
-        const ccUrgent = (accounts || []).filter(a => {
-          if (a.type !== "credit_card" || !a.due_day || !Number(a.outstanding_amount || 0)) return false;
-          const daysLeft = Math.ceil((getNextDueDate(a.due_day) - new Date()) / 86400000);
-          return daysLeft >= 0 && daysLeft <= 3;
-        });
-        if (gmailCount === 0 && ccUrgent.length === 0 && alerts.length === 0) return null;
-        return (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {gmailCount > 0 && (
-              <div style={{
-                background: "#fef9ec", border: "1.5px solid #fde68a", borderRadius: 14,
-                padding: "14px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
-              }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontSize: 20 }}>📧</span>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#92400e", fontFamily: "Figtree, sans-serif" }}>
-                      {gmailCount} transaction{gmailCount !== 1 ? "s" : ""} from Gmail need review
-                    </div>
-                    <div style={{ fontSize: 11, color: "#b45309", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
-                      {lastSyncMins != null
-                        ? `Last sync ${lastSyncMins < 1 ? "just now" : `${lastSyncMins} min ago`}`
-                        : "Gmail sync found new transactions"}
-                    </div>
-                  </div>
-                </div>
-                <button onClick={() => openEmail?.("pending")} style={{
-                  background: "#d97706", color: "#fff", border: "none", borderRadius: 8,
-                  padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer",
-                  fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", flexShrink: 0,
-                }}>
-                  Review Now →
-                </button>
-              </div>
-            )}
-            {ccUrgent.map(cc => {
-              const daysLeft = Math.ceil((getNextDueDate(cc.due_day) - new Date()) / 86400000);
-              return (
-                <div key={cc.id} style={{
-                  background: "#fef2f2", border: "1.5px solid #fecaca", borderRadius: 14,
-                  padding: "12px 16px", display: "flex", alignItems: "center", gap: 12,
-                }}>
-                  <span style={{ fontSize: 18 }}>💳</span>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#991b1b", fontFamily: "Figtree, sans-serif" }}>
-                      {cc.name} due in {daysLeft} day{daysLeft !== 1 ? "s" : ""}
-                    </div>
-                    <div style={{ fontSize: 11, color: "#dc2626", fontFamily: "Figtree, sans-serif" }}>
-                      {fmtIDR(Number(cc.outstanding_amount || 0))} outstanding
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-            <AlertCenter alerts={alerts} />
-          </div>
-        );
-      })()}
-
-      {/* Quick Actions */}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button onClick={() => setShowAddTxModal(true)} style={QUICK_BTN}>
-          + Add Transaction
-        </button>
-        <button onClick={() => openEmail?.("pending")} style={QUICK_BTN}>
-          📧 Email Sync{(pendingSyncs || []).length > 0 && (
-            <span style={{
-              background: "#dc2626", color: "#fff", borderRadius: 99,
-              padding: "0 5px", fontSize: 9, fontWeight: 700, marginLeft: 4,
-              display: "inline-block", lineHeight: "14px",
-            }}>
-              {(pendingSyncs || []).length}
-            </span>
-          )}
-        </button>
-        <button onClick={() => setTab?.("scan")} style={QUICK_BTN}>📷 AI Scan</button>
       </div>
 
       {/* ════════════ SECTION 3 — THIS MONTH METRICS ════════════ */}
@@ -1790,23 +1713,22 @@ const LINK_BTN = {
   padding: 0,
 };
 
-// Hero icon button (used inside dark gradient card)
-const HERO_ICON_BTN = {
-  width: 32, height: 32, borderRadius: 9,
-  border: "1px solid rgba(255,255,255,0.14)",
-  background: "rgba(255,255,255,0.07)",
-  color: "rgba(255,255,255,0.75)", cursor: "pointer",
+// Hero icon button — Soft Mint theme
+const HERO_MINT_BTN = {
+  width: 32, height: 32, borderRadius: 8, border: "none",
+  background: "rgba(20,83,45,0.08)", color: "#14532d",
+  cursor: "pointer", fontSize: 13,
   display: "flex", alignItems: "center", justifyContent: "center",
 };
 
-// Quick action pill button
-const QUICK_BTN = {
-  height: 30, padding: "0 14px", borderRadius: 99,
-  border: "1px solid #e5e7eb", background: "#fff",
-  color: "#374151", fontSize: 12, fontWeight: 600,
-  fontFamily: "Figtree, sans-serif", cursor: "pointer",
-  display: "flex", alignItems: "center", gap: 4,
-  whiteSpace: "nowrap",
+// Red dot indicator for notification/pending badges
+const NOTIF_DOT = {
+  position: "absolute", top: 4, right: 4,
+  width: 8, height: 8,
+  background: "#ef4444",
+  borderRadius: "50%",
+  border: "1.5px solid #f0fdf4",
+  pointerEvents: "none",
 };
 
 // Section card base

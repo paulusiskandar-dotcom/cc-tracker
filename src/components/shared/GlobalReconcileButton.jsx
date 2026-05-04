@@ -8,7 +8,7 @@ const FF = "Figtree, sans-serif";
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
-export default function GlobalReconcileButton({ accounts, type, onNavigate, user }) {
+export default function GlobalReconcileButton({ accounts, type, onNavigate, user, iconOnly = false }) {
   const [showUpload, setShowUpload] = useState(false);
   const [stagedFiles, setStagedFiles] = useState([]);
   const [processing, setProcessing] = useState(false);
@@ -100,9 +100,25 @@ export default function GlobalReconcileButton({ accounts, type, onNavigate, user
 
   return (
     <>
-      <Button size="sm" variant="secondary" onClick={() => setShowUpload(true)}>
-        Reconcile
-      </Button>
+      {iconOnly ? (
+        <button
+          onClick={() => setShowUpload(true)}
+          title="Reconcile from PDF"
+          aria-label="Reconcile"
+          style={{
+            width: 32, height: 32, borderRadius: 8, border: "none",
+            background: "rgba(20,83,45,0.08)", color: "#14532d",
+            cursor: "pointer", fontSize: 14,
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          ⚖
+        </button>
+      ) : (
+        <Button size="sm" variant="secondary" onClick={() => setShowUpload(true)}>
+          Reconcile
+        </Button>
+      )}
 
       {/* ── Upload modal ── */}
       <Modal isOpen={showUpload} onClose={() => { setShowUpload(false); setStagedFiles([]); }} title="Reconcile from PDF" width={520}>
