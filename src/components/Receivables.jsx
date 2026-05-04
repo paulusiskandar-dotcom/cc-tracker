@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
+import { Pencil, Trash2, ChevronUp, ChevronDown } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { ledgerApi, employeeLoanApi, loanPaymentsApi, recalculateBalance } from "../api";
 import { supabase } from "../lib/supabase";
@@ -138,7 +139,6 @@ export default function Receivables({
   const [selectedIn,    setSelectedIn]   = useState({}); // { accId: Set<ledgerId> }
   const [settling,      setSettling]     = useState(false);
   const [expandedSett,  setExpandedSett] = useState(new Set());
-  const [showSettled,   setShowSettled]  = useState({}); // { entity: bool }
   // ── Edit / Delete settlement ──────────────────────────────────
   const [editSModal,    setEditSModal]   = useState(false);
   const [editSItem,     setEditSItem]    = useState(null);
@@ -182,11 +182,12 @@ export default function Receivables({
       .sort((a, b) => b.tx_date.localeCompare(a.tx_date))
   , [ledger]);
 
-  // Per-entity reimburse totals computed from ledger (not from account.receivable_outstanding)
+  // Per-entity reimburse totals — unsettled entries only (settled items don't count toward outstanding)
   const reimburseStats = useMemo(() => {
     const map = {};
     ledger.forEach(e => {
       if (!e.entity) return;
+      if (e.reimburse_settlement_id) return;
       if (e.tx_type === "reimburse_out") {
         if (!map[e.entity]) map[e.entity] = { out: 0, in: 0 };
         map[e.entity].out += Number(e.amount_idr || e.amount || 0);
@@ -326,10 +327,7 @@ export default function Receivables({
       .then(({ data }) => { if (data) setSettlements(data); });
   }, [user?.id]);
 
-  // ── RE category lookup ────────────────────────────────────────
-  const RE_CAT_NAMES = { Hamasa: "Hamasa RE", SDC: "SDC RE", Travelio: "Travelio RE" };
-  const getRECat = (entity) =>
-    (categories || []).find(c => c.label === RE_CAT_NAMES[entity] || c.name === RE_CAT_NAMES[entity]);
+  const REIMBURSABLE_LOSS_CATEGORY_ID = 'e054e34e-9251-461b-a118-718077cf3293';
 
   // ── Toggle row selection ───────────────────────────────────────
   const toggleOutRow = (accId, entryId) => setSelectedOut(prev => {
@@ -349,8 +347,6 @@ export default function Receivables({
     const inIds  = Array.from(selectedIn[acc.id]  || []);
     if (!outIds.length || !inIds.length)
       return showToast("Select at least one expense and one received item", "error");
-
-    const recat = getRECat(entity);
 
     // Check for existing settlement for this entity created today
     const todayMidnight = new Date(); todayMidnight.setHours(0, 0, 0, 0);
@@ -394,12 +390,12 @@ export default function Receivables({
           const fromId = ledger.find(e => mergedOut.includes(e.id))?.from_id || null;
           const { error: lErr } = await supabase.from("ledger").insert([{
             user_id: user.id, tx_date: todayStr(),
-            description: `${entity} Reimbursable Expense`,
+            description: `${entity} Reimbursable Loss`,
             amount: newReimbursable, amount_idr: newReimbursable, currency: "IDR",
             tx_type: "expense", from_type: "account", to_type: "expense",
             from_id: fromId, to_id: null,
-            category_id: recat?.id || null, category_name: recat?.label || RE_CAT_NAMES[entity],
-            entity: "Personal", is_reimburse: false,
+            category_id: REIMBURSABLE_LOSS_CATEGORY_ID, category_name: "Reimbursable Loss",
+            entity: entity, is_reimburse: false,
             notes: `Settlement: ${entity}`, reimburse_settlement_id: settlement.id,
           }]);
           if (lErr) throw new Error(lErr.message);
@@ -427,7 +423,7 @@ export default function Receivables({
             out_ledger_ids: outIds, in_ledger_ids: inIds,
             total_out: totalOut, total_in: totalIn,
             reimbursable_expense: reimbursable,
-            re_category_id: recat?.id || null, notes: null,
+            re_category_id: REIMBURSABLE_LOSS_CATEGORY_ID, notes: null,
           }])
           .select().single();
         if (sErr) throw new Error(sErr.message);
@@ -437,12 +433,12 @@ export default function Receivables({
           const fromId = outEntries[0]?.from_id || null;
           const { error: lErr } = await supabase.from("ledger").insert([{
             user_id: user.id, tx_date: todayStr(),
-            description: `${entity} Reimbursable Expense`,
+            description: `${entity} Reimbursable Loss`,
             amount: reimbursable, amount_idr: reimbursable, currency: "IDR",
             tx_type: "expense", from_type: "account", to_type: "expense",
             from_id: fromId, to_id: null,
-            category_id: recat?.id || null, category_name: recat?.label || RE_CAT_NAMES[entity],
-            entity: "Personal", is_reimburse: false,
+            category_id: REIMBURSABLE_LOSS_CATEGORY_ID, category_name: "Reimbursable Loss",
+            entity: entity, is_reimburse: false,
             notes: `Settlement: ${entity}`, reimburse_settlement_id: settlement.id,
           }]);
           if (lErr) throw new Error(lErr.message);
@@ -722,17 +718,15 @@ export default function Receivables({
               const entCol      = ENT_COL[r.entity] || T.ac;
               const entBg       = ENT_BG[r.entity]  || T.sur2;
 
-              // All reimburse rows for this entity (entity-based, not account-id-based)
-              const entityShowSettled = showSettled[r.entity] || false;
+              // All reimburse rows for this entity — only unsettled entries shown in top section
               const allOutRows = ledger.filter(e =>
                 e.tx_type === "reimburse_out" && e.entity === r.entity
               ).sort((a, b) => b.tx_date.localeCompare(a.tx_date));
               const allInRows = ledger.filter(e =>
                 e.tx_type === "reimburse_in" && e.entity === r.entity
               ).sort((a, b) => b.tx_date.localeCompare(a.tx_date));
-              const outRows = entityShowSettled ? allOutRows : allOutRows.filter(e => !e.reimburse_settlement_id);
-              const inRows  = allInRows;
-              const hasSettled = allOutRows.some(e => e.reimburse_settlement_id) || allInRows.some(e => e.reimburse_settlement_id);
+              const outRows = allOutRows.filter(e => !e.reimburse_settlement_id);
+              const inRows  = allInRows.filter(e => !e.reimburse_settlement_id);
 
               const entitySettlements = settlements.filter(s => s.entity === r.entity);
 
@@ -765,31 +759,11 @@ export default function Receivables({
                         </div>
                       </div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        {hasSettled && (
-                          <button
-                            onClick={() => setShowSettled(prev => ({ ...prev, [r.entity]: !prev[r.entity] }))}
-                            style={{ height: 30, padding: "0 12px", border: "1px solid #e5e7eb", borderRadius: 8, cursor: "pointer", background: "transparent", color: "#6b7280", fontSize: 11, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
-                          >
-                            {entityShowSettled ? "Hide settled" : "Show settled"}
-                          </button>
-                        )}
                         <button
                           onClick={() => navigate(`/reimburse/${r.entity}/statement`)}
                           style={{ height: 30, padding: "0 12px", border: "1px solid #e5e7eb", borderRadius: 8, cursor: "pointer", background: "#fff", color: "#374151", fontSize: 11, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
                         >
                           📄 Statement
-                        </button>
-                        <button
-                          onClick={() => { setHistoryEntity(r.entity); setHistoryModal(true); }}
-                          style={{ height: 30, padding: "0 12px", border: `1px solid ${entCol}`, borderRadius: 8, cursor: "pointer", background: "transparent", color: entCol, fontSize: 12, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
-                        >
-                          History
-                        </button>
-                        <button
-                          onClick={() => { setOutForm(f => ({ ...f, entity: r.entity })); setOutModal(true); }}
-                          style={{ height: 30, padding: "0 14px", border: "none", borderRadius: 8, cursor: "pointer", background: entBg, color: entCol, fontSize: 12, fontWeight: 700, fontFamily: "Figtree, sans-serif" }}
-                        >
-                          + Expense
                         </button>
                       </div>
                     </div>
@@ -936,21 +910,25 @@ export default function Receivables({
                                     <span style={{ fontWeight: 700, color: re > 0 ? "#dc2626" : "#059669" }}>RE {fmtIDR(re, true)}</span>
                                   </div>
                                 </div>
-                                <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
                                   <button
                                     onClick={e => { e.stopPropagation(); openEditSettle(s); }}
-                                    style={{ border: "none", background: "none", cursor: "pointer", padding: "2px 4px", fontSize: 13, color: "#9ca3af", lineHeight: 1 }}
                                     title="Edit"
-                                  >✏️</button>
+                                    style={{ background: "transparent", border: "none", padding: 6, cursor: "pointer", color: "#9ca3af", lineHeight: 1, display: "flex", alignItems: "center" }}
+                                    onMouseEnter={e => e.currentTarget.style.color = "#3b5bdb"}
+                                    onMouseLeave={e => e.currentTarget.style.color = "#9ca3af"}
+                                  ><Pencil size={13} /></button>
                                   <button
                                     onClick={e => { e.stopPropagation(); handleDeleteSettle(s); }}
-                                    style={{ border: "none", background: "none", cursor: "pointer", padding: "2px 4px", fontSize: 13, color: "#9ca3af", lineHeight: 1 }}
                                     title="Delete"
-                                  >🗑</button>
-                                  <span
+                                    style={{ background: "transparent", border: "none", padding: 6, cursor: "pointer", color: "#9ca3af", lineHeight: 1, display: "flex", alignItems: "center" }}
+                                    onMouseEnter={e => e.currentTarget.style.color = "#dc2626"}
+                                    onMouseLeave={e => e.currentTarget.style.color = "#9ca3af"}
+                                  ><Trash2 size={13} /></button>
+                                  <button
                                     onClick={() => setExpandedSett(prev => { const ns = new Set(prev); ns.has(s.id) ? ns.delete(s.id) : ns.add(s.id); return ns; })}
-                                    style={{ fontSize: 10, color: "#9ca3af", cursor: "pointer", padding: "2px 4px" }}
-                                  >{isExpanded ? "▲" : "▼"}</span>
+                                    style={{ background: "transparent", border: "none", padding: 6, cursor: "pointer", color: "#9ca3af", lineHeight: 1, display: "flex", alignItems: "center" }}
+                                  >{isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}</button>
                                 </div>
                               </div>
                               {isExpanded && (
