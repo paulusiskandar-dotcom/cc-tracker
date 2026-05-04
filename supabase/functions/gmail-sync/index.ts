@@ -248,7 +248,7 @@ function matchAccount(masked: string | null, bankName: string | null, accounts: 
   if (!masked || accounts.length === 0) return null;
 
   const suffix = extractVisibleSuffix(masked);
-  if (!suffix) return null;
+  if (!suffix || suffix.length < 4) return null;
 
   // Filter by bank if we know it
   const pool = bankName

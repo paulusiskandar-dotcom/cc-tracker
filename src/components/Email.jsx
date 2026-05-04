@@ -415,8 +415,15 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
         const row = applyMerchantRule(syncToRow(s));
         // Per-row auto-detect if server didn't match an account
         if (!row.from_id) {
-          const sender = s.ai_raw_result?.sender_email || s.sender_email || "";
-          const detected = detectAccount({ subject: s.subject, sender, accounts: spendAccounts });
+          const sender = s.sender_email || "";
+          const aiTx   = Array.isArray(s.ai_raw_result) ? s.ai_raw_result[s.tx_index ?? 0] : null;
+          const detected = detectAccount({
+            subject:   s.subject,
+            sender,
+            cardLast4: s.card_last4 || aiTx?.card_last4 || null,
+            pdfText:   aiTx?.from_account_masked || null,
+            accounts:  spendAccounts,
+          });
           if (detected && (detected.confidence === 'high' || detected.confidence === 'medium')) {
             return { ...row, from_id: detected.accountId, _autoDetect: detected };
           }
