@@ -557,6 +557,8 @@ export default function BankStatement({
             <ReconcileMissingBar
               reconcile={reconcile}
               accounts={accounts}
+              categories={categories}
+              incomeSrcs={incomeSrcs}
               onExpandAll={() => {
                 if (reconcile.expandedIds.size === reconcile.missing.length) reconcile.collapseAll();
                 else reconcile.expandAll();

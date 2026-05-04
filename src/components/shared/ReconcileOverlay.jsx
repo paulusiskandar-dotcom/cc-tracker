@@ -9,7 +9,6 @@ import { supabase } from "../../lib/supabase";
 import { processReconcilePDF } from "../../lib/reconcilePdfUpload";
 import { fmtIDR, todayStr } from "../../utils";
 import { Button, showToast, TxHorizontal, TX_HORIZONTAL_TYPES } from "./index";
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../../constants";
 import { LIGHT } from "../../theme";
 import Modal from "./Modal";
 import ReconcileSummaryModal from "./ReconcileSummaryModal";
@@ -497,7 +496,7 @@ export function getMissingRowsMap(missing) {
 }
 
 // ── Missing rows summary bar ─────────────────────────────────
-export function ReconcileMissingBar({ reconcile, accounts, onExpandAll, expandedCount, totalMissing, onSaveAll, saving }) {
+export function ReconcileMissingBar({ reconcile, accounts, onExpandAll, expandedCount, totalMissing, onSaveAll, saving, categories = [], incomeSrcs = [] }) {
   const [bulkType,     setBulkType]     = useState("");
   const [bulkCategory, setBulkCategory] = useState("");
   const [bulkAccount,  setBulkAccount]  = useState("");
@@ -558,8 +557,8 @@ export function ReconcileMissingBar({ reconcile, accounts, onExpandAll, expanded
               const isIncomeType  = ["income","collect_loan","sell_asset","reimburse_in"].includes(newType);
               const isExpenseType = ["expense","reimburse_out"].includes(newType);
               if (bulkCategory) {
-                const inIncome  = INCOME_CATEGORIES_LIST.some(c => c.id === bulkCategory);
-                const inExpense = EXPENSE_CATEGORIES.some(c => c.id === bulkCategory);
+                const inIncome  = incomeSrcs.some(c => c.id === bulkCategory);
+                const inExpense = categories.some(c => c.id === bulkCategory);
                 if ((isIncomeType && !inIncome) || (isExpenseType && !inExpense)) setBulkCategory("");
               }
             }}
@@ -572,24 +571,24 @@ export function ReconcileMissingBar({ reconcile, accounts, onExpandAll, expanded
 
           <select value={bulkCategory}
             onChange={e => {
-              const cat = [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES_LIST].find(c => c.id === e.target.value);
+              const cat = [...categories, ...incomeSrcs].find(c => c.id === e.target.value);
               setBulkCategory(e.target.value);
-              applyBulkToAll("category_id", e.target.value, { category_name: cat?.label || "" });
+              applyBulkToAll("category_id", e.target.value, { category_name: cat?.label || cat?.name || "" });
             }}
             style={{ fontSize: 11, padding: "3px 6px", borderRadius: 5, border: "1px solid #fbbf24", background: "#fff", fontFamily: FF, cursor: "pointer" }}>
             <option value="">Category…</option>
             {(() => {
               const isIncomeType  = ["income","collect_loan","sell_asset","reimburse_in"].includes(bulkType);
               const isExpenseType = ["expense","reimburse_out"].includes(bulkType);
-              if (isIncomeType)  return INCOME_CATEGORIES_LIST.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>);
-              if (isExpenseType) return EXPENSE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>);
+              if (isIncomeType)  return incomeSrcs.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.name}` : c.name}</option>);
+              if (isExpenseType) return categories.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.name}` : c.name}</option>);
               return (
                 <>
                   <optgroup label="Expense">
-                    {EXPENSE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>)}
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.name}` : c.name}</option>)}
                   </optgroup>
                   <optgroup label="Income">
-                    {INCOME_CATEGORIES_LIST.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>)}
+                    {incomeSrcs.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.name}` : c.name}</option>)}
                   </optgroup>
                 </>
               );
