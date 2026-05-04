@@ -1,5 +1,6 @@
 // GlobalReconcileButton — upload PDF statements, auto-detect account + period, navigate to the right statement page in reconcile mode
 import { useState, useRef } from "react";
+import { Scale } from "lucide-react";
 import { Button, showToast } from "./index";
 import Modal from "./Modal";
 import { processReconcilePDF, matchDetectedAccount } from "../../lib/reconcilePdfUpload";
@@ -108,11 +109,11 @@ export default function GlobalReconcileButton({ accounts, type, onNavigate, user
           style={{
             width: 32, height: 32, borderRadius: 8, border: "none",
             background: "rgba(20,83,45,0.08)", color: "#14532d",
-            cursor: "pointer", fontSize: 14,
+            cursor: "pointer",
             display: "flex", alignItems: "center", justifyContent: "center",
           }}
         >
-          ⚖
+          <Scale size={16} strokeWidth={1.5} />
         </button>
       ) : (
         <Button size="sm" variant="secondary" onClick={() => setShowUpload(true)}>

@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect, useCallback } from "react";
+import { Bell, Mail, Camera, Scale, Plus } from "lucide-react";
 import { ledgerApi, recurringApi, reimburseSettlementsApi, loanPaymentsApi, employeeLoanApi } from "../api";
 import { fmtIDR, ym, mlShort, getGreeting, todayStr, groupByDate, checkDuplicateTransaction } from "../utils";
 import { showToast, EmptyState, Modal, Button, AmountInput, Field, Input, FormRow } from "./shared/index";
@@ -902,7 +903,7 @@ export default function Dashboard({
                 aria-label="Notifications"
                 style={HERO_MINT_BTN}
               >
-                🔔
+                <Bell size={16} strokeWidth={1.5} />
               </button>
               {notifCount > 0 && <span style={NOTIF_DOT} />}
             </div>
@@ -915,10 +916,7 @@ export default function Dashboard({
                 aria-label="Email Sync"
                 style={HERO_MINT_BTN}
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-                  <polyline points="22,6 12,13 2,6"/>
-                </svg>
+                <Mail size={16} strokeWidth={1.5} />
               </button>
               {(pendingSyncs?.length || 0) > 0 && <span style={NOTIF_DOT} />}
             </div>
@@ -930,10 +928,7 @@ export default function Dashboard({
               aria-label="AI Scan"
               style={HERO_MINT_BTN}
             >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-                <circle cx="12" cy="13" r="4"/>
-              </svg>
+              <Camera size={16} strokeWidth={1.5} />
             </button>
 
             {/* 4. Reconcile (icon-only ⚖) */}
@@ -953,12 +948,11 @@ export default function Dashboard({
               style={{
                 width: 32, height: 32, borderRadius: 8, border: "none",
                 background: "#14532d", color: "#fff",
-                cursor: "pointer", fontSize: 18, fontWeight: 500,
+                cursor: "pointer",
                 display: "flex", alignItems: "center", justifyContent: "center",
-                lineHeight: 1,
               }}
             >
-              +
+              <Plus size={18} strokeWidth={2} />
             </button>
           </div>
         </div>
