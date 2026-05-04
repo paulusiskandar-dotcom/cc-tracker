@@ -1,5 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
-import { supabase } from "../lib/supabase";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import { ledgerApi, recurringApi, reimburseSettlementsApi, loanPaymentsApi, employeeLoanApi } from "../api";
 import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST } from "../constants";
 import { fmtIDR, ym, mlShort, getGreeting, todayStr, groupByDate, checkDuplicateTransaction } from "../utils";
@@ -10,49 +9,8 @@ import GlobalReconcileButton from "./shared/GlobalReconcileButton";
 import { detectRecurringPatterns } from "../lib/recurringDetection";
 import TxVerticalBig from "./shared/TxVerticalBig";
 import BudgetWidget from "./shared/BudgetWidget";
+import BankPickerSheet from "./shared/BankPickerSheet";
 
-// ── Reconcile Status widget ────────────────────────────────────
-function ReconcileStatusWidget({ user, accounts }) {
-  const [lastReconciled, setLastReconciled] = useState({});
-
-  useEffect(() => {
-    if (!user) return;
-    supabase.from("reconcile_sessions")
-      .select("account_id, completed_at")
-      .eq("user_id", user.id)
-      .eq("status", "completed")
-      .order("completed_at", { ascending: false })
-      .then(({ data }) => {
-        const map = {};
-        (data || []).forEach(r => { if (!map[r.account_id]) map[r.account_id] = r.completed_at; });
-        setLastReconciled(map);
-      });
-  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const needCount = accounts.filter(a => {
-    if (!a.is_active) return false;
-    if (a.type !== "bank" && a.type !== "credit_card") return false;
-    const last = lastReconciled[a.id];
-    if (!last) return true;
-    return (Date.now() - new Date(last).getTime()) / 86400000 > 7;
-  }).length;
-
-  return (
-    <div style={{
-      background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 16,
-      padding: "14px 18px", display: "flex", alignItems: "center", gap: 10,
-      fontFamily: "Figtree, sans-serif",
-    }}>
-      <span style={{
-        width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
-        background: needCount > 0 ? "#BA7517" : "#0F6E56",
-      }} />
-      <span style={{ fontSize: 14, fontWeight: 500, color: "#111827" }}>
-        {needCount} account{needCount !== 1 ? "s" : ""} need to reconcile
-      </span>
-    </div>
-  );
-}
 
 // ── Recurring Suggestions widget ──────────────────────────────
 const REC_FF   = "Figtree, sans-serif";
@@ -191,6 +149,10 @@ export default function Dashboard({
   const [paySaving,     setPaySaving]     = useState(false);
   const [showAddTxModal, setShowAddTxModal] = useState(false);
   const [nwPeriod, setNwPeriod]             = useState("month");
+  const [bankPickerState, setBankPickerState] = useState({
+    isOpen: false, onSelect: null, contextLabel: "", contextAmount: "", mode: "default",
+  });
+  const closeBankPicker = useCallback(() => setBankPickerState(s => ({ ...s, isOpen: false })), []);
   // ─── DERIVED STATS ───────────────────────────────────────────
   const nw = netWorth || { total: 0, bank: 0, cash: 0, assets: 0, receivables: 0, ccDebt: 0, liabilities: 0, reimburseOutstanding: 0 };
 
@@ -346,7 +308,7 @@ export default function Dashboard({
 
   // Recent transactions, grouped by date (last 10)
   const recentGroups = useMemo(() => {
-    const recent = ledger.slice(0, 10);
+    const recent = ledger.slice(0, 5);
     return groupByDate(recent);
   }, [ledger]);
 
@@ -502,7 +464,7 @@ export default function Dashboard({
           amount: Number(cc.outstanding_amount || 0),
           amountColor: "#dc2626", amountSign: "−",
           icon: "💳", iconBg: "#fee2e2", iconColor: "#dc2626",
-          actionable: false,
+          actionable: true, confirmLabel: "Pay", confirmStyle: "danger",
         });
       });
 
@@ -522,7 +484,7 @@ export default function Dashboard({
           amountColor: isInc ? "#059669" : "#dc2626",
           amountSign: isInc ? "+" : "−",
           icon: "🔄", iconBg: isInc ? "#dcfce7" : "#fee2e2", iconColor: isInc ? "#059669" : "#dc2626",
-          actionable: false,
+          actionable: true, confirmLabel: "Log", confirmStyle: "primary",
         });
       });
 
@@ -539,7 +501,7 @@ export default function Dashboard({
         amount: outstanding,
         amountColor: "#059669", amountSign: "+",
         icon: "🧾", iconBg: "#dcfce7", iconColor: "#059669",
-        actionable: false,
+        actionable: true, confirmLabel: "Mark", confirmStyle: "primary",
       });
     });
 
@@ -582,6 +544,13 @@ export default function Dashboard({
   const notifCount = useMemo(() =>
     (pendingSyncs?.length || 0) + (alerts?.length || 0),
   [pendingSyncs, alerts]);
+
+  // 14-day cash flow forecast from upcoming items
+  const upcomingForecast = useMemo(() => {
+    const income  = upcomingItems.filter(i => i.amountSign === "+").reduce((s, i) => s + (i.amount || 0), 0);
+    const expense = upcomingItems.filter(i => i.amountSign === "−" || i.amountSign === "-").reduce((s, i) => s + (i.amount || 0), 0);
+    return { income, expense, net: income - expense };
+  }, [upcomingItems]);
 
   // ─── REMINDER ACTIONS ────────────────────────────────────────
   const openConfirmModal = (r, editMode = false) => {
@@ -693,6 +662,105 @@ export default function Dashboard({
 
   // Keep alias for Skip button reference
   const doConfirmReminder = doConfirm; // eslint-disable-line no-unused-vars
+
+  // ── 1-click: Pay CC (opens bank picker, then inserts pay_cc ledger) ──
+  const quickPayCC = useCallback((cc) => {
+    if (!cc) return;
+    setBankPickerState({
+      isOpen: true, mode: "default",
+      contextLabel: "Pay " + cc.name,
+      contextAmount: fmtIDR(cc.outstanding_amount || 0),
+      onSelect: async (bank) => {
+        closeBankPicker();
+        try {
+          const created = await ledgerApi.create(user.id, {
+            tx_type: "pay_cc", tx_date: todayStr(),
+            amount: cc.outstanding_amount || 0, currency: cc.currency || "IDR",
+            amount_idr: cc.outstanding_amount || 0,
+            from_type: "account", from_id: bank.id,
+            to_type: "account",   to_id: cc.id,
+            description: "Pay " + cc.name, entity: "Personal",
+            merchant_name: null, attachment_url: null,
+            ai_categorized: false, ai_confidence: null,
+            installment_id: null, scan_batch_id: null, notes: null,
+          }, accounts);
+          if (created) setLedger(p => [created, ...p]);
+          showToast(`✓ Paid ${fmtIDR(cc.outstanding_amount || 0, true)} to ${cc.name}`);
+        } catch (e) { showToast("Gagal bayar CC: " + (e.message || "Error"), "error"); }
+      },
+    });
+  }, [user, accounts, setLedger, closeBankPicker]);
+
+  // ── 1-click: Log recurring template (day_of_month type, no reminder row) ──
+  const quickConfirmRecurring = useCallback((template) => {
+    if (!template) return;
+    const isExpense = template.tx_type === "expense";
+    const needPicker = isExpense ? !template.from_id : !template.to_id;
+
+    const doInsert = async (overrideBankId) => {
+      try {
+        const created = await ledgerApi.create(user.id, {
+          tx_type: template.tx_type, tx_date: todayStr(),
+          amount: template.amount, currency: template.currency || "IDR",
+          amount_idr: template.amount,
+          from_type: template.from_type || (isExpense ? "account" : "income_source"),
+          from_id:   template.from_id || (isExpense ? overrideBankId : null),
+          to_type:   template.to_type || (!isExpense ? "account" : "expense"),
+          to_id:     template.to_id || (!isExpense ? overrideBankId : null),
+          category_id: template.category_id || null,
+          entity: template.entity || "Personal",
+          description: template.name || template.description || "Recurring",
+          merchant_name: null, attachment_url: null,
+          ai_categorized: false, ai_confidence: null,
+          installment_id: null, scan_batch_id: null, notes: null,
+        }, accounts);
+        if (created) setLedger(p => [created, ...p]);
+        await recurringApi.updateTemplate(template.id, { last_generated_date: todayStr() });
+        showToast(`✓ Logged: ${template.name}`);
+      } catch (e) { showToast("Gagal log recurring: " + (e.message || "Error"), "error"); }
+    };
+
+    if (needPicker) {
+      setBankPickerState({
+        isOpen: true, mode: !isExpense ? "credit" : "default",
+        contextLabel: (isExpense ? "Pay: " : "Receive: ") + template.name,
+        contextAmount: fmtIDR(template.amount),
+        onSelect: async (bank) => { closeBankPicker(); await doInsert(bank.id); },
+      });
+    } else {
+      doInsert(null);
+    }
+  }, [user, accounts, setLedger, closeBankPicker]);
+
+  // ── 1-click: Mark reimburse_pending as received ──
+  const quickMarkReimbursePending = useCallback((settlement) => {
+    if (!settlement) return;
+    const outstanding = Math.max(0, Number(settlement.total_out || 0) - Number(settlement.total_in || 0));
+    setBankPickerState({
+      isOpen: true, mode: "credit",
+      contextLabel: "Receive from " + (settlement.entity || "Reimburse"),
+      contextAmount: fmtIDR(outstanding),
+      onSelect: async (bank) => {
+        closeBankPicker();
+        try {
+          const receivableAcc = receivables.find(r => r.entity === settlement.entity);
+          const created = await ledgerApi.create(user.id, {
+            tx_type: "reimburse_in", tx_date: todayStr(),
+            amount: outstanding, currency: "IDR", amount_idr: outstanding,
+            from_type: "account", from_id: receivableAcc?.id || null,
+            to_type: "account",   to_id: bank.id,
+            entity: settlement.entity || "Personal",
+            description: (settlement.entity || "Reimburse") + " received",
+            merchant_name: null, attachment_url: null,
+            ai_categorized: false, ai_confidence: null,
+            installment_id: null, scan_batch_id: null, notes: null,
+          }, accounts);
+          if (created) setLedger(p => [created, ...p]);
+          showToast(`✓ Recorded ${fmtIDR(outstanding, true)} from ${settlement.entity}`);
+        } catch (e) { showToast("Gagal record reimburse: " + (e.message || "Error"), "error"); }
+      },
+    });
+  }, [user, accounts, setLedger, closeBankPicker, receivables]);
 
   const skipReminder = async (r) => {
     const tmpl = r.recurring_templates || {};
@@ -1191,13 +1259,24 @@ export default function Dashboard({
 
       {/* ════════════ SECTION 5 — UPCOMING ════════════ */}
       <div style={{ background: "#fff", borderRadius: 16, padding: "16px 18px" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-          <span style={SEC_TITLE}>Upcoming — Next 14 Days</span>
-          {upcomingItems.length > 0 && (
-            <span style={{ fontSize: 10, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
-              {upcomingItems.length} item{upcomingItems.length !== 1 ? "s" : ""}
-            </span>
-          )}
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 14 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={SEC_TITLE}>Upcoming — Next 14 Days</span>
+            {upcomingItems.length > 0 && (
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 11, fontFamily: "Figtree, sans-serif", alignItems: "center" }}>
+                <span style={{ color: "#9ca3af" }}>{upcomingItems.length} item{upcomingItems.length !== 1 ? "s" : ""}</span>
+                {upcomingForecast.income > 0 && (
+                  <span style={{ color: "#059669" }}>↑ {fmtIDR(upcomingForecast.income, true)}</span>
+                )}
+                {upcomingForecast.expense > 0 && (
+                  <span style={{ color: "#dc2626" }}>↓ {fmtIDR(upcomingForecast.expense, true)}</span>
+                )}
+                <span style={{ fontWeight: 600, color: upcomingForecast.net >= 0 ? "#059669" : "#dc2626" }}>
+                  Net {upcomingForecast.net >= 0 ? "+" : "−"}{fmtIDR(Math.abs(upcomingForecast.net), true)}
+                </span>
+              </div>
+            )}
+          </div>
         </div>
         {upcomingGroups.length === 0 ? (
           <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
@@ -1215,34 +1294,41 @@ export default function Dashboard({
                   {group.label}
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {group.items.map(item => (
-                    <UpcomingRow
-                      key={item.id}
-                      item={item}
-                      onEdit={
-                        item.type === "reminder"   ? () => openConfirmModal(item.raw, true) :
-                        item.type === "receivable" ? () => openSettleModal(item.raw) :
-                        item.type === "loan"       ? () => openLoanPayModal(item.raw) :
-                        null
+                  {group.items.map(item => {
+                    const handleConfirm = (() => {
+                      switch (item.type) {
+                        case "reminder":          return () => openConfirmModal(item.raw);
+                        case "receivable":        return () => openSettleModal(item.raw);
+                        case "loan":              return () => openLoanPayModal(item.raw);
+                        case "reimburse":         return () => openReimburseModal(item.raw);
+                        case "cc_due":            return () => quickPayCC(item.raw);
+                        case "recurring":         return () => quickConfirmRecurring(item.raw);
+                        case "reimburse_pending": return () => quickMarkReimbursePending(item.raw);
+                        default:                  return null;
                       }
-                      onConfirm={
-                        item.type === "reminder"   ? () => openConfirmModal(item.raw) :
-                        item.type === "receivable" ? () => openSettleModal(item.raw) :
-                        item.type === "loan"       ? () => openLoanPayModal(item.raw) :
-                        item.type === "reimburse"  ? () => openReimburseModal(item.raw) :
-                        null
+                    })();
+                    const handleSkip = (() => {
+                      switch (item.type) {
+                        case "reminder":          return () => skipReminder(item.raw);
+                        case "reimburse":         return () => dismissReimburse(item.raw);
+                        default:                  return () => dismissUpcoming(item.id);
                       }
-                      onSkip={
-                        item.type === "reminder"                            ? () => skipReminder(item.raw) :
-                        item.type === "loan" || item.type === "receivable"  ? () => dismissUpcoming(item.id) :
-                        item.type === "reimburse"                           ? () => dismissReimburse(item.raw) :
-                        item.type === "deposito_maturity"                   ? () => dismissUpcoming(item.id) :
-                        item.type === "cc_due" || item.type === "recurring" ||
-                        item.type === "reimburse_pending"                   ? () => dismissUpcoming(item.id) :
-                        null
-                      }
-                    />
-                  ))}
+                    })();
+                    return (
+                      <UpcomingRow
+                        key={item.id}
+                        item={item}
+                        onEdit={
+                          item.type === "reminder"   ? () => openConfirmModal(item.raw, true) :
+                          item.type === "receivable" ? () => openSettleModal(item.raw) :
+                          item.type === "loan"       ? () => openLoanPayModal(item.raw) :
+                          null
+                        }
+                        onConfirm={handleConfirm}
+                        onSkip={item.type === "installment" ? null : handleSkip}
+                      />
+                    );
+                  })}
                 </div>
               </div>
             ))}
@@ -1305,13 +1391,23 @@ export default function Dashboard({
         </div>
       </div>
 
-      {/* Reconcile Status + Recurring Suggestions */}
-      <ReconcileStatusWidget user={user} accounts={accounts} />
+      {/* Recurring Suggestions */}
       <RecurringSuggestionsWidget
         user={user}
         ledger={ledger}
         recurringTemplates={recurTemplates}
         onCreated={() => onRefresh?.()}
+      />
+
+      {/* ── BANK PICKER SHEET ── */}
+      <BankPickerSheet
+        isOpen={bankPickerState.isOpen}
+        onClose={closeBankPicker}
+        onSelect={bankPickerState.onSelect}
+        bankAccounts={bankAccounts}
+        contextLabel={bankPickerState.contextLabel}
+        contextAmount={bankPickerState.contextAmount}
+        mode={bankPickerState.mode}
       />
 
       {/* ── QUICK ADD TRANSACTION MODAL ── */}
@@ -1564,18 +1660,31 @@ export default function Dashboard({
 
 // ─── UPCOMING ROW ─────────────────────────────────────────────
 function UpcomingRow({ item, onConfirm, onEdit, onSkip }) {
+  const [hovered, setHovered] = useState(false);
   const isInfo = item.infoOnly;
+  const { confirmLabel, confirmStyle } = item;
+
+  const confirmBtnStyle = (() => {
+    const base = { border: "none", padding: "5px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "Figtree, sans-serif", flexShrink: 0 };
+    if (confirmStyle === "danger") return { ...base, background: "#fee2e2", color: "#dc2626" };
+    if (confirmStyle === "amber")  return { ...base, background: "#fef3c7", color: "#d97706" };
+    return { ...base, background: "#dcfce7", color: "#059669" };
+  })();
+
   return (
-    <div style={{
-      display:      "flex",
-      alignItems:   "center",
-      gap:          10,
-      padding:      "10px 12px",
-      background:   isInfo ? "#f9fafb" : "#ffffff",
-      border:       `1px solid ${isInfo ? "#f3f4f6" : "#e5e7eb"}`,
-      borderRadius: 12,
-      opacity:      isInfo ? 0.8 : 1,
-    }}>
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display:      "flex",
+        alignItems:   "center",
+        gap:          10,
+        padding:      "10px 12px",
+        background:   isInfo ? "#f9fafb" : "#ffffff",
+        border:       `1px solid ${isInfo ? "#f3f4f6" : "#e5e7eb"}`,
+        borderRadius: 12,
+        opacity:      isInfo ? 0.8 : 1,
+      }}>
       {/* Icon */}
       <div style={{
         width: 32, height: 32, borderRadius: 9, flexShrink: 0,
@@ -1627,15 +1736,23 @@ function UpcomingRow({ item, onConfirm, onEdit, onSkip }) {
 
       {/* Action buttons */}
       {!isInfo && (
-        <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+        <div style={{ display: "flex", gap: 4, flexShrink: 0, alignItems: "center" }}>
           {onEdit && (
             <button onClick={e => { e.stopPropagation(); onEdit(e); }} style={RUPT_GHOST} title="Edit">✏️</button>
           )}
           {onConfirm && (
-            <button onClick={e => { e.stopPropagation(); onConfirm(e); }} style={RUPT_PRIMARY} title="Confirm">✓</button>
+            <button onClick={e => { e.stopPropagation(); onConfirm(e); }} style={confirmBtnStyle} title="Confirm">
+              {confirmLabel || "✓"}
+            </button>
           )}
           {onSkip && (
-            <button onClick={e => { e.stopPropagation(); onSkip(e); }} style={RUPT_GHOST} title="Skip">✕</button>
+            <button
+              onClick={e => { e.stopPropagation(); onSkip(e); }}
+              style={{ ...RUPT_GHOST, opacity: hovered ? 1 : 0, transition: "opacity 0.15s" }}
+              title="Dismiss"
+            >
+              ✕
+            </button>
           )}
         </div>
       )}
@@ -1643,12 +1760,6 @@ function UpcomingRow({ item, onConfirm, onEdit, onSkip }) {
   );
 }
 
-const RUPT_PRIMARY = {
-  width: 28, height: 28, borderRadius: 8, border: "none",
-  background: "#dcfce7", color: "#059669", fontSize: 12, fontWeight: 700,
-  cursor: "pointer", fontFamily: "Figtree, sans-serif",
-  display: "flex", alignItems: "center", justifyContent: "center",
-};
 const RUPT_GHOST = {
   width: 28, height: 28, borderRadius: 8,
   border: "1px solid #e5e7eb", background: "#f9fafb",
