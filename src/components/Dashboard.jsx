@@ -1256,7 +1256,7 @@ export default function Dashboard({
 
       {/* Budget widget */}
       {budgets.length > 0 && (
-        <BudgetWidget budgets={budgets} ledger={ledger} onAddBudget={() => setSettingsTab?.("budgets")} />
+        <BudgetWidget budgets={budgets} ledger={ledger} onAddBudget={() => setTab?.("budget")} />
       )}
 
       {/* ════════════ SECTION 5 — UPCOMING ════════════ */}
