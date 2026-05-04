@@ -721,6 +721,8 @@ export default function BankStatement({
                       accounts={accounts}
                       employeeLoans={[]}
                       user={user}
+                      categories={categories}
+                      incomeSrcs={incomeSrcs}
                       onRefresh={() => { load(); onRefresh?.(); }}
                       onAccountCreated={() => { load(); onRefresh?.(); }}
                     />

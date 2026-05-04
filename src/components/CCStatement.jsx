@@ -731,6 +731,8 @@ export default function CCStatement({
                       accounts={accounts}
                       employeeLoans={[]}
                       user={user}
+                      categories={categories}
+                      incomeSrcs={incomeSrcs}
                       onRefresh={() => { load(); onRefresh?.(); }}
                     />
                   ))}

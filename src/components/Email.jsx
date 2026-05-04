@@ -695,6 +695,8 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
           source="gmail"
           accounts={accounts}
           employeeLoans={employeeLoans}
+          categories={categories}
+          incomeSrcs={incomeSrcs}
           T={T}
           busy={importing}
           onMergeTransfer={handleMergeTransfer}

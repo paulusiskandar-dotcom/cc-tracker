@@ -17,7 +17,7 @@
 //   onCreateInstallment (row) => void  — optional, estatement only
 
 import { useState, useEffect, Fragment } from "react";
-import { EXPENSE_CATEGORIES, INCOME_CATEGORIES_LIST, REIMBURSE_ENTITIES } from "../../constants";
+import { REIMBURSE_ENTITIES } from "../../constants";
 import { showToast } from "./Card";
 import { supabase } from "../../lib/supabase";
 
@@ -453,6 +453,7 @@ function AccountCell({ r, onUpdate, T, accounts, employeeLoans }) {
 function TxHorizontalCard({
   r, isSelected, isSkipped, isNotesOpen, T,
   source, accounts, employeeLoans, txTypes,
+  categories, incomeSrcs,
   onUpdate, onConfirm, onSkip, onToggleSelect, onToggleNotes,
   onCreateInstallment, confirmingId, onMergeTransfer,
 }) {
@@ -474,7 +475,7 @@ function TxHorizontalCard({
   const sign    = amtSign(r.tx_type);
   const isFX    = r.currency && r.currency !== "IDR";
   const showCat = !NO_CAT_TYPES.has(r.tx_type);
-  const cats    = r.tx_type === "income" ? INCOME_CATEGORIES_LIST : EXPENSE_CATEGORIES;
+  const cats    = r.tx_type === "income" ? incomeSrcs : categories;
   const typeColor = TX_HORIZONTAL_TYPES.find(t => t.value === r.tx_type)?.color || T.text;
 
   const amtStr = isFX
@@ -595,10 +596,10 @@ function TxHorizontalCard({
             value={r.category_id || ""}
             onChange={e => {
               const cat = cats.find(c => c.id === e.target.value);
-              onUpdate({ category_id: e.target.value, category_name: cat?.label || "" });
+              onUpdate({ category_id: e.target.value, category_name: cat?.label || cat?.name || "" });
             }}>
             <option value="">Category…</option>
-            {cats.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>)}
+            {cats.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label || c.name}` : (c.label || c.name)}</option>)}
           </select>
         )}
 
@@ -794,6 +795,8 @@ export default function TxHorizontal({
   onCreateInstallment,
   onMergeTransfer,
   hideBatchFooter = false,
+  categories = [],
+  incomeSrcs = [],
 }) {
   const [notesOpen,    setNotesOpen]    = useState(new Set());
   const [confirmingId, setConfirmingId] = useState(null);
@@ -945,8 +948,8 @@ export default function TxHorizontal({
               const isIncomeType  = ["income","collect_loan","sell_asset","reimburse_in"].includes(newType);
               const isExpenseType = ["expense","reimburse_out"].includes(newType);
               if (bulkCategory) {
-                const inIncome  = INCOME_CATEGORIES_LIST.some(c => c.id === bulkCategory);
-                const inExpense = EXPENSE_CATEGORIES.some(c => c.id === bulkCategory);
+                const inIncome  = incomeSrcs.some(c => c.id === bulkCategory);
+                const inExpense = categories.some(c => c.id === bulkCategory);
                 if ((isIncomeType && !inIncome) || (isExpenseType && !inExpense)) setBulkCategory("");
               }
             }}
@@ -958,24 +961,24 @@ export default function TxHorizontal({
           {/* Category */}
           <select value={bulkCategory}
             onChange={e => {
-              const cat = [...EXPENSE_CATEGORIES, ...INCOME_CATEGORIES_LIST].find(c => c.id === e.target.value);
+              const cat = [...categories, ...incomeSrcs].find(c => c.id === e.target.value);
               setBulkCategory(e.target.value);
-              applyBulk("category_id", e.target.value, { category_name: cat?.label || "" });
+              applyBulk("category_id", e.target.value, { category_name: cat?.label || cat?.name || "" });
             }}
             style={{ fontSize: 11, padding: "4px 6px", borderRadius: 5, border: "1px solid #bfdbfe", background: "#fff", fontFamily: "Figtree, sans-serif", cursor: "pointer" }}>
             <option value="">Set category…</option>
             {(() => {
               const isIncomeType  = ["income","collect_loan","sell_asset","reimburse_in"].includes(bulkType);
               const isExpenseType = ["expense","reimburse_out"].includes(bulkType);
-              if (isIncomeType)  return INCOME_CATEGORIES_LIST.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>);
-              if (isExpenseType) return EXPENSE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>);
+              if (isIncomeType)  return incomeSrcs.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.name}` : c.name}</option>);
+              if (isExpenseType) return categories.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.name}` : c.name}</option>);
               return (
                 <>
                   <optgroup label="Expense">
-                    {EXPENSE_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>)}
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.name}` : c.name}</option>)}
                   </optgroup>
                   <optgroup label="Income">
-                    {INCOME_CATEGORIES_LIST.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label}` : c.label}</option>)}
+                    {incomeSrcs.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.name}` : c.name}</option>)}
                   </optgroup>
                 </>
               );
@@ -1030,6 +1033,8 @@ export default function TxHorizontal({
                     accounts={accounts}
                     employeeLoans={effectiveLoans}
                     txTypes={txTypes}
+                    categories={categories}
+                    incomeSrcs={incomeSrcs}
                     onUpdate={patch => onUpdateRow(r._id, patch)}
                     onConfirm={() => handleConfirmRow(r)}
                     onSkip={onSkipRow}

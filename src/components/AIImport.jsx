@@ -796,6 +796,8 @@ export default function AIImport({ user, accounts, categories = [], incomeSrcs =
             source="ai_scan"
             accounts={accounts}
             employeeLoans={employeeLoans}
+            categories={categories}
+            incomeSrcs={incomeSrcs}
             T={T}
             busy={importing}
             onRefreshScan={batchFilePath ? handleRefreshScan : null}
