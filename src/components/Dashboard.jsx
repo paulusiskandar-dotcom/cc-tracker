@@ -11,7 +11,6 @@ import ReconcileDraftBanner from "./shared/ReconcileDraftBanner";
 import { detectRecurringPatterns } from "../lib/recurringDetection";
 import TxVerticalBig from "./shared/TxVerticalBig";
 import BudgetWidget from "./shared/BudgetWidget";
-import SpendingBreakdown from "./shared/SpendingBreakdown";
 
 // ── Reconcile Status widget ────────────────────────────────────
 function ReconcileStatusWidget({ user, accounts }) {
@@ -224,6 +223,7 @@ export default function Dashboard({
   const [payForm,       setPayForm]       = useState({ amount: "", pay_date: todayStr(), notes: "" });
   const [paySaving,     setPaySaving]     = useState(false);
   const [showAddTxModal, setShowAddTxModal] = useState(false);
+  const [nwPeriod, setNwPeriod]             = useState("month");
   // ─── DERIVED STATS ───────────────────────────────────────────
   const nw = netWorth || { total: 0, bank: 0, cash: 0, assets: 0, receivables: 0, ccDebt: 0, liabilities: 0, reimburseOutstanding: 0 };
 
@@ -280,17 +280,6 @@ export default function Dashboard({
     return { ccGroupMap: gm, ccGroupedIds: gids };
   }, [creditCards]);
 
-  const totalAssets = useMemo(() =>
-    assets.reduce((s, a) => s + Number(a.current_value || 0) * (fxRates?.[a.currency] || 1), 0),
-  [assets, fxRates]);
-
-  const totalReceivables = useMemo(() =>
-    receivables.reduce((s, r) => s + Number(r.receivable_outstanding || 0), 0),
-  [receivables]);
-
-  const totalEmpLoans = useMemo(() => netWorth?.employeeLoanTotal || 0, [netWorth]);
-  const totalReimburse = useMemo(() => netWorth?.reimburseOutstanding || 0, [netWorth]);
-
   // Last 6 months cash flow (for mini chart)
   const cashFlowData = useMemo(() => {
     const months = [];
@@ -308,6 +297,22 @@ export default function Dashboard({
   }, [ledger]);
 
   const maxCF = Math.max(...cashFlowData.flatMap(d => [d.income, d.expense]), 1);
+
+  const topCategories = useMemo(() => {
+    const map = {};
+    thisMonthLedger
+      .filter(e => e.tx_type === "expense")
+      .forEach(e => {
+        const key  = e.category_id || "other";
+        const cat  = (categories || []).find(c => c.id === e.category_id);
+        const name = cat?.name || e.category_name || "Other";
+        const icon = cat?.icon || "💸";
+        const color = cat?.color || "#9ca3af";
+        if (!map[key]) map[key] = { name, icon, color, total: 0 };
+        map[key].total += Number(e.amount_idr || e.amount || 0);
+      });
+    return Object.values(map).sort((a, b) => b.total - a.total);
+  }, [thisMonthLedger, categories]);
 
   const savingsRate = useMemo(() => {
     if (!thisMonthIncome) return 0;
@@ -390,7 +395,7 @@ export default function Dashboard({
 
   const RE_CAT_NAMES = { Hamasa: "Hamasa RE", SDC: "SDC RE", Travelio: "Travelio RE" };
 
-  // ── UNIFIED UPCOMING ITEMS (next 7 days, max 10) ─────────────
+  // ── UNIFIED UPCOMING ITEMS (next 14 days, max 10) ─────────────
   const upcomingItems = useMemo(() => {
     const today = todayStr();
     const all = [];
@@ -483,9 +488,9 @@ export default function Dashboard({
         });
       });
 
-    // F) Deposito jatuh tempo — within 7 days
+    // F) Deposito jatuh tempo — within 14 days
     const todayDate = new Date(today);
-    const cutoffDate = new Date(todayDate.getTime() + 7 * 86400000);
+    const cutoffDate = new Date(todayDate.getTime() + 14 * 86400000);
     assets
       .filter(a => a.subtype === "Deposito" && a.deposit_status !== "closed")
       .forEach(a => {
@@ -516,7 +521,7 @@ export default function Dashboard({
       return next.toISOString().slice(0, 10);
     };
 
-    // G) CC payment due dates within next 7 days
+    // G) CC payment due dates within next 14 days
     creditCards
       .filter(cc => cc.due_day && Number(cc.outstanding_amount || 0) > 0)
       .forEach(cc => {
@@ -534,7 +539,7 @@ export default function Dashboard({
         });
       });
 
-    // H) Recurring income/expense with day_of_month within next 7 days
+    // H) Recurring income/expense with day_of_month within next 14 days
     recurTemplates
       .filter(t => t.day_of_month && (t.tx_type === "income" || t.tx_type === "expense"))
       .forEach(t => {
@@ -574,7 +579,7 @@ export default function Dashboard({
     return all
       .filter(item => !dismissed.has(item.id))
       .sort((a, b) => a.date.localeCompare(b.date) || (a.type === "installment" ? 1 : -1))
-      .slice(0, 15);
+      .slice(0, 8);
   }, [reminders, loansWithStats, receivables, installments, creditCards, dismissed, reimburseSettlements, assets, bankAccounts, recurTemplates]);
 
   // Group upcoming by date
@@ -719,7 +724,7 @@ export default function Dashboard({
   };
 
   // Keep alias for Skip button reference
-  const doConfirmReminder = doConfirm;
+  const doConfirmReminder = doConfirm; // eslint-disable-line no-unused-vars
 
   const skipReminder = async (r) => {
     const tmpl = r.recurring_templates || {};
@@ -802,16 +807,6 @@ export default function Dashboard({
     setSettleSaving(false);
   };
 
-  // ─── MOBILE NUMBER FORMATTING ────────────────────────────────
-  const fmtM = (n) => {
-    const v = Math.abs(Number(n) || 0);
-    const sign = Number(n) < 0 ? "-" : "";
-    if (v >= 1e9) return `${sign}Rp ${(v / 1e9).toFixed(1)}M`;
-    if (v >= 1e6) return `${sign}Rp ${(v / 1e6).toFixed(1)}jt`;
-    if (v >= 1e3) return `${sign}Rp ${(v / 1e3).toFixed(0)}rb`;
-    return `${sign}Rp ${v}`;
-  };
-
   const handleReconcileNavigate = (acc, year, month, txs, filename, blobUrl, closingBal, openingBal) => {
     const isCC = acc.type === "credit_card";
     if (isCC) {
@@ -841,106 +836,134 @@ export default function Dashboard({
 
   // ─── RENDER ──────────────────────────────────────────────────
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, paddingBottom: 24 }}>
 
-      {/* ── GREETING + SHORTCUT BUTTONS ── */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <div style={{ fontSize: 15, fontWeight: 600, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
-          {getGreeting()}, Paulus 👋
-        </div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-          <button
-            onClick={() => setShowAddTxModal(true)}
-            title="Add transaction"
-            style={{ width: 32, height: 32, borderRadius: 8, border: "0.5px solid #e5e7eb", background: "#fff", color: "#374151", cursor: "pointer", fontSize: 18, fontWeight: 500, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "Figtree, sans-serif" }}>
-            +
-          </button>
-          <GlobalReconcileButton
-            type="all"
-            accounts={accounts}
-            user={user}
-            onNavigate={handleReconcileNavigate}
-          />
-          {[
-            { label: "Email Sync",  onClick: () => openEmail?.("pending") },
-            { label: "AI Scan",     onClick: () => setTab?.("scan"), icon: true },
-          ].map(({ label, onClick, icon }) => (
-            <button key={label} onClick={onClick} style={{
-              display: "flex", alignItems: "center", gap: 5,
-              height: 28, padding: "0 12px", borderRadius: 99,
-              border: "1px solid #e5e7eb", background: "#fff",
-              color: "#374151", fontSize: 12, fontWeight: 500,
-              fontFamily: "Figtree, sans-serif", cursor: "pointer",
-              transition: "background 0.15s, border-color 0.15s",
-            }}
-            onMouseEnter={e => { e.currentTarget.style.background = "#f3f4f6"; e.currentTarget.style.borderColor = "#d1d5db"; }}
-            onMouseLeave={e => { e.currentTarget.style.background = "#fff";    e.currentTarget.style.borderColor = "#e5e7eb"; }}
-            >
-              {icon && (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-                  <circle cx="12" cy="13" r="4"/>
-                </svg>
-              )}
-              {label}
+      {/* ════════════ SECTION 1 — HERO NET WORTH ════════════ */}
+      <div style={{
+        background: "linear-gradient(135deg, #0f172a 0%, #1e3a5f 45%, #312e81 100%)",
+        borderRadius: 20,
+        padding: isMobile ? "18px 16px 20px" : "26px 26px 22px",
+        position: "relative",
+        overflow: "hidden",
+      }}>
+        {/* Top row: greeting + icon actions */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18, gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.5)", fontFamily: "Figtree, sans-serif" }}>
+            {getGreeting()}, Paulus
+          </span>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <button onClick={() => setShowAddTxModal(true)} title="Add transaction" style={HERO_ICON_BTN}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+              </svg>
             </button>
-          ))}
+            <GlobalReconcileButton type="all" accounts={accounts} user={user} onNavigate={handleReconcileNavigate} />
+            <button onClick={() => openEmail?.("pending")} title="Email Sync" style={HERO_ICON_BTN}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                <polyline points="22,6 12,13 2,6"/>
+              </svg>
+            </button>
+            <button onClick={() => setTab?.("scan")} title="AI Scan" style={HERO_ICON_BTN}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                <circle cx="12" cy="13" r="4"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Label + period selector */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.38)", textTransform: "uppercase", letterSpacing: "1.4px", fontFamily: "Figtree, sans-serif" }}>
+            Total Net Worth
+          </span>
+          <div style={{ display: "flex", gap: 2 }}>
+            {[["month", "1M"], ["3m", "3M"], ["ytd", "YTD"]].map(([val, lbl]) => (
+              <button key={val} onClick={() => setNwPeriod(val)} style={{
+                fontSize: 10, fontWeight: 700, fontFamily: "Figtree, sans-serif",
+                padding: "3px 8px", borderRadius: 6, border: "none", cursor: "pointer",
+                background: nwPeriod === val ? "rgba(255,255,255,0.18)" : "transparent",
+                color: nwPeriod === val ? "#fff" : "rgba(255,255,255,0.35)",
+                transition: "all 0.15s",
+              }}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Big number */}
+        <div style={{
+          fontSize: isMobile ? 30 : 38,
+          fontWeight: 900,
+          color: "#ffffff",
+          fontFamily: "Figtree, sans-serif",
+          lineHeight: 1.1,
+          marginBottom: 6,
+          overflow: "hidden",
+          textOverflow: isMobile ? "ellipsis" : "unset",
+          whiteSpace: isMobile ? "nowrap" : "normal",
+        }}>
+          {isMobile ? fmtIDR(nw.total, true) : fmtIDR(nw.total)}
+        </div>
+
+        {/* Monthly delta */}
+        {monthlyChange !== 0 && (
+          <div style={{ fontSize: 12, fontWeight: 600, color: monthlyChange >= 0 ? "#4ade80" : "#f87171", fontFamily: "Figtree, sans-serif", marginBottom: 16 }}>
+            {monthlyChange >= 0 ? "↑" : "↓"} {fmtIDR(Math.abs(monthlyChange), true)} this month
+          </div>
+        )}
+
+        {/* 6-month sparkline */}
+        {netWorthHistory.length > 1 && (() => {
+          const vals  = netWorthHistory.slice(-6).map(m => m.value);
+          const minV  = Math.min(...vals);
+          const maxV  = Math.max(...vals);
+          const range = maxV - minV || 1;
+          const pts   = vals.map((v, i) => `${4 + (i / (vals.length - 1)) * 292},${38 - ((v - minV) / range) * 30}`).join(" ");
+          const area  = `4,42 ${pts} 296,42`;
+          return (
+            <svg viewBox="0 0 300 44" style={{ width: "100%", height: 28, marginBottom: 16, opacity: 0.7 }}>
+              <polygon points={area} fill="#AFA9EC" opacity="0.16" />
+              <polyline points={pts} fill="none" stroke="#AFA9EC" strokeWidth="1.5" />
+            </svg>
+          );
+        })()}
+
+        {/* 6 mini-stats */}
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: isMobile ? "repeat(3, 1fr)" : "repeat(6, 1fr)",
+          gap: isMobile ? "14px 8px" : "0 20px",
+          paddingTop: 14,
+          borderTop: "0.5px solid rgba(255,255,255,0.1)",
+        }}>
+          {(() => {
+            const totalRecv = (nw.receivables || 0) + (nw.employeeLoanTotal || 0) + (nw.reimburseOutstanding || 0);
+            return [
+              { label: "BANK",    v: fmtIDR(nw.bank || 0, true),         raw: nw.bank || 0,         color: "#85B7EB" },
+              { label: "CASH",    v: fmtIDR(nw.cash || 0, true),         raw: nw.cash || 0,         color: "#85B7EB" },
+              { label: "ASSETS",  v: fmtIDR(nw.assets || 0, true),       raw: nw.assets || 0,       color: "#97C459" },
+              { label: "RECV",    v: fmtIDR(totalRecv, true),             raw: totalRecv,             color: "#5DCAA5" },
+              { label: "CC DEBT", v: (nw.ccDebt > 0 ? "−" : "") + fmtIDR(nw.ccDebt || 0, true), raw: nw.ccDebt || 0, color: "#F09595" },
+              { label: "LIAB",    v: fmtIDR(nw.liabilities || 0, true),   raw: nw.liabilities || 0, color: "rgba(255,255,255,0.45)" },
+            ].map(s => (
+              <div key={s.label}>
+                <div style={{ fontSize: 9, fontWeight: 700, color: "rgba(255,255,255,0.35)", textTransform: "uppercase", letterSpacing: "1px", fontFamily: "Figtree, sans-serif", marginBottom: 3 }}>
+                  {s.label}
+                </div>
+                <div style={{ fontSize: isMobile ? 12 : 13, fontWeight: 600, color: s.raw === 0 ? "rgba(255,255,255,0.2)" : s.color, fontFamily: "Figtree, sans-serif" }}>
+                  {s.v}
+                </div>
+              </div>
+            ));
+          })()}
         </div>
       </div>
 
-      {/* ── GMAIL PENDING BANNER ── */}
-      {(() => {
-        // pendingSyncs is already flattened individual transactions from pending email_sync rows
-        // (getPending already filters status='pending', extracted_count>0, ai_raw_result IS NOT NULL)
-        const gmailCount = (pendingSyncs || []).length;
-        if (gmailCount === 0) return null;
-        return (
-          <div style={{
-            background:   "#fef9ec",
-            border:       "1.5px solid #fde68a",
-            borderRadius: 14,
-            padding:      "14px 16px",
-            display:      "flex",
-            alignItems:   "center",
-            justifyContent: "space-between",
-            gap:          12,
-          }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span style={{ fontSize: 20 }}>📧</span>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#92400e", fontFamily: "Figtree, sans-serif" }}>
-                  {gmailCount} transaction{gmailCount > 1 ? "s" : ""} from Gmail need review
-                </div>
-                <div style={{ fontSize: 11, color: "#b45309", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
-                  {lastSyncMins != null
-                    ? `Last sync ${lastSyncMins < 1 ? "just now" : `${lastSyncMins} min ago`}`
-                    : "Gmail sync found new transactions"}
-                </div>
-              </div>
-            </div>
-            <button
-              onClick={() => openEmail?.("pending")}
-              style={{
-                background:   "#d97706",
-                color:        "#fff",
-                border:       "none",
-                borderRadius: 8,
-                padding:      "7px 14px",
-                fontSize:     12,
-                fontWeight:   700,
-                cursor:       "pointer",
-                fontFamily:   "Figtree, sans-serif",
-                whiteSpace:   "nowrap",
-                flexShrink:   0,
-              }}
-            >
-              Review Now →
-            </button>
-          </div>
-        );
-      })()}
-
-      {/* ── RECONCILE DRAFT BANNER ── */}
+      {/* ════════════ SECTION 2 — ACTION REQUIRED ════════════ */}
+      {/* Reconcile draft banner (manages its own visibility) */}
       <ReconcileDraftBanner
         user={user}
         accounts={accounts}
@@ -955,340 +978,412 @@ export default function Dashboard({
         }}
       />
 
-      {/* ── ALERT CENTER ── */}
-      <AlertCenter alerts={alerts} />
+      {/* Gmail pending + CC urgent + alerts */}
+      {(() => {
+        const gmailCount = (pendingSyncs || []).length;
+        const ccUrgent = (accounts || []).filter(a => {
+          if (a.type !== "credit_card" || !a.due_day || !Number(a.outstanding_amount || 0)) return false;
+          const daysLeft = Math.ceil((getNextDueDate(a.due_day) - new Date()) / 86400000);
+          return daysLeft >= 0 && daysLeft <= 3;
+        });
+        if (gmailCount === 0 && ccUrgent.length === 0 && alerts.length === 0) return null;
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {gmailCount > 0 && (
+              <div style={{
+                background: "#fef9ec", border: "1.5px solid #fde68a", borderRadius: 14,
+                padding: "14px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: 20 }}>📧</span>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#92400e", fontFamily: "Figtree, sans-serif" }}>
+                      {gmailCount} transaction{gmailCount !== 1 ? "s" : ""} from Gmail need review
+                    </div>
+                    <div style={{ fontSize: 11, color: "#b45309", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
+                      {lastSyncMins != null
+                        ? `Last sync ${lastSyncMins < 1 ? "just now" : `${lastSyncMins} min ago`}`
+                        : "Gmail sync found new transactions"}
+                    </div>
+                  </div>
+                </div>
+                <button onClick={() => openEmail?.("pending")} style={{
+                  background: "#d97706", color: "#fff", border: "none", borderRadius: 8,
+                  padding: "7px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer",
+                  fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", flexShrink: 0,
+                }}>
+                  Review Now →
+                </button>
+              </div>
+            )}
+            {ccUrgent.map(cc => {
+              const daysLeft = Math.ceil((getNextDueDate(cc.due_day) - new Date()) / 86400000);
+              return (
+                <div key={cc.id} style={{
+                  background: "#fef2f2", border: "1.5px solid #fecaca", borderRadius: 14,
+                  padding: "12px 16px", display: "flex", alignItems: "center", gap: 12,
+                }}>
+                  <span style={{ fontSize: 18 }}>💳</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#991b1b", fontFamily: "Figtree, sans-serif" }}>
+                      {cc.name} due in {daysLeft} day{daysLeft !== 1 ? "s" : ""}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#dc2626", fontFamily: "Figtree, sans-serif" }}>
+                      {fmtIDR(Number(cc.outstanding_amount || 0))} outstanding
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            <AlertCenter alerts={alerts} />
+          </div>
+        );
+      })()}
 
-      {/* ── BENTO GRID ── */}
+      {/* Quick Actions */}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button onClick={() => setShowAddTxModal(true)} style={QUICK_BTN}>
+          + Add Transaction
+        </button>
+        <button onClick={() => openEmail?.("pending")} style={QUICK_BTN}>
+          📧 Email Sync{(pendingSyncs || []).length > 0 && (
+            <span style={{
+              background: "#dc2626", color: "#fff", borderRadius: 99,
+              padding: "0 5px", fontSize: 9, fontWeight: 700, marginLeft: 4,
+              display: "inline-block", lineHeight: "14px",
+            }}>
+              {(pendingSyncs || []).length}
+            </span>
+          )}
+        </button>
+        <button onClick={() => setTab?.("scan")} style={QUICK_BTN}>📷 AI Scan</button>
+      </div>
+
+      {/* ════════════ SECTION 3 — THIS MONTH METRICS ════════════ */}
       <div style={{
-        display:             "grid",
+        display: "grid",
         gridTemplateColumns: isMobile ? "1fr" : "repeat(3, 1fr)",
-        gap:                 isMobile ? 10 : 10,
+        gap: 12,
       }}>
-
-        {/* [1] Net Worth — dark hero, spans 2 cols on desktop */}
-        <div style={{ ...BENTO_DARK, gridColumn: isMobile ? "span 1" : "span 2" }}>
-          <div style={DARK_LABEL}>Total Net Worth</div>
-          <div style={{
-            ...DARK_VALUE,
-            fontSize:     isMobile ? 26 : 28,
-            overflow:     "hidden",
-            textOverflow: isMobile ? "ellipsis" : "unset",
-            whiteSpace:   isMobile ? "nowrap" : "normal",
-          }}>
-            {isMobile ? fmtM(nw.total) : fmtIDR(nw.total)}
+        {/* Col 1: Cash Flow */}
+        <div style={SEC_CARD}>
+          <div style={SEC_HEAD}>
+            <span style={SEC_TITLE}>Cash Flow</span>
+            {thisMonthIncome > 0 && (
+              <span style={{
+                fontSize: 10, fontFamily: "Figtree, sans-serif", fontWeight: 700,
+                color: savingsRate >= 0 ? "#0F6E56" : "#A32D2D",
+                background: savingsRate >= 0 ? "#E1F5EE" : "#FCEBEB",
+                padding: "2px 8px", borderRadius: 20,
+              }}>
+                {savingsRate >= 0 ? `${savingsRate}% saved` : `${savingsRate}%`}
+              </span>
+            )}
           </div>
-          {monthlyChange !== 0 && (
-            <div style={{
-              fontSize:   12,
-              fontWeight: 600,
-              color:      monthlyChange >= 0 ? "#4ade80" : "#f87171",
-              fontFamily: "Figtree, sans-serif",
-              marginBottom: 14,
-            }}>
-              {monthlyChange >= 0 ? "↑" : "↓"} {fmtIDR(Math.abs(monthlyChange), true)} this month
-            </div>
-          )}
-          {/* 12-month net worth trend */}
-          {netWorthHistory.length > 1 && (() => {
-            const vals   = netWorthHistory.map(m => m.value);
-            const min    = Math.min(...vals);
-            const max    = Math.max(...vals);
-            const range  = max - min || 1;
-            const pts    = vals.map((v, i) => `${5 + (i / (vals.length - 1)) * 290},${55 - ((v - min) / range) * 45}`).join(" ");
-            const area   = `5,60 ${pts} 295,60`;
-            return (
-              <svg viewBox="0 0 300 60" style={{ width: "100%", height: 40, marginBottom: 10, opacity: 0.8 }}>
-                <polygon points={area} fill="#AFA9EC" opacity="0.2" />
-                <polyline points={pts} fill="none" stroke="#AFA9EC" strokeWidth="1.5" />
-              </svg>
-            );
-          })()}
-
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
-            gap: "20px 24px",
-            paddingTop: 12,
-            borderTop: "0.5px solid rgba(255,255,255,0.15)",
-            marginTop: 4,
-          }}>
-            {(() => {
-              const totalRecv = (nw.receivables || 0) + (nw.employeeLoanTotal || 0) + (nw.reimburseOutstanding || 0);
-              const items = [
-                { label: "BANK",           raw: nw.bank || 0,      display: fmtIDR(nw.bank || 0, true),                                       color: "#85B7EB" },
-                { label: "CASH",           raw: nw.cash || 0,      display: fmtIDR(nw.cash || 0, true),                                       color: "#85B7EB" },
-                { label: "ASSETS",         raw: nw.assets || 0,    display: fmtIDR(nw.assets || 0, true),                                     color: "#97C459" },
-                { label: "RECEIVABLES",    raw: totalRecv,          display: fmtIDR(totalRecv, true),                                         color: "#5DCAA5" },
-                { label: "CC OUTSTANDING", raw: nw.ccDebt || 0,    display: (nw.ccDebt > 0 ? "-" : "") + fmtIDR(nw.ccDebt || 0, true),       color: "#F09595" },
-                { label: "LIABILITY",      raw: nw.liabilities || 0, display: fmtIDR(nw.liabilities || 0, true),                             color: "rgba(255,255,255,0.5)" },
-              ];
-              return items.map(s => (
-                <div key={s.label}>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "1.2px", fontFamily: "Figtree, sans-serif", marginBottom: 4 }}>
-                    {s.label}
-                  </div>
-                  <div style={{ fontSize: 16, fontWeight: 500, color: s.raw === 0 ? "rgba(255,255,255,0.35)" : s.color, fontFamily: "Figtree, sans-serif" }}>
-                    {s.display}
-                  </div>
-                </div>
-              ));
-            })()}
-          </div>
-        </div>
-
-        {/* [2] CC This Month */}
-        <div style={{ ...BENTO_BASE, background: "#fde8e8" }}>
-          {/* badge */}
-          {creditCards.length > 0 && (
-            <div style={{
-              position: "absolute", top: 12, right: 12,
-              fontSize: 9, fontWeight: 700, fontFamily: "Figtree, sans-serif",
-              background: "#dc262620", color: "#dc2626",
-              padding: "2px 6px", borderRadius: 20,
-            }}>
-              {creditCards.length} cards
-            </div>
-          )}
-          {/* icon */}
-          <div style={{
-            width: 34, height: 34, borderRadius: 10,
-            background: "rgba(220,38,38,0.12)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 16, marginBottom: 10,
-          }}>💳</div>
-          {/* label */}
-          <div style={{
-            fontSize: 10, fontWeight: 700, color: "#9ca3af",
-            textTransform: "uppercase", letterSpacing: "0.5px",
-            fontFamily: "Figtree, sans-serif", marginBottom: 4,
-          }}>CC This Month</div>
-          {/* main value = this month spend */}
-          <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>
-            Spend this month
-          </div>
-          <div style={{
-            fontSize: 16, fontWeight: 800, color: "#111827",
-            fontFamily: "Figtree, sans-serif", lineHeight: 1.2, marginBottom: 2,
-          }}>{fmtIDR(thisMonthCCSpend)}</div>
-          {/* outstanding debt */}
-          <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: 10 }}>
-            Outstanding debt: <strong style={{ color: "#dc2626" }}>{fmtIDR(totalCCDebt, true)}</strong>
-          </div>
-
-          {/* ── shared limit groups ── */}
-          {Object.values(ccGroupMap).map(g => {
-            const util = g.sharedLimit > 0 ? Math.min(100, (g.totalDebt / g.sharedLimit) * 100) : 0;
-            const utilColor = util > 80 ? "#dc2626" : util > 50 ? "#d97706" : "#059669";
-            return (
-              <div key={g.id} style={{ marginBottom: 8 }}>
-                <div style={{
-                  display: "flex", justifyContent: "space-between", alignItems: "baseline",
-                  marginBottom: 3,
-                }}>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
-                    {g.name}
-                  </span>
-                  <span style={{ fontSize: 10, color: utilColor, fontWeight: 700, fontFamily: "Figtree, sans-serif" }}>
-                    {util.toFixed(0)}% of {fmtIDR(g.sharedLimit, true)}
-                  </span>
-                </div>
-                <div style={{ height: 5, borderRadius: 3, background: "#f3f4f6", overflow: "hidden" }}>
-                  <div style={{ width: `${util}%`, height: "100%", background: utilColor, borderRadius: 3, transition: "width 0.3s" }} />
-                </div>
-                <div style={{ fontSize: 9, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
-                  {g.members.map(m => m.name).join(" · ")}
-                </div>
-              </div>
-            );
-          })}
-
-          {/* ── standalone cards (not in any group) ── */}
-          {creditCards.filter(c => !ccGroupedIds.has(c.id) && Number(c.outstanding_amount || 0) > 0).map(c => {
-            const debt  = Number(c.outstanding_amount || 0);
-            const limit = Number(c.card_limit || 0);
-            const util  = limit > 0 ? Math.min(100, (debt / limit) * 100) : 0;
-            const utilColor = util > 80 ? "#dc2626" : util > 50 ? "#d97706" : "#059669";
-            return (
-              <div key={c.id} style={{ marginBottom: 6 }}>
-                <div style={{
-                  display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 2,
-                }}>
-                  <span style={{ fontSize: 10, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>{c.name}</span>
-                  <span style={{ fontSize: 10, fontWeight: 600, color: "#374151", fontFamily: "Figtree, sans-serif" }}>
-                    {fmtIDR(debt, true)}
-                  </span>
-                </div>
-                {limit > 0 && (
-                  <div style={{ height: 3, borderRadius: 2, background: "#f3f4f6", overflow: "hidden" }}>
-                    <div style={{ width: `${util}%`, height: "100%", background: utilColor, borderRadius: 2 }} />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* [3] Bank & Cash Total */}
-        {(() => {
-          const cashAccs  = bankAccounts.filter(a => a.subtype === "cash");
-          const bankOnly  = bankAccounts.filter(a => a.subtype !== "cash");
-          const cashTotal = nw.cash || 0;
-          const bankTotal = nw.bank || 0;
-          const sub = cashTotal > 0
-            ? `Bank: ${fmtIDR(bankTotal, true)} · Cash: ${fmtIDR(cashTotal, true)}`
-            : `${bankOnly.length} account${bankOnly.length !== 1 ? "s" : ""}`;
-          return (
-            <BentoTile
-              bg="#e8f4fd" icon="🏦" iconBg="rgba(59,91,219,0.12)"
-              label="Bank & Cash"
-              value={fmtIDR(bankTotal + cashTotal)}
-              sub={sub}
-              badge={bankAccounts.length > 0 ? `${bankAccounts.length} accs` : null}
-              badgeColor="#3b5bdb"
-            />
-          );
-        })()}
-
-        {/* [4] Assets */}
-        <BentoTile
-          bg="#e8fdf0" icon="📈" iconBg="rgba(5,150,105,0.12)"
-          label="Assets"
-          value={fmtIDR(totalAssets)}
-          sub={`${assets.length} item${assets.length !== 1 ? "s" : ""}`}
-          badge={assets.length > 0 ? `${assets.length} items` : null}
-          badgeColor="#059669"
-        />
-
-        {/* [5] Receivables */}
-        <BentoTile
-          bg="#fdf6e8" icon="📋" iconBg="rgba(217,119,6,0.12)"
-          label="Receivables"
-          value={fmtIDR(totalReceivables + totalEmpLoans + totalReimburse)}
-          sub={`${totalReimburse > 0 ? `Reimburse: ${fmtIDR(totalReimburse, true)}` : ""}${totalReceivables > 0 ? `${totalReimburse > 0 ? " · " : ""}Other: ${fmtIDR(totalReceivables, true)}` : ""}${totalEmpLoans > 0 ? ` · Loans: ${fmtIDR(totalEmpLoans, true)}` : ""}`}
-          badge={totalReceivables + totalEmpLoans + totalReimburse > 0 ? "View →" : null}
-          badgeColor="#d97706"
-          onClick={() => setTab?.("receivables")}
-        />
-
-        {/* [B] Budget — full width */}
-        {budgets.length > 0 && (
-          <div style={{ gridColumn: isMobile ? "span 1" : "span 3" }}>
-            <BudgetWidget budgets={budgets} ledger={ledger} onAddBudget={() => setSettingsTab?.("budgets")} />
-          </div>
-        )}
-
-        {/* [6] Cash Flow — spans 2 cols on desktop, full width on mobile */}
-        <div style={{ ...BENTO_WHITE, gridColumn: isMobile ? "span 1" : "span 2" }}>
-          <div style={{
-            ...CARD_ROW,
-            flexDirection: isMobile ? "column" : "row",
-            alignItems:    isMobile ? "flex-start" : "center",
-            gap:           isMobile ? 6 : 0,
-          }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <div style={CARD_TITLE}>Cash Flow</div>
-              {thisMonthIncome > 0 && (
-                <span style={{ fontSize: 10, color: savingsRate >= 0 ? "#0F6E56" : "#A32D2D", background: savingsRate >= 0 ? "#E1F5EE" : "#FCEBEB", padding: "2px 6px", borderRadius: 4, fontFamily: "Figtree, sans-serif" }}>
-                  {savingsRate >= 0 ? `Saved ${savingsRate}%` : `${savingsRate}%`}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
+            {[
+              { label: "Income",  value: thisMonthIncome,  color: "#059669", prefix: "" },
+              { label: "Expense", value: thisMonthExpense, color: "#dc2626", prefix: "" },
+              { label: "Surplus", value: surplus,          color: surplus >= 0 ? "#059669" : "#dc2626", prefix: surplus >= 0 ? "+" : "" },
+            ].map(s => (
+              <div key={s.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>{s.label}</span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: s.color, fontFamily: "Figtree, sans-serif" }}>
+                  {s.prefix}{fmtIDR(Math.abs(s.value), true)}
                 </span>
-              )}
-            </div>
-            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
-              <LegendDot color="#059669" label="Income" />
-              <LegendDot color="#dc2626" label="Expense" />
-            </div>
-          </div>
-
-          {/* Numbers */}
-          <div style={{ display: "flex", gap: 20, marginBottom: 14 }}>
-            <div>
-              <div style={STAT_LABEL}>Income</div>
-              <div style={{ ...STAT_VAL, color: "#059669" }}>{fmtIDR(thisMonthIncome)}</div>
-            </div>
-            <div>
-              <div style={STAT_LABEL}>Expense</div>
-              <div style={{ ...STAT_VAL, color: "#dc2626" }}>{fmtIDR(thisMonthExpense)}</div>
-            </div>
-            <div>
-              <div style={STAT_LABEL}>Surplus</div>
-              <div style={{ ...STAT_VAL, color: surplus >= 0 ? "#059669" : "#dc2626" }}>
-                {surplus >= 0 ? "+" : ""}{fmtIDR(surplus)}
               </div>
-            </div>
+            ))}
           </div>
-
-          {/* Bar chart */}
           <MiniBarChart data={cashFlowData} max={maxCF} />
         </div>
 
-        {/* [S] Spending Breakdown */}
-        {!isMobile && (
-          <div style={{ alignSelf: "stretch" }}>
-            <SpendingBreakdown ledger={ledger} />
+        {/* Col 2: CC Spending */}
+        <div style={SEC_CARD}>
+          <div style={SEC_HEAD}>
+            <span style={SEC_TITLE}>CC Spending</span>
+            {creditCards.length > 0 && (
+              <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+                {creditCards.length} card{creditCards.length !== 1 ? "s" : ""}
+              </span>
+            )}
           </div>
-        )}
+          <div style={{ fontSize: 26, fontWeight: 900, color: "#111827", fontFamily: "Figtree, sans-serif", marginBottom: 4 }}>
+            {fmtIDR(thisMonthCCSpend, true)}
+          </div>
+          <div style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif", marginBottom: 14 }}>
+            This month · <strong style={{ color: "#dc2626" }}>{fmtIDR(totalCCDebt, true)}</strong> outstanding
+          </div>
+          {/* Top shared group utilization */}
+          {Object.values(ccGroupMap).slice(0, 1).map(g => {
+            const util = g.sharedLimit > 0 ? Math.min(100, (g.totalDebt / g.sharedLimit) * 100) : 0;
+            const utilColor = util > 80 ? "#dc2626" : util > 50 ? "#d97706" : "#059669";
+            return (
+              <div key={g.id}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                  <span style={{ fontSize: 11, color: "#374151", fontFamily: "Figtree, sans-serif" }}>{g.name}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: utilColor, fontFamily: "Figtree, sans-serif" }}>{util.toFixed(0)}% used</span>
+                </div>
+                <div style={{ height: 6, borderRadius: 3, background: "#f3f4f6" }}>
+                  <div style={{ width: `${util}%`, height: "100%", background: utilColor, borderRadius: 3, transition: "width 0.3s" }} />
+                </div>
+                <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 3 }}>
+                  {fmtIDR(g.totalDebt, true)} of {fmtIDR(g.sharedLimit, true)}
+                </div>
+              </div>
+            );
+          })}
+          {/* Standalone top card if no groups */}
+          {Object.keys(ccGroupMap).length === 0 && creditCards.filter(c => Number(c.card_limit || 0) > 0 && Number(c.outstanding_amount || 0) > 0).slice(0, 1).map(c => {
+            const debt = Number(c.outstanding_amount || 0);
+            const limit = Number(c.card_limit || 0);
+            const util = Math.min(100, (debt / limit) * 100);
+            const utilColor = util > 80 ? "#dc2626" : util > 50 ? "#d97706" : "#059669";
+            return (
+              <div key={c.id}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                  <span style={{ fontSize: 11, color: "#374151", fontFamily: "Figtree, sans-serif" }}>{c.name}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: utilColor, fontFamily: "Figtree, sans-serif" }}>{util.toFixed(0)}% used</span>
+                </div>
+                <div style={{ height: 6, borderRadius: 3, background: "#f3f4f6" }}>
+                  <div style={{ width: `${util}%`, height: "100%", background: utilColor, borderRadius: 3 }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
 
-        {/* [7] Upcoming — full width */}
-        <div style={{ ...BENTO_WHITE, gridColumn: isMobile ? "span 1" : "span 3" }}>
-          <div style={CARD_TITLE}>Upcoming — Next 7 Days</div>
-
-          {upcomingGroups.length === 0 ? (
-            <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 10 }}>
-              🎉 All clear — nothing due this week
+        {/* Col 3: Top Category (icons/colors from DB) */}
+        <div style={SEC_CARD}>
+          <div style={SEC_HEAD}><span style={SEC_TITLE}>Top Category</span></div>
+          {topCategories.length === 0 ? (
+            <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 8 }}>
+              No spending this month
             </div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 10 }}>
-              {upcomingGroups.map(([date, group]) => (
-                <div key={date}>
-                  {/* Date group header */}
-                  <div style={{
-                    fontSize: 10, fontWeight: 700, color: "#9ca3af",
-                    letterSpacing: "0.08em", fontFamily: "Figtree, sans-serif",
-                    marginBottom: 6, textTransform: "uppercase",
-                  }}>
-                    {group.label}
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {group.items.map(item => (
-                      <UpcomingRow
-                        key={item.id}
-                        item={item}
-                        onEdit={
-                          item.type === "reminder"   ? () => openConfirmModal(item.raw, true) :
-                          item.type === "receivable" ? () => openSettleModal(item.raw) :
-                          item.type === "loan"       ? () => openLoanPayModal(item.raw) :
-                          null
-                        }
-                        onConfirm={
-                          item.type === "reminder"   ? () => openConfirmModal(item.raw) :
-                          item.type === "receivable" ? () => openSettleModal(item.raw) :
-                          item.type === "loan"       ? () => openLoanPayModal(item.raw) :
-                          item.type === "reimburse"  ? () => openReimburseModal(item.raw) :
-                          null
-                        }
-                        onSkip={
-                          item.type === "reminder"                            ? () => skipReminder(item.raw) :
-                          item.type === "loan" || item.type === "receivable"  ? () => dismissUpcoming(item.id) :
-                          item.type === "reimburse"                           ? () => dismissReimburse(item.raw) :
-                          item.type === "deposito_maturity"                   ? () => dismissUpcoming(item.id) :
-                          item.type === "cc_due" || item.type === "recurring" ||
-                          item.type === "reimburse_pending"                   ? () => dismissUpcoming(item.id) :
-                          null
-                        }
-                      />
-                    ))}
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                <div style={{
+                  width: 44, height: 44, borderRadius: 12, flexShrink: 0,
+                  background: (topCategories[0]?.color || "#9ca3af") + "22",
+                  display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22,
+                }}>
+                  {topCategories[0]?.icon || "💸"}
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>{topCategories[0]?.name || "Other"}</div>
+                  <div style={{ fontSize: 22, fontWeight: 900, color: topCategories[0]?.color || "#dc2626", fontFamily: "Figtree, sans-serif" }}>
+                    {fmtIDR(topCategories[0]?.total || 0, true)}
                   </div>
                 </div>
-              ))}
+              </div>
+              {topCategories.slice(1, 5).map((cat, i) => {
+                const pct = topCategories[0]?.total > 0 ? (cat.total / topCategories[0].total) * 100 : 0;
+                return (
+                  <div key={cat.name + i} style={{ marginBottom: 7 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
+                      <span style={{ fontSize: 11, color: "#374151", fontFamily: "Figtree, sans-serif" }}>{cat.icon} {cat.name}</span>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: "#374151", fontFamily: "Figtree, sans-serif" }}>{fmtIDR(cat.total, true)}</span>
+                    </div>
+                    <div style={{ height: 3, borderRadius: 2, background: "#f3f4f6" }}>
+                      <div style={{ width: `${pct}%`, height: "100%", background: cat.color || "#9ca3af", borderRadius: 2 }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* ════════════ SECTION 4 — CC OVERVIEW ════════════ */}
+      {creditCards.length > 0 && (
+        <div style={{ background: "#fff", borderRadius: 16, padding: "16px 18px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+            <span style={SEC_TITLE}>CC Overview</span>
+            <span style={{ fontSize: 10, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
+              {creditCards.length} card{creditCards.length !== 1 ? "s" : ""} · {fmtIDR(totalCCDebt, true)} total
+            </span>
+          </div>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: isMobile
+              ? "repeat(2, 1fr)"
+              : `repeat(${Math.min(4, Math.max(1, Object.keys(ccGroupMap).length + creditCards.filter(c => !ccGroupedIds.has(c.id)).length))}, 1fr)`,
+            gap: 10,
+          }}>
+            {Object.values(ccGroupMap).map(g => {
+              const util = g.sharedLimit > 0 ? Math.min(100, (g.totalDebt / g.sharedLimit) * 100) : 0;
+              const utilColor = util > 80 ? "#dc2626" : util > 50 ? "#d97706" : "#059669";
+              return (
+                <div key={g.id} style={{ background: "#f9fafb", borderRadius: 12, padding: "12px 14px" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", fontFamily: "Figtree, sans-serif", marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {g.name}
+                  </div>
+                  <div style={{ fontSize: 17, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif", marginBottom: 6 }}>
+                    {fmtIDR(g.totalDebt, true)}
+                  </div>
+                  <div style={{ height: 5, borderRadius: 3, background: "#e5e7eb", marginBottom: 4 }}>
+                    <div style={{ width: `${util}%`, height: "100%", background: utilColor, borderRadius: 3, transition: "width 0.3s" }} />
+                  </div>
+                  <div style={{ fontSize: 9, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+                    {util.toFixed(0)}% · {fmtIDR(g.sharedLimit, true)} limit · {g.members.length} cards
+                  </div>
+                </div>
+              );
+            })}
+            {creditCards.filter(c => !ccGroupedIds.has(c.id)).map(c => {
+              const debt = Number(c.outstanding_amount || 0);
+              const limit = Number(c.card_limit || 0);
+              const util = limit > 0 ? Math.min(100, (debt / limit) * 100) : 0;
+              const utilColor = util > 80 ? "#dc2626" : util > 50 ? "#d97706" : "#059669";
+              return (
+                <div key={c.id} style={{ background: "#f9fafb", borderRadius: 12, padding: "12px 14px" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", fontFamily: "Figtree, sans-serif", marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {c.name}
+                  </div>
+                  <div style={{ fontSize: 17, fontWeight: 800, color: debt > 0 ? "#111827" : "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: limit > 0 ? 6 : 0 }}>
+                    {fmtIDR(debt, true)}
+                  </div>
+                  {limit > 0 && (
+                    <>
+                      <div style={{ height: 5, borderRadius: 3, background: "#e5e7eb", marginBottom: 4 }}>
+                        <div style={{ width: `${util}%`, height: "100%", background: utilColor, borderRadius: 3, transition: "width 0.3s" }} />
+                      </div>
+                      <div style={{ fontSize: 9, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+                        {util.toFixed(0)}% · {fmtIDR(limit, true)} limit
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Budget widget */}
+      {budgets.length > 0 && (
+        <BudgetWidget budgets={budgets} ledger={ledger} onAddBudget={() => setSettingsTab?.("budgets")} />
+      )}
+
+      {/* ════════════ SECTION 5 — UPCOMING ════════════ */}
+      <div style={{ background: "#fff", borderRadius: 16, padding: "16px 18px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+          <span style={SEC_TITLE}>Upcoming — Next 14 Days</span>
+          {upcomingItems.length > 0 && (
+            <span style={{ fontSize: 10, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>
+              {upcomingItems.length} item{upcomingItems.length !== 1 ? "s" : ""}
+            </span>
+          )}
+        </div>
+        {upcomingGroups.length === 0 ? (
+          <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+            🎉 All clear — nothing due this week
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {upcomingGroups.map(([date, group]) => (
+              <div key={date}>
+                <div style={{
+                  fontSize: 10, fontWeight: 700, color: "#9ca3af",
+                  letterSpacing: "0.08em", fontFamily: "Figtree, sans-serif",
+                  marginBottom: 6, textTransform: "uppercase",
+                }}>
+                  {group.label}
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {group.items.map(item => (
+                    <UpcomingRow
+                      key={item.id}
+                      item={item}
+                      onEdit={
+                        item.type === "reminder"   ? () => openConfirmModal(item.raw, true) :
+                        item.type === "receivable" ? () => openSettleModal(item.raw) :
+                        item.type === "loan"       ? () => openLoanPayModal(item.raw) :
+                        null
+                      }
+                      onConfirm={
+                        item.type === "reminder"   ? () => openConfirmModal(item.raw) :
+                        item.type === "receivable" ? () => openSettleModal(item.raw) :
+                        item.type === "loan"       ? () => openLoanPayModal(item.raw) :
+                        item.type === "reimburse"  ? () => openReimburseModal(item.raw) :
+                        null
+                      }
+                      onSkip={
+                        item.type === "reminder"                            ? () => skipReminder(item.raw) :
+                        item.type === "loan" || item.type === "receivable"  ? () => dismissUpcoming(item.id) :
+                        item.type === "reimburse"                           ? () => dismissReimburse(item.raw) :
+                        item.type === "deposito_maturity"                   ? () => dismissUpcoming(item.id) :
+                        item.type === "cc_due" || item.type === "recurring" ||
+                        item.type === "reimburse_pending"                   ? () => dismissUpcoming(item.id) :
+                        null
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ════════════ SECTION 6 — ACTIVITY ════════════ */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: isMobile ? "1fr" : "2fr 1fr",
+        gap: 12,
+      }}>
+        {/* Recent Transactions */}
+        <div style={{ background: "#fff", borderRadius: 16, padding: "16px 18px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+            <span style={SEC_TITLE}>Recent Transactions</span>
+            <button onClick={() => setTab?.("transactions")} style={LINK_BTN}>View all →</button>
+          </div>
+          {recentGroups.length === 0 ? (
+            <EmptyState icon="📋" message="No transactions yet" />
+          ) : (
+            <GroupedTransactionList groups={recentGroups} accounts={accounts} categories={categories} compact />
+          )}
+        </div>
+
+        {/* Spending by Category (icons/colors from DB — not constants) */}
+        <div style={{ background: "#fff", borderRadius: 16, padding: "16px 18px" }}>
+          <div style={{ marginBottom: 14 }}><span style={SEC_TITLE}>Spending by Category</span></div>
+          {topCategories.length === 0 ? (
+            <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+              No spending this month
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+              {topCategories.slice(0, 7).map((cat, i) => {
+                const maxTotal = topCategories[0]?.total || 1;
+                const pct = (cat.total / maxTotal) * 100;
+                return (
+                  <div key={cat.name + i}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
+                        <span style={{ fontSize: 14, flexShrink: 0 }}>{cat.icon}</span>
+                        <span style={{ fontSize: 11, color: "#374151", fontFamily: "Figtree, sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {cat.name}
+                        </span>
+                      </div>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", flexShrink: 0, marginLeft: 8 }}>
+                        {fmtIDR(cat.total, true)}
+                      </span>
+                    </div>
+                    <div style={{ height: 4, borderRadius: 2, background: "#f3f4f6" }}>
+                      <div style={{ width: `${pct}%`, height: "100%", background: cat.color || "#9ca3af", borderRadius: 2, transition: "width 0.3s" }} />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
       </div>
 
-      {/* ── RECONCILE STATUS ── */}
+      {/* Reconcile Status + Recurring Suggestions */}
       <ReconcileStatusWidget user={user} accounts={accounts} />
-
-      {/* ── RECURRING SUGGESTIONS ── */}
       <RecurringSuggestionsWidget
         user={user}
         ledger={ledger}
@@ -1296,31 +1391,7 @@ export default function Dashboard({
         onCreated={() => onRefresh?.()}
       />
 
-      {/* ── RECENT TRANSACTIONS ── */}
-      <div style={{ ...BENTO_WHITE, marginTop: 4 }}>
-        <div style={CARD_ROW}>
-          <div style={CARD_TITLE}>Recent Transactions</div>
-          <button
-            onClick={() => setTab?.("transactions")}
-            style={LINK_BTN}
-          >
-            View all →
-          </button>
-        </div>
-
-        {recentGroups.length === 0 ? (
-          <EmptyState icon="📋" message="No transactions yet" />
-        ) : (
-          <GroupedTransactionList
-            groups={recentGroups}
-            accounts={accounts}
-            categories={categories}
-            compact
-          />
-        )}
-      </div>
-
-      {/* ── QUICK ADD TRANSACTION ── */}
+      {/* ── QUICK ADD TRANSACTION MODAL ── */}
       {showAddTxModal && (
         <TxVerticalBig
           open={showAddTxModal}
@@ -1564,7 +1635,6 @@ export default function Dashboard({
         })()}
       </Modal>
 
-
     </div>
   );
 }
@@ -1664,66 +1734,10 @@ const RUPT_GHOST = {
   display: "flex", alignItems: "center", justifyContent: "center",
 };
 
-// ─── BENTO TILE ───────────────────────────────────────────────
-function BentoTile({ bg, icon, iconBg, label, value, sub, badge, badgeColor, onClick }) {
-  return (
-    <div onClick={onClick} style={{ ...BENTO_BASE, background: bg, cursor: onClick ? "pointer" : "default" }}>
-      {/* Badge */}
-      {badge && (
-        <div style={{
-          position:     "absolute", top: 12, right: 12,
-          fontSize:     9, fontWeight: 700,
-          fontFamily:   "Figtree, sans-serif",
-          background:   badgeColor + "20",
-          color:        badgeColor,
-          padding:      "2px 6px",
-          borderRadius: 20,
-        }}>
-          {badge}
-        </div>
-      )}
-      {/* Icon */}
-      <div style={{
-        width: 34, height: 34, borderRadius: 10,
-        background: iconBg || "rgba(0,0,0,0.07)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: 16, marginBottom: 10,
-      }}>
-        {icon}
-      </div>
-      {/* Label */}
-      <div style={{
-        fontSize: 10, fontWeight: 700, color: "#9ca3af",
-        textTransform: "uppercase", letterSpacing: "0.5px",
-        fontFamily: "Figtree, sans-serif", marginBottom: 4,
-      }}>
-        {label}
-      </div>
-      {/* Value */}
-      <div className="bento-value" style={{
-        fontSize: 16, fontWeight: 800, color: "#111827",
-        fontFamily: "Figtree, sans-serif", lineHeight: 1.2,
-        marginBottom: sub ? 4 : 0,
-        wordBreak: "break-all",
-      }}>
-        {value}
-      </div>
-      {/* Sub */}
-      {sub && (
-        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", wordBreak: "break-word", overflowWrap: "anywhere" }}>
-          {sub}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── MINI BAR CHART ──────────────────────────────────────────
 function MiniBarChart({ data, max }) {
   const BAR_H = 72;
   const BAR_W = 10;
-  const GAP   = 4;
-  const GROUP = BAR_W * 2 + GAP + 8; // pair width + group gap
 
   return (
     <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: BAR_H + 20 }}>
@@ -1733,33 +1747,26 @@ function MiniBarChart({ data, max }) {
         const isCurrent = i === data.length - 1;
         return (
           <div key={d.m} style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1 }}>
-            {/* Bars */}
             <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: BAR_H }}>
               <div style={{
-                width:        BAR_W,
-                height:       Math.max(incH, 2),
+                width: BAR_W, height: Math.max(incH, 2),
                 borderRadius: "3px 3px 0 0",
-                background:   isCurrent ? "#059669" : "#bbf7d0",
-                transition:   "height 0.3s",
-                flexShrink:   0,
+                background: isCurrent ? "#059669" : "#bbf7d0",
+                transition: "height 0.3s", flexShrink: 0,
               }} />
               <div style={{
-                width:        BAR_W,
-                height:       Math.max(expH, 2),
+                width: BAR_W, height: Math.max(expH, 2),
                 borderRadius: "3px 3px 0 0",
-                background:   isCurrent ? "#dc2626" : "#fecaca",
-                transition:   "height 0.3s",
-                flexShrink:   0,
+                background: isCurrent ? "#dc2626" : "#fecaca",
+                transition: "height 0.3s", flexShrink: 0,
               }} />
             </div>
-            {/* Month label */}
             <div style={{
-              fontSize:   9,
+              fontSize: 9,
               fontWeight: isCurrent ? 700 : 500,
-              color:      isCurrent ? "#111827" : "#9ca3af",
+              color: isCurrent ? "#111827" : "#9ca3af",
               fontFamily: "Figtree, sans-serif",
-              marginTop:  4,
-              whiteSpace: "nowrap",
+              marginTop: 4, whiteSpace: "nowrap",
             }}>
               {d.month}
             </div>
@@ -1770,102 +1777,57 @@ function MiniBarChart({ data, max }) {
   );
 }
 
-// ─── LEGEND DOT ───────────────────────────────────────────────
-function LegendDot({ color, label }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-      <div style={{ width: 8, height: 8, borderRadius: 2, background: color }} />
-      <span style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>{label}</span>
-    </div>
-  );
-}
-
 // ─── STYLES ───────────────────────────────────────────────────
-// GRID is now applied inline in render (isMobile-aware)
-
-const BENTO_BASE = {
-  borderRadius: 16,
-  padding:      "16px 16px 14px",
-  position:     "relative",
-  overflow:     "hidden",
-  minWidth:     0,  // prevent grid blowout
-};
-
-const BENTO_WHITE = {
-  ...BENTO_BASE,
-  background: "#ffffff",
-};
-
-const BENTO_DARK = {
-  ...BENTO_BASE,
-  background: "linear-gradient(135deg, #1e3a5f 0%, #4338ca 100%)",
-};
-
-const DARK_LABEL = {
-  fontSize:      10,
-  fontWeight:    600,
-  color:         "rgba(255,255,255,0.45)",
-  textTransform: "uppercase",
-  letterSpacing: "0.5px",
-  fontFamily:    "Figtree, sans-serif",
-  marginBottom:  6,
-};
-
-const DARK_VALUE = {
-  fontSize:     28,
-  fontWeight:   900,
-  color:        "#ffffff",
-  fontFamily:   "Figtree, sans-serif",
-  lineHeight:   1.1,
-  marginBottom: 6,
-};
-
-const DARK_STATS = {
-  display:    "grid",
-  // gridTemplateColumns set inline (isMobile: 2 cols, desktop: 4 cols)
-  gap:        8,
-  paddingTop: 12,
-  borderTop:  "1px solid rgba(255,255,255,0.08)",
-};
-
-const CARD_TITLE = {
-  fontSize:   13,
-  fontWeight: 700,
-  color:      "#111827",
-  fontFamily: "Figtree, sans-serif",
-};
-
-const CARD_ROW = {
-  display:        "flex",
-  justifyContent: "space-between",
-  alignItems:     "center",
-  marginBottom:   12,
-};
-
-const STAT_LABEL = {
-  fontSize:      9,
-  fontWeight:    700,
-  color:         "#9ca3af",
-  textTransform: "uppercase",
-  letterSpacing: "0.4px",
-  fontFamily:    "Figtree, sans-serif",
-  marginBottom:  2,
-};
-
-const STAT_VAL = {
-  fontSize:   13,
-  fontWeight: 800,
-  fontFamily: "Figtree, sans-serif",
-};
 
 const LINK_BTN = {
-  background:  "none",
-  border:      "none",
-  color:       "#3b5bdb",
-  fontSize:    12,
-  fontWeight:  700,
-  cursor:      "pointer",
-  fontFamily:  "Figtree, sans-serif",
-  padding:     0,
+  background: "none",
+  border: "none",
+  color: "#3b5bdb",
+  fontSize: 12,
+  fontWeight: 700,
+  cursor: "pointer",
+  fontFamily: "Figtree, sans-serif",
+  padding: 0,
 };
 
+// Hero icon button (used inside dark gradient card)
+const HERO_ICON_BTN = {
+  width: 32, height: 32, borderRadius: 9,
+  border: "1px solid rgba(255,255,255,0.14)",
+  background: "rgba(255,255,255,0.07)",
+  color: "rgba(255,255,255,0.75)", cursor: "pointer",
+  display: "flex", alignItems: "center", justifyContent: "center",
+};
+
+// Quick action pill button
+const QUICK_BTN = {
+  height: 30, padding: "0 14px", borderRadius: 99,
+  border: "1px solid #e5e7eb", background: "#fff",
+  color: "#374151", fontSize: 12, fontWeight: 600,
+  fontFamily: "Figtree, sans-serif", cursor: "pointer",
+  display: "flex", alignItems: "center", gap: 4,
+  whiteSpace: "nowrap",
+};
+
+// Section card base
+const SEC_CARD = {
+  background: "#ffffff",
+  borderRadius: 16,
+  padding: "16px 18px",
+};
+
+// Section card header row
+const SEC_HEAD = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  marginBottom: 14,
+};
+
+// Section title
+const SEC_TITLE = {
+  fontSize: 13,
+  fontWeight: 700,
+  color: "#111827",
+  fontFamily: "Figtree, sans-serif",
+};
