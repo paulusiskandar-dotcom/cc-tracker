@@ -30,6 +30,7 @@ import Receivables  from "./components/Receivables";
 import Income       from "./components/Income";
 import Reports      from "./components/Reports";
 import Budget       from "./components/Budget";
+import SearchModal  from "./components/SearchModal";
 import Calendar     from "./components/Calendar";
 import Settings     from "./components/Settings";
 import AIImport     from "./components/AIImport";
@@ -207,7 +208,8 @@ function Finance({ user, signOut }) {
   useEffect(() => {
     window.location.hash = tab;
   }, [tab]);
-  const [showMore, setShowMore] = useState(false);
+  const [showMore,    setShowMore]    = useState(false);
+  const [searchOpen,  setSearchOpen]  = useState(false);
 
   // ── Data state ──
   const [accounts,       setAccounts]       = useState([]);
@@ -308,6 +310,18 @@ function Finance({ user, signOut }) {
   }, [user.id]);
 
   useEffect(() => { if (user?.id) loadData(); }, [user?.id, loadData]);
+
+  // Global Cmd+K / Ctrl+K shortcut → open search
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setSearchOpen(prev => !prev);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   // Persist dark mode preference
   useEffect(() => {
@@ -564,6 +578,14 @@ function Finance({ user, signOut }) {
         </>
       )}
 
+      <SearchModal
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        ledger={ledger}
+        accounts={accounts}
+        categories={categories}
+        setTab={goTab}
+      />
       <ToastContainer />
       <UndoToast onUndone={() => loadData()} />
     </div>
