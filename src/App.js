@@ -33,7 +33,8 @@ import Calendar     from "./components/Calendar";
 import Settings     from "./components/Settings";
 import AIImport     from "./components/AIImport";
 import Email        from "./components/Email";
-import Reconcile    from "./components/Reconcile";
+import Reconcile       from "./components/Reconcile";
+import Notifications   from "./components/Notifications";
 import StatementPage          from "./pages/StatementPage";
 import ReimburseStatementPage from "./pages/ReimburseStatementPage";
 import LoanStatementPage      from "./pages/LoanStatementPage";
@@ -369,7 +370,7 @@ function Finance({ user, signOut }) {
     </div>
   );
 
-  const EXTRA_LABELS = { scan: "AI Scan", aiimport: "AI Scan", email: "Email" };
+  const EXTRA_LABELS = { scan: "AI Scan", aiimport: "AI Scan", email: "Email", notifications: "Notifications" };
   const pageLabel = !onMainPage
     ? "Statement"
     : (TABS.find(t => t.id === tab)?.label || EXTRA_LABELS[tab] || "Dashboard");
@@ -396,8 +397,9 @@ function Finance({ user, signOut }) {
       case "reconcile":    return <Reconcile    {...shared} />;
       case "scan":         return <AIImport     {...shared} />;
       case "aiimport":     return <AIImport     {...shared} />; // legacy redirect
-      case "email":        return <Email        {...shared} initialTab={emailInitialTab} />;
-      default:             return <Dashboard    {...shared} />;
+      case "email":         return <Email         {...shared} initialTab={emailInitialTab} />;
+      case "notifications": return <Notifications {...shared} />;
+      default:              return <Dashboard    {...shared} />;
     }
   };
 

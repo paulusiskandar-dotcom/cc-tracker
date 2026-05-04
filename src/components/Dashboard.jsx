@@ -898,7 +898,7 @@ export default function Dashboard({
             {/* 1. Notification Bell */}
             <div style={{ position: "relative" }}>
               <button
-                onClick={() => showToast("Notifications coming soon", "info")}
+                onClick={() => setTab?.("notifications")}
                 title="Notifications"
                 aria-label="Notifications"
                 style={HERO_MINT_BTN}
