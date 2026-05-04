@@ -446,7 +446,7 @@ export default function Calendar({
         <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", marginBottom: 6 }}>
           {DAY_NAMES.map(d => (
             <div key={d} style={{
-              fontSize: 10, fontWeight: 600, color: "#9ca3af",
+              fontSize: 12, fontWeight: 600, color: "#9ca3af", letterSpacing: 0.5,
               textAlign: "center", textTransform: "uppercase", padding: "2px 0",
             }}>
               {d}
@@ -475,17 +475,17 @@ export default function Calendar({
                 }}
               >
                 <span style={{
-                  fontSize: 12, fontWeight: tdy || act ? 700 : 400,
+                  fontSize: 15, fontWeight: tdy || act ? 700 : 400,
                   color: act ? "#3b5bdb" : tdy ? "#16a34a" : pst ? "#9ca3af" : "#374151",
                   lineHeight: 1.3,
                 }}>
                   {cell.day}
                 </span>
                 {cell.dots.length > 0 && (
-                  <div style={{ display: "flex", gap: 2, marginTop: 2 }}>
+                  <div style={{ display: "flex", gap: 3, marginTop: 4 }}>
                     {cell.dots.map((c, i) => (
                       <div key={i} style={{
-                        width: 4, height: 4, borderRadius: "50%",
+                        width: 6, height: 6, borderRadius: "50%",
                         background: pst ? c + "88" : c,
                       }} />
                     ))}
