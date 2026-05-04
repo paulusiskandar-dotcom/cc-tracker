@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { LayoutGrid, List } from "lucide-react";
 import { ledgerApi, recalculateBalance } from "../api";
 import { fmtIDR, todayStr } from "../utils";
 import { showToast } from "../components/shared/Card";
@@ -39,6 +40,7 @@ export default function ReimburseStatementPage({
   setLedger, onRefresh,
   bankAccounts = [], creditCards = [], receivables = [],
   fxRates = {}, allCurrencies: CURRENCIES = [],
+  reimburseSettlements = [],
 }) {
   const { entity } = useParams();
   const navigate   = useNavigate();
@@ -46,6 +48,8 @@ export default function ReimburseStatementPage({
   const [fromDate, setFromDate] = useState(firstOfMonth());
   const [toDate,   setToDate]   = useState(todayStr());
   const [applied,  setApplied]  = useState({ from: firstOfMonth(), to: todayStr() });
+
+  const [viewMode, setViewMode] = useState("paired"); // "paired" | "chronological"
 
   const [txOpen,    setTxOpen]    = useState(false);
   const [txMode,    setTxMode]    = useState("edit");
@@ -88,6 +92,47 @@ export default function ReimburseStatementPage({
     return Object.entries(map).sort(([a], [b]) => a.localeCompare(b));
   }, [filteredRows]);
 
+  // ── Paired groups by settlement ───────────────────────────────
+  const pairedGroups = useMemo(() => {
+    const groupedMap = {};
+    const unsettled = [];
+
+    for (const row of filteredRows) {
+      const sId = row.reimburse_settlement_id;
+      if (!sId) {
+        unsettled.push(row);
+        continue;
+      }
+      if (!groupedMap[sId]) {
+        const settlement = (reimburseSettlements || []).find(s => s.id === sId);
+        groupedMap[sId] = {
+          id: sId,
+          settled_at: settlement?.settled_at || null,
+          re_amount: Number(settlement?.reimbursable_expense) || 0,
+          outRows: [],
+          inRows: [],
+        };
+      }
+      if (row.tx_type === "reimburse_out") {
+        groupedMap[sId].outRows.push(row);
+      } else if (row.tx_type === "reimburse_in") {
+        groupedMap[sId].inRows.push(row);
+      }
+    }
+
+    const settled = Object.values(groupedMap)
+      .sort((a, b) => {
+        const da = a.settled_at ? new Date(a.settled_at).getTime() : 0;
+        const db = b.settled_at ? new Date(b.settled_at).getTime() : 0;
+        return da - db;
+      })
+      .map((g, idx) => ({ ...g, seq: idx + 1 }));
+
+    unsettled.sort((a, b) => (b.tx_date || "").localeCompare(a.tx_date || ""));
+
+    return { settled, unsettled };
+  }, [filteredRows, reimburseSettlements]);
+
   // ── Delete ────────────────────────────────────────────────────
   const handleDelete = async () => {
     if (!delEntry) return;
@@ -126,6 +171,37 @@ export default function ReimburseStatementPage({
       e._runOutstanding,
     ]);
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([hdr, ...rows]), "Transactions");
+
+    const pairedSheet = [
+      ["Settlement", "Settled Date", "Out Description", "Out Amount", "In Description", "In Amount", "RE"],
+      ...pairedGroups.settled.flatMap(g => {
+        const maxRows = Math.max(g.outRows.length, g.inRows.length, 1);
+        return Array.from({ length: maxRows }, (_, i) => [
+          i === 0 ? `#${g.seq}` : "",
+          i === 0 ? fmtDateShort(g.settled_at) : "",
+          g.outRows[i]?.description || "",
+          g.outRows[i] ? Number(g.outRows[i].amount_idr || g.outRows[i].amount || 0) : "",
+          g.inRows[i]?.description || "",
+          g.inRows[i] ? Number(g.inRows[i].amount_idr || g.inRows[i].amount || 0) : "",
+          i === 0 ? g.re_amount : "",
+        ]);
+      }),
+      ...(pairedGroups.unsettled.length > 0 ? [
+        ["", "", "", "", "", "", ""],
+        ["UNSETTLED", "", "", "", "", "", ""],
+        ...pairedGroups.unsettled.map(row => [
+          "",
+          fmtDateShort(row.tx_date),
+          row.tx_type === "reimburse_out" ? row.description : "",
+          row.tx_type === "reimburse_out" ? Number(row.amount_idr || row.amount || 0) : "",
+          row.tx_type === "reimburse_in"  ? row.description : "",
+          row.tx_type === "reimburse_in"  ? Number(row.amount_idr || row.amount || 0) : "",
+          "",
+        ]),
+      ] : []),
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(pairedSheet), "Paired");
+
     XLSX.writeFile(wb, `${entity}_Reimburse_${applied.from}_${applied.to}.xlsx`);
   };
 
@@ -163,7 +239,20 @@ export default function ReimburseStatementPage({
           <div style={{ fontSize: 18, fontWeight: 800, color: "#111827" }}>{entity} — Reimburse Statement</div>
           <div style={{ fontSize: 12, color: "#9ca3af" }}>All reimburse transactions</div>
         </div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+          <button
+            onClick={() => setViewMode(prev => prev === "paired" ? "chronological" : "paired")}
+            className="no-print"
+            style={{
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "6px 12px", background: "#fff", border: "1px solid #e5e7eb",
+              borderRadius: 8, fontSize: 12, fontWeight: 500, color: "#14532d",
+              cursor: "pointer", fontFamily: FF,
+            }}
+          >
+            {viewMode === "paired" ? <LayoutGrid size={14} /> : <List size={14} />}
+            {viewMode === "paired" ? "Paired view" : "Chronological"}
+          </button>
           <button onClick={exportPDF}   style={BTN()}>🖨 PDF</button>
           <button onClick={exportExcel} style={BTN()}>📊 Excel</button>
         </div>
@@ -199,103 +288,228 @@ export default function ReimburseStatementPage({
         </div>
       )}
 
-      {/* ── Statement grid ── */}
-      <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden" }}>
-        <div style={{ display: "grid", gridTemplateColumns: COLS, background: "#f9fafb", borderBottom: "0.5px solid #e5e7eb", padding: RP }}>
-          {HDR.map(({ label, align }) => (
-            <div key={label} style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF, padding: "9px 6px", textAlign: align }}>
-              {label}
-            </div>
-          ))}
-        </div>
+      {/* ── Paired view ── */}
+      {viewMode === "paired" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
 
-        {filteredRows.length === 0 ? (
-          <div style={{ padding: "40px 20px", textAlign: "center", color: "#9ca3af", fontSize: 13 }}>
-            No transactions in this period.
-          </div>
-        ) : (
-          <>
-            {grouped.map(([date, txs]) => (
-              <div key={date}>
-                <div style={{ background: "#f3f4f6", borderBottom: "0.5px solid #e5e7eb", padding: "5px 20px", fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF }}>
-                  {fmtDateLabel(date)}
+          {/* Unsettled section */}
+          {pairedGroups.unsettled.length > 0 && (
+            <div style={{ border: "1px solid #fde68a", borderRadius: 12, padding: "12px 14px", background: "#fff" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <div>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "#d97706" }}>Unsettled</span>
+                  <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: 8 }}>
+                    belum di-pair · {pairedGroups.unsettled.length} item{pairedGroups.unsettled.length > 1 ? "s" : ""}
+                  </span>
                 </div>
-
-                {txs.map(tx => {
-                  const amt   = Number(tx.amount_idr || tx.amount || 0);
-                  const isOut = tx.tx_type === "reimburse_out";
-                  const acc   = accounts.find(a => a.id === (isOut ? tx.from_id : tx.to_id));
-                  return (
-                    <div key={tx.id} style={{ display: "grid", gridTemplateColumns: COLS, borderBottom: "0.5px solid #f3f4f6", padding: RP, alignItems: "center" }}>
-                      {/* Tanggal */}
-                      <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, padding: "8px 6px", whiteSpace: "nowrap" }}>
-                        {fmtDateShort(tx.tx_date)}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                {/* OUT column */}
+                <div style={{ background: "#f9fafb", borderRadius: 8, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 10, color: "#9ca3af", letterSpacing: 0.5, marginBottom: 6 }}>OUT</div>
+                  {pairedGroups.unsettled.filter(r => r.tx_type === "reimburse_out").map(row => (
+                    <div key={row.id} style={{ paddingBottom: 8, marginBottom: 8, borderBottom: "0.5px dashed #e5e7eb" }}>
+                      <div style={{ fontSize: 13, color: "#111827", fontFamily: FF }}>{row.description || "—"}</div>
+                      <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>
+                        {(accounts.find(a => a.id === row.from_id)?.name || "—")} · {fmtDateShort(row.tx_date)}
                       </div>
-                      {/* Keterangan */}
-                      <div style={{ padding: "8px 6px", minWidth: 0 }}>
-                        <div style={{ fontSize: 12, fontWeight: 500, color: "#111827", fontFamily: FF, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {tx.description || (isOut ? "Reimburse Out" : "Reimburse In")}
-                        </div>
-                        {acc && (
-                          <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, marginTop: 2 }}>
-                            {isOut ? `← ${acc.name}` : `→ ${acc.name}`}
-                          </div>
-                        )}
-                        <div className="no-print" style={{ display: "flex", gap: 5, marginTop: 3 }}>
-                          <button onClick={() => { setTxMode("edit"); setTxInitial(tx); setTxOpen(true); }}
-                            style={{ fontSize: 9, padding: "1px 7px", borderRadius: 5, border: "1px solid #e5e7eb", background: "#f9fafb", color: "#374151", cursor: "pointer", fontFamily: FF, fontWeight: 600 }}>
-                            Edit
-                          </button>
-                          <button onClick={() => { setDelEntry(tx); setDelConfirm(true); }}
-                            style={{ fontSize: 9, padding: "1px 7px", borderRadius: 5, border: "1px solid #fee2e2", background: "#fff5f5", color: "#dc2626", cursor: "pointer", fontFamily: FF, fontWeight: 600 }}>
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                      {/* Kategori */}
-                      <div style={{ fontSize: 11, color: "#6b7280", fontFamily: FF, padding: "8px 6px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {tx.category_name || "—"}
-                      </div>
-                      {/* Out */}
-                      <div style={{ fontSize: 12, fontWeight: 600, color: "#dc2626", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
-                        {isOut ? fmtIDR(amt) : <span style={{ color: "#d1d5db" }}>—</span>}
-                      </div>
-                      {/* In */}
-                      <div style={{ fontSize: 12, fontWeight: 600, color: "#059669", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
-                        {!isOut ? fmtIDR(amt) : <span style={{ color: "#d1d5db" }}>—</span>}
-                      </div>
-                      {/* Outstanding */}
-                      <div style={{ fontSize: 12, fontWeight: 700, color: tx._runOutstanding > 0 ? "#d97706" : "#059669", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
-                        {tx._runOutstanding < 0
-                          ? `(${fmtIDR(Math.abs(tx._runOutstanding))})`
-                          : fmtIDR(tx._runOutstanding)}
+                      <div style={{ fontSize: 13, fontWeight: 500, color: "#dc2626", marginTop: 4 }}>
+                        {fmtIDR(row.amount_idr || row.amount)}
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            ))}
-
-            {/* Closing row */}
-            <div style={{ display: "grid", gridTemplateColumns: COLS, background: "#f9fafb", borderTop: "1.5px solid #e5e7eb", padding: RP }}>
-              <div />
-              <div style={{ fontSize: 11, fontWeight: 800, color: outstanding > 0 ? "#d97706" : "#059669", fontFamily: FF, padding: "9px 6px" }}>
-                Outstanding (all time)
-              </div>
-              <div />
-              <div style={{ fontSize: 13, fontWeight: 800, color: "#dc2626", fontFamily: FF, padding: "9px 6px", textAlign: "right" }}>
-                {fmtIDR(totalOut)}
-              </div>
-              <div style={{ fontSize: 13, fontWeight: 800, color: "#059669", fontFamily: FF, padding: "9px 6px", textAlign: "right" }}>
-                {fmtIDR(totalIn)}
-              </div>
-              <div style={{ fontSize: 13, fontWeight: 800, color: outstanding > 0 ? "#d97706" : "#059669", fontFamily: FF, padding: "9px 6px", textAlign: "right" }}>
-                {outstanding < 0 ? `(${fmtIDR(Math.abs(outstanding))})` : fmtIDR(outstanding)}
+                  ))}
+                  {pairedGroups.unsettled.filter(r => r.tx_type === "reimburse_out").length === 0 && (
+                    <div style={{ fontSize: 12, color: "#9ca3af" }}>—</div>
+                  )}
+                </div>
+                {/* IN column */}
+                <div style={{ background: "#f9fafb", borderRadius: 8, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 10, color: "#9ca3af", letterSpacing: 0.5, marginBottom: 6 }}>IN</div>
+                  {pairedGroups.unsettled.filter(r => r.tx_type === "reimburse_in").map(row => (
+                    <div key={row.id} style={{ paddingBottom: 8, marginBottom: 8, borderBottom: "0.5px dashed #e5e7eb" }}>
+                      <div style={{ fontSize: 13, color: "#111827", fontFamily: FF }}>{row.description || "—"}</div>
+                      <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>
+                        {(accounts.find(a => a.id === row.to_id)?.name || "—")} · {fmtDateShort(row.tx_date)}
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: "#059669", marginTop: 4 }}>
+                        {fmtIDR(row.amount_idr || row.amount)}
+                      </div>
+                    </div>
+                  ))}
+                  {pairedGroups.unsettled.filter(r => r.tx_type === "reimburse_in").length === 0 && (
+                    <div style={{ fontSize: 12, color: "#9ca3af" }}>—</div>
+                  )}
+                </div>
               </div>
             </div>
-          </>
-        )}
-      </div>
+          )}
+
+          {/* Settled sections */}
+          {pairedGroups.settled.map(group => (
+            <div key={group.id} style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: "12px 14px", background: "#fff" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <div>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "#111827" }}>Settlement #{group.seq}</span>
+                  <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: 8 }}>{fmtDateShort(group.settled_at)}</span>
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: "#d97706" }}>
+                  RE {fmtIDR(group.re_amount)}
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                {/* OUT column */}
+                <div style={{ background: "#f9fafb", borderRadius: 8, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 10, color: "#9ca3af", letterSpacing: 0.5, marginBottom: 6 }}>OUT</div>
+                  {group.outRows.map((row, i) => (
+                    <div key={row.id} style={{ paddingBottom: 8, marginBottom: 8, borderBottom: i < group.outRows.length - 1 ? "0.5px dashed #e5e7eb" : "none" }}>
+                      <div style={{ fontSize: 13, color: "#111827", fontFamily: FF }}>{row.description || "—"}</div>
+                      <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>
+                        {(accounts.find(a => a.id === row.from_id)?.name || "—")} · {fmtDateShort(row.tx_date)}
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: "#dc2626", marginTop: 4 }}>
+                        {fmtIDR(row.amount_idr || row.amount)}
+                      </div>
+                    </div>
+                  ))}
+                  {group.outRows.length > 1 && (
+                    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>
+                      Subtotal: {fmtIDR(group.outRows.reduce((s, r) => s + Number(r.amount_idr || r.amount || 0), 0))}
+                    </div>
+                  )}
+                  {group.outRows.length === 0 && <div style={{ fontSize: 12, color: "#9ca3af" }}>—</div>}
+                </div>
+                {/* IN column */}
+                <div style={{ background: "#f9fafb", borderRadius: 8, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 10, color: "#9ca3af", letterSpacing: 0.5, marginBottom: 6 }}>IN</div>
+                  {group.inRows.map((row, i) => (
+                    <div key={row.id} style={{ paddingBottom: 8, marginBottom: 8, borderBottom: i < group.inRows.length - 1 ? "0.5px dashed #e5e7eb" : "none" }}>
+                      <div style={{ fontSize: 13, color: "#111827", fontFamily: FF }}>{row.description || "—"}</div>
+                      <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>
+                        {(accounts.find(a => a.id === row.to_id)?.name || "—")} · {fmtDateShort(row.tx_date)}
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: "#059669", marginTop: 4 }}>
+                        {fmtIDR(row.amount_idr || row.amount)}
+                      </div>
+                    </div>
+                  ))}
+                  {group.inRows.length > 1 && (
+                    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>
+                      Subtotal: {fmtIDR(group.inRows.reduce((s, r) => s + Number(r.amount_idr || r.amount || 0), 0))}
+                    </div>
+                  )}
+                  {group.inRows.length === 0 && <div style={{ fontSize: 12, color: "#9ca3af" }}>—</div>}
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {pairedGroups.settled.length === 0 && pairedGroups.unsettled.length === 0 && (
+            <div style={{ padding: 40, textAlign: "center", color: "#9ca3af", fontSize: 13, background: "#f9fafb", borderRadius: 12, border: "1px solid #e5e7eb" }}>
+              No reimburse transactions in this period
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Chronological view (unchanged) ── */}
+      {viewMode === "chronological" && (
+        <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden" }}>
+          <div style={{ display: "grid", gridTemplateColumns: COLS, background: "#f9fafb", borderBottom: "0.5px solid #e5e7eb", padding: RP }}>
+            {HDR.map(({ label, align }) => (
+              <div key={label} style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF, padding: "9px 6px", textAlign: align }}>
+                {label}
+              </div>
+            ))}
+          </div>
+
+          {filteredRows.length === 0 ? (
+            <div style={{ padding: "40px 20px", textAlign: "center", color: "#9ca3af", fontSize: 13 }}>
+              No transactions in this period.
+            </div>
+          ) : (
+            <>
+              {grouped.map(([date, txs]) => (
+                <div key={date}>
+                  <div style={{ background: "#f3f4f6", borderBottom: "0.5px solid #e5e7eb", padding: "5px 20px", fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF }}>
+                    {fmtDateLabel(date)}
+                  </div>
+
+                  {txs.map(tx => {
+                    const amt   = Number(tx.amount_idr || tx.amount || 0);
+                    const isOut = tx.tx_type === "reimburse_out";
+                    const acc   = accounts.find(a => a.id === (isOut ? tx.from_id : tx.to_id));
+                    return (
+                      <div key={tx.id} style={{ display: "grid", gridTemplateColumns: COLS, borderBottom: "0.5px solid #f3f4f6", padding: RP, alignItems: "center" }}>
+                        {/* Tanggal */}
+                        <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, padding: "8px 6px", whiteSpace: "nowrap" }}>
+                          {fmtDateShort(tx.tx_date)}
+                        </div>
+                        {/* Keterangan */}
+                        <div style={{ padding: "8px 6px", minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 500, color: "#111827", fontFamily: FF, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {tx.description || (isOut ? "Reimburse Out" : "Reimburse In")}
+                          </div>
+                          {acc && (
+                            <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, marginTop: 2 }}>
+                              {isOut ? `← ${acc.name}` : `→ ${acc.name}`}
+                            </div>
+                          )}
+                          <div className="no-print" style={{ display: "flex", gap: 5, marginTop: 3 }}>
+                            <button onClick={() => { setTxMode("edit"); setTxInitial(tx); setTxOpen(true); }}
+                              style={{ fontSize: 9, padding: "1px 7px", borderRadius: 5, border: "1px solid #e5e7eb", background: "#f9fafb", color: "#374151", cursor: "pointer", fontFamily: FF, fontWeight: 600 }}>
+                              Edit
+                            </button>
+                            <button onClick={() => { setDelEntry(tx); setDelConfirm(true); }}
+                              style={{ fontSize: 9, padding: "1px 7px", borderRadius: 5, border: "1px solid #fee2e2", background: "#fff5f5", color: "#dc2626", cursor: "pointer", fontFamily: FF, fontWeight: 600 }}>
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                        {/* Kategori */}
+                        <div style={{ fontSize: 11, color: "#6b7280", fontFamily: FF, padding: "8px 6px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {tx.category_name || "—"}
+                        </div>
+                        {/* Out */}
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#dc2626", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
+                          {isOut ? fmtIDR(amt) : <span style={{ color: "#d1d5db" }}>—</span>}
+                        </div>
+                        {/* In */}
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#059669", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
+                          {!isOut ? fmtIDR(amt) : <span style={{ color: "#d1d5db" }}>—</span>}
+                        </div>
+                        {/* Outstanding */}
+                        <div style={{ fontSize: 12, fontWeight: 700, color: tx._runOutstanding > 0 ? "#d97706" : "#059669", fontFamily: FF, padding: "8px 6px", textAlign: "right" }}>
+                          {tx._runOutstanding < 0
+                            ? `(${fmtIDR(Math.abs(tx._runOutstanding))})`
+                            : fmtIDR(tx._runOutstanding)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+
+              {/* Closing row */}
+              <div style={{ display: "grid", gridTemplateColumns: COLS, background: "#f9fafb", borderTop: "1.5px solid #e5e7eb", padding: RP }}>
+                <div />
+                <div style={{ fontSize: 11, fontWeight: 800, color: outstanding > 0 ? "#d97706" : "#059669", fontFamily: FF, padding: "9px 6px" }}>
+                  Outstanding (all time)
+                </div>
+                <div />
+                <div style={{ fontSize: 13, fontWeight: 800, color: "#dc2626", fontFamily: FF, padding: "9px 6px", textAlign: "right" }}>
+                  {fmtIDR(totalOut)}
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "#059669", fontFamily: FF, padding: "9px 6px", textAlign: "right" }}>
+                  {fmtIDR(totalIn)}
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: outstanding > 0 ? "#d97706" : "#059669", fontFamily: FF, padding: "9px 6px", textAlign: "right" }}>
+                  {outstanding < 0 ? `(${fmtIDR(Math.abs(outstanding))})` : fmtIDR(outstanding)}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* ── Footer ── */}
       {filteredRows.length > 0 && (
