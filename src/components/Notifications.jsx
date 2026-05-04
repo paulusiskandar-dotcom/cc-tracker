@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
-import { fmtIDR } from "../utils";
+import { fmtIDR, todayStr } from "../utils";
 import { showToast } from "./shared/index";
+import { ledgerApi, recurringApi } from "../api";
+import BankPickerSheet from "./shared/BankPickerSheet";
 
 function getNextDueDate(dayOfMonth) {
   const now = new Date();
@@ -35,9 +37,16 @@ export default function Notifications({
   setTab,
   openEmail,
   onRefresh,
+  setLedger,
+  setReminders,
+  setRecurTemplates,
+  fxRates,
 }) {
   const [activeTab, setActiveTab] = useState("all");
   const [dismissedIds, setDismissedIds] = useState(new Set());
+  const [confirming,   setConfirming]   = useState(null);
+  const [pickerOpen,   setPickerOpen]   = useState(false);
+  const [pickerCtx,    setPickerCtx]    = useState(null); // { template, reminder }
 
   // ── 1. CC DUE ────────────────────────────────────────────────
   const ccDueItems = useMemo(() => {
@@ -231,6 +240,75 @@ export default function Notifications({
     }
   }, [activeTab, allItems, ccDueItems, emailItems, reconcileItems, recurringItems, installmentItems]);
 
+  // ── RECURRING CONFIRM HELPERS ────────────────────────────────
+  const doInsertRecurring = async (template, reminder, overrideBankId) => {
+    const isExpense = !["income", "reimburse_in", "collect_loan", "sell_asset"].includes(template.tx_type);
+    const date = todayStr();
+    const amount = Number(template.amount || 0);
+    const currency = template.currency || "IDR";
+    const rate = currency !== "IDR"
+      ? Number(fxRates?.[currency]?.rate || fxRates?.[currency] || 1)
+      : 1;
+    const amount_idr = currency === "IDR" ? amount : Math.round(amount * rate);
+    try {
+      const created = await ledgerApi.create(user.id, {
+        tx_type:  template.tx_type,
+        tx_date:  date,
+        amount,   currency,  amount_idr,
+        from_type: template.from_type || (isExpense ? "account" : "income_source"),
+        from_id:   template.from_id   || (isExpense ? overrideBankId : null),
+        to_type:   template.to_type   || (!isExpense ? "account" : "expense"),
+        to_id:     template.to_id     || (!isExpense ? overrideBankId : null),
+        category_id: template.category_id || null,
+        entity:    template.entity || "Personal",
+        description: template.name || template.description || "Recurring",
+        merchant_name: null, attachment_url: null,
+        ai_categorized: false, ai_confidence: null,
+        installment_id: null, scan_batch_id: null, notes: null,
+      }, accounts);
+      await recurringApi.updateTemplate(template.id, { last_generated_date: date });
+      if (reminder?.id) await recurringApi.confirmReminder(reminder.id);
+      if (created && setLedger)    setLedger(p => [created, ...p]);
+      if (setRecurTemplates) setRecurTemplates(p => p.map(t => t.id === template.id ? { ...t, last_generated_date: date } : t));
+      if (reminder?.id && setReminders) setReminders(p => p.map(r => r.id === reminder.id ? { ...r, status: "confirmed", confirmed_at: new Date().toISOString() } : r));
+      setDismissedIds(prev => new Set([...prev, reminder ? `recur-rem-${reminder.id}` : `recur-tmpl-${template.id}`]));
+      showToast(`✓ Logged: ${template.name}`);
+    } catch (e) {
+      showToast("Gagal log recurring: " + (e.message || "Error"), "error");
+    } finally {
+      setConfirming(null);
+    }
+  };
+
+  const confirmRecurringEntry = (template, reminder) => {
+    if (!template) return;
+    const isExpense = !["income", "reimburse_in", "collect_loan", "sell_asset"].includes(template.tx_type);
+    const needPicker = isExpense ? !template.from_id : !template.to_id;
+    if (needPicker) {
+      setPickerCtx({ template, reminder });
+      setPickerOpen(true);
+      return;
+    }
+    const key = reminder ? `recur-rem-${reminder.id}` : `recur-tmpl-${template.id}`;
+    setConfirming(key);
+    doInsertRecurring(template, reminder, null);
+  };
+
+  const skipRecurringReminder = async (reminder) => {
+    if (!reminder?.id) return;
+    setConfirming(`recur-rem-${reminder.id}`);
+    try {
+      await recurringApi.skipReminder(reminder.id);
+      if (setReminders) setReminders(p => p.map(r => r.id === reminder.id ? { ...r, status: "skipped" } : r));
+      setDismissedIds(prev => new Set([...prev, `recur-rem-${reminder.id}`]));
+      showToast("Skipped");
+    } catch (e) {
+      showToast("Gagal skip", "error");
+    } finally {
+      setConfirming(null);
+    }
+  };
+
   // ── HANDLERS ─────────────────────────────────────────────────
   const handleAction = (item) => {
     switch (item.type) {
@@ -244,9 +322,10 @@ export default function Notifications({
         setTab?.("reconcile");
         break;
       case "recurring_reminder":
+        confirmRecurringEntry(item.raw.template, item.raw.reminder);
+        break;
       case "recurring_template":
-        setTab?.("dashboard");
-        showToast("Buka section Upcoming di Dashboard untuk confirm", "info");
+        confirmRecurringEntry(item.raw, null);
         break;
       default:
         break;
@@ -255,6 +334,17 @@ export default function Notifications({
 
   const handleDismiss = (item) => {
     setDismissedIds(prev => new Set([...prev, item.id]));
+  };
+
+  // ── BANK PICKER CONFIRM ──────────────────────────────────────
+  const handlePickerSelect = (bank) => {
+    setPickerOpen(false);
+    const ctx = pickerCtx;
+    setPickerCtx(null);
+    if (!ctx) return;
+    const key = ctx.reminder ? `recur-rem-${ctx.reminder.id}` : `recur-tmpl-${ctx.template.id}`;
+    setConfirming(key);
+    doInsertRecurring(ctx.template, ctx.reminder, bank.id);
   };
 
   // ── TABS ─────────────────────────────────────────────────────
@@ -347,17 +437,30 @@ export default function Notifications({
               item={item}
               onAction={() => handleAction(item)}
               onDismiss={() => handleDismiss(item)}
+              onSkip={item.type === "recurring_reminder" ? () => skipRecurringReminder(item.raw.reminder) : undefined}
+              busy={confirming === (item.type === "recurring_reminder" ? `recur-rem-${item.raw?.reminder?.id}` : `recur-tmpl-${item.raw?.id}`)}
             />
           ))
         )}
       </div>
+
+      {/* Bank picker for recurring with missing account */}
+      <BankPickerSheet
+        isOpen={pickerOpen}
+        onClose={() => { setPickerOpen(false); setPickerCtx(null); }}
+        onSelect={handlePickerSelect}
+        bankAccounts={bankAccounts}
+        contextLabel={pickerCtx ? `Pilih akun untuk ${pickerCtx.template?.name || "Recurring"}` : ""}
+        contextAmount={pickerCtx ? fmtIDR(pickerCtx.template?.amount || 0) : ""}
+        mode="default"
+      />
 
     </div>
   );
 }
 
 // ── ROW COMPONENT ─────────────────────────────────────────────
-function NotifRow({ item, onAction, onDismiss }) {
+function NotifRow({ item, onAction, onDismiss, onSkip, busy }) {
   const [hovered, setHovered] = useState(false);
 
   const sevColor = item.severity === "high" ? "#dc2626" : item.severity === "medium" ? "#d97706" : "#9ca3af";
@@ -427,10 +530,26 @@ function NotifRow({ item, onAction, onDismiss }) {
         </div>
       )}
 
+      {/* Skip (recurring reminders only) */}
+      {onSkip && (
+        <button
+          onClick={onSkip}
+          disabled={busy}
+          style={{
+            border: "1px solid #e5e7eb", padding: "6px 10px", borderRadius: 8,
+            fontSize: 11, fontWeight: 600, cursor: "pointer",
+            fontFamily: "Figtree, sans-serif", background: "#f9fafb", color: "#6b7280",
+            flexShrink: 0, opacity: busy ? 0.5 : 1,
+          }}
+        >
+          Skip
+        </button>
+      )}
+
       {/* Action */}
       {item.actionLabel ? (
-        <button onClick={onAction} style={actionBtnStyle}>
-          {item.actionLabel}
+        <button onClick={onAction} disabled={busy} style={{ ...actionBtnStyle, opacity: busy ? 0.5 : 1 }}>
+          {busy ? "…" : item.actionLabel}
         </button>
       ) : (
         <span style={{
