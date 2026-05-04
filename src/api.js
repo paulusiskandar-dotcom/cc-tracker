@@ -1277,6 +1277,7 @@ export function flattenEmailSync(rows) {
         tx_index:                i,
         ai_raw_result:           row.ai_raw_result,
         subject:                 row.subject,
+        sender_email:            row.sender_email,
         received_at:             row.received_at,
         raw_body:                row.raw_body,
         transaction_date:        tx.date,
