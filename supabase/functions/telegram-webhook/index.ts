@@ -277,7 +277,7 @@ async function handleText(
     ai_raw_result: transactions,
     extracted_count: transactions.length,
     imported_count: 0,
-    status: "review",
+    status: "pending",
     source: "telegram",
   });
 
@@ -330,7 +330,7 @@ async function handlePhoto(
     ai_raw_result: transactions,
     extracted_count: transactions.length,
     imported_count: 0,
-    status: "review",
+    status: "pending",
     source: "telegram",
   });
 
