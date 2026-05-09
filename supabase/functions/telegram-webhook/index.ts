@@ -61,6 +61,15 @@ Common patterns:
 
 CRITICAL: If the message mentions CS "14000" or "Mandiri" or "TB xxx" format → from_bank_name MUST be "Mandiri". If "1500888" or sender BCA → "BCA". If "14041" → "CIMB Niaga". CS number overrides any other guess.
 
+SETORAN TUNAI RULE (TELEGRAM ONLY):
+If the text or image contains the keywords "Setoran Tunai" (cash deposit), apply these overrides regardless of other patterns:
+- suggested_tx_type: "reimburse_in"
+- suggested_entity: "Hamasa"
+- suggested_category: "Reimbursement"
+- type: "in"
+- reasoning: "Setoran tunai detected — classified as Hamasa reimbursement"
+Rationale: cash deposits to Paulus's accounts are always employee reimbursements from Hamasa business expenses.
+
 Output ONLY the JSON array, no markdown fences, no explanation.`;
 
 // ─── Account resolve helpers ─────────────────────────────────────────────────
