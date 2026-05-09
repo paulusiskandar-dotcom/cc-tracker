@@ -142,7 +142,22 @@ async function resolveAccountIds(supabase: any, userId: string, transactions: an
     return;
   }
 
+  const bcaRAccount = accounts.find((a: any) => a.name === "BCA R" && a.type === "bank");
+
   for (const tx of transactions) {
+    // SETORAN TUNAI OVERRIDE: force to_account_id = BCA R, skip regular resolve
+    if (tx.is_setoran_tunai === true ||
+        (tx.suggested_tx_type === "reimburse_in" && tx.suggested_entity === "Hamasa")) {
+      if (bcaRAccount) {
+        tx.to_account_id = bcaRAccount.id;
+        tx.to_type = "account";
+        tx.from_account_id = null;
+        tx.from_type = null;
+        tx.resolve_method = "setoran_tunai_override";
+      }
+      continue;
+    }
+
     if (!tx.from_account_id) {
       const visibleFrom = tx.account_visible_digits || getTrailingDigits(tx.from_account_masked) || tx.card_last4 || "";
       const cleanedFrom = getVisibleDigits(visibleFrom);
