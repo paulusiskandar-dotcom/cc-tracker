@@ -183,8 +183,17 @@ async function callClaudeText(apiKey: string, prompt: string): Promise<any[]> {
   return parseJsonArray(raw);
 }
 
+function uint8ArrayToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 8192;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
 async function callClaudeVision(apiKey: string, imageBytes: Uint8Array, prompt: string): Promise<any[]> {
-  const base64 = btoa(String.fromCharCode(...imageBytes));
+  const base64 = uint8ArrayToBase64(imageBytes);
 
   const resp = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -194,7 +203,7 @@ async function callClaudeVision(apiKey: string, imageBytes: Uint8Array, prompt: 
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       max_tokens: 2048,
       messages: [
         {
