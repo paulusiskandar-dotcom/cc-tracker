@@ -834,15 +834,15 @@ function BankAccountCard({ account: a, ledger, fxRates = {}, CURRENCIES: C = [],
           <div style={{ fontSize: 9, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px", fontFamily: "Figtree, sans-serif", marginBottom: 3 }}>Balance</div>
           {isForeign ? (
             <>
-              <div style={{ fontSize: 24, fontWeight: 800, color: "#059669", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
-                {cur?.symbol || a.currency} {bal.toLocaleString("id-ID")}
+              <div style={{ fontSize: 24, fontWeight: 800, color: bal >= 0 ? "#059669" : "#dc2626", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
+                {bal < 0 ? "-" : ""}{cur?.symbol || a.currency} {Math.abs(bal).toLocaleString("id-ID")}
               </div>
               <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 3 }}>≈ {fmtIDR(idrEquiv, true)}</div>
               <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>Rate: {fmtIDR(rate, true)}/{a.currency}</div>
             </>
           ) : (
-            <div style={{ fontSize: 24, fontWeight: 800, color: "#059669", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
-              {fmtIDR(bal)}
+            <div style={{ fontSize: 24, fontWeight: 800, color: bal >= 0 ? "#059669" : "#dc2626", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
+              {fmtIDR(bal, false, true)}
             </div>
           )}
         </div>
@@ -900,8 +900,8 @@ function CashAccountCard({ account: a, fxRates = {}, CURRENCIES: C = [], ledger,
               <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>Rate: {fmtIDR(rate, true)}/{a.currency}</div>
             </>
           ) : (
-            <div style={{ fontSize: 24, fontWeight: 800, color: "#059669", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
-              {fmtIDR(bal)}
+            <div style={{ fontSize: 24, fontWeight: 800, color: bal >= 0 ? "#059669" : "#dc2626", fontFamily: "Figtree, sans-serif", lineHeight: 1.1 }}>
+              {fmtIDR(bal, false, true)}
             </div>
           )}
         </div>

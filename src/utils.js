@@ -5,12 +5,14 @@
 export const fmt = (n) =>
   "Rp " + Math.round(Math.abs(Number(n || 0))).toLocaleString("id-ID");
 
-export const fmtIDR = (n, short = false) => {
-  const v = Math.round(Math.abs(Number(n || 0)));
-  if (short && v >= 1e9) return "Rp " + (v / 1e9).toLocaleString("id-ID", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "B";
-  if (short && v >= 1e6) return "Rp " + (v / 1e6).toLocaleString("id-ID", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "M";
-  if (short && v >= 1e3) return "Rp " + Math.round(v / 1e3).toLocaleString("id-ID") + "K";
-  return "Rp " + v.toLocaleString("id-ID");
+export const fmtIDR = (n, short = false, keepSign = false) => {
+  const raw = Number(n || 0);
+  const v = Math.round(Math.abs(raw));
+  const sign = keepSign && raw < 0 ? "-" : "";
+  if (short && v >= 1e9) return sign + "Rp " + (v / 1e9).toLocaleString("id-ID", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "B";
+  if (short && v >= 1e6) return sign + "Rp " + (v / 1e6).toLocaleString("id-ID", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "M";
+  if (short && v >= 1e3) return sign + "Rp " + Math.round(v / 1e3).toLocaleString("id-ID") + "K";
+  return sign + "Rp " + v.toLocaleString("id-ID");
 };
 
 export const fmtCur = (amount, currency) => {
