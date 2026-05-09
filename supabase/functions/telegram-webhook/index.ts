@@ -64,9 +64,17 @@ Deno.serve(async (req: Request) => {
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
   const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-  if (!TELEGRAM_BOT_TOKEN || !AUTHORIZED_CHAT_ID || !AUTHORIZED_USER_ID || !ANTHROPIC_API_KEY || !SUPABASE_URL || !SERVICE_ROLE_KEY) {
-    console.error("[telegram-webhook] Missing env vars");
-    return new Response("Server misconfigured", { status: 500 });
+  const missing: string[] = [];
+  if (!TELEGRAM_BOT_TOKEN) missing.push("TELEGRAM_BOT_TOKEN");
+  if (!AUTHORIZED_CHAT_ID) missing.push("TELEGRAM_AUTHORIZED_CHAT_ID");
+  if (!AUTHORIZED_USER_ID) missing.push("TELEGRAM_AUTHORIZED_USER_ID");
+  if (!ANTHROPIC_API_KEY) missing.push("ANTHROPIC_API_KEY");
+  if (!SUPABASE_URL) missing.push("SUPABASE_URL");
+  if (!SERVICE_ROLE_KEY) missing.push("SUPABASE_SERVICE_ROLE_KEY");
+
+  if (missing.length > 0) {
+    console.error("[telegram-webhook] Missing env vars:", missing.join(", "));
+    return new Response(`Server misconfig - missing: ${missing.join(", ")}`, { status: 500 });
   }
 
   let update: any;
