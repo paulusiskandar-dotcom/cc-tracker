@@ -3,11 +3,11 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 const TELEGRAM_API = "https://api.telegram.org";
 
 const TG_PARSE_PROMPT = (input: string, type: "text" | "image" | "pdf") =>
-  `You are a financial transaction extractor for Indonesian banking. The user is forwarding ${type === "image" ? "a screenshot or photo of" : type === "pdf" ? "a PDF e-statement from" : ""} a bank notification (SMS, mobile banking notif, e-wallet alert, etc).
+  `You are a financial transaction extractor for Indonesian banking. The user is forwarding ${type === "image" ? "a screenshot or photo of" : type === "pdf" ? "a PDF document of" : ""} a bank notification (SMS, mobile banking notif, e-statement, e-wallet alert, etc).
 
-${type === "pdf" ? "Extract ALL transactions from the attached PDF document (e-statement). May contain multiple transactions.\n\n" : type === "image" ? "Extract transaction details from the attached image.\n\n" : `Extract transaction details from this text:\n\n${input}\n\n`}
+${type === "pdf" ? "Extract ALL transactions from the attached PDF document (e-statement). May contain multiple transactions." : type === "image" ? "Extract transaction details from the attached image." : `Extract transaction details from this text:\n\n${input}\n\n`}
 
-Return a JSON array of transactions. Most messages contain ONE transaction, but some statements may have multiple. Each transaction:
+Return a JSON array of transactions. Most messages contain ONE transaction, but PDFs may have multiple. Each transaction:
 
 {
   "date": "YYYY-MM-DD" (parse Indonesian date formats: "29/04/2026", "29 Apr 2026", etc — always output as YYYY-MM-DD),
@@ -17,30 +17,144 @@ Return a JSON array of transactions. Most messages contain ONE transaction, but 
   "currency": "IDR" or "USD" or "SGD" etc,
   "description": string (concise summary of the transaction),
   "merchant_name": string or null (e.g. "Tokopedia", "Starbucks", "PT ABC Tbk"),
-  "card_last4": string or null (extract last 4 visible digits if present, e.g. "0868" from "xxx868"),
-  "from_account_masked": string or null (raw masked string, e.g. "1 TB xxx868"),
-  "from_bank_name": string or null ("BCA", "Mandiri", "OCBC", "CIMB Niaga", etc),
+  "card_last4": string or null (extract last 4 visible digits if present, do NOT pad with 0; if only 3 digits visible like "868", output "868" not "0868"),
+  "account_visible_digits": string or null (visible trailing digits from masked account, no padding; e.g. from "1 TB xxx868" → "868", from "rek. 0830****97" → "97"),
+  "from_account_masked": string or null (raw masked string as appears in input, e.g. "1 TB xxx868", "0830****97"),
+  "from_bank_name": string or null ("BCA", "Mandiri", "BNI", "BRI", "CIMB Niaga", "OCBC", "Jenius", "Danamon", "Maybank", "BLU", "Neobank", "Superbank", etc),
   "to_bank_name": string or null,
   "is_qris": boolean (true if QRIS payment),
   "is_debit": boolean (true if debit card / direct bank account),
   "is_transfer": boolean (true if transfer between accounts),
   "is_cc_payment": boolean (true if credit card bill payment),
-  "suggested_category": string (e.g. "Salary" for income, "Food & Drink", "Transport", "Shopping" for expense, "Bank Charges", "Other"),
+  "suggested_category": string (e.g. "Salary" for income, "Food & Drink", "Transport", "Shopping" for expense, "Bank Charges", "Other Income"),
   "suggested_entity": "Personal" | "Hamasa" | "SDC" | "Travelio" (default "Personal" unless context suggests otherwise),
   "suggested_tx_type": "expense" | "income" | "transfer" | "pay_cc" | "reimburse_in" | "reimburse_out" (default "income" if KREDIT/in, "expense" if DEBET/out),
   "confidence": number 0-1 (0.95 if very clear, 0.7 if some ambiguity),
   "reasoning": string (1 sentence why)
 }
 
-Common Indonesian bank patterns:
-- BCA SMS: "KREDIT Rp.X pada rek. 1 TB xxx868 tgl. 29/04/2026" → income, BCA, last4 "0868"
-- Mandiri SMS: "Anda menerima Rp X dari NAMA pd 25/05/2026" → income, Mandiri
+INDONESIAN BANK IDENTIFICATION (CRITICAL):
+
+Use customer service phone numbers and format keywords to identify the bank correctly. DO NOT guess — if ambiguous, leave from_bank_name null.
+
+- BCA: CS 1500888, "Halo BCA", sender "BCA INFO" or "bca@bca.co.id", format "Source of Fund : 0831****88", uses "Tahapan" for savings
+- Mandiri: CS 14000, "Mandiri Call", sender "Bank Mandiri", format "TAHAPAN - 0831****88" or "1 TB xxx868" (TB = Tabungan/savings), uses "Livin" for mobile banking
+- BNI: CS 1500046, sender "BNI"
+- BRI: CS 14017, sender "BRI"
+- CIMB Niaga: CS 14041, sender "creditcard.notification@cimbniaga.co.id", format "5192-99XX-XXXX-XX87"
+- OCBC: CS 1500999, "OCBC", "90N" product line
+- Jenius: CS 1500365, "Jenius by SMBC", "btpn"
+- Danamon: CS 1500090
+- Maybank: CS 1500611
+- BLU by BCA Digital: sender "BLU", "blu by BCA Digital" (separate from BCA)
+- Jago: CS 1500746, "Bank Jago"
+
+Common patterns:
+- "KREDIT Rp.X pada rek. 1 TB xxx868 tgl. 29/04/2026 … hub 14000" → Mandiri (TB format + CS 14000), NOT BCA
+- "BCA INFO: Anda menerima Rp X" → BCA
 - "DEBET Rp X" or "Anda telah membayar Rp X" → expense
 - QRIS payments → is_qris: true, usually expense
 - Transfer between own accounts → is_transfer: true, suggested_tx_type "transfer"
 - Credit card payment → is_cc_payment: true, suggested_tx_type "pay_cc"
+- "GAJI", "PAYROLL", "SALARY" → suggested_category "Salary"
+- "DIVIDEN", "DEVIDEN" → suggested_category "Dividend"
+
+CRITICAL: If the message mentions CS "14000" or "Mandiri" or "TB xxx" format → from_bank_name MUST be "Mandiri". If "1500888" or sender BCA → "BCA". If "14041" → "CIMB Niaga". CS number overrides any other guess.
 
 Output ONLY the JSON array, no markdown fences, no explanation.`;
+
+// ─── Account resolve helpers ─────────────────────────────────────────────────
+
+function getVisibleDigits(input: string | null): string {
+  if (!input) return "";
+  return String(input).replace(/[^\d]/g, "");
+}
+
+function getTrailingDigits(input: string | null): string {
+  if (!input) return "";
+  const match = String(input).match(/(\d+)\s*$/);
+  return match ? match[1] : "";
+}
+
+function matchAccount(
+  visibleDigits: string,
+  bankName: string | null,
+  currency: string | null,
+  candidates: any[],
+): string | null {
+  if (!visibleDigits || visibleDigits.length < 3) return null;
+
+  let pool = candidates;
+  if (bankName) {
+    const bnLower = bankName.toLowerCase();
+    const filtered = candidates.filter(
+      (a) =>
+        (a.bank_name && bnLower.includes(a.bank_name.toLowerCase())) ||
+        (a.bank_name && a.bank_name.toLowerCase().includes(bnLower)),
+    );
+    if (filtered.length > 0) pool = filtered;
+  }
+
+  if (currency && currency !== "IDR") {
+    const cFiltered = pool.filter((a) => a.currency === currency);
+    if (cFiltered.length > 0) pool = cFiltered;
+  }
+
+  const byAccountNo = pool.filter((a) => a.account_no && a.account_no.endsWith(visibleDigits));
+  if (byAccountNo.length === 1) return byAccountNo[0].id;
+  if (byAccountNo.length > 1) {
+    const idrFirst = byAccountNo.filter((a) => a.currency === "IDR");
+    if (idrFirst.length === 1) return idrFirst[0].id;
+    return null; // ambiguous
+  }
+
+  const last4 = visibleDigits.slice(-4);
+  if (last4.length >= 3) {
+    const byLast4 = pool.filter(
+      (a) => a.card_last4 && (a.card_last4 === last4 || a.card_last4.endsWith(last4) || last4.endsWith(a.card_last4)),
+    );
+    if (byLast4.length === 1) return byLast4[0].id;
+  }
+
+  return null;
+}
+
+async function resolveAccountIds(supabase: any, userId: string, transactions: any[]): Promise<void> {
+  if (!transactions || transactions.length === 0) return;
+
+  const { data: accounts, error } = await supabase
+    .from("accounts")
+    .select("id, name, type, bank_name, account_no, card_last4, currency, is_active")
+    .eq("user_id", userId)
+    .eq("is_active", true);
+
+  if (error || !accounts) {
+    console.error("[telegram-webhook] Failed to fetch accounts for resolve:", error);
+    return;
+  }
+
+  for (const tx of transactions) {
+    if (!tx.from_account_id) {
+      const visibleFrom = tx.account_visible_digits || getTrailingDigits(tx.from_account_masked) || tx.card_last4 || "";
+      const cleanedFrom = getVisibleDigits(visibleFrom);
+      if (cleanedFrom.length >= 3) {
+        const fromId = matchAccount(cleanedFrom, tx.from_bank_name, tx.currency, accounts);
+        if (fromId) {
+          tx.from_account_id = fromId;
+          tx.resolve_method = "server_side_match";
+        }
+      }
+    }
+
+    // For income: the receiving account is "to", not "from"
+    if (!tx.to_account_id && tx.suggested_tx_type === "income" && tx.from_account_id) {
+      tx.to_account_id = tx.from_account_id;
+      tx.from_account_id = null;
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") {
@@ -302,6 +416,8 @@ async function handleText(
     return;
   }
 
+  await resolveAccountIds(supabase, userId, transactions);
+
   const { error } = await supabase.from("email_sync").insert({
     user_id: userId,
     gmail_message_id: `tg-${message.message_id}-${Date.now()}`,
@@ -354,6 +470,8 @@ async function handlePhoto(
     await sendTelegramMessage(botToken, chatId, "⚠️ Tidak bisa extract transaksi dari foto ini\\.");
     return;
   }
+
+  await resolveAccountIds(supabase, userId, transactions);
 
   const { error } = await supabase.from("email_sync").insert({
     user_id: userId,
@@ -411,6 +529,8 @@ async function handleDocument(
     await sendTelegramMessage(botToken, chatId, "⚠️ Tidak bisa extract transaksi dari PDF ini\\.");
     return;
   }
+
+  await resolveAccountIds(supabase, userId, transactions);
 
   const { error } = await supabase.from("email_sync").insert({
     user_id: userId,
