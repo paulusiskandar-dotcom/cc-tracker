@@ -2,10 +2,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 
 const TELEGRAM_API = "https://api.telegram.org";
 
-const TG_PARSE_PROMPT = (input: string, type: "text" | "image") =>
-  `You are a financial transaction extractor for Indonesian banking. The user is forwarding ${type === "image" ? "a screenshot or photo of" : ""} a bank notification (SMS, mobile banking notif, e-wallet alert, etc).
+const TG_PARSE_PROMPT = (input: string, type: "text" | "image" | "pdf") =>
+  `You are a financial transaction extractor for Indonesian banking. The user is forwarding ${type === "image" ? "a screenshot or photo of" : type === "pdf" ? "a PDF e-statement from" : ""} a bank notification (SMS, mobile banking notif, e-wallet alert, etc).
 
-${type === "text" ? `Extract transaction details from this text:\n\n${input}\n\n` : `Extract transaction details from the attached image.\n\n`}
+${type === "pdf" ? "Extract ALL transactions from the attached PDF document (e-statement). May contain multiple transactions.\n\n" : type === "image" ? "Extract transaction details from the attached image.\n\n" : `Extract transaction details from this text:\n\n${input}\n\n`}
 
 Return a JSON array of transactions. Most messages contain ONE transaction, but some statements may have multiple. Each transaction:
 
@@ -103,8 +103,10 @@ Deno.serve(async (req: Request) => {
   try {
     if (message.photo && message.photo.length > 0) {
       await handlePhoto(message, TELEGRAM_BOT_TOKEN, ANTHROPIC_API_KEY, supabase, AUTHORIZED_USER_ID, chatId);
+    } else if (message.document) {
+      await handleDocument(message, TELEGRAM_BOT_TOKEN, ANTHROPIC_API_KEY, supabase, AUTHORIZED_USER_ID, chatId);
     } else if (message.voice) {
-      await sendTelegramMessage(TELEGRAM_BOT_TOKEN, chatId, "🎙️ Voice support coming soon. Untuk sekarang, kirim text atau foto.");
+      await sendTelegramMessage(TELEGRAM_BOT_TOKEN, chatId, "🎙️ Voice support coming soon\\. Untuk sekarang, kirim text, foto, atau PDF\\.");
     } else if (message.text) {
       const text: string = message.text.trim();
 
@@ -113,7 +115,7 @@ Deno.serve(async (req: Request) => {
           await sendTelegramMessage(
             TELEGRAM_BOT_TOKEN,
             chatId,
-            "Halo Paulus\\! 👋\n\nKirim:\n• Text SMS bank yang di\\-copy\n• Foto/screenshot notifikasi bank\n• Atau ketik manual transaksi\n\nSaya akan parse otomatis dan save ke Paulus Finance\\.",
+            "Halo Paulus\\! 👋\n\nKirim:\n• Text SMS bank yang di\\-copy\n• Foto/screenshot notifikasi bank\n• PDF e\\-statement bank\n• Atau ketik manual transaksi\n\nSaya akan parse otomatis dan save ke Paulus Finance\\.",
           );
         } else if (text === "/help") {
           await sendTelegramMessage(
@@ -129,7 +131,7 @@ Deno.serve(async (req: Request) => {
 
       await handleText(text, message, ANTHROPIC_API_KEY, supabase, AUTHORIZED_USER_ID, TELEGRAM_BOT_TOKEN, chatId);
     } else {
-      await sendTelegramMessage(TELEGRAM_BOT_TOKEN, chatId, "Format tidak didukung\\. Kirim text atau foto\\.");
+      await sendTelegramMessage(TELEGRAM_BOT_TOKEN, chatId, "Format tidak didukung\\. Kirim text, foto, atau PDF\\.");
     }
   } catch (err: any) {
     console.error("[telegram-webhook] Handler error:", err);
@@ -211,7 +213,7 @@ async function callClaudeVision(apiKey: string, imageBytes: Uint8Array, prompt: 
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-4-6",
+      model: "claude-haiku-4-5-20251001",
       max_tokens: 2048,
       messages: [
         {
@@ -229,6 +231,41 @@ async function callClaudeVision(apiKey: string, imageBytes: Uint8Array, prompt: 
   if (!resp.ok) {
     console.error("[telegram-webhook] Claude vision API error:", data);
     throw new Error("AI vision parse failed: " + (data.error?.message || "Unknown"));
+  }
+
+  const raw: string = data.content?.[0]?.text || "[]";
+  return parseJsonArray(raw);
+}
+
+async function callClaudePDF(apiKey: string, pdfBytes: Uint8Array, prompt: string): Promise<any[]> {
+  const base64 = uint8ArrayToBase64(pdfBytes);
+
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 4096,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } },
+            { type: "text", text: prompt },
+          ],
+        },
+      ],
+    }),
+  });
+
+  const data = await resp.json();
+  if (!resp.ok) {
+    console.error("[telegram-webhook] Claude PDF API error:", data);
+    throw new Error("AI PDF parse failed: " + (data.error?.message || "Unknown"));
   }
 
   const raw: string = data.content?.[0]?.text || "[]";
@@ -341,6 +378,66 @@ async function handlePhoto(
   }
 
   const summary = buildSummary(transactions);
+  await sendTelegramMessage(
+    botToken,
+    chatId,
+    `✅ Saved ${transactions.length} transaksi pending review:\n\n${summary}\n\nBuka Paulus Finance untuk confirm\\.`,
+  );
+}
+
+async function handleDocument(
+  message: any,
+  botToken: string,
+  apiKey: string,
+  supabase: any,
+  userId: string,
+  chatId: number,
+) {
+  const doc = message.document;
+
+  if (doc.mime_type !== "application/pdf") {
+    await sendTelegramMessage(botToken, chatId, `📄 Format ${escapeMarkdown(doc.mime_type || "unknown")} belum support\\. Cuma PDF yang support\\.`);
+    return;
+  }
+
+  await sendTelegramMessage(botToken, chatId, "📄 Processing PDF\\.\\.\\.");
+
+  const pdfBytes = await downloadTelegramFile(botToken, doc.file_id);
+  const caption: string = message.caption || "";
+  const prompt = TG_PARSE_PROMPT(caption || "(no caption)", "pdf");
+  const transactions = await callClaudePDF(apiKey, pdfBytes, prompt);
+
+  if (transactions.length === 0) {
+    await sendTelegramMessage(botToken, chatId, "⚠️ Tidak bisa extract transaksi dari PDF ini\\.");
+    return;
+  }
+
+  const { error } = await supabase.from("email_sync").insert({
+    user_id: userId,
+    gmail_message_id: `tg-pdf-${message.message_id}-${Date.now()}`,
+    sender_email: "telegram@paulus",
+    subject: `Telegram PDF: ${doc.file_name || "document"}`,
+    received_at: new Date().toISOString(),
+    email_type: "transaction_notification",
+    raw_body: `[PDF from Telegram]\nFilename: ${doc.file_name}${caption ? "\nCaption: " + caption : ""}`,
+    attachment_name: doc.file_name || `pdf-${message.message_id}.pdf`,
+    ai_raw_result: transactions,
+    extracted_count: transactions.length,
+    imported_count: 0,
+    status: "pending",
+    source: "telegram",
+  });
+
+  if (error) {
+    console.error("[telegram-webhook] Insert error:", error);
+    await sendTelegramMessage(botToken, chatId, "❌ Gagal save: " + escapeMarkdown(error.message));
+    return;
+  }
+
+  const preview = transactions.slice(0, 5);
+  const moreCount = transactions.length - preview.length;
+  const summary = buildSummary(preview) + (moreCount > 0 ? `\n\\.\\.\\. dan ${moreCount} transaksi lain` : "");
+
   await sendTelegramMessage(
     botToken,
     chatId,
