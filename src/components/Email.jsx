@@ -551,11 +551,12 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
         merchantApi.upsert(user.id, r.description, entry.category_id, entry.category_name, entry.tx_type)
           .catch(e => console.warn("[merchant_mapping upsert]", e?.message));
       }
-      if (r.tx_type === "collect_loan" && (r.employee_loan_id || r.from_id)) {
+      if (r.tx_type === "collect_loan" && r.employee_loan_id) {
         loanPaymentsApi.recordAndIncrement(user.id, {
-          loanId: r.employee_loan_id || r.from_id, payDate: r.tx_date,
+          loanId: r.employee_loan_id, payDate: r.tx_date,
           amount: Number(r.amount_idr || r.amount || 0),
           notes: r.description || "Collected via import",
+          ledgerId: created?.id,
         }).catch(e => console.error("[collect_loan payment]", e));
       }
       if (r._cicilan && r._cicilanMonths >= 2 && created?.id) {
@@ -595,11 +596,12 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
         const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
         if (created?.id) newLedgerIds.push(created.id);
         setLedger(p => [created, ...p]);
-        if (r.tx_type === "collect_loan" && r.from_id) {
+        if (r.tx_type === "collect_loan" && r.employee_loan_id) {
           loanPaymentsApi.recordAndIncrement(user.id, {
-            loanId: r.from_id, payDate: r.tx_date,
+            loanId: r.employee_loan_id, payDate: r.tx_date,
             amount: Number(r.amount_idr || r.amount || 0),
             notes: r.description || "Collected via import",
+            ledgerId: created?.id,
           }).catch(e => console.error("[collect_loan payment]", e));
         }
         if (r._cicilan && r._cicilanMonths >= 2 && created?.id) {
