@@ -43,17 +43,6 @@ export default function LoanStatementPage({
       .sort((a, b) => a.tx_date.localeCompare(b.tx_date));
   }, [ledger, loan]);
 
-  // ── Running balance from ledger rows ──────────────────────────
-  const ledgerRowsWithBal = useMemo(() => {
-    let bal = 0;
-    return ledgerRows.map(e => {
-      const amt = Number(e.amount_idr || 0);
-      if (e.tx_type === "give_loan")    bal += amt;
-      if (e.tx_type === "collect_loan") bal -= amt;
-      return { ...e, _runBal: bal, _dir: e.tx_type === "give_loan" ? "pinjam" : "bayar" };
-    });
-  }, [ledgerRows]);
-
   // ── Fallback: synthetic row + loanPayments ────────────────────
   const payments = useMemo(() => {
     if (!loan || ledgerRows.length > 0) return [];
@@ -79,6 +68,18 @@ export default function LoanStatementPage({
     const ld = payments.slice().sort((a, b) => (b.pay_date || "").localeCompare(a.pay_date || ""))[0];
     return { totalLoaned: total, totalCollected: tc, outstanding: Math.max(0, total - tc), lastDate: ld?.pay_date || null };
   }, [loan, useLedger, ledgerRows, payments]);
+
+  // ── Running balance — seed from totalLoaned so rows without a give_loan ledger entry work ──
+  const ledgerRowsWithBal = useMemo(() => {
+    const hasGiveLoan = ledgerRows.some(e => e.tx_type === "give_loan");
+    let bal = hasGiveLoan ? 0 : totalLoaned;
+    return ledgerRows.map(e => {
+      const amt = Number(e.amount_idr || 0);
+      if (e.tx_type === "give_loan")    bal += amt;
+      if (e.tx_type === "collect_loan") bal -= amt;
+      return { ...e, _runBal: bal, _dir: e.tx_type === "give_loan" ? "pinjam" : "bayar" };
+    });
+  }, [ledgerRows, totalLoaned]);
 
   // ── Group by date ─────────────────────────────────────────────
   const grouped = useMemo(() => {
