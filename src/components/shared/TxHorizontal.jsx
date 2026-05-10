@@ -20,6 +20,7 @@ import { useState, useEffect, Fragment } from "react";
 import { REIMBURSE_ENTITIES } from "../../constants";
 import { showToast } from "./Card";
 import { supabase } from "../../lib/supabase";
+import BulkEditModal from "./BulkEditModal";
 
 // ── TX Types (13 total) ─────────────────────────────────────────
 export const TX_HORIZONTAL_TYPES = [
@@ -803,10 +804,7 @@ export default function TxHorizontal({
   const [confirmingAll,setConfirmingAll]= useState(false);
   const [confirmedIds,  setConfirmedIds]  = useState(new Set());
   const [fetchedLoans,  setFetchedLoans]  = useState([]);
-  const [bulkType,     setBulkType]     = useState("");
-  const [bulkCategory, setBulkCategory] = useState("");
-  const [bulkAccount,  setBulkAccount]  = useState("");
-  const [bulkEntity,   setBulkEntity]   = useState("");
+  const [bulkModal,    setBulkModal]    = useState(false);
 
   // Fallback: fetch employee loans directly if prop arrives empty and rows contain collect_loan
   useEffect(() => {
@@ -834,14 +832,6 @@ export default function TxHorizontal({
     const ns = new Set(s); ns.has(id) ? ns.delete(id) : ns.add(id); return ns;
   });
 
-  const applyBulk = (field, value, extra = {}) => {
-    if (!value) return;
-    const selectedIds = visibleRows.filter(r => selected[r._id] && !skipped?.has(r._id)).map(r => r._id);
-    if (!selectedIds.length) { showToast("Select rows first", "warning"); return; }
-    selectedIds.forEach(id => onUpdateRow(id, { [field]: value, ...extra }));
-    showToast(`Applied to ${selectedIds.length} rows`);
-  };
-
   const handleConfirmRow = async (row) => {
     setConfirmingId(row._id);
     try {
@@ -856,6 +846,12 @@ export default function TxHorizontal({
     r.status !== "imported" &&
     r.status !== "confirmed"
   );
+
+  const handleBulkApply = (patch) => {
+    const selectedIds = visibleRows.filter(r => selected[r._id] && !skipped?.has(r._id)).map(r => r._id);
+    selectedIds.forEach(id => onUpdateRow(id, patch));
+    showToast(`Applied to ${selectedIds.length} rows`);
+  };
 
   const handleConfirmAll = async () => {
     const toConfirm = visibleRows.filter(r =>
@@ -893,6 +889,13 @@ export default function TxHorizontal({
             style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, border: `1px solid ${T.border}`, background: T.sur2, color: T.text2, cursor: "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 600 }}>
             {allSelected ? "Deselect All" : "Select All"}
           </button>
+          {countSelected >= 2 && (
+            <button
+              onClick={() => setBulkModal(true)}
+              style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, border: "none", background: "#3b5bdb", color: "#fff", cursor: "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 700 }}>
+              Bulk Edit ({countSelected})
+            </button>
+          )}
         </div>
         <div style={{ display: "flex", gap: 6 }}>
           {onRefreshScan && (
@@ -927,86 +930,6 @@ export default function TxHorizontal({
           </button>
         </div>
       </div>}
-
-      {/* ── Bulk Edit Toolbar ── */}
-      {!hideBatchFooter && countSelected >= 2 && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap",
-          background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10,
-          padding: "8px 12px", fontFamily: "Figtree, sans-serif",
-        }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: "#1d4ed8" }}>
-            Bulk Edit ({countSelected})
-          </span>
-
-          {/* Type */}
-          <select value={bulkType}
-            onChange={e => {
-              const newType = e.target.value;
-              setBulkType(newType);
-              applyBulk("tx_type", newType);
-              const isIncomeType  = ["income","collect_loan","sell_asset","reimburse_in"].includes(newType);
-              const isExpenseType = ["expense","reimburse_out"].includes(newType);
-              if (bulkCategory) {
-                const inIncome  = incomeSrcs.some(c => c.id === bulkCategory);
-                const inExpense = categories.some(c => c.id === bulkCategory);
-                if ((isIncomeType && !inIncome) || (isExpenseType && !inExpense)) setBulkCategory("");
-              }
-            }}
-            style={{ fontSize: 11, padding: "4px 6px", borderRadius: 5, border: "1px solid #bfdbfe", background: "#fff", fontFamily: "Figtree, sans-serif", cursor: "pointer" }}>
-            <option value="">Set type…</option>
-            {txTypes.map(t => <option key={t.value} value={t.value} style={{ color: t.color }}>{t.label}</option>)}
-          </select>
-
-          {/* Category */}
-          <select value={bulkCategory}
-            onChange={e => {
-              const cat = [...categories, ...incomeSrcs].find(c => c.id === e.target.value);
-              setBulkCategory(e.target.value);
-              applyBulk("category_id", e.target.value, { category_name: cat?.label || cat?.name || "" });
-            }}
-            style={{ fontSize: 11, padding: "4px 6px", borderRadius: 5, border: "1px solid #bfdbfe", background: "#fff", fontFamily: "Figtree, sans-serif", cursor: "pointer" }}>
-            <option value="">Set category…</option>
-            {(() => {
-              const isIncomeType  = ["income","collect_loan","sell_asset","reimburse_in"].includes(bulkType);
-              const isExpenseType = ["expense","reimburse_out"].includes(bulkType);
-              if (isIncomeType)  return incomeSrcs.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.name}` : c.name}</option>);
-              if (isExpenseType) return categories.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.name}` : c.name}</option>);
-              return (
-                <>
-                  <optgroup label="Expense">
-                    {categories.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.name}` : c.name}</option>)}
-                  </optgroup>
-                  <optgroup label="Income">
-                    {incomeSrcs.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.name}` : c.name}</option>)}
-                  </optgroup>
-                </>
-              );
-            })()}
-          </select>
-
-          {/* Account */}
-          <select value={bulkAccount}
-            onChange={e => { setBulkAccount(e.target.value); applyBulk("from_id", e.target.value); }}
-            style={{ fontSize: 11, padding: "4px 6px", borderRadius: 5, border: "1px solid #bfdbfe", background: "#fff", fontFamily: "Figtree, sans-serif", cursor: "pointer" }}>
-            <option value="">Set account…</option>
-            {accounts.filter(a => ["bank","cash","credit_card"].includes(a.type)).map(a => (
-              <option key={a.id} value={a.id}>{a.name}</option>
-            ))}
-          </select>
-
-          {/* Entity */}
-          <select value={bulkEntity}
-            onChange={e => { setBulkEntity(e.target.value); applyBulk("entity", e.target.value); }}
-            style={{ fontSize: 11, padding: "4px 6px", borderRadius: 5, border: "1px solid #bfdbfe", background: "#fff", fontFamily: "Figtree, sans-serif", cursor: "pointer" }}>
-            <option value="">Set entity…</option>
-            <option value="Personal">Personal</option>
-            <option value="Hamasa">Hamasa</option>
-            <option value="SDC">SDC</option>
-            <option value="Travelio">Travelio</option>
-          </select>
-        </div>
-      )}
 
       {/* ── Cards ── */}
       {(() => {
@@ -1050,6 +973,18 @@ export default function TxHorizontal({
           </div>
         );
       })()}
+
+      <BulkEditModal
+        open={bulkModal}
+        onClose={() => setBulkModal(false)}
+        onApply={handleBulkApply}
+        count={countSelected}
+        mode="selected"
+        accounts={accounts}
+        categories={categories}
+        incomeSrcs={incomeSrcs}
+        txTypes={txTypes}
+      />
     </div>
   );
 }

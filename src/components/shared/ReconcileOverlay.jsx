@@ -9,6 +9,7 @@ import { supabase } from "../../lib/supabase";
 import { processReconcilePDF } from "../../lib/reconcilePdfUpload";
 import { fmtIDR, todayStr } from "../../utils";
 import { Button, showToast, TxHorizontal, TX_HORIZONTAL_TYPES } from "./index";
+import BulkEditModal from "./BulkEditModal";
 import { LIGHT } from "../../theme";
 import Modal from "./Modal";
 import ReconcileSummaryModal from "./ReconcileSummaryModal";
@@ -497,27 +498,20 @@ export function getMissingRowsMap(missing) {
 
 // ── Missing rows summary bar ─────────────────────────────────
 export function ReconcileMissingBar({ reconcile, accounts, onExpandAll, expandedCount, totalMissing, onSaveAll, saving, categories = [], incomeSrcs = [] }) {
-  const [bulkType,     setBulkType]     = useState("");
-  const [bulkCategory, setBulkCategory] = useState("");
-  const [bulkAccount,  setBulkAccount]  = useState("");
-  const [bulkEntity,   setBulkEntity]   = useState("");
+  const [bulkModal, setBulkModal] = useState(false);
 
   if (!reconcile.active || totalMissing === 0) return null;
 
   const allExpanded = expandedCount === totalMissing;
 
-  const applyBulkToAll = (field, value, extra = {}) => {
-    if (!value) return;
+  const handleBulkApply = (patch) => {
     const pending = reconcile.pendingRows || {};
     const ids = Object.keys(pending);
     if (!ids.length) {
-      reconcile.expandAll();
-      showToast("Expanding all rows — click bulk again after they load", "info");
+      showToast("Expand rows first to enable bulk edit", "info");
       return;
     }
-    ids.forEach(id => {
-      reconcile.updatePendingRow(id, { ...pending[id], [field]: value, ...extra });
-    });
+    ids.forEach(id => reconcile.updatePendingRow(id, { ...pending[id], ...patch }));
     showToast(`Applied to ${ids.length} rows`);
   };
 
@@ -534,87 +528,31 @@ export function ReconcileMissingBar({ reconcile, accounts, onExpandAll, expanded
             {allExpanded ? "Collapse All" : `Expand All (${totalMissing})`}
           </button>
           {expandedCount > 0 && (
+            <button onClick={() => setBulkModal(true)}
+              style={{ fontSize: 11, fontWeight: 700, padding: "5px 12px", borderRadius: 6, border: "none", background: "#3b5bdb", color: "#fff", cursor: "pointer", fontFamily: FF }}>
+              Bulk Edit
+            </button>
+          )}
+          {expandedCount > 0 && (
             <button onClick={onSaveAll} disabled={saving}
-              style={{ fontSize: 11, fontWeight: 700, padding: "5px 14px", borderRadius: 6, border: "none", background: "#3b5bdb", color: "#fff", cursor: saving ? "default" : "pointer", fontFamily: FF, opacity: saving ? 0.6 : 1 }}>
+              style={{ fontSize: 11, fontWeight: 700, padding: "5px 14px", borderRadius: 6, border: "none", background: "#059669", color: "#fff", cursor: saving ? "default" : "pointer", fontFamily: FF, opacity: saving ? 0.6 : 1 }}>
               {saving ? "Saving…" : `Save All (${expandedCount})`}
             </button>
           )}
         </div>
       </div>
 
-      {/* Bulk edit row — only visible when at least 1 panel is expanded */}
-      {expandedCount > 0 && (
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", paddingTop: 6, borderTop: "1px solid #fde68a" }}>
-          <span style={{ fontSize: 10, fontWeight: 700, color: "#92400e", fontFamily: FF, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-            Bulk Edit:
-          </span>
-
-          <select value={bulkType}
-            onChange={e => {
-              const newType = e.target.value;
-              setBulkType(newType);
-              applyBulkToAll("tx_type", newType);
-              const isIncomeType  = ["income","collect_loan","sell_asset","reimburse_in"].includes(newType);
-              const isExpenseType = ["expense","reimburse_out"].includes(newType);
-              if (bulkCategory) {
-                const inIncome  = incomeSrcs.some(c => c.id === bulkCategory);
-                const inExpense = categories.some(c => c.id === bulkCategory);
-                if ((isIncomeType && !inIncome) || (isExpenseType && !inExpense)) setBulkCategory("");
-              }
-            }}
-            style={{ fontSize: 11, padding: "3px 6px", borderRadius: 5, border: "1px solid #fbbf24", background: "#fff", fontFamily: FF, cursor: "pointer" }}>
-            <option value="">Type…</option>
-            {TX_HORIZONTAL_TYPES.filter(t => t.value !== "cc_installment").map(t => (
-              <option key={t.value} value={t.value} style={{ color: t.color }}>{t.label}</option>
-            ))}
-          </select>
-
-          <select value={bulkCategory}
-            onChange={e => {
-              const cat = [...categories, ...incomeSrcs].find(c => c.id === e.target.value);
-              setBulkCategory(e.target.value);
-              applyBulkToAll("category_id", e.target.value, { category_name: cat?.label || cat?.name || "" });
-            }}
-            style={{ fontSize: 11, padding: "3px 6px", borderRadius: 5, border: "1px solid #fbbf24", background: "#fff", fontFamily: FF, cursor: "pointer" }}>
-            <option value="">Category…</option>
-            {(() => {
-              const isIncomeType  = ["income","collect_loan","sell_asset","reimburse_in"].includes(bulkType);
-              const isExpenseType = ["expense","reimburse_out"].includes(bulkType);
-              if (isIncomeType)  return incomeSrcs.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.name}` : c.name}</option>);
-              if (isExpenseType) return categories.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.name}` : c.name}</option>);
-              return (
-                <>
-                  <optgroup label="Expense">
-                    {categories.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.name}` : c.name}</option>)}
-                  </optgroup>
-                  <optgroup label="Income">
-                    {incomeSrcs.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.name}` : c.name}</option>)}
-                  </optgroup>
-                </>
-              );
-            })()}
-          </select>
-
-          <select value={bulkAccount}
-            onChange={e => { setBulkAccount(e.target.value); applyBulkToAll("from_id", e.target.value); }}
-            style={{ fontSize: 11, padding: "3px 6px", borderRadius: 5, border: "1px solid #fbbf24", background: "#fff", fontFamily: FF, cursor: "pointer" }}>
-            <option value="">Account…</option>
-            {(accounts || []).filter(a => ["bank","cash","credit_card"].includes(a.type)).map(a => (
-              <option key={a.id} value={a.id}>{a.name}</option>
-            ))}
-          </select>
-
-          <select value={bulkEntity}
-            onChange={e => { setBulkEntity(e.target.value); applyBulkToAll("entity", e.target.value); }}
-            style={{ fontSize: 11, padding: "3px 6px", borderRadius: 5, border: "1px solid #fbbf24", background: "#fff", fontFamily: FF, cursor: "pointer" }}>
-            <option value="">Entity…</option>
-            <option value="Personal">Personal</option>
-            <option value="Hamasa">Hamasa</option>
-            <option value="SDC">SDC</option>
-            <option value="Travelio">Travelio</option>
-          </select>
-        </div>
-      )}
+      <BulkEditModal
+        open={bulkModal}
+        onClose={() => setBulkModal(false)}
+        onApply={handleBulkApply}
+        count={expandedCount}
+        mode="all"
+        accounts={accounts}
+        categories={categories}
+        incomeSrcs={incomeSrcs}
+        txTypes={TX_HORIZONTAL_TYPES.filter(t => t.value !== "cc_installment")}
+      />
     </div>
   );
 }
