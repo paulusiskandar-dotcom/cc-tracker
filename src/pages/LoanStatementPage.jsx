@@ -68,7 +68,8 @@ export default function LoanStatementPage({
   const { totalLoaned, totalCollected, outstanding, lastDate } = useMemo(() => {
     if (!loan) return { totalLoaned: 0, totalCollected: 0, outstanding: 0, lastDate: null };
     if (useLedger) {
-      const tl = ledgerRows.filter(e => e.tx_type === "give_loan").reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+      const tlFromLedger = ledgerRows.filter(e => e.tx_type === "give_loan").reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+      const tl = tlFromLedger > 0 ? tlFromLedger : Number(loan.total_amount || 0);
       const tc = ledgerRows.filter(e => e.tx_type === "collect_loan").reduce((s, e) => s + Number(e.amount_idr || 0), 0);
       const ld = ledgerRows.filter(e => e.tx_type === "collect_loan").sort((a, b) => b.tx_date.localeCompare(a.tx_date))[0];
       return { totalLoaned: tl, totalCollected: tc, outstanding: tl - tc, lastDate: ld?.tx_date || null };
