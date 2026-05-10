@@ -301,6 +301,84 @@ function AddIncomeModal({ incomeSrcs, bankAccounts, onSave, onClose, saving }) {
   );
 }
 
+// ── ForecastCard ─────────────────────────────────────────────────
+function ForecastCard({ forecast }) {
+  const max = Math.max(...forecast.monthsAhead.map(m => m.amount), 1);
+
+  return (
+    <div style={{
+      background: "#fff",
+      border: "0.5px solid #e5e7eb",
+      borderRadius: 16,
+      padding: 24,
+      marginBottom: 16,
+      position: "relative",
+      overflow: "hidden",
+    }}>
+      <div style={{
+        position: "absolute", top: 0, left: 0, right: 0, height: 3,
+        background: "linear-gradient(90deg, #3b5bdb, #8b5cf6)",
+      }} />
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <div>
+          <div style={{ fontSize: 12, color: "#9ca3af", textTransform: "uppercase", letterSpacing: 0.5, fontFamily: FF }}>Forecast</div>
+          <div style={{ fontSize: 18, fontWeight: 600, color: "#111827", marginTop: 2, fontFamily: FF }}>Projected Income</div>
+        </div>
+      </div>
+
+      {/* 30/60/90 windows */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 24 }}>
+        {[
+          { label: "Next 30 days", amount: forecast.w30 },
+          { label: "Next 60 days", amount: forecast.w60 },
+          { label: "Next 90 days", amount: forecast.w90 },
+        ].map(w => (
+          <div key={w.label} style={{
+            background: "#f9fafb",
+            border: "0.5px solid #e5e7eb",
+            borderRadius: 12,
+            padding: 16,
+          }}>
+            <div style={{ fontSize: 11, color: "#9ca3af", textTransform: "uppercase", letterSpacing: 0.5, fontFamily: FF }}>{w.label}</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: "#3b5bdb", marginTop: 6, fontFamily: FF }}>
+              {fmtIDR(w.amount)}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* 6-month breakdown */}
+      <div style={{ fontSize: 11, color: "#9ca3af", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 12, fontFamily: FF }}>
+        Next 6 Months
+      </div>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: 80 }}>
+        {forecast.monthsAhead.map((m, i) => (
+          <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+            <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 600, fontFamily: FF }}>
+              {fmtIDR(m.amount, true)}
+            </div>
+            <div style={{
+              width: "100%",
+              height: `${(m.amount / max) * 50}px`,
+              minHeight: 4,
+              background: "linear-gradient(180deg, #3b5bdb, #8b5cf6)",
+              borderRadius: 4,
+            }} />
+            <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: FF }}>{m.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {forecast.totalMonthlyProjection === 0 && (
+        <div style={{ marginTop: 16, fontSize: 13, color: "#9ca3af", textAlign: "center", fontStyle: "italic", fontFamily: FF }}>
+          Forecast akan muncul setelah Paulus set monthly_target atau ada historical income data
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────
 export default function Income({
   user, accounts, ledger, incomeSrcs, fxRates, curMonth,
@@ -382,6 +460,70 @@ export default function Income({
       };
     }).sort((a, b) => b.thisMonthAmount - a.thisMonthAmount);
   }, [incomeSrcs, incomeLedger, thisMonthIncome, now]);
+
+  // ── Forecast computation ─────────────────────────────────────
+  const forecast = useMemo(() => {
+    const perSource = incomeSrcs.map(src => {
+      let projectedMonthly = 0;
+
+      // Historical avg (last 3 months)
+      let last3Total = 0;
+      for (let i = 1; i <= 3; i++) {
+        const mStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const mEnd   = new Date(now.getFullYear(), now.getMonth() - i + 1, 0, 23, 59, 59);
+        const monthSum = ledger
+          .filter(tx => tx.tx_type === "income" && tx.from_id === src.id
+            && new Date(tx.tx_date) >= mStart && new Date(tx.tx_date) <= mEnd)
+          .reduce((s, tx) => s + Number(tx.amount_idr || 0), 0);
+        last3Total += monthSum;
+      }
+      const last3Avg = last3Total / 3;
+
+      if (src.recurrence === "monthly") {
+        projectedMonthly = Number(src.monthly_target || 0) > 0
+          ? Number(src.monthly_target)
+          : last3Avg;
+      } else if (src.recurrence === "quarterly") {
+        let last3qTotal = 0;
+        for (let q = 1; q <= 3; q++) {
+          const qStart = new Date(now.getFullYear(), now.getMonth() - (q * 3), 1);
+          const qEnd   = new Date(now.getFullYear(), now.getMonth() - (q * 3) + 3, 0, 23, 59, 59);
+          const qSum = ledger
+            .filter(tx => tx.tx_type === "income" && tx.from_id === src.id
+              && new Date(tx.tx_date) >= qStart && new Date(tx.tx_date) <= qEnd)
+            .reduce((s, tx) => s + Number(tx.amount_idr || 0), 0);
+          last3qTotal += qSum;
+        }
+        projectedMonthly = (last3qTotal / 3) / 3;
+      } else if (src.recurrence === "yearly") {
+        const yStart = new Date(now.getFullYear() - 1, now.getMonth(), 1);
+        const yEnd   = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+        const yearSum = ledger
+          .filter(tx => tx.tx_type === "income" && tx.from_id === src.id
+            && new Date(tx.tx_date) >= yStart && new Date(tx.tx_date) <= yEnd)
+          .reduce((s, tx) => s + Number(tx.amount_idr || 0), 0);
+        projectedMonthly = yearSum / 12;
+      } else {
+        projectedMonthly = last3Avg;
+      }
+
+      return { ...src, projectedMonthly };
+    });
+
+    const totalMonthlyProjection = perSource.reduce((s, src) => s + src.projectedMonthly, 0);
+    const w30 = totalMonthlyProjection;
+    const w60 = totalMonthlyProjection * 2;
+    const w90 = totalMonthlyProjection * 3;
+
+    const monthsAhead = [];
+    for (let i = 1; i <= 6; i++) {
+      const targetMonth = new Date(now.getFullYear(), now.getMonth() + i, 1);
+      const monthLabel  = targetMonth.toLocaleDateString("id-ID", { month: "short", year: "numeric" });
+      monthsAhead.push({ label: monthLabel, amount: totalMonthlyProjection });
+    }
+
+    return { perSource, totalMonthlyProjection, w30, w60, w90, monthsAhead };
+  }, [incomeSrcs, ledger, now]);
 
   // ── CRUD handlers ────────────────────────────────────────────
   const handleSaveSource = async (patch) => {
@@ -493,6 +635,8 @@ export default function Income({
               </div>
             </div>
           </div>
+
+          <ForecastCard forecast={forecast} />
 
           {/* Per-source grid */}
           {incomeSrcs.length === 0 ? (
