@@ -277,6 +277,9 @@ export const ledgerApi = {
       }
     }
 
+    // Defensive: fk_ledger_category refs expense_categories only; income source is in from_id
+    if (safeEntry.tx_type === "income") safeEntry.category_id = null;
+
     // ── Pre-insert: create new asset account (buy_asset + new_asset) ──────
     let localAccounts = accounts;
     if (entry.tx_type === "buy_asset" && new_asset) {

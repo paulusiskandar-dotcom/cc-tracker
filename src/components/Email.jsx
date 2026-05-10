@@ -515,6 +515,8 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
         category_name = lookup.name;
       }
       if (isIncome && !from_id && category_id) from_id = category_id;
+      // fk_ledger_category refs expense_categories only; income source is already in from_id
+      if (isIncome) category_id = null;
     }
     return {
       tx_date:       r.tx_date,
