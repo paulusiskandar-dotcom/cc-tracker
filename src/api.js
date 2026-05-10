@@ -844,6 +844,71 @@ export const recurringApi = {
       .eq("id", reminderId);
     if (error) throw new Error(error.message);
   },
+
+  upsertForIncomeSource: async (userId, src) => {
+    // Find existing template for this income source
+    const { data: existing, error: fetchErr } = await supabase
+      .from("recurring_templates")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("income_source_id", src.id)
+      .maybeSingle();
+    if (fetchErr) throw new Error(fetchErr.message);
+
+    // ad_hoc → soft-disable if a template exists, otherwise nothing to do
+    if (src.recurrence === "ad_hoc") {
+      if (existing) {
+        const { error } = await supabase
+          .from("recurring_templates")
+          .update({ is_active: false })
+          .eq("id", existing.id);
+        if (error) throw new Error(error.message);
+      }
+      return null;
+    }
+
+    const frequencyMap = { monthly: "monthly", quarterly: "quarterly", yearly: "yearly" };
+    const frequency = frequencyMap[src.recurrence] || "monthly";
+    const day = Math.max(1, Math.min(31, Number(src.expected_day) || 1));
+
+    // Compute next_due_date: next future occurrence of `day` given frequency
+    const today = new Date();
+    let nextDue = new Date(today.getFullYear(), today.getMonth(), day);
+    if (nextDue <= today) {
+      if (frequency === "monthly")    nextDue = new Date(today.getFullYear(), today.getMonth() + 1, day);
+      else if (frequency === "quarterly") nextDue = new Date(today.getFullYear(), today.getMonth() + 3, day);
+      else if (frequency === "yearly")    nextDue = new Date(today.getFullYear() + 1, today.getMonth(), day);
+    }
+    const nextDueStr = nextDue.toISOString().slice(0, 10);
+
+    const payload = {
+      name:             src.name,
+      tx_type:          "income",
+      amount:           Number(src.monthly_target || 0),
+      currency:         src.currency || "IDR",
+      frequency,
+      day_of_month:     day,
+      is_active:        true,
+      next_due_date:    nextDueStr,
+      income_source_id: src.id,
+      from_type:        "income_source",
+      from_id:          src.id,
+      entity:           "Personal",
+    };
+
+    if (existing) {
+      const { error } = await supabase
+        .from("recurring_templates")
+        .update(payload)
+        .eq("id", existing.id);
+      if (error) throw new Error(error.message);
+    } else {
+      const { error } = await supabase
+        .from("recurring_templates")
+        .insert([{ ...payload, user_id: userId }]);
+      if (error) throw new Error(error.message);
+    }
+  },
 };
 
 // ─── MERCHANT MAPPINGS ────────────────────────────────────────

@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { TrendingUp, TrendingDown } from "lucide-react";
-import { ledgerApi, incomeSrcApi } from "../api";
+import { ledgerApi, incomeSrcApi, recurringApi } from "../api";
 import { fmtIDR, todayStr, ym, mlShort } from "../utils";
 import { LIGHT, DARK } from "../theme";
 import { showToast } from "./shared/Card";
@@ -529,16 +529,23 @@ export default function Income({
   const handleSaveSource = async (patch) => {
     setSaving(true);
     try {
+      let savedSrc;
       if (editingSource?.id) {
-        const updated = await incomeSrcApi.update(editingSource.id, patch);
-        setIncomeSrcs(prev => prev.map(s => s.id === editingSource.id ? updated : s));
+        savedSrc = await incomeSrcApi.update(editingSource.id, patch);
+        setIncomeSrcs(prev => prev.map(s => s.id === editingSource.id ? savedSrc : s));
         showToast("Source updated");
       } else {
-        const created = await incomeSrcApi.create(user.id, patch);
-        setIncomeSrcs(prev => [...prev, created]);
+        savedSrc = await incomeSrcApi.create(user.id, patch);
+        setIncomeSrcs(prev => [...prev, savedSrc]);
         showToast("Source added");
       }
       setEditingSource(null);
+      // Non-blocking: sync recurring template — failure doesn't affect source save
+      if (savedSrc?.id) {
+        recurringApi.upsertForIncomeSource(user.id, savedSrc).catch(err =>
+          console.error("Failed to sync recurring template:", err)
+        );
+      }
     } catch (e) { showToast(e.message, "error"); }
     setSaving(false);
   };
