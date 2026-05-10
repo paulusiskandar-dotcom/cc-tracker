@@ -113,6 +113,33 @@ function getNextDueDate(dueDay) {
   return due;
 }
 
+function getLastStatementDate(statementDay, today) {
+  if (!statementDay) return null;
+  const day = Number(statementDay);
+  const candidate = new Date(today.getFullYear(), today.getMonth(), day);
+  if (candidate < today) return candidate;
+  return new Date(today.getFullYear(), today.getMonth() - 1, day);
+}
+
+function computePendingDue(cc, ledger, today) {
+  const outstanding = Number(cc.outstanding_amount || 0);
+  if (outstanding <= 0) return 0;
+  if (!cc.statement_day) return outstanding;
+  const lastStmt = getLastStatementDate(cc.statement_day, today);
+  if (!lastStmt) return outstanding;
+  const lastStmtStr = lastStmt.toISOString().slice(0, 10);
+  const chargesAfter = ledger
+    .filter(e => {
+      if (!e.tx_date || e.tx_date <= lastStmtStr) return false;
+      if (e.tx_type === "expense"       && e.to_id   === cc.id) return true;
+      if (e.tx_type === "reimburse_out" && e.from_id === cc.id) return true;
+      if (e.tx_type === "buy_asset"     && e.from_id === cc.id) return true;
+      return false;
+    })
+    .reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+  return Math.max(0, outstanding - chargesAfter);
+}
+
 export default function Dashboard({
   user, accounts, ledger, thisMonthLedger, categories,
   reminders, recurTemplates, netWorth, bankAccounts,
@@ -452,22 +479,22 @@ export default function Dashboard({
     };
 
     // G) CC payment due dates within next 14 days
-    creditCards
-      .filter(cc => cc.due_day && Number(cc.outstanding_amount || 0) > 0)
-      .forEach(cc => {
-        const dueDateStr = nextDueDateStr(cc.due_day);
-        if (dueDateStr > cutoffDate.toISOString().slice(0, 10)) return;
-        all.push({
-          id: `cc-${cc.id}`, type: "cc_due", raw: cc,
-          date: dueDateStr,
-          title: cc.name,
-          sub: "Payment due",
-          amount: Number(cc.outstanding_amount || 0),
-          amountColor: "#dc2626", amountSign: "−",
-          icon: "💳", iconBg: "#fee2e2", iconColor: "#dc2626",
-          actionable: true, confirmLabel: "Pay", confirmStyle: "danger",
-        });
+    creditCards.filter(cc => cc.due_day).forEach(cc => {
+      const pendingDue = computePendingDue(cc, ledger, todayDate);
+      if (pendingDue <= 0) return;
+      const dueDateStr = nextDueDateStr(cc.due_day);
+      if (dueDateStr > cutoffDate.toISOString().slice(0, 10)) return;
+      all.push({
+        id: `cc-${cc.id}`, type: "cc_due", raw: cc,
+        date: dueDateStr,
+        title: cc.name,
+        sub: `Due: ${fmtIDR(pendingDue)}`,
+        amount: pendingDue,
+        amountColor: "#dc2626", amountSign: "−",
+        icon: "💳", iconBg: "#fee2e2", iconColor: "#dc2626",
+        actionable: true, confirmLabel: "Pay", confirmStyle: "danger",
       });
+    });
 
     // H) Recurring income/expense with day_of_month within next 14 days
     recurTemplates
@@ -510,7 +537,7 @@ export default function Dashboard({
       .filter(item => !dismissed.has(item.id))
       .sort((a, b) => a.date.localeCompare(b.date) || (a.type === "installment" ? 1 : -1))
       .slice(0, 8);
-  }, [reminders, loansWithStats, receivables, installments, creditCards, dismissed, reimburseSettlements, assets, bankAccounts, recurTemplates]);
+  }, [reminders, loansWithStats, receivables, installments, creditCards, dismissed, reimburseSettlements, assets, bankAccounts, recurTemplates, ledger]);
 
   // Group upcoming by date
   const UPCOMING_DEFAULT_VISIBLE = 4;
