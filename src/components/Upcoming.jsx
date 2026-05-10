@@ -17,6 +17,37 @@ const TYPE_META = {
   reimburse_pend:   { icon: "↙",  color: "#d97706", bg: "#fef9ec" },
 };
 
+function getLastStatementDate(statementDay, today) {
+  if (!statementDay) return null;
+  const day = Number(statementDay);
+  const candidate = new Date(today.getFullYear(), today.getMonth(), day);
+  if (candidate < today) return candidate;
+  return new Date(today.getFullYear(), today.getMonth() - 1, day);
+}
+
+function computePendingDue(cc, ledger, today) {
+  const outstanding = Number(cc.outstanding_amount || 0);
+  if (outstanding <= 0) return 0;
+
+  if (!cc.statement_day) return outstanding;
+
+  const lastStmt = getLastStatementDate(cc.statement_day, today);
+  if (!lastStmt) return outstanding;
+  const lastStmtStr = lastStmt.toISOString().slice(0, 10);
+
+  const chargesAfter = ledger
+    .filter(e => {
+      if (!e.tx_date || e.tx_date <= lastStmtStr) return false;
+      if (e.tx_type === "expense"      && e.to_id   === cc.id) return true;
+      if (e.tx_type === "reimburse_out" && e.from_id === cc.id) return true;
+      if (e.tx_type === "buy_asset"    && e.from_id === cc.id) return true;
+      return false;
+    })
+    .reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+
+  return Math.max(0, outstanding - chargesAfter);
+}
+
 export default function Upcoming({
   user, accounts, ledger, reminders, recurTemplates,
   employeeLoans = [], loanPayments = [], receivables = [],
@@ -155,16 +186,20 @@ export default function Upcoming({
 
     // 6. CC Jatuh Tempo — due within next 7 days
     creditCards.filter(cc => cc.due_day).forEach(cc => {
+      const pendingDue = computePendingDue(cc, ledger, today);
+      if (pendingDue <= 0) return;
+
       const dueDate = getNextDueDate(Number(cc.due_day));
       if (dueDate > cutoff) return;
+
       all.push({
         id: `cc-due-${cc.id}`,
         type: "cc_due",
         raw: cc,
         date: dueDate.toISOString().slice(0, 10),
         title: `${cc.name} — Jatuh Tempo`,
-        amount: Number(cc.outstanding_amount || 0),
-        sub: `Balance: ${fmtIDR(Number(cc.outstanding_amount || 0))}`,
+        amount: pendingDue,
+        sub: `Due: ${fmtIDR(pendingDue)}`,
         actionable: true,
       });
     });
