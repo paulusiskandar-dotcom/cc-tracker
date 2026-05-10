@@ -21,4 +21,3 @@ export { default as SortDropdown } from "./SortDropdown";
 export { default as TxHorizontal } from "./TxHorizontal";
 export { TX_HORIZONTAL_TYPES } from "./TxHorizontal";
 
-export { default as BulkEditModal } from "./BulkEditModal";

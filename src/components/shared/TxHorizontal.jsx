@@ -20,8 +20,6 @@ import { useState, useEffect, Fragment } from "react";
 import { REIMBURSE_ENTITIES } from "../../constants";
 import { showToast } from "./Card";
 import { supabase } from "../../lib/supabase";
-import BulkEditModal from "./BulkEditModal";
-
 // ── TX Types (13 total) ─────────────────────────────────────────
 export const TX_HORIZONTAL_TYPES = [
   { value: "expense",        label: "Expense",        color: "#dc2626" },
@@ -773,6 +771,40 @@ function TxHorizontalCard({
   );
 }
 
+// ─── BULK FIELD HELPER ─────────────────────────────────────────
+function BulkField({ toggle, onToggle, label, children }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 140 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <input
+          type="checkbox"
+          checked={toggle}
+          onChange={e => onToggle(e.target.checked)}
+          style={{ cursor: "pointer", margin: 0 }}
+        />
+        <span style={{
+          fontSize: 10, fontWeight: 600,
+          color: toggle ? "#1e3a8a" : "#9ca3af",
+          textTransform: "uppercase", letterSpacing: 0.3,
+        }}>{label}</span>
+      </div>
+      <div style={{ opacity: toggle ? 1 : 0.5 }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+const bulkSelectStyle = {
+  width: "100%",
+  padding: "5px 8px",
+  border: "1px solid #d1d5db",
+  borderRadius: 6,
+  fontSize: 12,
+  fontFamily: "Figtree, sans-serif",
+  background: "#fff",
+};
+
 // ─── MAIN EXPORT ───────────────────────────────────────────────
 export default function TxHorizontal({
   rows = [],
@@ -804,7 +836,21 @@ export default function TxHorizontal({
   const [confirmingAll,setConfirmingAll]= useState(false);
   const [confirmedIds,  setConfirmedIds]  = useState(new Set());
   const [fetchedLoans,  setFetchedLoans]  = useState([]);
-  const [bulkModal,    setBulkModal]    = useState(false);
+  const [bulkOpen,       setBulkOpen]       = useState(false);
+  const [bBT_type,       setBBT_type]       = useState("");
+  const [bBT_cat,        setBBT_cat]        = useState("");
+  const [bBT_from,       setBBT_from]       = useState("");
+  const [bBT_to,         setBBT_to]         = useState("");
+  const [bBT_entity,     setBBT_entity]     = useState("");
+  const [bBT_borrower,   setBBT_borrower]   = useState("");
+  const [bBT_asset,      setBBT_asset]      = useState("");
+  const [bBT_typeOn,     setBBT_typeOn]     = useState(false);
+  const [bBT_catOn,      setBBT_catOn]      = useState(false);
+  const [bBT_fromOn,     setBBT_fromOn]     = useState(false);
+  const [bBT_toOn,       setBBT_toOn]       = useState(false);
+  const [bBT_entityOn,   setBBT_entityOn]   = useState(false);
+  const [bBT_borrowerOn, setBBT_borrowerOn] = useState(false);
+  const [bBT_assetOn,    setBBT_assetOn]    = useState(false);
 
   // Fallback: fetch employee loans directly if prop arrives empty and rows contain collect_loan
   useEffect(() => {
@@ -847,10 +893,33 @@ export default function TxHorizontal({
     r.status !== "confirmed"
   );
 
-  const handleBulkApply = (patch) => {
-    const selectedIds = visibleRows.filter(r => selected[r._id] && !skipped?.has(r._id)).map(r => r._id);
-    selectedIds.forEach(id => onUpdateRow(id, patch));
-    showToast(`Applied to ${selectedIds.length} rows`);
+  const handleBulkApplyInline = () => {
+    const activeRows = visibleRows.filter(r => selected[r._id] && !skipped?.has(r._id));
+    if (activeRows.length === 0) { showToast("No rows selected", "warning"); return; }
+
+    const patch = {};
+    if (bBT_typeOn && bBT_type) patch.tx_type = bBT_type;
+    if (bBT_catOn && bBT_cat) {
+      patch.category_id = bBT_cat;
+      const cat = bBT_type === "income"
+        ? (incomeSrcs || []).find(c => c.id === bBT_cat)
+        : (categories || []).find(c => c.id === bBT_cat);
+      patch.category_name = cat?.name || "";
+    }
+    if (bBT_fromOn && bBT_from) { patch.from_id = bBT_from; patch.from_type = "account"; }
+    if (bBT_toOn && bBT_to)     { patch.to_id   = bBT_to;   patch.to_type   = "account"; }
+    if (bBT_entityOn   && bBT_entity)   patch.entity            = bBT_entity;
+    if (bBT_borrowerOn && bBT_borrower) patch.employee_loan_id  = bBT_borrower;
+    if (bBT_assetOn    && bBT_asset)    { patch.to_id = bBT_asset; patch.to_type = "asset"; }
+
+    if (Object.keys(patch).length === 0) { showToast("Toggle at least one field to apply", "warning"); return; }
+
+    activeRows.forEach(r => onUpdateRow(r._id, patch));
+    showToast(`Applied to ${activeRows.length} ${activeRows.length === 1 ? "row" : "rows"}`);
+
+    // Reset toggles, keep values so user can re-apply with minor tweaks
+    setBBT_typeOn(false); setBBT_catOn(false); setBBT_fromOn(false); setBBT_toOn(false);
+    setBBT_entityOn(false); setBBT_borrowerOn(false); setBBT_assetOn(false);
   };
 
   const handleConfirmAll = async () => {
@@ -891,9 +960,9 @@ export default function TxHorizontal({
           </button>
           {countSelected >= 1 && (
             <button
-              onClick={() => setBulkModal(true)}
-              style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, border: "none", background: "#3b5bdb", color: "#fff", cursor: "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 700 }}>
-              Bulk Edit ({countSelected})
+              onClick={() => setBulkOpen(o => !o)}
+              style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, border: "none", background: bulkOpen ? "#1e3a8a" : "#3b5bdb", color: "#fff", cursor: "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 700 }}>
+              {bulkOpen ? "✕ Close" : `Bulk Edit (${countSelected})`}
             </button>
           )}
         </div>
@@ -930,6 +999,164 @@ export default function TxHorizontal({
           </button>
         </div>
       </div>}
+
+      {/* ── Inline Bulk Edit Row ── */}
+      {bulkOpen && countSelected >= 1 && (
+        <div style={{
+          background: "#f0f4ff", border: "1px solid #93c5fd",
+          borderRadius: 10, padding: 12, display: "flex",
+          flexDirection: "column", gap: 8, fontFamily: "Figtree, sans-serif",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 11, fontWeight: 700, color: "#1e3a8a", textTransform: "uppercase", letterSpacing: 0.5 }}>
+            <span>Bulk Edit · {countSelected} {countSelected === 1 ? "row" : "rows"}</span>
+            <span style={{ color: "#6b7280", fontSize: 10 }}>Toggle field untuk include di apply</span>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+
+            {/* Type */}
+            <BulkField toggle={bBT_typeOn} onToggle={setBBT_typeOn} label="Type">
+              <select
+                value={bBT_type}
+                onChange={e => {
+                  setBBT_type(e.target.value);
+                  if (!bBT_typeOn) setBBT_typeOn(true);
+                  setBBT_cat(""); setBBT_from(""); setBBT_to("");
+                  setBBT_entity(""); setBBT_borrower(""); setBBT_asset("");
+                }}
+                style={bulkSelectStyle}
+              >
+                <option value="">— Type —</option>
+                {(txTypes || []).map(t => (
+                  <option key={t.value || t} value={t.value || t}>{t.label || t}</option>
+                ))}
+              </select>
+            </BulkField>
+
+            {/* Category/Source — expense or income only */}
+            {(bBT_type === "expense" || bBT_type === "income") && (
+              <BulkField toggle={bBT_catOn} onToggle={setBBT_catOn} label={bBT_type === "income" ? "Source" : "Category"}>
+                <select
+                  value={bBT_cat}
+                  onChange={e => { setBBT_cat(e.target.value); if (!bBT_catOn) setBBT_catOn(true); }}
+                  style={bulkSelectStyle}
+                >
+                  <option value="">— {bBT_type === "income" ? "Source" : "Category"} —</option>
+                  {(bBT_type === "income" ? (incomeSrcs || []) : (categories || [])).map(c => (
+                    <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.name}` : c.name}</option>
+                  ))}
+                </select>
+              </BulkField>
+            )}
+
+            {/* From Account — expense, transfer, pay_cc, reimburse_out, give_loan, buy_asset */}
+            {["expense","transfer","pay_cc","reimburse_out","give_loan","buy_asset"].includes(bBT_type) && (
+              <BulkField toggle={bBT_fromOn} onToggle={setBBT_fromOn} label="From">
+                <select
+                  value={bBT_from}
+                  onChange={e => { setBBT_from(e.target.value); if (!bBT_fromOn) setBBT_fromOn(true); }}
+                  style={bulkSelectStyle}
+                >
+                  <option value="">— From —</option>
+                  {(accounts || []).filter(a => {
+                    if (!a.is_active) return false;
+                    if (["pay_cc","buy_asset","give_loan"].includes(bBT_type)) return ["bank","cash"].includes(a.type);
+                    return ["bank","cash","credit_card"].includes(a.type);
+                  }).map(a => (
+                    <option key={a.id} value={a.id}>{a.name}{a.card_last4 ? ` ···${a.card_last4}` : ""}</option>
+                  ))}
+                </select>
+              </BulkField>
+            )}
+
+            {/* To Account — income, transfer, pay_cc, reimburse_in, collect_loan */}
+            {["income","transfer","pay_cc","reimburse_in","collect_loan"].includes(bBT_type) && (
+              <BulkField toggle={bBT_toOn} onToggle={setBBT_toOn} label="To">
+                <select
+                  value={bBT_to}
+                  onChange={e => { setBBT_to(e.target.value); if (!bBT_toOn) setBBT_toOn(true); }}
+                  style={bulkSelectStyle}
+                >
+                  <option value="">— To —</option>
+                  {(accounts || []).filter(a => {
+                    if (!a.is_active) return false;
+                    if (bBT_type === "pay_cc") return a.type === "credit_card";
+                    if (["income","reimburse_in","collect_loan"].includes(bBT_type)) return ["bank","cash"].includes(a.type);
+                    return ["bank","cash","credit_card"].includes(a.type);
+                  }).map(a => (
+                    <option key={a.id} value={a.id}>{a.name}{a.card_last4 ? ` ···${a.card_last4}` : ""}</option>
+                  ))}
+                </select>
+              </BulkField>
+            )}
+
+            {/* Entity — reimburse_in/reimburse_out only */}
+            {(bBT_type === "reimburse_in" || bBT_type === "reimburse_out") && (
+              <BulkField toggle={bBT_entityOn} onToggle={setBBT_entityOn} label="Entity">
+                <select
+                  value={bBT_entity}
+                  onChange={e => { setBBT_entity(e.target.value); if (!bBT_entityOn) setBBT_entityOn(true); }}
+                  style={bulkSelectStyle}
+                >
+                  <option value="">— Entity —</option>
+                  {REIMBURSE_ENTITIES.map(e => <option key={e} value={e}>{e}</option>)}
+                </select>
+              </BulkField>
+            )}
+
+            {/* Borrower — collect_loan/give_loan */}
+            {(bBT_type === "collect_loan" || bBT_type === "give_loan") && (
+              <BulkField toggle={bBT_borrowerOn} onToggle={setBBT_borrowerOn} label="Borrower">
+                <select
+                  value={bBT_borrower}
+                  onChange={e => { setBBT_borrower(e.target.value); if (!bBT_borrowerOn) setBBT_borrowerOn(true); }}
+                  style={bulkSelectStyle}
+                >
+                  <option value="">— Borrower —</option>
+                  {(effectiveLoans || []).filter(l => l.status !== "settled").map(l => (
+                    <option key={l.id} value={l.id}>{l.employee_name}</option>
+                  ))}
+                </select>
+              </BulkField>
+            )}
+
+            {/* Asset — buy_asset only */}
+            {bBT_type === "buy_asset" && (
+              <BulkField toggle={bBT_assetOn} onToggle={setBBT_assetOn} label="Asset">
+                <select
+                  value={bBT_asset}
+                  onChange={e => { setBBT_asset(e.target.value); if (!bBT_assetOn) setBBT_assetOn(true); }}
+                  style={bulkSelectStyle}
+                >
+                  <option value="">— Asset —</option>
+                  {(accounts || []).filter(a => a.type === "asset" && a.is_active).map(a => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+              </BulkField>
+            )}
+
+            <div style={{ flex: 1, minWidth: 0 }} />
+
+            {/* Reset */}
+            <button
+              onClick={() => {
+                setBBT_type(""); setBBT_cat(""); setBBT_from(""); setBBT_to("");
+                setBBT_entity(""); setBBT_borrower(""); setBBT_asset("");
+                setBBT_typeOn(false); setBBT_catOn(false); setBBT_fromOn(false); setBBT_toOn(false);
+                setBBT_entityOn(false); setBBT_borrowerOn(false); setBBT_assetOn(false);
+              }}
+              style={{ fontSize: 11, padding: "6px 12px", borderRadius: 6, border: "1px solid #d1d5db", background: "#fff", color: "#6b7280", cursor: "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 600 }}
+            >Reset</button>
+
+            {/* Apply */}
+            <button
+              onClick={handleBulkApplyInline}
+              style={{ fontSize: 11, padding: "6px 14px", borderRadius: 6, border: "none", background: "#059669", color: "#fff", cursor: "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 700 }}
+            >Apply to {countSelected}</button>
+          </div>
+        </div>
+      )}
 
       {/* ── Cards ── */}
       {(() => {
@@ -974,17 +1201,6 @@ export default function TxHorizontal({
         );
       })()}
 
-      <BulkEditModal
-        open={bulkModal}
-        onClose={() => setBulkModal(false)}
-        onApply={handleBulkApply}
-        count={countSelected}
-        mode="selected"
-        accounts={accounts}
-        categories={categories}
-        incomeSrcs={incomeSrcs}
-        txTypes={txTypes}
-      />
     </div>
   );
 }

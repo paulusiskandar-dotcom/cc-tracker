@@ -9,7 +9,6 @@ import { supabase } from "../../lib/supabase";
 import { processReconcilePDF } from "../../lib/reconcilePdfUpload";
 import { fmtIDR, todayStr } from "../../utils";
 import { Button, showToast, TxHorizontal, TX_HORIZONTAL_TYPES } from "./index";
-import BulkEditModal from "./BulkEditModal";
 import { LIGHT } from "../../theme";
 import Modal from "./Modal";
 import ReconcileSummaryModal from "./ReconcileSummaryModal";
@@ -528,12 +527,6 @@ export function ReconcileMissingBar({ reconcile, accounts, onExpandAll, expanded
             {allExpanded ? "Collapse All" : `Expand All (${totalMissing})`}
           </button>
           {expandedCount > 0 && (
-            <button onClick={() => setBulkModal(true)}
-              style={{ fontSize: 11, fontWeight: 700, padding: "5px 12px", borderRadius: 6, border: "none", background: "#3b5bdb", color: "#fff", cursor: "pointer", fontFamily: FF }}>
-              Bulk Edit
-            </button>
-          )}
-          {expandedCount > 0 && (
             <button onClick={onSaveAll} disabled={saving}
               style={{ fontSize: 11, fontWeight: 700, padding: "5px 14px", borderRadius: 6, border: "none", background: "#059669", color: "#fff", cursor: saving ? "default" : "pointer", fontFamily: FF, opacity: saving ? 0.6 : 1 }}>
               {saving ? "Saving…" : `Save All (${expandedCount})`}
@@ -542,17 +535,6 @@ export function ReconcileMissingBar({ reconcile, accounts, onExpandAll, expanded
         </div>
       </div>
 
-      <BulkEditModal
-        open={bulkModal}
-        onClose={() => setBulkModal(false)}
-        onApply={handleBulkApply}
-        count={expandedCount}
-        mode="all"
-        accounts={accounts}
-        categories={categories}
-        incomeSrcs={incomeSrcs}
-        txTypes={TX_HORIZONTAL_TYPES.filter(t => t.value !== "cc_installment")}
-      />
     </div>
   );
 }
