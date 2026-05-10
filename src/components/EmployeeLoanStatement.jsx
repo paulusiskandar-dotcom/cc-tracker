@@ -52,11 +52,21 @@ export default function EmployeeLoanStatement({
 
   // All transactions involving this receivable account
   const rows = useMemo(() => {
+    // Derive employee_loan_ids linked to this receivable via give_loan entries
+    const linkedLoanIds = new Set(
+      ledger
+        .filter(e => e.tx_type === "give_loan" && e.to_id === receivable.id && e.employee_loan_id)
+        .map(e => e.employee_loan_id)
+    );
     return ledger
-      .filter(e =>
-        (e.tx_type === "give_loan"    && e.to_id   === receivable.id) ||
-        (e.tx_type === "collect_loan" && e.from_id === receivable.id)
-      )
+      .filter(e => {
+        if (e.tx_type === "give_loan" && e.to_id === receivable.id) return true;
+        if (e.tx_type === "collect_loan") {
+          if (e.from_id === receivable.id) return true;
+          if (e.employee_loan_id && linkedLoanIds.has(e.employee_loan_id)) return true;
+        }
+        return false;
+      })
       .sort((a, b) => {
         const d = a.tx_date.localeCompare(b.tx_date);
         return d !== 0 ? d : (a.created_at || "").localeCompare(b.created_at || "");
