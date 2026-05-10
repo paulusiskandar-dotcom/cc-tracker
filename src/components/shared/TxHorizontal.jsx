@@ -889,7 +889,7 @@ export default function TxHorizontal({
             style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, border: `1px solid ${T.border}`, background: T.sur2, color: T.text2, cursor: "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 600 }}>
             {allSelected ? "Deselect All" : "Select All"}
           </button>
-          {countSelected >= 2 && (
+          {countSelected >= 1 && (
             <button
               onClick={() => setBulkModal(true)}
               style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, border: "none", background: "#3b5bdb", color: "#fff", cursor: "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 700 }}>
