@@ -775,7 +775,19 @@ function TxHorizontalCard({
               <select
                 style={{ ...inSel(T), flex: 1, border: `1px solid ${T.border}`, padding: "3px 5px" }}
                 value={r.recurring_template_id || ""}
-                onChange={e => onUpdate({ recurring_template_id: e.target.value || null })}
+                onChange={e => {
+                  const templateId = e.target.value || null;
+                  const patch = { recurring_template_id: templateId };
+                  if (templateId) {
+                    const tpl = (recurTemplates || []).find(t => t.id === templateId);
+                    if (tpl) {
+                      if (tpl.category_id) patch.category_id = tpl.category_id;
+                      if (tpl.from_id)     patch.from_id     = tpl.from_id;
+                      if (tpl.from_type)   patch.from_type   = tpl.from_type;
+                    }
+                  }
+                  onUpdate(patch);
+                }}
               >
                 <option value="">— Not recurring —</option>
                 {(recurTemplates || [])

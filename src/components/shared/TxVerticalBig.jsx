@@ -1359,7 +1359,15 @@ export default function TxVerticalBig({
                 onChange={e => {
                   if (e.target.checked) {
                     const first = (recurTemplates || []).find(t => t.tx_type === "expense" && t.is_active !== false);
-                    setFormState(f => ({ ...f, recurring_template_id: first?.id || null }));
+                    setFormState(f => {
+                      const patch = { ...f, recurring_template_id: first?.id || null };
+                      if (first) {
+                        if (first.category_id) patch.category_id = first.category_id;
+                        if (first.from_id)     patch.from_id     = first.from_id;
+                        if (first.from_type)   patch.from_type   = first.from_type;
+                      }
+                      return patch;
+                    });
                   } else {
                     setFormState(f => ({ ...f, recurring_template_id: null }));
                   }
@@ -1371,7 +1379,21 @@ export default function TxVerticalBig({
             {form.recurring_template_id && (
               <select
                 value={form.recurring_template_id || ""}
-                onChange={e => setFormState(f => ({ ...f, recurring_template_id: e.target.value || null }))}
+                onChange={e => {
+                  const templateId = e.target.value || null;
+                  setFormState(f => {
+                    const patch = { ...f, recurring_template_id: templateId };
+                    if (templateId) {
+                      const tpl = (recurTemplates || []).find(t => t.id === templateId);
+                      if (tpl) {
+                        if (tpl.category_id) patch.category_id = tpl.category_id;
+                        if (tpl.from_id)     patch.from_id     = tpl.from_id;
+                        if (tpl.from_type)   patch.from_type   = tpl.from_type;
+                      }
+                    }
+                    return patch;
+                  });
+                }}
                 style={{ width: "100%", height: 44, padding: "0 14px", border: "1.5px solid #e5e7eb", borderRadius: 10, fontFamily: FF, fontSize: 14, fontWeight: 500, color: "#111827", background: "#fff", marginTop: 8 }}
               >
                 <option value="">— Select template —</option>

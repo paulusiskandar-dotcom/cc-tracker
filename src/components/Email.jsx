@@ -425,6 +425,8 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
             sender,
             cardLast4: s.card_last4 || aiTx?.card_last4 || null,
             pdfText:   aiTx?.from_account_masked || null,
+            bankName:  aiTx?.from_bank_name || s.from_bank_name || null,
+            currency:  aiTx?.currency || s.currency || null,
             accounts:  spendAccounts,
           });
           if (detected && (detected.confidence === 'high' || detected.confidence === 'medium')) {
