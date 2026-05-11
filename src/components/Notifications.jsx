@@ -262,6 +262,7 @@ export default function Notifications({
         category_id: template.category_id || null,
         entity:    template.entity || "Personal",
         description: template.name || template.description || "Recurring",
+        recurring_template_id: template.id || reminder?.template_id || null,
         merchant_name: null, attachment_url: null,
         ai_categorized: false, ai_confidence: null,
         installment_id: null, scan_batch_id: null, notes: null,

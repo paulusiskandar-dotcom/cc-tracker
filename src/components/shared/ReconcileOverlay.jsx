@@ -1,7 +1,7 @@
 // ReconcileOverlay — shared reconcile mode for Bank & CC statements
 // Provides: upload modal, matching logic, status column renderer, and reconcile bar
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
-import { reconcileApi, ledgerApi, installmentsApi, loanPaymentsApi } from "../../api";
+import { reconcileApi, ledgerApi, installmentsApi, loanPaymentsApi, recurringApi } from "../../api";
 import { merchantRules } from "../../lib/merchantRules";
 import { detectDuplicate } from "../../lib/duplicateDetection";
 import { detectTransferPairs } from "../../lib/transferDetection";
@@ -652,6 +652,12 @@ export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans,
         notes: r.notes || null,
       };
       const created = await ledgerApi.create(user.id, entry, accounts);
+      if (created?.id) {
+        try {
+          const match = await recurringApi.tryAutoMatch(user.id, created);
+          if (match.matched) showToast(`✓ "${match.templateName}" auto-matched (recurring bill confirmed)`);
+        } catch (_) { /* silent */ }
+      }
 
       // Cicilan support
       if (r._cicilan && r._cicilanMonths >= 2 && created?.id) {

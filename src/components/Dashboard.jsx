@@ -668,6 +668,7 @@ export default function Dashboard({
             entity:      "Personal",
             notes:       confirmForm.notes || null,
             category_id: tmpl.category_id || null,
+            recurring_template_id: reminder.template_id || null,
             merchant_name: null, attachment_url: null,
             ai_categorized: false, ai_confidence: null,
             installment_id: null, scan_batch_id: null,

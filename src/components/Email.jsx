@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { gmailApi, settingsApi, ledgerApi, merchantApi, getTxFromToTypes, flattenEmailSync, loanPaymentsApi, installmentsApi } from "../api";
+import { gmailApi, settingsApi, ledgerApi, merchantApi, getTxFromToTypes, flattenEmailSync, loanPaymentsApi, installmentsApi, recurringApi } from "../api";
 import { undoManager } from "../lib/undoManager";
 import { merchantRules } from "../lib/merchantRules";
 import { detectAccount } from "../lib/accountDetection";
@@ -542,6 +542,12 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       const entry = buildEntry(r);
       const created = await ledgerApi.create(user.id, entry, accounts);
       setLedger(p => [created, ...p]);
+      if (created?.id) {
+        try {
+          const match = await recurringApi.tryAutoMatch(user.id, created);
+          if (match.matched) showToast(`✓ "${match.templateName}" auto-matched (recurring bill confirmed)`);
+        } catch (_) { /* silent */ }
+      }
       // Silent learning: persist merchant → category mapping for next time.
       if (entry.category_id && entry.merchant_name && (entry.tx_type === "expense" || entry.tx_type === "income")) {
         merchantApi.upsert(user.id, entry.merchant_name, entry.category_id, entry.category_name, entry.tx_type)
@@ -591,11 +597,18 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     setImporting(true);
     let count = 0;
     const newLedgerIds = [];
+    const matchedNames = [];
     for (const r of selectedRows) {
       try {
         const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
         if (created?.id) newLedgerIds.push(created.id);
         setLedger(p => [created, ...p]);
+        if (created?.id) {
+          try {
+            const match = await recurringApi.tryAutoMatch(user.id, created);
+            if (match.matched) matchedNames.push(match.templateName);
+          } catch (_) { /* silent */ }
+        }
         if (r.tx_type === "collect_loan" && r.employee_loan_id) {
           loanPaymentsApi.recordAndIncrement(user.id, {
             loanId: r.employee_loan_id, payDate: r.tx_date,
@@ -620,6 +633,8 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     setImporting(false);
     setProcessedCount(n => n + count);
     showToast(`${count} transaction${count !== 1 ? "s" : ""} imported`);
+    if (matchedNames.length === 1) showToast(`✓ "${matchedNames[0]}" auto-matched (recurring bill confirmed)`);
+    else if (matchedNames.length > 1) showToast(`${matchedNames.length} bills auto-matched`);
     if (newLedgerIds.length) undoManager.register({ type: "save_batch", ids: newLedgerIds, label: `Saved ${newLedgerIds.length} transaction${newLedgerIds.length !== 1 ? "s" : ""}` });
     draft.clearDraft();
     onRefresh?.();

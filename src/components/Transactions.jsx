@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { ledgerApi, gmailApi, getTxFromToTypes, recalculateBalance } from "../api";
+import { ledgerApi, gmailApi, getTxFromToTypes, recalculateBalance, recurringApi } from "../api";
 import { undoManager } from "../lib/undoManager";
 import { ENTITIES } from "../constants";
 import { fmtIDR, fmtCur, todayStr, ym, groupByDate, fmtDateLabel } from "../utils";
@@ -637,6 +637,12 @@ function PendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, user,
     try {
       const created = await ledgerApi.create(user.id, buildEntry(sync), accounts);
       setLedger(p => [created, ...p]);
+      if (created?.id) {
+        try {
+          const match = await recurringApi.tryAutoMatch(user.id, created);
+          if (match.matched) showToast(`✓ "${match.templateName}" auto-matched (recurring bill confirmed)`);
+        } catch (_) { /* silent */ }
+      }
       await gmailApi.updateSync(sync.email_sync_id || sync.id, { status: "confirmed" });
       removeOne(sync.id);
       showToast("Imported");

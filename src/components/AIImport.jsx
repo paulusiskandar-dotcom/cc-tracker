@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import { undoManager } from "../lib/undoManager";
 import { merchantRules } from "../lib/merchantRules";
-import { ledgerApi, scanApi, merchantApi, getTxFromToTypes, installmentsApi } from "../api";
+import { ledgerApi, scanApi, merchantApi, getTxFromToTypes, installmentsApi, recurringApi } from "../api";
 import { fmtIDR, todayStr, checkDuplicateTransaction, autoCategorize } from "../utils";
 import { detectAccount } from "../lib/accountDetection";
 import AutoDetectBadge from "./shared/AutoDetectBadge";
@@ -555,6 +555,7 @@ export default function AIImport({ user, accounts, categories = [], incomeSrcs =
     setImporting(true);
     let ok = 0, failed = 0;
     const newLedgerIds = [];
+    const matchedNames = [];
     for (const r of validRows) {
       try {
         const entry = buildEntry(r);
@@ -562,6 +563,12 @@ export default function AIImport({ user, accounts, categories = [], incomeSrcs =
         if (created) {
           if (created.id) newLedgerIds.push(created.id);
           setLedger(prev => [created, ...prev]); ok++;
+          if (created.id) {
+            try {
+              const match = await recurringApi.tryAutoMatch(user.id, created);
+              if (match.matched) matchedNames.push(match.templateName);
+            } catch (_) { /* silent */ }
+          }
           // Silent learning: persist merchant → category mapping for next time.
           if (entry.category_id && r.description && (entry.tx_type === "expense" || entry.tx_type === "income")) {
             merchantApi.upsert(user.id, r.description, entry.category_id, entry.category_name, entry.tx_type)
@@ -592,6 +599,8 @@ export default function AIImport({ user, accounts, categories = [], incomeSrcs =
     const skipNote = zeroSkipped > 0 ? `. ${zeroSkipped} skipped (amount = 0)` : "";
     const failNote = failed > 0 ? `. ${failed} failed` : "";
     showToast(`Imported ${ok} of ${rows.length} entries${skipNote}${failNote}`, failed > 0 ? "warning" : undefined);
+    if (matchedNames.length === 1) showToast(`✓ "${matchedNames[0]}" auto-matched (recurring bill confirmed)`);
+    else if (matchedNames.length > 1) showToast(`${matchedNames.length} bills auto-matched`);
     if (newLedgerIds.length) undoManager.register({ type: "save_batch", ids: newLedgerIds, label: `Saved ${newLedgerIds.length} transaction${newLedgerIds.length !== 1 ? "s" : ""}` });
     setImporting(false);
   };
@@ -604,6 +613,12 @@ export default function AIImport({ user, accounts, categories = [], incomeSrcs =
       const created = await ledgerApi.create(user.id, entry, accounts);
       if (created) {
         setLedger(prev => [created, ...prev]);
+        if (created.id) {
+          try {
+            const match = await recurringApi.tryAutoMatch(user.id, created);
+            if (match.matched) showToast(`✓ "${match.templateName}" auto-matched (recurring bill confirmed)`);
+          } catch (_) { /* silent */ }
+        }
         // Silent learning
         if (entry.category_id && r.description && (entry.tx_type === "expense" || entry.tx_type === "income")) {
           merchantApi.upsert(user.id, r.description, entry.category_id, entry.category_name, entry.tx_type)

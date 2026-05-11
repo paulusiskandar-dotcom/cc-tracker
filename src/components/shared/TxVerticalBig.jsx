@@ -25,6 +25,7 @@ import {
   ledgerApi, merchantApi, getTxFromToTypes,
   assetsApi,
   installmentsApi, recalculateBalance, accountsApi, employeeLoanApi,
+  recurringApi,
 } from "../../api";
 import { REIMBURSE_ENTITIES } from "../../constants";
 import { fmtIDR, fmtCur, todayStr, toIDR } from "../../utils";
@@ -702,6 +703,12 @@ export default function TxVerticalBig({
       } else {
         savedEntry = await ledgerApi.create(user.id, entry, accounts);
         setLedger?.(p => [savedEntry, ...p]);
+        if (type === "expense" && savedEntry?.id) {
+          try {
+            const match = await recurringApi.tryAutoMatch(user.id, savedEntry);
+            if (match.matched) showToast(`✓ "${match.templateName}" auto-matched (recurring bill confirmed)`);
+          } catch (_) { /* silent */ }
+        }
         const affectedIds = [
           ...(entry.from_type === "account" && entry.from_id ? [entry.from_id] : []),
           ...(entry.to_type   === "account" && entry.to_id   ? [entry.to_id]   : []),

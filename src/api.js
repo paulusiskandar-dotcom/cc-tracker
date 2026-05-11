@@ -914,6 +914,83 @@ export const recurringApi = {
       if (error) throw new Error(error.message);
     }
   },
+
+  // Try to auto-match a newly-created ledger entry against pending recurring reminders.
+  // Returns { matched: boolean, templateName?, reminderId? }
+  tryAutoMatch: async (userId, ledgerEntry) => {
+    if (!ledgerEntry?.id) return { matched: false };
+    if (ledgerEntry.tx_type !== "expense") return { matched: false };
+    try {
+      const { data: pendingReminders, error } = await supabase
+        .from("recurring_reminders")
+        .select("id, due_date, template_id, recurring_templates(name, tx_type, amount, from_id)")
+        .eq("user_id", userId)
+        .eq("status", "pending");
+      if (error || !pendingReminders?.length) return { matched: false };
+
+      const expenseReminders = pendingReminders.filter(r =>
+        r.recurring_templates?.tx_type === "expense" && r.recurring_templates?.name
+      );
+      if (!expenseReminders.length) return { matched: false };
+
+      const desc = (ledgerEntry.description || "").toLowerCase().trim();
+      if (!desc) return { matched: false };
+
+      const ledgerAmount = Number(ledgerEntry.amount_idr || ledgerEntry.amount || 0);
+      const ledgerDate   = new Date(ledgerEntry.tx_date);
+
+      for (const reminder of expenseReminders) {
+        const tmpl = reminder.recurring_templates;
+        const tmplNameLower = (tmpl.name || "").toLowerCase().trim();
+        if (!tmplNameLower) continue;
+
+        // CHECK 1: Description match — significant words (>= 4 chars)
+        const tmplWords = tmplNameLower.split(/\s+/).filter(w => w.length >= 4);
+        let descMatch = false;
+        if (tmplWords.length >= 2) {
+          descMatch = tmplWords.every(w => desc.includes(w));
+        } else {
+          descMatch = desc.includes(tmplNameLower);
+        }
+        if (!descMatch) continue;
+
+        // CHECK 2: Amount tolerance ±50%
+        const tmplAmount = Number(tmpl.amount || 0);
+        if (tmplAmount > 0 && ledgerAmount > 0) {
+          const ratio = ledgerAmount / tmplAmount;
+          if (ratio < 0.5 || ratio > 1.5) continue;
+        }
+
+        // CHECK 3: Date window ±10 days from reminder.due_date
+        const dueDate  = new Date(reminder.due_date);
+        const diffDays = Math.abs(ledgerDate - dueDate) / (1000 * 60 * 60 * 24);
+        if (diffDays > 10) continue;
+
+        // CHECK 4: from_id match if template specifies
+        if (tmpl.from_id && ledgerEntry.from_id && tmpl.from_id !== ledgerEntry.from_id) continue;
+
+        // MATCH — auto-confirm reminder + stamp ledger
+        const { error: confirmErr } = await supabase
+          .from("recurring_reminders")
+          .update({ status: "confirmed", confirmed_at: new Date().toISOString(), generated_ledger_id: ledgerEntry.id })
+          .eq("id", reminder.id);
+        if (confirmErr) {
+          console.error("[tryAutoMatch] confirm failed:", confirmErr);
+          continue;
+        }
+        await supabase
+          .from("ledger")
+          .update({ recurring_template_id: reminder.template_id })
+          .eq("id", ledgerEntry.id);
+        return { matched: true, templateName: tmpl.name, reminderId: reminder.id };
+      }
+
+      return { matched: false };
+    } catch (err) {
+      console.error("[tryAutoMatch] error:", err);
+      return { matched: false };
+    }
+  },
 };
 
 // ─── MERCHANT MAPPINGS ────────────────────────────────────────

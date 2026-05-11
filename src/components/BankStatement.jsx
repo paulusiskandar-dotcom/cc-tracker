@@ -12,7 +12,7 @@ import ProgressIndicator from "./shared/ProgressIndicator";
 import { useImportDraft } from "../lib/useImportDraft";
 import DraftBanner from "./shared/DraftBanner";
 import PDFViewer from "./shared/PDFViewer";
-import { ledgerApi } from "../api";
+import { ledgerApi, recurringApi } from "../api";
 import * as XLSX from "xlsx";
 
 const FF = "Figtree, sans-serif";
@@ -171,6 +171,7 @@ export default function BankStatement({
     setSavingAll(true);
     let successCount = 0, errCount = 0;
     const newLedgerIds = [];
+    const matchedNames = [];
     for (const stmtRow of missing) {
       // Build default row from statement data, merge with any user edits from the panel
       const defaultRow = {
@@ -207,12 +208,20 @@ export default function BankStatement({
         const created = await ledgerApi.create(user.id, entry, accounts);
         if (created?.id) newLedgerIds.push(created.id);
         successCount++;
+        if (created?.id) {
+          try {
+            const match = await recurringApi.tryAutoMatch(user.id, created);
+            if (match.matched) matchedNames.push(match.templateName);
+          } catch (_) { /* silent */ }
+        }
       } catch (e) { errCount++; console.error("[saveAll]", e); }
     }
     setSavingAll(false);
     reconcile.collapseAll();
     Object.keys(reconcile.pendingRows).forEach(id => reconcile.removePendingRow(id));
     showToast(`Saved ${successCount}${errCount ? `, ${errCount} failed` : ""}`);
+    if (matchedNames.length === 1) showToast(`✓ "${matchedNames[0]}" auto-matched (recurring bill confirmed)`);
+    else if (matchedNames.length > 1) showToast(`${matchedNames.length} bills auto-matched`);
     if (newLedgerIds.length) undoManager.register({ type: "save_batch", ids: newLedgerIds, label: `Saved ${newLedgerIds.length} transaction${newLedgerIds.length !== 1 ? "s" : ""}` });
     load();
     onRefresh?.();
