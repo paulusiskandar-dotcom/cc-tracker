@@ -1812,6 +1812,103 @@ export const reconcileApi = {
   },
 };
 
+// ─── TAGS ─────────────────────────────────────────────────────
+export const tagsApi = {
+  async list(userId, opts = {}) {
+    let q = supabase.from("tags").select("*").eq("user_id", userId);
+    if (opts.status) {
+      q = q.eq("status", opts.status);
+    } else {
+      q = q.neq("status", "archived");
+    }
+    q = q.order("display_order", { ascending: true })
+         .order("created_at", { ascending: false });
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+    return data || [];
+  },
+
+  async create(userId, tag) {
+    const { data, error } = await supabase
+      .from("tags")
+      .insert([{
+        user_id:       userId,
+        name:          tag.name,
+        type:          tag.type          || "trip",
+        start_date:    tag.start_date    || null,
+        end_date:      tag.end_date      || null,
+        notes:         tag.notes         || null,
+        status:        tag.status        || "active",
+        icon:          tag.icon          || null,
+        color:         tag.color         || "#3b5bdb",
+        display_order: tag.display_order || 0,
+      }])
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return data;
+  },
+
+  async update(id, patch) {
+    const { data, error } = await supabase
+      .from("tags")
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return data;
+  },
+
+  // Soft delete via status change — preserves historical data
+  async delete(id) {
+    const { error } = await supabase
+      .from("tags")
+      .update({ status: "archived", updated_at: new Date().toISOString() })
+      .eq("id", id);
+    if (error) throw new Error(error.message);
+  },
+
+  // Hard delete only for empty tags
+  async hardDelete(id) {
+    const { count } = await supabase
+      .from("ledger")
+      .select("id", { count: "exact", head: true })
+      .eq("tag_id", id);
+    if (count && count > 0)
+      throw new Error(`Cannot delete: ${count} transaction(s) still linked. Archive instead.`);
+    const { error } = await supabase.from("tags").delete().eq("id", id);
+    if (error) throw new Error(error.message);
+  },
+
+  // Tags active on a given date (for auto-suggest — Sub-phase 3)
+  async getActiveInRange(userId, date) {
+    const { data, error } = await supabase
+      .from("tags")
+      .select("*")
+      .eq("user_id", userId)
+      .eq("status", "active")
+      .or(`and(start_date.lte.${date},end_date.gte.${date}),and(start_date.is.null,end_date.is.null)`)
+      .order("display_order", { ascending: true });
+    if (error) return [];
+    return data || [];
+  },
+
+  // Compute spend totals from ledger rows
+  async getStats(userId, tagId) {
+    const { data, error } = await supabase
+      .from("ledger")
+      .select("amount_idr, tx_type")
+      .eq("user_id", userId)
+      .eq("tag_id", tagId);
+    if (error || !data) return { totalSpend: 0, transactionCount: 0 };
+    const totalSpend = data
+      .filter(e => e.tx_type === "expense" || e.tx_type === "buy_asset")
+      .reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+    return { totalSpend, transactionCount: data.length };
+  },
+};
+
 const AI_MODEL = "claude-haiku-4-5-20251001";
 
 // ─── AI PROXY ─────────────────────────────────────────────────

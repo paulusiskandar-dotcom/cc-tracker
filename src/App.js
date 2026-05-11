@@ -4,7 +4,7 @@ import {
   Home, ArrowUpDown, Landmark, Wallet, CreditCard,
   TrendingUp, ClipboardList, ArrowDown, BarChart2,
   Calendar as CalendarIcon, Settings as SettingsIcon, LayoutGrid,
-  ClipboardCheck, PiggyBank,
+  ClipboardCheck, PiggyBank, Tag,
 } from "lucide-react";
 import PILogo from "./components/PILogo";
 import { supabase } from "./lib/supabase";
@@ -37,6 +37,7 @@ import AIImport     from "./components/AIImport";
 import Email        from "./components/Email";
 import Reconcile       from "./components/Reconcile";
 import Notifications   from "./components/Notifications";
+import Tags            from "./components/Tags";
 import StatementPage          from "./pages/StatementPage";
 import ReimburseStatementPage from "./pages/ReimburseStatementPage";
 import LoanStatementPage      from "./pages/LoanStatementPage";
@@ -408,6 +409,7 @@ function Finance({ user, signOut }) {
       case "income":       return <Income       {...shared} />;
       case "reports":      return <Reports      {...shared} />;
       case "budget":       return <Budget       {...shared} />;
+      case "tags":         return <Tags         user={user} ledger={ledger} />;
       case "calendar":     return <Calendar     {...shared} />;
       case "settings":     return <Settings     {...shared} signOut={signOut} initialTab={settingsInitialTab} />;
       case "reconcile":    return <Reconcile    {...shared} />;
@@ -607,6 +609,7 @@ function NAV_ICON({ id }) {
     case "income":       return <ArrowDown      {...LUCIDE_PROPS} />;
     case "reports":      return <BarChart2     {...LUCIDE_PROPS} />;
     case "budget":       return <PiggyBank     {...LUCIDE_PROPS} />;
+    case "tags":         return <Tag           {...LUCIDE_PROPS} />;
     case "calendar":     return <CalendarIcon  {...LUCIDE_PROPS} />;
     case "reconcile":    return <ClipboardCheck {...LUCIDE_PROPS} />;
     case "settings":     return <SettingsIcon  {...LUCIDE_PROPS} />;
