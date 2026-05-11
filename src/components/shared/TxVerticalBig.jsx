@@ -732,10 +732,10 @@ export default function TxVerticalBig({
               .maybeSingle();
             if (pendingReminder) {
               await recurringApi.confirmReminder(pendingReminder.id);
-              showToast(`✓ Bill marked and reminder confirmed`);
+              showToast(`✓ Recurring linked and reminder confirmed`);
               if (onRefresh) await onRefresh();
             } else {
-              showToast(`✓ Tagged as Bill`);
+              showToast(`✓ Tagged as Recurring`);
             }
           } catch (err) {
             console.error("Auto-confirm reminder failed:", err);
@@ -1349,9 +1349,9 @@ export default function TxVerticalBig({
         {showCicilan && (
           <CicilanSection enabled={cicilan} onToggle={() => setCicilan(v => !v)} form={form} set={set} />
         )}
-        {/* 11b. Mark as Bill (Expense only) */}
+        {/* 11b. Mark as Recurring (Expense only) */}
         {showCicilan && (
-          <Field label="Mark as Bill (optional)">
+          <Field label="Mark as Recurring (optional)">
             <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>
               <input
                 type="checkbox"
@@ -1366,7 +1366,7 @@ export default function TxVerticalBig({
                 }}
                 style={{ cursor: "pointer" }}
               />
-              <span style={{ color: "#6b7280" }}>This is a recurring bill payment</span>
+              <span style={{ color: "#6b7280" }}>This is a recurring expense</span>
             </label>
             {form.recurring_template_id && (
               <select
@@ -1374,7 +1374,7 @@ export default function TxVerticalBig({
                 onChange={e => setFormState(f => ({ ...f, recurring_template_id: e.target.value || null }))}
                 style={{ width: "100%", height: 44, padding: "0 14px", border: "1.5px solid #e5e7eb", borderRadius: 10, fontFamily: FF, fontSize: 14, fontWeight: 500, color: "#111827", background: "#fff", marginTop: 8 }}
               >
-                <option value="">— Select bill —</option>
+                <option value="">— Select template —</option>
                 {(recurTemplates || [])
                   .filter(t => t.tx_type === "expense" && t.is_active !== false)
                   .map(t => (

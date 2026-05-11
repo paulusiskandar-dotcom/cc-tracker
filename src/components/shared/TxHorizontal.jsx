@@ -771,13 +771,13 @@ function TxHorizontalCard({
           {/* Bill picker — expense only */}
           {r.tx_type === "expense" && (
             <div style={{ display: "flex", gap: 6, alignItems: "center", flex: "0 0 40%" }}>
-              <span style={{ fontSize: 10, fontWeight: 700, color: T.text3, textTransform: "uppercase", letterSpacing: "0.04em", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>Bill</span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: T.text3, textTransform: "uppercase", letterSpacing: "0.04em", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>Recurring</span>
               <select
                 style={{ ...inSel(T), flex: 1, border: `1px solid ${T.border}`, padding: "3px 5px" }}
                 value={r.recurring_template_id || ""}
                 onChange={e => onUpdate({ recurring_template_id: e.target.value || null })}
               >
-                <option value="">— Not a bill —</option>
+                <option value="">— Not recurring —</option>
                 {(recurTemplates || [])
                   .filter(t => t.tx_type === "expense" && t.is_active !== false)
                   .map(t => <option key={t.id} value={t.id}>🔁 {t.name}</option>)}
