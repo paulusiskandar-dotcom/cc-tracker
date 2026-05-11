@@ -15,6 +15,7 @@ const SUBTABS = [
   { id: "income",    label: "Income" },
   { id: "transfer",  label: "Transfers" },
   { id: "reimburse", label: "Reimburse" },
+  { id: "bills",     label: "Bills" },
 ];
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────
@@ -46,6 +47,7 @@ export default function Transactions({
     else if (subTab === "income")    list = list.filter(e => e.tx_type === "income");
     else if (subTab === "transfer")  list = list.filter(e => ["transfer","pay_cc","fx_exchange"].includes(e.tx_type));
     else if (subTab === "reimburse") list = list.filter(e => e.is_reimburse || e.tx_type === "reimburse_out" || e.tx_type === "reimburse_in");
+    else if (subTab === "bills")     list = list.filter(e => !!e.recurring_template_id);
     if (filterMonth)  list = list.filter(e => ym(e.tx_date) === filterMonth);
     if (filterEntity) list = list.filter(e => e.entity === filterEntity);
     if (filterAccId)  list = list.filter(e => e.from_id === filterAccId || e.to_id === filterAccId);
@@ -487,6 +489,7 @@ function TxRow({ entry: e, accounts, categories = [], onEdit, onDelete }) {
   };
 
   const meta = renderMeta();
+  const isBill = !!e.recurring_template_id;
 
   return (
     <div style={{ borderBottom: "1px solid #f9fafb" }}>
@@ -520,12 +523,15 @@ function TxRow({ entry: e, accounts, categories = [], onEdit, onDelete }) {
           }}>
             {e.description || "—"}
           </div>
-          {meta && (
+          {(meta || isBill) && (
             <div style={{
               fontSize: 11, color: "#9ca3af",
               fontFamily: "Figtree, sans-serif",
               marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
             }}>
+              {isBill && (
+                <span style={{ fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 4, background: "#EDE8FF", color: "#5B2DC4", marginRight: 4, verticalAlign: "middle", display: "inline-block" }}>🔁 Bill</span>
+              )}
               {meta}
             </div>
           )}
