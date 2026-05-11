@@ -27,6 +27,7 @@ import {
   installmentsApi, recalculateBalance, accountsApi, employeeLoanApi,
   recurringApi,
 } from "../../api";
+import { supabase } from "../../lib/supabase";
 import { REIMBURSE_ENTITIES } from "../../constants";
 import { fmtIDR, fmtCur, todayStr, toIDR } from "../../utils";
 import Modal from "./Modal";
@@ -77,6 +78,7 @@ const EMPTY = () => ({
   asset_name: "", asset_type: "Investment", asset_mode: "existing", asset_id: null,
   // fx_exchange extras
   fx_rate_used: "",
+  recurring_template_id: null,
 });
 
 const ASSET_TYPES = ["Property","Vehicle","Investment","Crypto","Collectible","Other"];
@@ -230,6 +232,7 @@ export default function TxVerticalBig({
   bankAccounts = [], creditCards = [], assets = [],
   liabilities = [], receivables = [], incomeSrcs = [],
   employeeLoans = [], setEmployeeLoans,
+  recurTemplates = [],
   onRefresh,
 }) {
   const [form,    setFormState] = useState(EMPTY);
@@ -296,6 +299,7 @@ export default function TxVerticalBig({
         monthly_installment: initialData.monthly_installment || "",
         loan_start_date:  initialData.loan_start_date || todayStr(),
         fx_rate_used:     initialData.fx_rate_used || "",
+        recurring_template_id: initialData.recurring_template_id || null,
       });
       setGroup(groupForType(txType));
 
@@ -686,6 +690,7 @@ export default function TxVerticalBig({
         ai_confidence:  null,
         installment_id: installmentId,
         scan_batch_id:  null,
+        recurring_template_id: form.recurring_template_id || null,
       };
 
       let savedEntry;
@@ -703,11 +708,38 @@ export default function TxVerticalBig({
       } else {
         savedEntry = await ledgerApi.create(user.id, entry, accounts);
         setLedger?.(p => [savedEntry, ...p]);
-        if (type === "expense" && savedEntry?.id) {
+        // DISABLED 2026-05-11 — replaced with manual Bill picker UX
+        // if (type === "expense" && savedEntry?.id) {
+        //   const match = await recurringApi.tryAutoMatch(user.id, savedEntry);
+        //   if (match.matched) showToast(`✓ "${match.templateName}" auto-matched`);
+        // }
+        // Auto-confirm matching pending reminder if Bill picker used
+        if (form.recurring_template_id && savedEntry?.id) {
           try {
-            const match = await recurringApi.tryAutoMatch(user.id, savedEntry);
-            if (match.matched) showToast(`✓ "${match.templateName}" auto-matched (recurring bill confirmed)`);
-          } catch (_) { /* silent */ }
+            const txDate = new Date(form.tx_date);
+            const minDate = new Date(txDate); minDate.setDate(minDate.getDate() - 15);
+            const maxDate = new Date(txDate); maxDate.setDate(maxDate.getDate() + 15);
+            const { data: pendingReminder } = await supabase
+              .from("recurring_reminders")
+              .select("id, due_date")
+              .eq("user_id", user.id)
+              .eq("template_id", form.recurring_template_id)
+              .eq("status", "pending")
+              .gte("due_date", minDate.toISOString().slice(0, 10))
+              .lte("due_date", maxDate.toISOString().slice(0, 10))
+              .order("due_date", { ascending: true })
+              .limit(1)
+              .maybeSingle();
+            if (pendingReminder) {
+              await recurringApi.confirmReminder(pendingReminder.id);
+              showToast(`✓ Bill marked and reminder confirmed`);
+              if (onRefresh) await onRefresh();
+            } else {
+              showToast(`✓ Tagged as Bill`);
+            }
+          } catch (err) {
+            console.error("Auto-confirm reminder failed:", err);
+          }
         }
         const affectedIds = [
           ...(entry.from_type === "account" && entry.from_id ? [entry.from_id] : []),
@@ -1316,6 +1348,41 @@ export default function TxVerticalBig({
         {/* 11. Cicilan (Expense only) */}
         {showCicilan && (
           <CicilanSection enabled={cicilan} onToggle={() => setCicilan(v => !v)} form={form} set={set} />
+        )}
+        {/* 11b. Mark as Bill (Expense only) */}
+        {showCicilan && (
+          <Field label="Mark as Bill (optional)">
+            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={!!form.recurring_template_id}
+                onChange={e => {
+                  if (e.target.checked) {
+                    const first = (recurTemplates || []).find(t => t.tx_type === "expense" && t.is_active !== false);
+                    setFormState(f => ({ ...f, recurring_template_id: first?.id || null }));
+                  } else {
+                    setFormState(f => ({ ...f, recurring_template_id: null }));
+                  }
+                }}
+                style={{ cursor: "pointer" }}
+              />
+              <span style={{ color: "#6b7280" }}>This is a recurring bill payment</span>
+            </label>
+            {form.recurring_template_id && (
+              <select
+                value={form.recurring_template_id || ""}
+                onChange={e => setFormState(f => ({ ...f, recurring_template_id: e.target.value || null }))}
+                style={{ width: "100%", height: 44, padding: "0 14px", border: "1.5px solid #e5e7eb", borderRadius: 10, fontFamily: FF, fontSize: 14, fontWeight: 500, color: "#111827", background: "#fff", marginTop: 8 }}
+              >
+                <option value="">— Select bill —</option>
+                {(recurTemplates || [])
+                  .filter(t => t.tx_type === "expense" && t.is_active !== false)
+                  .map(t => (
+                    <option key={t.id} value={t.id}>🔁 {t.name}</option>
+                  ))}
+              </select>
+            )}
+          </Field>
         )}
         {/* 12. Notes */}
         {notesField}

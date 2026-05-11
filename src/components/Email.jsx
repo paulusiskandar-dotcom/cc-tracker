@@ -542,12 +542,11 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       const entry = buildEntry(r);
       const created = await ledgerApi.create(user.id, entry, accounts);
       setLedger(p => [created, ...p]);
-      if (created?.id) {
-        try {
-          const match = await recurringApi.tryAutoMatch(user.id, created);
-          if (match.matched) showToast(`✓ "${match.templateName}" auto-matched (recurring bill confirmed)`);
-        } catch (_) { /* silent */ }
-      }
+      // DISABLED 2026-05-11 — replaced with manual Bill picker via TxVerticalBig modal
+      // if (created?.id) {
+      //   const match = await recurringApi.tryAutoMatch(user.id, created);
+      //   if (match.matched) showToast(`✓ "${match.templateName}" auto-matched`);
+      // }
       // Silent learning: persist merchant → category mapping for next time.
       if (entry.category_id && entry.merchant_name && (entry.tx_type === "expense" || entry.tx_type === "income")) {
         merchantApi.upsert(user.id, entry.merchant_name, entry.category_id, entry.category_name, entry.tx_type)
@@ -603,12 +602,11 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
         const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
         if (created?.id) newLedgerIds.push(created.id);
         setLedger(p => [created, ...p]);
-        if (created?.id) {
-          try {
-            const match = await recurringApi.tryAutoMatch(user.id, created);
-            if (match.matched) matchedNames.push(match.templateName);
-          } catch (_) { /* silent */ }
-        }
+        // DISABLED 2026-05-11 — replaced with manual Bill picker via TxVerticalBig modal
+        // if (created?.id) {
+        //   const match = await recurringApi.tryAutoMatch(user.id, created);
+        //   if (match.matched) matchedNames.push(match.templateName);
+        // }
         if (r.tx_type === "collect_loan" && r.employee_loan_id) {
           loanPaymentsApi.recordAndIncrement(user.id, {
             loanId: r.employee_loan_id, payDate: r.tx_date,
