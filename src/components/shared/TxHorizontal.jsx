@@ -452,7 +452,7 @@ function AccountCell({ r, onUpdate, T, accounts, employeeLoans }) {
 function TxHorizontalCard({
   r, isSelected, isSkipped, isNotesOpen, T,
   source, accounts, employeeLoans, txTypes,
-  categories, incomeSrcs,
+  categories, incomeSrcs, recurTemplates = [],
   onUpdate, onConfirm, onSkip, onToggleSelect, onToggleNotes,
   onCreateInstallment, confirmingId, onMergeTransfer,
 }) {
@@ -755,16 +755,35 @@ function TxHorizontalCard({
         </div>
       )}
 
-      {/* ── Notes ── */}
+      {/* ── Notes + Bill picker ── */}
       {isNotesOpen && (
-        <div style={{ borderTop: `1px solid ${T.border}`, background: T.sur2, padding: "6px 10px 8px 32px", display: "flex", gap: 6, alignItems: "center" }}>
-          <span style={{ fontSize: 10, fontWeight: 700, color: T.text3, textTransform: "uppercase", letterSpacing: "0.04em", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>Notes</span>
-          <input
-            style={{ ...inSel(T), flex: 1, border: `1px solid ${T.border}`, padding: "3px 5px" }}
-            value={r.notes || ""}
-            onChange={e => onUpdate({ notes: e.target.value })}
-            placeholder="Optional notes…"
-          />
+        <div style={{ borderTop: `1px solid ${T.border}`, background: T.sur2, padding: "6px 10px 8px 32px", display: "flex", gap: 12, alignItems: "center" }}>
+          {/* Notes — narrower when bill picker is shown */}
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flex: r.tx_type === "expense" ? "0 0 55%" : "1" }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: T.text3, textTransform: "uppercase", letterSpacing: "0.04em", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>Notes</span>
+            <input
+              style={{ ...inSel(T), flex: 1, border: `1px solid ${T.border}`, padding: "3px 5px" }}
+              value={r.notes || ""}
+              onChange={e => onUpdate({ notes: e.target.value })}
+              placeholder="Optional notes…"
+            />
+          </div>
+          {/* Bill picker — expense only */}
+          {r.tx_type === "expense" && (
+            <div style={{ display: "flex", gap: 6, alignItems: "center", flex: "0 0 40%" }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: T.text3, textTransform: "uppercase", letterSpacing: "0.04em", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>Bill</span>
+              <select
+                style={{ ...inSel(T), flex: 1, border: `1px solid ${T.border}`, padding: "3px 5px" }}
+                value={r.recurring_template_id || ""}
+                onChange={e => onUpdate({ recurring_template_id: e.target.value || null })}
+              >
+                <option value="">— Not a bill —</option>
+                {(recurTemplates || [])
+                  .filter(t => t.tx_type === "expense" && t.is_active !== false)
+                  .map(t => <option key={t.id} value={t.id}>🔁 {t.name}</option>)}
+              </select>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -830,6 +849,7 @@ export default function TxHorizontal({
   hideBatchFooter = false,
   categories = [],
   incomeSrcs = [],
+  recurTemplates = [],
 }) {
   const [notesOpen,    setNotesOpen]    = useState(new Set());
   const [confirmingId, setConfirmingId] = useState(null);
@@ -1185,6 +1205,7 @@ export default function TxHorizontal({
                     txTypes={txTypes}
                     categories={categories}
                     incomeSrcs={incomeSrcs}
+                    recurTemplates={recurTemplates}
                     onUpdate={patch => onUpdateRow(r._id, patch)}
                     onConfirm={() => handleConfirmRow(r)}
                     onSkip={onSkipRow}

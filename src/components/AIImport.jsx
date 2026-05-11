@@ -73,7 +73,7 @@ const fmtDateShort = (d) => {
 };
 
 // ─────────────────────────────────────────────────────────────────
-export default function AIImport({ user, accounts, categories = [], incomeSrcs = [], ledger, onRefresh, setLedger, dark, merchantMaps = [], fxRates = {}, CURRENCIES = [], setPendingSyncs, employeeLoans = [] }) {
+export default function AIImport({ user, accounts, categories = [], incomeSrcs = [], ledger, onRefresh, setLedger, dark, merchantMaps = [], fxRates = {}, CURRENCIES = [], setPendingSyncs, employeeLoans = [], recurTemplates = [] }) {
   const T = dark ? DARK : LIGHT;
   const fileRef = useRef();
 
@@ -540,6 +540,7 @@ export default function AIImport({ user, accounts, categories = [], incomeSrcs =
       notes:          r.notes || "",
       source:         "ai_scan",
       scan_batch_id:  batchId || null,
+      recurring_template_id: r.recurring_template_id || null,
       ...(r.tx_type === "give_loan" && r.new_loan  ? { new_loan:  r.new_loan  } : {}),
       ...(r.tx_type === "buy_asset"  && r.new_asset ? { new_asset: r.new_asset } : {}),
     };
@@ -563,11 +564,22 @@ export default function AIImport({ user, accounts, categories = [], incomeSrcs =
         if (created) {
           if (created.id) newLedgerIds.push(created.id);
           setLedger(prev => [created, ...prev]); ok++;
-          if (created.id) {
+          // DISABLED 2026-05-11 — replaced with manual Bill picker
+          // tryAutoMatch(user.id, created)
+          // Auto-confirm matching pending reminder if Bill picker was used
+          if (entry.recurring_template_id && created.id) {
             try {
-              const match = await recurringApi.tryAutoMatch(user.id, created);
-              if (match.matched) matchedNames.push(match.templateName);
-            } catch (_) { /* silent */ }
+              const txDate = new Date(entry.tx_date);
+              const minDate = new Date(txDate); minDate.setDate(minDate.getDate() - 15);
+              const maxDate = new Date(txDate); maxDate.setDate(maxDate.getDate() + 15);
+              const { data: pr } = await supabase
+                .from("recurring_reminders").select("id")
+                .eq("user_id", user.id).eq("template_id", entry.recurring_template_id).eq("status", "pending")
+                .gte("due_date", minDate.toISOString().slice(0, 10))
+                .lte("due_date", maxDate.toISOString().slice(0, 10))
+                .order("due_date", { ascending: true }).limit(1).maybeSingle();
+              if (pr) { await recurringApi.confirmReminder(pr.id); matchedNames.push(r.description || "Bill"); }
+            } catch (err) { console.error("Auto-confirm reminder failed:", err); }
           }
           // Silent learning: persist merchant → category mapping for next time.
           if (entry.category_id && r.description && (entry.tx_type === "expense" || entry.tx_type === "income")) {
@@ -613,11 +625,23 @@ export default function AIImport({ user, accounts, categories = [], incomeSrcs =
       const created = await ledgerApi.create(user.id, entry, accounts);
       if (created) {
         setLedger(prev => [created, ...prev]);
-        if (created.id) {
+        // DISABLED 2026-05-11 — replaced with manual Bill picker
+        // tryAutoMatch(user.id, created)
+        // Auto-confirm matching pending reminder if Bill picker was used
+        if (entry.recurring_template_id && created.id) {
           try {
-            const match = await recurringApi.tryAutoMatch(user.id, created);
-            if (match.matched) showToast(`✓ "${match.templateName}" auto-matched (recurring bill confirmed)`);
-          } catch (_) { /* silent */ }
+            const txDate = new Date(entry.tx_date);
+            const minDate = new Date(txDate); minDate.setDate(minDate.getDate() - 15);
+            const maxDate = new Date(txDate); maxDate.setDate(maxDate.getDate() + 15);
+            const { data: pr } = await supabase
+              .from("recurring_reminders").select("id")
+              .eq("user_id", user.id).eq("template_id", entry.recurring_template_id).eq("status", "pending")
+              .gte("due_date", minDate.toISOString().slice(0, 10))
+              .lte("due_date", maxDate.toISOString().slice(0, 10))
+              .order("due_date", { ascending: true }).limit(1).maybeSingle();
+            if (pr) { await recurringApi.confirmReminder(pr.id); showToast("✓ Bill marked and reminder confirmed"); onRefresh?.(); }
+            else showToast("✓ Tagged as Bill");
+          } catch (err) { console.error("Auto-confirm reminder failed:", err); }
         }
         // Silent learning
         if (entry.category_id && r.description && (entry.tx_type === "expense" || entry.tx_type === "income")) {
@@ -812,6 +836,7 @@ export default function AIImport({ user, accounts, categories = [], incomeSrcs =
             employeeLoans={employeeLoans}
             categories={categories}
             incomeSrcs={incomeSrcs}
+            recurTemplates={recurTemplates}
             T={T}
             busy={importing}
             onRefreshScan={batchFilePath ? handleRefreshScan : null}

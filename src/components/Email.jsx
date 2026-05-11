@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { gmailApi, settingsApi, ledgerApi, merchantApi, getTxFromToTypes, flattenEmailSync, loanPaymentsApi, installmentsApi, recurringApi } from "../api";
+import { supabase } from "../lib/supabase";
 import { undoManager } from "../lib/undoManager";
 import { merchantRules } from "../lib/merchantRules";
 import { detectAccount } from "../lib/accountDetection";
@@ -61,6 +62,7 @@ export default function Email({
   dark, onRefresh,
   employeeLoans = [],
   merchantMaps = [],
+  recurTemplates = [],
   initialTab = "pending",
 }) {
   const T = dark ? DARK : LIGHT;
@@ -209,6 +211,7 @@ export default function Email({
           T={T}
           employeeLoans={employeeLoans}
           merchantMaps={merchantMaps}
+          recurTemplates={recurTemplates}
         />
       )}
 
@@ -368,7 +371,7 @@ export default function Email({
 // ─── EMAIL PENDING TAB ────────────────────────────────────────────
 const GMAIL_NO_CAT = new Set(["transfer","pay_cc","give_loan","collect_loan","fx_exchange","reimburse_in","reimburse_out","buy_asset","sell_asset","pay_liability"]);
 
-function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, incomeSrcs = [], user, ledger, setLedger, onRefresh, dark, T: theme, employeeLoans = [], merchantMaps = [] }) {
+function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, incomeSrcs = [], user, ledger, setLedger, onRefresh, dark, T: theme, employeeLoans = [], merchantMaps = [], recurTemplates = [] }) {
   const T = theme || LIGHT;
 
   // Local editable rows (mirrors pendingSyncs but editable)
@@ -534,6 +537,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       notes,
       source:        "gmail",
       email_sync_id: r.email_sync_id || r._id,
+      recurring_template_id: r.recurring_template_id || null,
     };
   };
 
@@ -542,11 +546,22 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       const entry = buildEntry(r);
       const created = await ledgerApi.create(user.id, entry, accounts);
       setLedger(p => [created, ...p]);
-      // DISABLED 2026-05-11 — replaced with manual Bill picker via TxVerticalBig modal
-      // if (created?.id) {
-      //   const match = await recurringApi.tryAutoMatch(user.id, created);
-      //   if (match.matched) showToast(`✓ "${match.templateName}" auto-matched`);
-      // }
+      // Auto-confirm matching pending reminder if Bill picker was used
+      if (entry.recurring_template_id && created?.id) {
+        try {
+          const txDate = new Date(entry.tx_date);
+          const minDate = new Date(txDate); minDate.setDate(minDate.getDate() - 15);
+          const maxDate = new Date(txDate); maxDate.setDate(maxDate.getDate() + 15);
+          const { data: pr } = await supabase
+            .from("recurring_reminders").select("id")
+            .eq("user_id", user.id).eq("template_id", entry.recurring_template_id).eq("status", "pending")
+            .gte("due_date", minDate.toISOString().slice(0, 10))
+            .lte("due_date", maxDate.toISOString().slice(0, 10))
+            .order("due_date", { ascending: true }).limit(1).maybeSingle();
+          if (pr) { await recurringApi.confirmReminder(pr.id); showToast("✓ Bill marked and reminder confirmed"); onRefresh?.(); }
+          else showToast("✓ Tagged as Bill");
+        } catch (err) { console.error("Auto-confirm reminder failed:", err); }
+      }
       // Silent learning: persist merchant → category mapping for next time.
       if (entry.category_id && entry.merchant_name && (entry.tx_type === "expense" || entry.tx_type === "income")) {
         merchantApi.upsert(user.id, entry.merchant_name, entry.category_id, entry.category_name, entry.tx_type)
@@ -599,14 +614,25 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     const matchedNames = [];
     for (const r of selectedRows) {
       try {
-        const created = await ledgerApi.create(user.id, buildEntry(r), accounts);
+        const builtEntry = buildEntry(r);
+        const created = await ledgerApi.create(user.id, builtEntry, accounts);
         if (created?.id) newLedgerIds.push(created.id);
         setLedger(p => [created, ...p]);
-        // DISABLED 2026-05-11 — replaced with manual Bill picker via TxVerticalBig modal
-        // if (created?.id) {
-        //   const match = await recurringApi.tryAutoMatch(user.id, created);
-        //   if (match.matched) matchedNames.push(match.templateName);
-        // }
+        // Auto-confirm matching pending reminder if Bill picker was used
+        if (builtEntry.recurring_template_id && created?.id) {
+          try {
+            const txDate = new Date(builtEntry.tx_date);
+            const minDate = new Date(txDate); minDate.setDate(minDate.getDate() - 15);
+            const maxDate = new Date(txDate); maxDate.setDate(maxDate.getDate() + 15);
+            const { data: pr } = await supabase
+              .from("recurring_reminders").select("id")
+              .eq("user_id", user.id).eq("template_id", builtEntry.recurring_template_id).eq("status", "pending")
+              .gte("due_date", minDate.toISOString().slice(0, 10))
+              .lte("due_date", maxDate.toISOString().slice(0, 10))
+              .order("due_date", { ascending: true }).limit(1).maybeSingle();
+            if (pr) { await recurringApi.confirmReminder(pr.id); matchedNames.push(r.description || "Bill"); }
+          } catch (err) { console.error("Auto-confirm reminder failed:", err); }
+        }
         if (r.tx_type === "collect_loan" && r.employee_loan_id) {
           loanPaymentsApi.recordAndIncrement(user.id, {
             loanId: r.employee_loan_id, payDate: r.tx_date,
@@ -714,6 +740,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
           employeeLoans={employeeLoans}
           categories={categories}
           incomeSrcs={incomeSrcs}
+          recurTemplates={recurTemplates}
           T={T}
           busy={importing}
           onMergeTransfer={handleMergeTransfer}
