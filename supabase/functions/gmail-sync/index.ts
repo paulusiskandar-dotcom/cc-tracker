@@ -244,26 +244,60 @@ function extractVisibleSuffix(masked: string): string | null {
 
 // Match a masked account string against the user's accounts list.
 // Returns the best matching account id, or null if no confident match.
-function matchAccount(masked: string | null, bankName: string | null, accounts: any[]): string | null {
+function matchAccount(
+  masked: string | null,
+  bankName: string | null,
+  accounts: any[],
+  currency: string | null = null,
+): string | null {
   if (!masked || accounts.length === 0) return null;
 
   const suffix = extractVisibleSuffix(masked);
-  if (!suffix || suffix.length < 4) return null;
+  if (!suffix || suffix.length < 2) return null;
 
-  // Filter by bank if we know it
+  // Filter by bank + active status
   const pool = bankName
-    ? accounts.filter(a => a.bank_name && a.bank_name.toLowerCase().includes(bankName.toLowerCase()))
-    : accounts;
+    ? accounts.filter(a =>
+        a.bank_name &&
+        a.bank_name.toLowerCase() === bankName.toLowerCase() &&
+        a.is_active
+      )
+    : accounts.filter(a => a.is_active);
 
-  // Try suffix match against account_no
-  const byAccountNo = pool.filter(a => a.account_no && String(a.account_no).endsWith(suffix));
-  if (byAccountNo.length === 1) return byAccountNo[0].id;
+  if (pool.length === 0) return null;
 
-  // Try suffix match against last4
-  const byLast4 = pool.filter(a => a.last4 && String(a.last4) === suffix.slice(-4));
-  if (byLast4.length === 1) return byLast4[0].id;
+  // Disambiguate a list of candidates by currency, then by sort_order
+  const pickBest = (candidates: any[]): string | null => {
+    if (candidates.length === 0) return null;
+    if (candidates.length === 1) return candidates[0].id;
+    if (currency) {
+      const byCur = candidates.filter(a =>
+        a.currency && a.currency.toLowerCase() === currency.toLowerCase()
+      );
+      if (byCur.length === 1) return byCur[0].id;
+      if (byCur.length > 1) {
+        const sorted = [...byCur].sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999));
+        return sorted[0].id;
+      }
+    }
+    const sorted = [...candidates].sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999));
+    return sorted[0].id;
+  };
 
-  // Ambiguous or no match — return null so user can assign manually
+  // Try suffix match against account_no, then card_last4, at decreasing lengths
+  for (const len of [4, 3, 2]) {
+    if (suffix.length < len) continue;
+    const target = suffix.slice(-len);
+
+    const byAccountNo = pool.filter(a => a.account_no && String(a.account_no).endsWith(target));
+    const pickedAcct = pickBest(byAccountNo);
+    if (pickedAcct) return pickedAcct;
+
+    const byCardLast4 = pool.filter(a => a.card_last4 && String(a.card_last4).endsWith(target));
+    const pickedCard = pickBest(byCardLast4);
+    if (pickedCard) return pickedCard;
+  }
+
   return null;
 }
 
@@ -274,11 +308,13 @@ function resolveAccountIds(transactions: any[], accounts: any[]): any[] {
       tx.from_account_masked || tx.from_account_no || null,
       tx.from_bank_name || null,
       accounts,
+      tx.currency || null,
     );
     const toId = matchAccount(
-      tx.to_account_no || null,
+      tx.to_account_masked || tx.to_account_no || null,
       tx.to_bank_name || null,
       accounts,
+      tx.currency || null,
     );
     return { ...tx, from_account_id: fromId, to_account_id: toId };
   });
