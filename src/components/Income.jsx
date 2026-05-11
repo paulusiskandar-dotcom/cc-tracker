@@ -478,6 +478,23 @@ function NfSubGroup({ title, total, percentage, items, defaultCollapsed = true }
   );
 }
 
+function CashFlowKPI({ label, value, color, sublabel, prefix = "" }) {
+  return (
+    <div style={{
+      background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 12,
+      padding: "14px 16px", borderTop: `3px solid ${color}`,
+    }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 20, fontWeight: 800, color, marginTop: 4 }}>
+        {prefix}{fmtIDR(value)}
+      </div>
+      <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 4 }}>{sublabel}</div>
+    </div>
+  );
+}
+
 // ── ForecastCard ─────────────────────────────────────────────────
 function ForecastCard({ forecast }) {
   const max = Math.max(...forecast.monthsAhead.map(m => m.amount), 1);
@@ -569,6 +586,7 @@ export default function Income({
   const [addIncModal,   setAddIncModal]   = useState(false);
   const [presetSrcId,   setPresetSrcId]   = useState(null);
   const [saving,        setSaving]        = useState(false);
+  const [historyFilterSrc, setHistoryFilterSrc] = useState("");
 
   const bankAccounts = useMemo(() => accounts.filter(a => a.type === "bank"), [accounts]);
 
@@ -766,6 +784,53 @@ export default function Income({
     };
   }, [forecast.totalMonthlyProjection, recurTemplates, installments, ledger]);
 
+  // ── History data: last 12 months grouped income ──────────────
+  const historyData = useMemo(() => {
+    const now = new Date();
+    const months = [];
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = ym(d.toISOString().slice(0, 10));
+      const label = d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+      const txs = (ledger || [])
+        .filter(e => e.tx_type === "income" && ym(e.tx_date) === key)
+        .sort((a, b) => (b.tx_date || "").localeCompare(a.tx_date || ""));
+      const total = txs.reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+      months.push({ key, label, txs, total, count: txs.length });
+    }
+    return months;
+  }, [ledger]);
+
+  // ── Cash flow data: income vs spend last 12 months ───────────
+  const cashFlowData = useMemo(() => {
+    const now = new Date();
+    const months = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = ym(d.toISOString().slice(0, 10));
+      const label = d.toLocaleDateString("en-US", { month: "short" });
+      const monthLedger = (ledger || []).filter(e => ym(e.tx_date) === key);
+      const income = monthLedger
+        .filter(e => e.tx_type === "income")
+        .reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+      const spend = monthLedger
+        .filter(e => e.tx_type === "expense" || e.tx_type === "buy_asset")
+        .reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+      months.push({ key, label, income, spend, net: income - spend });
+    }
+    const totalIncome = months.reduce((s, m) => s + m.income, 0);
+    const totalSpend  = months.reduce((s, m) => s + m.spend,  0);
+    const totalNet    = totalIncome - totalSpend;
+    const maxValue    = Math.max(...months.map(m => Math.max(m.income, m.spend)), 1);
+    return {
+      months,
+      avgIncome: totalIncome / 12,
+      avgSpend:  totalSpend  / 12,
+      avgNet:    totalNet    / 12,
+      maxValue,
+    };
+  }, [ledger]);
+
   // ── CRUD handlers ────────────────────────────────────────────
   const handleSaveSource = async (patch) => {
     setSaving(true);
@@ -912,18 +977,197 @@ export default function Income({
         </>
       )}
 
-      {/* ── History tab (placeholder C-2) ── */}
+      {/* ── History tab ── */}
       {tab === "history" && (
-        <div style={{ background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 16, padding: "48px 24px", textAlign: "center", color: "#9ca3af", fontSize: 13 }}>
-          History view — coming in C-2
-        </div>
+        <>
+          {/* Filter bar */}
+          <div style={{
+            background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 12,
+            padding: "12px 16px", marginBottom: 16,
+            display: "flex", gap: 12, alignItems: "center", fontFamily: FF,
+          }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>
+              Filter source
+            </span>
+            <select
+              value={historyFilterSrc}
+              onChange={e => setHistoryFilterSrc(e.target.value)}
+              style={{
+                padding: "6px 10px", border: "1px solid #d1d5db", borderRadius: 6,
+                fontSize: 13, fontFamily: FF, background: "#fff", minWidth: 180,
+              }}
+            >
+              <option value="">All sources</option>
+              {(incomeSrcs || []).map(src => (
+                <option key={src.id} value={src.id}>{src.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Monthly groups */}
+          {historyData.map(m => {
+            const filteredTxs = historyFilterSrc
+              ? m.txs.filter(tx => tx.from_id === historyFilterSrc)
+              : m.txs;
+            const filteredTotal = filteredTxs.reduce((s, tx) => s + Number(tx.amount_idr || 0), 0);
+            if (filteredTxs.length === 0 && historyFilterSrc) return null;
+            return (
+              <div key={m.key} style={{
+                background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 12,
+                marginBottom: 12, overflow: "hidden", fontFamily: FF,
+              }}>
+                {/* Month header */}
+                <div style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "baseline",
+                  padding: "12px 16px", background: "#fafafa", borderBottom: "1px solid #f3f4f6",
+                }}>
+                  <div>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>{m.label}</span>
+                    <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: 8 }}>
+                      {filteredTxs.length} {filteredTxs.length === 1 ? "entry" : "entries"}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: 15, fontWeight: 800, color: "#059669" }}>
+                    +{fmtIDR(filteredTotal)}
+                  </span>
+                </div>
+                {/* Tx list */}
+                {filteredTxs.length === 0 ? (
+                  <div style={{ padding: 20, textAlign: "center", color: "#9ca3af", fontSize: 12 }}>
+                    No income in this month
+                  </div>
+                ) : (
+                  filteredTxs.map(tx => {
+                    const source  = (incomeSrcs || []).find(s => s.id === tx.from_id);
+                    const account = (accounts    || []).find(a => a.id === tx.to_id);
+                    return (
+                      <div key={tx.id} style={{
+                        display: "flex", justifyContent: "space-between", alignItems: "baseline",
+                        padding: "10px 16px", borderBottom: "1px solid #f3f4f6", fontSize: 13,
+                      }}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, color: "#111827", marginBottom: 2 }}>
+                            {tx.description || source?.name || "Income"}
+                          </div>
+                          <div style={{ fontSize: 11, color: "#6b7280" }}>
+                            {tx.tx_date} · {source?.name || "—"} · {account?.name || "—"}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#059669" }}>
+                          +{fmtIDR(Number(tx.amount_idr || 0))}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            );
+          })}
+
+          {historyData.every(m => m.txs.length === 0) && (
+            <div style={{
+              background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 12,
+              padding: "48px 24px", textAlign: "center", color: "#9ca3af", fontSize: 13,
+            }}>
+              No income history in the last 12 months
+            </div>
+          )}
+        </>
       )}
 
-      {/* ── Cash Flow tab (placeholder C-2) ── */}
+      {/* ── Cash Flow tab ── */}
       {tab === "cashflow" && (
-        <div style={{ background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 16, padding: "48px 24px", textAlign: "center", color: "#9ca3af", fontSize: 13 }}>
-          Cash Flow view — coming in C-2
-        </div>
+        <>
+          {/* KPI Hero */}
+          <div style={{
+            display: "grid", gridTemplateColumns: "repeat(3, 1fr)",
+            gap: 12, marginBottom: 16, fontFamily: FF,
+          }}>
+            <CashFlowKPI label="Avg Income" value={cashFlowData.avgIncome} color="#059669" sublabel="Last 12 months" />
+            <CashFlowKPI label="Avg Spend"  value={cashFlowData.avgSpend}  color="#dc2626" sublabel="Last 12 months" />
+            <CashFlowKPI
+              label="Avg Net"
+              value={cashFlowData.avgNet}
+              color={cashFlowData.avgNet >= 0 ? "#059669" : "#dc2626"}
+              sublabel="Last 12 months"
+              prefix={cashFlowData.avgNet >= 0 ? "+" : ""}
+            />
+          </div>
+
+          {/* 12-month bar chart */}
+          <div style={{
+            background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 16,
+            padding: "20px 24px", fontFamily: FF,
+          }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>
+              Cash Flow
+            </div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "#111827", marginTop: 4, marginBottom: 20 }}>
+              Last 12 Months
+            </div>
+
+            {/* Bar columns */}
+            <div style={{
+              display: "grid", gridTemplateColumns: "repeat(12, 1fr)",
+              gap: 6, height: 140, alignItems: "flex-end", marginBottom: 12,
+            }}>
+              {cashFlowData.months.map(m => {
+                const incomeH = (m.income / cashFlowData.maxValue) * 100;
+                const spendH  = (m.spend  / cashFlowData.maxValue) * 100;
+                return (
+                  <div key={m.key} style={{
+                    display: "flex", flexDirection: "column",
+                    alignItems: "center", justifyContent: "flex-end",
+                    gap: 4, height: "100%",
+                  }}>
+                    <div style={{
+                      display: "flex", gap: 2, alignItems: "flex-end",
+                      height: 100, width: "100%", justifyContent: "center",
+                    }}>
+                      <div
+                        title={`Income: ${fmtIDR(m.income)}`}
+                        style={{
+                          width: "45%", minWidth: 6,
+                          height: `${Math.max(incomeH, m.income > 0 ? 2 : 0)}%`,
+                          background: "linear-gradient(180deg, #10b981, #059669)",
+                          borderRadius: "3px 3px 0 0",
+                        }}
+                      />
+                      <div
+                        title={`Spend: ${fmtIDR(m.spend)}`}
+                        style={{
+                          width: "45%", minWidth: 6,
+                          height: `${Math.max(spendH, m.spend > 0 ? 2 : 0)}%`,
+                          background: "linear-gradient(180deg, #f87171, #dc2626)",
+                          borderRadius: "3px 3px 0 0",
+                        }}
+                      />
+                    </div>
+                    <div style={{ fontSize: 9, color: "#9ca3af", fontWeight: 600 }}>{m.label}</div>
+                    <div style={{ fontSize: 8, fontWeight: 700, color: m.net >= 0 ? "#059669" : "#dc2626" }}>
+                      {m.net >= 0 ? "+" : ""}{fmtIDR(m.net, true)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Legend */}
+            <div style={{
+              display: "flex", gap: 16, justifyContent: "center",
+              marginTop: 16, fontSize: 11, color: "#6b7280", fontWeight: 600,
+            }}>
+              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 12, height: 12, background: "#059669", borderRadius: 2, display: "inline-block" }} />
+                Income
+              </span>
+              <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ width: 12, height: 12, background: "#dc2626", borderRadius: 2, display: "inline-block" }} />
+                Spend
+              </span>
+            </div>
+          </div>
+        </>
       )}
 
       {/* ── Source Edit Modal ── */}
