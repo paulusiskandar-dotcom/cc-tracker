@@ -301,6 +301,127 @@ function AddIncomeModal({ incomeSrcs, bankAccounts, onSave, onClose, saving }) {
   );
 }
 
+// ── NetForecastCard ───────────────────────────────────────────────
+function NetForecastCard({ netForecast, period, onPeriodChange }) {
+  const mult        = period === "3month" ? 3 : period === "yearly" ? 12 : 1;
+  const periodLabel = period === "3month" ? "Next 3 Months" : period === "yearly" ? "Yearly" : "Monthly";
+  const isHealthy   = netForecast.net >= 0;
+  const totalIncomeP  = netForecast.totalIncome  * mult;
+  const totalOutflowP = netForecast.totalOutflow * mult;
+  const netP          = netForecast.net          * mult;
+
+  return (
+    <div style={{ background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 16, overflow: "hidden", marginBottom: 16, fontFamily: FF }}>
+      <div style={{ height: 3, background: isHealthy ? "linear-gradient(90deg,#059669,#10b981)" : "linear-gradient(90deg,#dc2626,#f59e0b)" }} />
+      <div style={{ padding: "20px 24px" }}>
+
+        {/* Header + period toggle */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>Net Forecast</div>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "#111827", marginTop: 2 }}>{periodLabel} Commitment Overview</div>
+          </div>
+          <div style={{ display: "flex", gap: 4, background: "#f3f4f6", padding: 3, borderRadius: 8 }}>
+            {[{ key: "monthly", label: "Monthly" }, { key: "3month", label: "3-Month" }, { key: "yearly", label: "Yearly" }].map(opt => (
+              <button key={opt.key} onClick={() => onPeriodChange(opt.key)} style={{
+                padding: "5px 12px", border: "none", borderRadius: 6,
+                background: period === opt.key ? "#fff" : "transparent",
+                color: period === opt.key ? "#111827" : "#6b7280",
+                fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: FF,
+                boxShadow: period === opt.key ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+              }}>{opt.label}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* Income */}
+        <div style={{ marginBottom: 12 }}>
+          <NfSectionHeader icon="📈" label="Income" amount={totalIncomeP} color="#059669" />
+        </div>
+
+        {/* Outflow */}
+        <div style={{ marginBottom: 12 }}>
+          <NfSectionHeader icon="📉" label="Outflow" amount={-totalOutflowP} color="#dc2626" />
+
+          {netForecast.billsBank.length > 0 && (
+            <NfSubGroup title={`Bills Bank (${netForecast.billsBank.length})`} total={netForecast.totalBillsBank * mult}
+              items={netForecast.billsBank.map(b => ({ label: b.name, amount: b.monthly * mult, hint: b.isEstimate ? "est" : "last paid" }))} />
+          )}
+
+          {netForecast.ccSubs.length > 0 && (
+            <NfSubGroup title={`CC Subscriptions (${netForecast.ccSubs.length})`} total={netForecast.totalCCSubs * mult}
+              items={netForecast.ccSubs.map(c => ({ label: c.name, amount: c.monthly * mult, hint: c.isEstimate ? "est" : "last paid" }))} />
+          )}
+
+          {netForecast.activeCicilan.length > 0 && (
+            <NfSubGroup title={`Cicilan (${netForecast.activeCicilan.length})`} total={netForecast.totalCicilan * mult}
+              items={netForecast.activeCicilan.map(c => ({ label: c.description, amount: c.monthly * mult, hint: `${c.remaining}/${c.total} mo left` }))} />
+          )}
+
+          {netForecast.liabilities.length > 0 ? (
+            <NfSubGroup title={`Liability (${netForecast.liabilities.length})`} total={netForecast.totalLiability * mult}
+              items={netForecast.liabilities.map(l => ({ label: l.name, amount: l.monthly * mult }))} />
+          ) : (
+            <div style={{ padding: "6px 8px 0", fontSize: 11, color: "#9ca3af", fontStyle: "italic" }}>
+              Liability (placeholder — cicilan mobil soon)
+            </div>
+          )}
+        </div>
+
+        {/* Divider + Net */}
+        <div style={{ borderTop: "2px solid #e5e7eb", paddingTop: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>💰 Net {periodLabel}</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: isHealthy ? "#059669" : "#dc2626" }}>
+            {netP >= 0 ? "+" : ""}{fmtIDR(netP)}
+          </div>
+        </div>
+
+        {/* Health banner */}
+        <div style={{
+          marginTop: 10, padding: "10px 14px", borderRadius: 8,
+          background: isHealthy ? "#ecfdf5" : "#fef2f2",
+          border: `1px solid ${isHealthy ? "#d1fae5" : "#fee2e2"}`,
+          fontSize: 12, fontWeight: 600,
+          color: isHealthy ? "#059669" : "#dc2626",
+        }}>
+          {isHealthy
+            ? `✅ Net positive${netForecast.netPct !== null ? ` (+${netForecast.netPct}%)` : ""}`
+            : `⚠️ Net negative — outflow exceeds income by ${fmtIDR(Math.abs(netP))}`}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NfSectionHeader({ icon, label, amount, color }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 0" }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{icon} {label}</div>
+      <div style={{ fontSize: 15, fontWeight: 800, color }}>{amount >= 0 ? "+" : ""}{fmtIDR(amount)}</div>
+    </div>
+  );
+}
+
+function NfSubGroup({ title, total, items }) {
+  return (
+    <div style={{ marginTop: 6, paddingLeft: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.4 }}>
+        <span>{title}</span>
+        <span style={{ color: "#111827" }}>{fmtIDR(total)}</span>
+      </div>
+      {items.map((item, i) => (
+        <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "3px 8px", fontSize: 12, color: "#374151" }}>
+          <span>
+            {item.label}
+            {item.hint && <span style={{ fontSize: 10, color: "#9ca3af", marginLeft: 6, fontStyle: "italic" }}>({item.hint})</span>}
+          </span>
+          <span style={{ fontWeight: 600 }}>{fmtIDR(item.amount)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── ForecastCard ─────────────────────────────────────────────────
 function ForecastCard({ forecast }) {
   const max = Math.max(...forecast.monthsAhead.map(m => m.amount), 1);
@@ -383,9 +504,12 @@ function ForecastCard({ forecast }) {
 export default function Income({
   user, accounts, ledger, incomeSrcs, fxRates, curMonth,
   onRefresh, setLedger, setIncomeSrcs, dark,
+  recurTemplates = [],
+  installments   = [],
 }) {
-  const [tab,           setTab]           = useState("overview");
-  const [editingSource, setEditingSource] = useState(null);
+  const [tab,            setTab]            = useState("overview");
+  const [forecastPeriod, setForecastPeriod] = useState("monthly");
+  const [editingSource,  setEditingSource]  = useState(null);
   const [addIncModal,   setAddIncModal]   = useState(false);
   const [presetSrcId,   setPresetSrcId]   = useState(null);
   const [saving,        setSaving]        = useState(false);
@@ -525,6 +649,67 @@ export default function Income({
     return { perSource, totalMonthlyProjection, w30, w60, w90, monthsAhead };
   }, [incomeSrcs, ledger, now]);
 
+  // ── Net Forecast computation ──────────────────────────────────
+  const netForecast = useMemo(() => {
+    const totalIncome = forecast.totalMonthlyProjection || 0;
+
+    const getLastPaid = (templateId) => {
+      if (!templateId || !ledger) return null;
+      const latest = ledger
+        .filter(e => e.recurring_template_id === templateId)
+        .sort((a, b) => (b.tx_date || "").localeCompare(a.tx_date || ""))[0];
+      return latest ? Number(latest.amount_idr || 0) : null;
+    };
+
+    const billsBank = (recurTemplates || [])
+      .filter(t => t.tx_type === "expense" && t.is_active !== false && t.from_type === "account")
+      .map(t => {
+        const lastPaid = getLastPaid(t.id);
+        return { id: t.id, name: t.name, monthly: lastPaid !== null ? lastPaid : Number(t.amount || 0), isEstimate: lastPaid === null };
+      })
+      .sort((a, b) => b.monthly - a.monthly);
+    const totalBillsBank = billsBank.reduce((s, b) => s + b.monthly, 0);
+
+    const ccSubs = (recurTemplates || [])
+      .filter(t => t.tx_type === "expense" && t.is_active !== false && t.from_type === "credit_card")
+      .map(t => {
+        const lastPaid = getLastPaid(t.id);
+        return { id: t.id, name: t.name, monthly: lastPaid !== null ? lastPaid : Number(t.amount || 0), isEstimate: lastPaid === null };
+      })
+      .sort((a, b) => b.monthly - a.monthly);
+    const totalCCSubs = ccSubs.reduce((s, c) => s + c.monthly, 0);
+
+    const activeCicilan = (installments || [])
+      .filter(i => i.status === "active" && Number(i.paid_months ?? 0) < Number(i.total_months ?? 0))
+      .map(i => ({
+        id: i.id,
+        description: i.description,
+        monthly:   Number(i.monthly_amount || 0),
+        remaining: Math.max(0, Number(i.total_months || 0) - Number(i.paid_months || 0)),
+        total:     Number(i.total_months || 0),
+      }))
+      .sort((a, b) => b.monthly - a.monthly);
+    const totalCicilan = activeCicilan.reduce((s, c) => s + c.monthly, 0);
+
+    const liabilities = (recurTemplates || [])
+      .filter(t => t.tx_type === "pay_liability" && t.is_active !== false)
+      .map(t => ({ id: t.id, name: t.name, monthly: Number(t.amount || 0) }));
+    const totalLiability = liabilities.reduce((s, l) => s + l.monthly, 0);
+
+    const totalOutflow = totalBillsBank + totalCCSubs + totalCicilan + totalLiability;
+    const net    = totalIncome - totalOutflow;
+    const netPct = totalIncome > 0 ? Math.round((net / totalIncome) * 100) : null;
+
+    return {
+      totalIncome,
+      billsBank, totalBillsBank,
+      ccSubs, totalCCSubs,
+      activeCicilan, totalCicilan,
+      liabilities, totalLiability,
+      totalOutflow, net, netPct,
+    };
+  }, [forecast.totalMonthlyProjection, recurTemplates, installments, ledger]);
+
   // ── CRUD handlers ────────────────────────────────────────────
   const handleSaveSource = async (patch) => {
     setSaving(true);
@@ -642,6 +827,12 @@ export default function Income({
               </div>
             </div>
           </div>
+
+          <NetForecastCard
+            netForecast={netForecast}
+            period={forecastPeriod}
+            onPeriodChange={setForecastPeriod}
+          />
 
           <ForecastCard forecast={forecast} />
 
