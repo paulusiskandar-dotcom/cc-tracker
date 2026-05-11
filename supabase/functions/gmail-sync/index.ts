@@ -255,32 +255,35 @@ function matchAccount(
   const suffix = extractVisibleSuffix(masked);
   if (!suffix || suffix.length < 2) return null;
 
-  // Filter by bank + active status
-  const pool = bankName
-    ? accounts.filter(a =>
-        a.bank_name &&
-        a.bank_name.toLowerCase() === bankName.toLowerCase() &&
-        a.is_active
-      )
+  // Filter by bank (fuzzy substring match either direction) + active status
+  const txBankLower = bankName?.toLowerCase() || null;
+  const pool = txBankLower
+    ? accounts.filter(a => {
+        if (!a.bank_name || !a.is_active) return false;
+        const accBank = a.bank_name.toLowerCase();
+        return accBank === txBankLower
+          || txBankLower.includes(accBank)
+          || accBank.includes(txBankLower);
+      })
     : accounts.filter(a => a.is_active);
 
   if (pool.length === 0) return null;
 
-  // Disambiguate a list of candidates by currency, then by sort_order
+  const curLower = currency?.toLowerCase() || null;
+
+  // Disambiguate candidates: exact bank match > currency match > sort_order
   const pickBest = (candidates: any[]): string | null => {
     if (candidates.length === 0) return null;
     if (candidates.length === 1) return candidates[0].id;
-    if (currency) {
-      const byCur = candidates.filter(a =>
-        a.currency && a.currency.toLowerCase() === currency.toLowerCase()
-      );
-      if (byCur.length === 1) return byCur[0].id;
-      if (byCur.length > 1) {
-        const sorted = [...byCur].sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999));
-        return sorted[0].id;
-      }
-    }
-    const sorted = [...candidates].sort((a, b) => (a.sort_order ?? 9999) - (b.sort_order ?? 9999));
+    const sorted = [...candidates].sort((a, b) => {
+      const aExact = txBankLower && a.bank_name?.toLowerCase() === txBankLower ? 0 : 1;
+      const bExact = txBankLower && b.bank_name?.toLowerCase() === txBankLower ? 0 : 1;
+      if (aExact !== bExact) return aExact - bExact;
+      const aCur = curLower && a.currency?.toLowerCase() === curLower ? 0 : 1;
+      const bCur = curLower && b.currency?.toLowerCase() === curLower ? 0 : 1;
+      if (aCur !== bCur) return aCur - bCur;
+      return (a.sort_order ?? 9999) - (b.sort_order ?? 9999);
+    });
     return sorted[0].id;
   };
 
