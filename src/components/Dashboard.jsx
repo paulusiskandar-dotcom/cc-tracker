@@ -646,7 +646,6 @@ export default function Dashboard({
 
         await reimburseSettlementsApi.update(settlement.id, {
           status:       "settled",
-          total_in:     amount,
           to_account_id: confirmForm.toAccountId,
           settled_at:   new Date().toISOString(),
         });

@@ -399,6 +399,10 @@ export const ledgerApi = {
       }
     }
     */
+    // BLOCK 2 — DISABLED 2026-05-11
+    // DB trigger ledger_recompute_settlement handles aggregate sync (total_in, total_out,
+    // in_ledger_ids, out_ledger_ids). Manual settle via Receivables wizard only — no auto-settle.
+    /*
     if (safeEntry.tx_type === "reimburse_in" && REIMBURSE_ENTITIES.includes(safeEntry.entity) && data?.id) {
       // Find pending settlement for same entity, update total_in
       try {
@@ -419,6 +423,7 @@ export const ledgerApi = {
         }
       } catch (e) { console.error("[ledgerApi.create] settlement reimburse_in exception:", e); }
     }
+    */
 
     return data;
   },
