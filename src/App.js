@@ -409,7 +409,7 @@ function Finance({ user, signOut }) {
       case "income":       return <Income       {...shared} />;
       case "reports":      return <Reports      {...shared} />;
       case "budget":       return <Budget       {...shared} />;
-      case "tags":         return <Tags         user={user} ledger={ledger} />;
+      case "tags":         return <Tags         user={user} ledger={ledger} onRefresh={loadData} />;
       case "calendar":     return <Calendar     {...shared} />;
       case "settings":     return <Settings     {...shared} signOut={signOut} initialTab={settingsInitialTab} />;
       case "reconcile":    return <Reconcile    {...shared} />;
