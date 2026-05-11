@@ -310,24 +310,30 @@ function NetForecastCard({ netForecast, period, onPeriodChange }) {
   const totalOutflowP = netForecast.totalOutflow * mult;
   const netP          = netForecast.net          * mult;
 
+  const totalOutflow = netForecast.totalOutflow || 0;
+  const pctBills    = totalOutflow > 0 ? Math.round((netForecast.totalBillsBank  / totalOutflow) * 100) : 0;
+  const pctCCSubs   = totalOutflow > 0 ? Math.round((netForecast.totalCCSubs     / totalOutflow) * 100) : 0;
+  const pctCicilan  = totalOutflow > 0 ? Math.round((netForecast.totalCicilan    / totalOutflow) * 100) : 0;
+  const pctLiability= totalOutflow > 0 ? Math.round((netForecast.totalLiability  / totalOutflow) * 100) : 0;
+
   return (
     <div style={{ background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 16, overflow: "hidden", marginBottom: 16, fontFamily: FF }}>
       <div style={{ height: 3, background: isHealthy ? "linear-gradient(90deg,#059669,#10b981)" : "linear-gradient(90deg,#dc2626,#f59e0b)" }} />
       <div style={{ padding: "20px 24px" }}>
 
         {/* Header + period toggle */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
           <div>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>Net Forecast</div>
-            <div style={{ fontSize: 18, fontWeight: 800, color: "#111827", marginTop: 2 }}>{periodLabel} Commitment Overview</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: "#111827", marginTop: 4 }}>{periodLabel} Commitment Overview</div>
           </div>
           <div style={{ display: "flex", gap: 4, background: "#f3f4f6", padding: 3, borderRadius: 8 }}>
             {[{ key: "monthly", label: "Monthly" }, { key: "3month", label: "3-Month" }, { key: "yearly", label: "Yearly" }].map(opt => (
               <button key={opt.key} onClick={() => onPeriodChange(opt.key)} style={{
-                padding: "5px 12px", border: "none", borderRadius: 6,
+                padding: "6px 14px", border: "none", borderRadius: 6,
                 background: period === opt.key ? "#fff" : "transparent",
                 color: period === opt.key ? "#111827" : "#6b7280",
-                fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: FF,
+                fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: FF,
                 boxShadow: period === opt.key ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
               }}>{opt.label}</button>
             ))}
@@ -335,50 +341,68 @@ function NetForecastCard({ netForecast, period, onPeriodChange }) {
         </div>
 
         {/* Income */}
-        <div style={{ marginBottom: 12 }}>
-          <NfSectionHeader icon="📈" label="Income" amount={totalIncomeP} color="#059669" />
-        </div>
+        <NfSectionHeader icon="📈" label="Income" amount={totalIncomeP} color="#059669" />
+
+        {/* Spacer */}
+        <div style={{ height: 12 }} />
 
         {/* Outflow */}
-        <div style={{ marginBottom: 12 }}>
-          <NfSectionHeader icon="📉" label="Outflow" amount={-totalOutflowP} color="#dc2626" />
+        <NfSectionHeader icon="📉" label="Outflow" amount={-totalOutflowP} color="#dc2626" />
 
-          {netForecast.billsBank.length > 0 && (
-            <NfSubGroup title={`Bills Bank (${netForecast.billsBank.length})`} total={netForecast.totalBillsBank * mult}
-              items={netForecast.billsBank.map(b => ({ label: b.name, amount: b.monthly * mult, hint: b.isEstimate ? "est" : "last paid" }))} />
-          )}
+        {netForecast.billsBank.length > 0 && (
+          <NfSubGroup
+            title={`Bills Bank (${netForecast.billsBank.length})`}
+            total={netForecast.totalBillsBank * mult}
+            percentage={pctBills}
+            items={netForecast.billsBank.map(b => ({ label: b.name, amount: b.monthly * mult, hint: b.isEstimate ? "est" : "last paid" }))}
+          />
+        )}
 
-          {netForecast.ccSubs.length > 0 && (
-            <NfSubGroup title={`CC Subscriptions (${netForecast.ccSubs.length})`} total={netForecast.totalCCSubs * mult}
-              items={netForecast.ccSubs.map(c => ({ label: c.name, amount: c.monthly * mult, hint: c.isEstimate ? "est" : "last paid" }))} />
-          )}
+        {netForecast.ccSubs.length > 0 && (
+          <NfSubGroup
+            title={`CC Subscriptions (${netForecast.ccSubs.length})`}
+            total={netForecast.totalCCSubs * mult}
+            percentage={pctCCSubs}
+            items={netForecast.ccSubs.map(c => ({ label: c.name, amount: c.monthly * mult, hint: c.isEstimate ? "est" : "last paid" }))}
+          />
+        )}
 
-          {netForecast.activeCicilan.length > 0 && (
-            <NfSubGroup title={`Cicilan (${netForecast.activeCicilan.length})`} total={netForecast.totalCicilan * mult}
-              items={netForecast.activeCicilan.map(c => ({ label: c.description, amount: c.monthly * mult, hint: `${c.remaining}/${c.total} mo left` }))} />
-          )}
+        {netForecast.activeCicilan.length > 0 && (
+          <NfSubGroup
+            title={`Cicilan (${netForecast.activeCicilan.length})`}
+            total={netForecast.totalCicilan * mult}
+            percentage={pctCicilan}
+            items={netForecast.activeCicilan.map(c => ({ label: c.description, amount: c.monthly * mult, hint: `${c.remaining}/${c.total} mo left` }))}
+          />
+        )}
 
-          {netForecast.liabilities.length > 0 ? (
-            <NfSubGroup title={`Liability (${netForecast.liabilities.length})`} total={netForecast.totalLiability * mult}
-              items={netForecast.liabilities.map(l => ({ label: l.name, amount: l.monthly * mult }))} />
-          ) : (
-            <div style={{ padding: "6px 8px 0", fontSize: 11, color: "#9ca3af", fontStyle: "italic" }}>
-              Liability (placeholder — cicilan mobil soon)
-            </div>
-          )}
-        </div>
+        {netForecast.liabilities.length > 0 ? (
+          <NfSubGroup
+            title={`Liability (${netForecast.liabilities.length})`}
+            total={netForecast.totalLiability * mult}
+            percentage={pctLiability}
+            items={netForecast.liabilities.map(l => ({ label: l.name, amount: l.monthly * mult }))}
+          />
+        ) : (
+          <div style={{
+            padding: "8px 12px", marginTop: 10, fontSize: 11, color: "#9ca3af",
+            fontStyle: "italic", background: "#fafafa", border: "1px solid #f3f4f6", borderRadius: 8,
+          }}>
+            Liability (placeholder — cicilan mobil soon)
+          </div>
+        )}
 
-        {/* Divider + Net */}
-        <div style={{ borderTop: "2px solid #e5e7eb", paddingTop: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>💰 Net {periodLabel}</div>
-          <div style={{ fontSize: 22, fontWeight: 800, color: isHealthy ? "#059669" : "#dc2626" }}>
+        {/* Divider + Net Monthly — big, prominent */}
+        <div style={{ borderTop: "2px solid #e5e7eb", paddingTop: 16, marginTop: 20, display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#111827" }}>💰 Net {periodLabel}</div>
+          <div style={{ fontSize: 26, fontWeight: 800, color: isHealthy ? "#059669" : "#dc2626", letterSpacing: -0.5 }}>
             {netP >= 0 ? "+" : ""}{fmtIDR(netP)}
           </div>
         </div>
 
         {/* Health banner */}
         <div style={{
-          marginTop: 10, padding: "10px 14px", borderRadius: 8,
+          marginTop: 12, padding: "12px 16px", borderRadius: 8,
           background: isHealthy ? "#ecfdf5" : "#fef2f2",
           border: `1px solid ${isHealthy ? "#d1fae5" : "#fee2e2"}`,
           fontSize: 12, fontWeight: 600,
@@ -395,29 +419,61 @@ function NetForecastCard({ netForecast, period, onPeriodChange }) {
 
 function NfSectionHeader({ icon, label, amount, color }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 0" }}>
-      <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{icon} {label}</div>
-      <div style={{ fontSize: 15, fontWeight: 800, color }}>{amount >= 0 ? "+" : ""}{fmtIDR(amount)}</div>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 0" }}>
+      <div style={{ fontSize: 14, fontWeight: 800, color: "#111827" }}>{icon} {label}</div>
+      <div style={{ fontSize: 16, fontWeight: 800, color }}>{amount >= 0 ? "+" : ""}{fmtIDR(amount)}</div>
     </div>
   );
 }
 
-function NfSubGroup({ title, total, items }) {
+function NfSubGroup({ title, total, percentage, items, defaultCollapsed = true }) {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
   return (
-    <div style={{ marginTop: 6, paddingLeft: 8 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.4 }}>
-        <span>{title}</span>
-        <span style={{ color: "#111827" }}>{fmtIDR(total)}</span>
-      </div>
-      {items.map((item, i) => (
-        <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "3px 8px", fontSize: 12, color: "#374151" }}>
-          <span>
-            {item.label}
-            {item.hint && <span style={{ fontSize: 10, color: "#9ca3af", marginLeft: 6, fontStyle: "italic" }}>({item.hint})</span>}
+    <div style={{ marginTop: 10 }}>
+      <div
+        onClick={() => setCollapsed(c => !c)}
+        style={{
+          display: "flex", justifyContent: "space-between", alignItems: "center",
+          padding: "8px 12px", background: "#f9fafb", border: "1px solid #f3f4f6",
+          borderRadius: 8, cursor: "pointer", userSelect: "none",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{
+            fontSize: 10, color: "#6b7280", display: "inline-block",
+            transition: "transform 0.15s",
+            transform: collapsed ? "rotate(0deg)" : "rotate(90deg)",
+          }}>▶</span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: 0.5 }}>
+            {title}
           </span>
-          <span style={{ fontWeight: 600 }}>{fmtIDR(item.amount)}</span>
+          {percentage != null && (
+            <span style={{
+              fontSize: 10, fontWeight: 600, color: "#6b7280",
+              background: "#fff", padding: "1px 6px", borderRadius: 4, border: "1px solid #e5e7eb",
+            }}>{percentage}%</span>
+          )}
         </div>
-      ))}
+        <span style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>{fmtIDR(total)}</span>
+      </div>
+      {!collapsed && (
+        <div style={{ paddingLeft: 24, marginTop: 4 }}>
+          {items.map((item, i) => (
+            <div key={i} style={{
+              display: "flex", justifyContent: "space-between", alignItems: "baseline",
+              padding: "4px 8px", fontSize: 13, color: "#374151",
+            }}>
+              <span style={{ display: "flex", alignItems: "baseline", gap: 6, flex: 1, minWidth: 0 }}>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.label}</span>
+                {item.hint && (
+                  <span style={{ fontSize: 10, color: "#9ca3af", fontStyle: "italic", flexShrink: 0 }}>({item.hint})</span>
+                )}
+              </span>
+              <span style={{ fontWeight: 600, color: "#111827", marginLeft: 12, flexShrink: 0 }}>{fmtIDR(item.amount)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
