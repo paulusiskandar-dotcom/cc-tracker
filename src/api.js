@@ -1468,6 +1468,8 @@ export function flattenEmailSync(rows) {
     const txs = Array.isArray(row.ai_raw_result) ? row.ai_raw_result : [];
     if (txs.length === 0) continue;
     txs.forEach((tx, i) => {
+      // Per-tx done flag set by markTxStatus — siblings stay visible, this one is filtered out
+      if (tx?.confirmed || tx?.skipped) return;
       flat.push({
         id:                      txs.length === 1 ? row.id : `${row.id}_${i}`,
         email_sync_id:           row.id,
@@ -1526,6 +1528,35 @@ export const gmailApi = {
   },
 
   updateSync: async (id, updates) => {
+    const { error } = await supabase.from("email_sync").update(updates).eq("id", id);
+    if (error) throw new Error(error.message);
+  },
+
+  // Per-tx status for multi-tx email_sync rows (Telegram photo batch, AI multi-extract).
+  // Mutates ai_raw_result[txIndex].{confirmed|skipped}=true, recomputes imported_count,
+  // flips parent status only when every child is done. Single-tx rows behave like the
+  // legacy updateSync({status}) path. Rows with no ai_raw_result fall back to row-level.
+  markTxStatus: async (id, txIndex, txStatus) => {
+    const { data, error: fetchErr } = await supabase
+      .from("email_sync")
+      .select("ai_raw_result")
+      .eq("id", id)
+      .single();
+    if (fetchErr) throw new Error(fetchErr.message);
+    const txs = Array.isArray(data?.ai_raw_result)
+      ? data.ai_raw_result.map(t => ({ ...(t || {}) }))
+      : [];
+    if (!txs.length || txIndex < 0 || txIndex >= txs.length) {
+      const { error } = await supabase.from("email_sync").update({ status: txStatus }).eq("id", id);
+      if (error) throw new Error(error.message);
+      return;
+    }
+    const flagKey = txStatus === "confirmed" ? "confirmed" : "skipped";
+    txs[txIndex] = { ...txs[txIndex], [flagKey]: true };
+    const importedCount = txs.filter(t => t?.confirmed).length;
+    const allDone = txs.every(t => t?.confirmed || t?.skipped);
+    const updates = { ai_raw_result: txs, imported_count: importedCount };
+    if (allDone) updates.status = importedCount > 0 ? "confirmed" : "skipped";
     const { error } = await supabase.from("email_sync").update(updates).eq("id", id);
     if (error) throw new Error(error.message);
   },

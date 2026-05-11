@@ -594,7 +594,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
           currency: r.currency || "IDR", txDate: r.tx_date, categoryId: r.category_id || null,
         }).catch(e => console.error("[cicilan import]", e));
       }
-      await gmailApi.updateSync(r.email_sync_id, { status: "confirmed" });
+      await gmailApi.markTxStatus(r.email_sync_id, r.tx_index ?? 0, "confirmed");
       removeRow(r._id);
       setProcessedCount(n => n + 1);
       if (entry.recurring_template_id) {
@@ -612,7 +612,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     const r = rows.find(x => x._id === id);
     if (!r) return;
     try {
-      await gmailApi.updateSync(r.email_sync_id, { status: "skipped" });
+      await gmailApi.markTxStatus(r.email_sync_id, r.tx_index ?? 0, "skipped");
       removeRow(id);
       setProcessedCount(n => n + 1);
       showToast("Skipped");
@@ -662,7 +662,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
             currency: r.currency || "IDR", txDate: r.tx_date, categoryId: r.category_id || null,
           }).catch(e => console.error("[cicilan import]", e));
         }
-        await gmailApi.updateSync(r.email_sync_id, { status: "confirmed" });
+        await gmailApi.markTxStatus(r.email_sync_id, r.tx_index ?? 0, "confirmed");
         removeRow(r._id);
         count++;
       } catch (_) { /* skip failures */ }
