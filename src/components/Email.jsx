@@ -548,7 +548,8 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       const entry = buildEntry(r);
       const created = await ledgerApi.create(user.id, entry, accounts);
       setLedger(p => [created, ...p]);
-      // Auto-confirm matching pending reminder if Bill picker was used
+      // Auto-confirm matching pending reminder if Recurring picker was used
+      let reminderConfirmed = false;
       if (entry.recurring_template_id && created?.id) {
         try {
           const txDate = new Date(entry.tx_date);
@@ -556,12 +557,16 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
           const maxDate = new Date(txDate); maxDate.setDate(maxDate.getDate() + 15);
           const { data: pr } = await supabase
             .from("recurring_reminders").select("id")
-            .eq("user_id", user.id).eq("template_id", entry.recurring_template_id).eq("status", "pending")
+            .eq("user_id", user.id)
+            .eq("template_id", entry.recurring_template_id)
+            .eq("status", "pending")
             .gte("due_date", minDate.toISOString().slice(0, 10))
             .lte("due_date", maxDate.toISOString().slice(0, 10))
             .order("due_date", { ascending: true }).limit(1).maybeSingle();
-          if (pr) { await recurringApi.confirmReminder(pr.id); showToast("✓ Bill marked and reminder confirmed"); onRefresh?.(); }
-          else showToast("✓ Tagged as Bill");
+          if (pr) {
+            await recurringApi.confirmReminder(pr.id);
+            reminderConfirmed = true;
+          }
         } catch (err) { console.error("Auto-confirm reminder failed:", err); }
       }
       // Silent learning: persist merchant → category mapping for next time.
@@ -592,7 +597,13 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       await gmailApi.updateSync(r.email_sync_id, { status: "confirmed" });
       removeRow(r._id);
       setProcessedCount(n => n + 1);
-      showToast("Imported");
+      if (entry.recurring_template_id) {
+        showToast(reminderConfirmed
+          ? "✓ Recurring linked and reminder confirmed"
+          : "✓ Tagged as Recurring");
+      } else {
+        showToast("Imported");
+      }
       onRefresh?.();
     } catch (e) { showToast(e.message, "error"); }
   };
@@ -632,7 +643,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
               .gte("due_date", minDate.toISOString().slice(0, 10))
               .lte("due_date", maxDate.toISOString().slice(0, 10))
               .order("due_date", { ascending: true }).limit(1).maybeSingle();
-            if (pr) { await recurringApi.confirmReminder(pr.id); matchedNames.push(r.description || "Bill"); }
+            if (pr) { await recurringApi.confirmReminder(pr.id); matchedNames.push(r.description || "Recurring"); }
           } catch (err) { console.error("Auto-confirm reminder failed:", err); }
         }
         if (r.tx_type === "collect_loan" && r.employee_loan_id) {
@@ -659,8 +670,8 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     setImporting(false);
     setProcessedCount(n => n + count);
     showToast(`${count} transaction${count !== 1 ? "s" : ""} imported`);
-    if (matchedNames.length === 1) showToast(`✓ "${matchedNames[0]}" auto-matched (recurring bill confirmed)`);
-    else if (matchedNames.length > 1) showToast(`${matchedNames.length} bills auto-matched`);
+    if (matchedNames.length === 1) showToast(`✓ "${matchedNames[0]}" recurring linked and reminder confirmed`);
+    else if (matchedNames.length > 1) showToast(`${matchedNames.length} recurring expenses linked`);
     if (newLedgerIds.length) undoManager.register({ type: "save_batch", ids: newLedgerIds, label: `Saved ${newLedgerIds.length} transaction${newLedgerIds.length !== 1 ? "s" : ""}` });
     draft.clearDraft();
     onRefresh?.();
