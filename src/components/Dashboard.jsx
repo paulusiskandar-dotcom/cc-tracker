@@ -192,7 +192,7 @@ export default function Dashboard({
 
   const thisMonthExpense = useMemo(() =>
     thisMonthLedger
-      .filter(e => e.tx_type === "expense")
+      .filter(e => e.tx_type === "expense" && !e.is_reimburse)
       .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0),
   [thisMonthLedger]);
 
@@ -246,7 +246,7 @@ export default function Dashboard({
       const m = d.toISOString().slice(0, 7);
       const income  = ledger.filter(e => ym(e.tx_date) === m && e.tx_type === "income")
         .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
-      const expense = ledger.filter(e => ym(e.tx_date) === m && e.tx_type === "expense")
+      const expense = ledger.filter(e => ym(e.tx_date) === m && e.tx_type === "expense" && !e.is_reimburse)
         .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
       months.push({ month: mlShort(m), income, expense, m });
     }
@@ -258,7 +258,7 @@ export default function Dashboard({
   const topCategories = useMemo(() => {
     const map = {};
     thisMonthLedger
-      .filter(e => e.tx_type === "expense")
+      .filter(e => e.tx_type === "expense" && !e.is_reimburse)
       .forEach(e => {
         const key  = e.category_id || "other";
         const cat  = (categories || []).find(c => c.id === e.category_id);
@@ -534,7 +534,7 @@ export default function Dashboard({
 
   const monthlyChange = useMemo(() => {
     const inc  = thisMonthLedger.filter(e => e.tx_type === "income").reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
-    const exp  = thisMonthLedger.filter(e => e.tx_type === "expense").reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
+    const exp  = thisMonthLedger.filter(e => e.tx_type === "expense" && !e.is_reimburse).reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
     return inc - exp;
   }, [thisMonthLedger]);
 

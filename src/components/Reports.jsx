@@ -94,7 +94,7 @@ function groupByCategory(txs, type = "expense", dbCategories = []) {
 
 function groupByMerchant(txs) {
   const map = {};
-  txs.filter(t => t.tx_type === "expense").forEach(t => {
+  txs.filter(t => t.tx_type === "expense" && !t.is_reimburse).forEach(t => {
     const key  = (t.merchant_name || t.description || "Unknown").trim();
     if (!key) return;
     if (!map[key]) { map[key] = { name: key, category_name: t.category_name || "", total: 0, count: 0, txs: [] }; }
@@ -324,7 +324,7 @@ function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeri
 
   // Insight
   const topCat     = catBreak[0];
-  const largestTx  = txs.filter(t => t.tx_type === "expense").sort((a, b) => Number(b.amount_idr) - Number(a.amount_idr))[0];
+  const largestTx  = txs.filter(t => t.tx_type === "expense" && !t.is_reimburse).sort((a, b) => Number(b.amount_idr) - Number(a.amount_idr))[0];
   const showInsight = topCat && largestTx;
 
   return (
@@ -454,7 +454,7 @@ const PIE_COLORS = ["#dc2626","#d97706","#3b5bdb","#059669","#7c3aed","#0891b2",
 function ExpenseTab({ ledger, categories = [], period, dark }) {
   const T = dark ? DARK : LIGHT;
   const range   = useMemo(() => getDateRange(period), [period]);
-  const txs     = useMemo(() => filterByRange(ledger, range).filter(t => t.tx_type === "expense"), [ledger, range]);
+  const txs     = useMemo(() => filterByRange(ledger, range).filter(t => t.tx_type === "expense" && !t.is_reimburse), [ledger, range]);
   const cats    = useMemo(() => groupByCategory(txs, "expense", categories), [txs, categories]);
   const [search, setSearch] = useState("");
   const [drill,  setDrill]  = useState(null);

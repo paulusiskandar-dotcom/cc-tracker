@@ -814,7 +814,7 @@ export default function Income({
         .filter(e => e.tx_type === "income")
         .reduce((s, e) => s + Number(e.amount_idr || 0), 0);
       const spend = monthLedger
-        .filter(e => e.tx_type === "expense" || e.tx_type === "buy_asset")
+        .filter(e => (e.tx_type === "expense" || e.tx_type === "buy_asset") && !e.is_reimburse)
         .reduce((s, e) => s + Number(e.amount_idr || 0), 0);
       months.push({ key, label, income, spend, net: income - spend });
     }
