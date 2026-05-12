@@ -1701,6 +1701,14 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
             value={form.card_limit || ""} onChange={v => set("card_limit", v)} />
         )}
 
+        <div>
+          <AmountInput label="Opening Balance" value={form.initial_balance || ""}
+            onChange={v => set("initial_balance", v)} />
+          <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4, fontFamily: "Figtree, sans-serif" }}>
+            Pre-existing debt before app tracking. Positive = debt, negative = overpayment.
+          </div>
+        </div>
+
         <AmountInput label="Monthly Spend Target (optional)" value={form.monthly_target || ""}
           onChange={v => set("monthly_target", v)} />
         <FormRow>
@@ -2003,7 +2011,7 @@ function emptyForm(type) {
   switch (type) {
     case "bank":        return { ...base, bank_name: "BCA", account_no: "", currency: "IDR", initial_balance: "", current_balance: 0, include_networth: true };
     case "cash":        return { ...base, currency: "IDR", initial_balance: "", current_balance: 0 };
-    case "credit_card": return { ...base, bank_name: "BCA", last4: "", network: "Visa", card_limit: "", monthly_target: "", statement_day: 25, due_day: 17, current_balance: 0, hasSharedLimit: false, sharedLimitMode: "new", groupName: "", sharedLimitAmount: "", joinGroupId: "" };
+    case "credit_card": return { ...base, bank_name: "BCA", last4: "", network: "Visa", card_limit: "", initial_balance: "", monthly_target: "", statement_day: 25, due_day: 17, current_balance: 0, hasSharedLimit: false, sharedLimitMode: "new", groupName: "", sharedLimitAmount: "", joinGroupId: "" };
     case "asset":       return { ...base, subtype: "Property", current_value: "", purchase_price: "", purchase_date: "", deposit_rollover_type: "non_aro", monthly_interest_payout: false, deposit_status: "active", tenor_months: "6" };
     case "liability":   return { ...base, subtype: "Mortgage", creditor: "", outstanding_amount: "", total_amount: "", monthly_payment: "", liability_interest_rate: "", start_date: "", end_date: "" };
     case "receivable":  return { ...base, entity: "Hamasa" };
