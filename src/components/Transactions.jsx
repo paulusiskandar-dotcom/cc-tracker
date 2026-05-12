@@ -42,6 +42,15 @@ export default function Transactions({
   const [filterAccId,  setFilterAccId]  = useState("");
   const [search,       setSearch]       = useState("");
 
+  // ── Account name lookup (for search) ──
+  const accountNameById = useMemo(() => {
+    const map = {};
+    for (const a of accounts || []) {
+      if (a?.id && a?.name) map[a.id] = String(a.name).toLowerCase();
+    }
+    return map;
+  }, [accounts]);
+
   // ── Filtering ──
   const filtered = useMemo(() => {
     let list = [...ledger];
@@ -54,14 +63,26 @@ export default function Transactions({
     if (filterEntity) list = list.filter(e => e.entity === filterEntity);
     if (filterAccId)  list = list.filter(e => e.from_id === filterAccId || e.to_id === filterAccId);
     if (search) {
-      const q = search.toLowerCase();
-      list = list.filter(e =>
-        e.description?.toLowerCase().includes(q) ||
-        e.merchant_name?.toLowerCase().includes(q) ||
-        e.category_name?.toLowerCase().includes(q));
+      const tokens = search.toLowerCase().trim().split(/\s+/).filter(Boolean);
+      if (tokens.length > 0) {
+        list = list.filter(e => {
+          const fromName  = accountNameById[e.from_id] || "";
+          const toName    = accountNameById[e.to_id]   || "";
+          const amountStr = String(e.amount_idr || e.amount || "");
+          const haystack  = [
+            e.description, e.merchant_name, e.category_name,
+            e.notes, e.entity, fromName, toName,
+          ].filter(Boolean).join(" ").toLowerCase();
+          return tokens.every(tok => {
+            const numericTok = tok.replace(/[^\d]/g, "");
+            if (numericTok && amountStr.includes(numericTok)) return true;
+            return haystack.includes(tok);
+          });
+        });
+      }
     }
     return list;
-  }, [ledger, subTab, filterMonth, filterEntity, filterAccId, search]);
+  }, [ledger, subTab, filterMonth, filterEntity, filterAccId, search, accountNameById]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
@@ -139,16 +160,39 @@ export default function Transactions({
             onChange={e => setSearch(e.target.value)}
             placeholder="Search transactions…"
             style={{
-              width: "100%", height: 36, padding: "0 12px 0 32px",
+              width: "100%", height: 36, padding: search ? "0 32px 0 32px" : "0 12px 0 32px",
               border: "1.5px solid #e5e7eb", borderRadius: 10,
               fontFamily: "Figtree, sans-serif", fontSize: 13, fontWeight: 500,
               color: "#111827", background: "#fff", outline: "none", boxSizing: "border-box",
             }}
           />
           <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", fontSize: 12, color: "#9ca3af" }}>🔍</span>
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              aria-label="Clear search"
+              style={{
+                position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)",
+                width: 22, height: 22, padding: 0, border: "none", background: "transparent",
+                cursor: "pointer", fontSize: 12, color: "#9ca3af",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontFamily: "Figtree, sans-serif",
+              }}
+            >
+              ✕
+            </button>
+          )}
         </div>
         <button onClick={openAdd} style={BTN_PRIMARY}>+ Add</button>
       </div>
+
+      {/* ── MATCH COUNT (visible when searching) ── */}
+      {search && (
+        <div style={{ fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif", marginTop: -8 }}>
+          {filtered.length} of {ledger.length} transactions
+        </div>
+      )}
 
       {/* ── FILTERS ROW ── */}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
