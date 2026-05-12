@@ -328,7 +328,8 @@ export default function Receivables({
       .then(({ data }) => { if (data) setSettlements(data); });
   }, [user?.id]);
 
-  const REIMBURSABLE_LOSS_CATEGORY_ID = 'e054e34e-9251-461b-a118-718077cf3293';
+  const REIMBURSABLE_LOSS_CATEGORY_ID   = 'e054e34e-9251-461b-a118-718077cf3293';
+  const REIMBURSABLE_SURPLUS_SRC_ID     = '0afb406d-fc3d-49af-a002-c40d3d865c4d';
 
   const getSettleDate = (rId) => settleDate[rId] || todayStr();
 
@@ -369,7 +370,9 @@ export default function Receivables({
           out_ledger_ids: outIds, in_ledger_ids: inIds,
           total_out: totalOut, total_in: totalIn,
           reimbursable_expense: reimbursable,
-          re_category_id: REIMBURSABLE_LOSS_CATEGORY_ID, notes: null,
+          re_category_id: REIMBURSABLE_LOSS_CATEGORY_ID,
+          status: 'settled',
+          notes: null,
         }])
         .select().single();
       if (settleErr) throw new Error(settleErr.message);
@@ -388,11 +391,30 @@ export default function Receivables({
         if (lErr) throw new Error(lErr.message);
       }
 
+      const surplus = Math.max(0, totalIn - totalOut);
+      if (surplus > 0) {
+        const { error: sErr } = await supabase.from("ledger").insert([{
+          user_id: user.id,
+          tx_date: settledAtForInsert,
+          description: `${entity} Reimbursable Surplus`,
+          amount: surplus, amount_idr: surplus, currency: "IDR",
+          tx_type: "income",
+          from_type: "income_source", from_id: REIMBURSABLE_SURPLUS_SRC_ID,
+          to_type: null, to_id: null,
+          category_id: null, category_name: null,
+          entity, is_reimburse: false,
+          notes: `Settlement: ${entity}`, reimburse_settlement_id: settlement.id,
+        }]);
+        if (sErr) throw new Error(sErr.message);
+      }
+
       const allIds = [...outIds, ...inIds];
       await supabase.from("ledger").update({ reimburse_settlement_id: settlement.id }).in("id", allIds);
       setLedger(prev => prev.map(e => allIds.includes(e.id) ? { ...e, reimburse_settlement_id: settlement.id } : e));
       setSettlements(prev => [settlement, ...prev]);
-      showToast(`${entity} settled${reimbursable > 0 ? ` · RE: ${fmtIDR(reimbursable)}` : ""}`);
+      const reLossLabel    = reimbursable > 0 ? ` · RE loss: ${fmtIDR(reimbursable)}`    : "";
+      const reSurplusLabel = surplus     > 0 ? ` · RE surplus: ${fmtIDR(surplus)}`    : "";
+      showToast(`${entity} settled${reLossLabel}${reSurplusLabel}`);
 
       setSelectedOut(prev => ({ ...prev, [acc.id]: new Set() }));
       setSelectedIn(prev =>  ({ ...prev, [acc.id]: new Set() }));
