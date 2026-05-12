@@ -121,7 +121,7 @@ export default function CreditCards({
   const [deleteInstId, setDeleteInstId] = useState(null);
 
   // Edit card state
-  const emptyEditCardForm = () => ({ name: "", bank_name: "", last4: "", network: "", card_limit: "", statement_day: "", due_day: "", color: "", shared_limit_on: false, shared_group_mode: "create", shared_limit_group_id: null, shared_limit: "", is_limit_group_master: false, card_image_url: "" });
+  const emptyEditCardForm = () => ({ name: "", bank_name: "", last4: "", network: "", card_limit: "", initial_balance: "", statement_day: "", due_day: "", color: "", shared_limit_on: false, shared_group_mode: "create", shared_limit_group_id: null, shared_limit: "", is_limit_group_master: false, card_image_url: "" });
   const [editCardModal,    setEditCardModal]    = useState(false);
   const [editCardAcc,      setEditCardAcc]      = useState(null);
   const [editCardForm,     setEditCardForm]     = useState(emptyEditCardForm());
@@ -437,7 +437,8 @@ export default function CreditCards({
       bank_name:             cc.bank_name     || "",
       last4:                 cc.card_last4    || "",
       network:               cc.network       || "",
-      card_limit:            cc.card_limit    != null ? String(cc.card_limit)    : "",
+      card_limit:            cc.card_limit       != null ? String(cc.card_limit)       : "",
+      initial_balance:       cc.initial_balance  != null ? String(cc.initial_balance)  : "",
       statement_day:         cc.statement_day != null ? String(cc.statement_day) : "",
       due_day:               cc.due_day       != null ? String(cc.due_day)       : "",
       color:                 cc.color         || "",
@@ -464,6 +465,7 @@ export default function CreditCards({
         card_last4:            editCardForm.last4          || null,
         network:               editCardForm.network        || null,
         card_limit:            sn(editCardForm.card_limit),
+        initial_balance:       sn(editCardForm.initial_balance),
         statement_day:         sn(editCardForm.statement_day),
         due_day:               sn(editCardForm.due_day),
         color:                 editCardForm.color          || null,
@@ -1132,6 +1134,18 @@ export default function CreditCards({
                 style={{ width: "100%", height: 44, padding: "0 12px", border: "1.5px solid #e5e7eb", borderRadius: 10, fontFamily: "Figtree, sans-serif", fontSize: 14, fontWeight: 700, color: "#111827", background: "#fff", outline: "none", boxSizing: "border-box" }} />
             </Field>
           </FormRow>
+
+          <div>
+            <AmountInput
+              label="Opening Balance"
+              value={editCardForm.initial_balance}
+              onChange={v => setEC("initial_balance", v)}
+              currency="IDR"
+            />
+            <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4, fontFamily: "Figtree, sans-serif" }}>
+              Pre-existing debt before app tracking. Positive = debt, negative = overpayment.
+            </div>
+          </div>
 
           {/* ── Shared Limit ── */}
           <Field label="Shared Limit">
