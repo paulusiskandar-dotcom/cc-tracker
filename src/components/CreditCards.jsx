@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { ledgerApi, installmentsApi, recurringApi, getTxFromToTypes, accountsApi } from "../api";
+import { ledgerApi, installmentsApi, recurringApi, getTxFromToTypes, accountsApi, recalculateBalance } from "../api";
 import { supabase } from "../lib/supabase";
 import { ENTITIES, BANKS_L, NETWORKS } from "../constants";
 import { fmtIDR, todayStr, ym, daysUntil } from "../utils";
@@ -491,6 +491,13 @@ export default function CreditCards({
       };
       const updated = await accountsApi.update(editCardAcc.id, data);
       setAccounts(p => p.map(a => a.id === editCardAcc.id ? { ...a, ...updated } : a));
+      // Recalculate outstanding & current_balance from ledger
+      // (audit AUDIT_CC_OPENING_BALANCE.md: fix stale outstanding after initial_balance change)
+      try {
+        await recalculateBalance(editCardAcc.id, user.id);
+      } catch (err) {
+        console.warn('recalculateBalance failed:', err);
+      }
       showToast("Card updated");
       setEditCardModal(false);
     } catch (e) { showToast(e.message, "error"); }
