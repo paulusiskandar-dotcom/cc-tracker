@@ -550,6 +550,25 @@ export default function Dashboard({
     return { income, expense, net: income - expense };
   }, [upcomingItems]);
 
+  const pendingReimburseByEntity = useMemo(() => {
+    const map = {};
+    ledger.forEach(e => {
+      if (!e.entity) return;
+      if (e.reimburse_settlement_id) return;
+      if (!map[e.entity]) map[e.entity] = { entity: e.entity, out: 0, in: 0 };
+      if (e.tx_type === "reimburse_out") map[e.entity].out += Number(e.amount_idr || 0);
+      if (e.tx_type === "reimburse_in")  map[e.entity].in  += Number(e.amount_idr || 0);
+    });
+    return Object.values(map)
+      .map(e => ({ ...e, net: e.out - e.in }))
+      .filter(e => e.net > 0)
+      .sort((a, b) => b.net - a.net);
+  }, [ledger]);
+
+  const totalReimburseOutstanding = useMemo(() =>
+    pendingReimburseByEntity.reduce((s, e) => s + e.net, 0),
+  [pendingReimburseByEntity]);
+
   // ─── REMINDER ACTIONS ────────────────────────────────────────
   const openConfirmModal = (r, editMode = false) => {
     const tmpl = r.recurring_templates || {};
@@ -1176,6 +1195,52 @@ export default function Dashboard({
           )}
         </div>
       </div>
+
+      {/* ════════════ SECTION 3.5 — REIMBURSABLE OUTSTANDING ════════════ */}
+      {totalReimburseOutstanding > 0 && (
+        <div style={SEC_CARD}>
+          <div style={SEC_HEAD}>
+            <span style={SEC_TITLE}>Reimbursable Outstanding</span>
+            <button onClick={() => setTab?.("receivables")} style={LINK_BTN}>
+              View all →
+            </button>
+          </div>
+
+          <div style={{
+            fontSize: 26,
+            fontWeight: 900,
+            color: "#d97706",
+            letterSpacing: -0.5,
+            marginBottom: 16,
+            fontFamily: "Figtree, sans-serif",
+          }}>
+            {fmtIDR(totalReimburseOutstanding, true)}
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {pendingReimburseByEntity.map((e, idx) => (
+              <div
+                key={e.entity}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "10px 0",
+                  borderTop: idx > 0 ? "1px solid #f3f4f6" : "none",
+                  fontFamily: "Figtree, sans-serif",
+                }}
+              >
+                <span style={{ fontSize: 13, fontWeight: 500, color: "#374151" }}>
+                  {e.entity}
+                </span>
+                <span style={{ fontSize: 14, fontWeight: 700, color: "#d97706" }}>
+                  {fmtIDR(e.net, true)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ════════════ SECTION 4 — CC OVERVIEW ════════════ */}
       {creditCards.length > 0 && (
