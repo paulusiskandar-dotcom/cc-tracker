@@ -1092,7 +1092,11 @@ export default function Receivables({
                             : "Pending";
                           const outLedger = ledger.filter(e => (s.out_ledger_ids || []).includes(e.id));
                           const inLedger  = ledger.filter(e => (s.in_ledger_ids  || []).includes(e.id));
-                          const re = Number(s.reimbursable_expense || 0);
+                          const sNet      = Number(s.total_in || 0) - Number(s.total_out || 0);
+                          const sIsLoss   = sNet < 0;
+                          const sIsSurp   = sNet > 0;
+                          const sReColor  = sIsLoss ? "#dc2626" : sIsSurp ? "#059669" : "#6b7280";
+                          const sReLabel  = sIsLoss ? "Loss" : sIsSurp ? "Surplus" : "Balanced";
                           return (
                             <div key={s.id} style={{ border: "0.5px solid #f3f4f6", borderRadius: 8, marginBottom: 4, overflow: "hidden" }}>
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", background: "#fafafa" }}>
@@ -1103,7 +1107,10 @@ export default function Receivables({
                                   <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", fontFamily: "Figtree, sans-serif" }}>{date}</div>
                                   <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1, fontFamily: "Figtree, sans-serif" }}>
                                     Out {fmtIDR(Number(s.total_out || 0))} · In {fmtIDR(Number(s.total_in || 0))} ·{" "}
-                                    <span style={{ fontWeight: 700, color: re > 0 ? "#dc2626" : "#059669" }}>RE {fmtIDR(re)}</span>
+                                    <span style={{ fontWeight: 700, color: sReColor }}>
+                                      {sNet === 0 ? "Rp 0" : `${sIsSurp ? "+" : ""}${fmtIDR(Math.abs(sNet))}`}
+                                      {" "}({sReLabel})
+                                    </span>
                                   </div>
                                 </div>
                                 <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
@@ -1144,8 +1151,11 @@ export default function Receivables({
                                     </div>
                                   ))}
                                   <div style={{ borderTop: "0.5px solid #f3f4f6", paddingTop: 6, marginTop: 4, display: "flex", justifyContent: "space-between", fontSize: 12, fontFamily: "Figtree, sans-serif" }}>
-                                    <span style={{ fontWeight: 700, color: "#374151" }}>{r.entity} RE</span>
-                                    <span style={{ fontWeight: 900, color: re > 0 ? "#dc2626" : "#059669" }}>{fmtIDR(re)}</span>
+                                    <span style={{ fontWeight: 700, color: "#374151" }}>{r.entity} Net</span>
+                                    <span style={{ fontWeight: 900, color: sReColor }}>
+                                      {sNet === 0 ? "Rp 0" : `${sIsSurp ? "+" : ""}${fmtIDR(Math.abs(sNet))}`}
+                                      {" "}({sReLabel})
+                                    </span>
                                   </div>
                                 </div>
                               )}
@@ -1731,10 +1741,20 @@ export default function Receivables({
                 <div style={{ fontWeight: 700, color: "#059669" }}>+{fmtIDR(Number(editSItem.total_in || 0))}</div>
               </div>
               <div>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", marginBottom: 2 }}>RE</div>
-                <div style={{ fontWeight: 700, color: Number(editSItem.reimbursable_expense || 0) > 0 ? "#dc2626" : "#059669" }}>
-                  {fmtIDR(Number(editSItem.reimbursable_expense || 0))}
-                </div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", marginBottom: 2 }}>Net</div>
+                {(() => {
+                  const eNet     = Number(editSItem.total_in || 0) - Number(editSItem.total_out || 0);
+                  const eIsLoss  = eNet < 0;
+                  const eIsSurp  = eNet > 0;
+                  const eColor   = eIsLoss ? "#dc2626" : eIsSurp ? "#059669" : "#6b7280";
+                  const eLabel   = eIsLoss ? "Loss" : eIsSurp ? "Surplus" : "Balanced";
+                  return (
+                    <div style={{ fontWeight: 700, color: eColor }}>
+                      {eNet === 0 ? "Rp 0" : `${eIsSurp ? "+" : ""}${fmtIDR(Math.abs(eNet))}`}
+                      <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.7 }}>({eLabel})</span>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
             <FormRow>
