@@ -527,7 +527,7 @@ function NotifRow({ item, onAction, onDismiss, onSkip, busy }) {
           fontFamily: "Figtree, sans-serif",
           flexShrink: 0,
         }}>
-          {item.amountSign || ""}{fmtIDR(item.amount, true)}
+          {item.amountSign || ""}{fmtIDR(item.amount)}
         </div>
       )}
 
