@@ -312,7 +312,7 @@ export default function Receivables({
       }
 
       await onRefresh();
-      showToast(`Recorded: ${fmtIDR(amt, true)}${fee > 0 ? ` + ${fmtIDR(fee, true)} CA fee` : ""} for ${outForm.entity}`);
+      showToast(`Recorded: ${fmtIDR(amt)}${fee > 0 ? ` + ${fmtIDR(fee)} CA fee` : ""} for ${outForm.entity}`);
       setOutModal(false);
     } catch (e) { showToast(e.message, "error"); }
     setSaving(false);
@@ -392,7 +392,7 @@ export default function Receivables({
       await supabase.from("ledger").update({ reimburse_settlement_id: settlement.id }).in("id", allIds);
       setLedger(prev => prev.map(e => allIds.includes(e.id) ? { ...e, reimburse_settlement_id: settlement.id } : e));
       setSettlements(prev => [settlement, ...prev]);
-      showToast(`${entity} settled${reimbursable > 0 ? ` · RE: ${fmtIDR(reimbursable, true)}` : ""}`);
+      showToast(`${entity} settled${reimbursable > 0 ? ` · RE: ${fmtIDR(reimbursable)}` : ""}`);
 
       setSelectedOut(prev => ({ ...prev, [acc.id]: new Set() }));
       setSelectedIn(prev =>  ({ ...prev, [acc.id]: new Set() }));
@@ -567,10 +567,10 @@ export default function Receivables({
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ fontSize: 10, fontWeight: 700, color: T.text3, letterSpacing: "0.06em" }}>
           {totalReimburse > 0 &&
-            `${fmtIDR(totalReimburse, true)} reimburse outstanding`}
+            `${fmtIDR(totalReimburse)} reimburse outstanding`}
           {totalLoanOutstanding > 0 && totalReimburse > 0 && "  ·  "}
           {totalLoanOutstanding > 0 &&
-            `${fmtIDR(totalLoanOutstanding, true)} loans outstanding`}
+            `${fmtIDR(totalLoanOutstanding)} loans outstanding`}
         </div>
         <Button variant="primary" size="sm" onClick={() => {
           setOutForm({ date: todayStr(), description: "", amount: "", entity: "Hamasa", from_id: spendAccounts[0]?.id || "", notes: "", cash_advance_fee: "" });
@@ -613,7 +613,7 @@ export default function Receivables({
           {reimburseAccs.length > 0 && (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
               {[
-                { label: "Total Outstanding", value: fmtIDR(totalReimburse, true), color: totalReimburse > 0 ? "#059669" : "#6b7280" },
+                { label: "Total Outstanding", value: fmtIDR(totalReimburse), color: totalReimburse > 0 ? "#059669" : "#6b7280" },
                 { label: "Active Entities",   value: String(activeReimburse),       color: "#3b5bdb" },
                 { label: "Total Entities",    value: String(reimburseAccs.length),  color: "#d97706" },
               ].map(s => (
@@ -745,7 +745,7 @@ export default function Receivables({
                                     {settled && <span style={{ marginLeft: 4, color: "#d1d5db" }}>· settled</span>}
                                   </div>
                                 </div>
-                                <div style={{ fontSize: 12, fontWeight: 700, color: "#dc2626", flexShrink: 0 }}>{fmtIDR(Number(e.amount || 0), true)}</div>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: "#dc2626", flexShrink: 0 }}>{fmtIDR(Number(e.amount || 0))}</div>
                               </div>
                             </div>
                           );
@@ -783,7 +783,7 @@ export default function Receivables({
                                     {settled && <span style={{ marginLeft: 4, color: "#d1d5db" }}>· settled</span>}
                                   </div>
                                 </div>
-                                <div style={{ fontSize: 12, fontWeight: 700, color: "#059669", flexShrink: 0 }}>+{fmtIDR(Number(e.amount || 0), true)}</div>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: "#059669", flexShrink: 0 }}>+{fmtIDR(Number(e.amount || 0))}</div>
                               </div>
                             </div>
                           );
@@ -861,8 +861,8 @@ export default function Receivables({
                                 >
                                   <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", fontFamily: "Figtree, sans-serif" }}>{date}</div>
                                   <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1, fontFamily: "Figtree, sans-serif" }}>
-                                    Out {fmtIDR(Number(s.total_out || 0), true)} · In {fmtIDR(Number(s.total_in || 0), true)} ·{" "}
-                                    <span style={{ fontWeight: 700, color: re > 0 ? "#dc2626" : "#059669" }}>RE {fmtIDR(re, true)}</span>
+                                    Out {fmtIDR(Number(s.total_out || 0))} · In {fmtIDR(Number(s.total_in || 0))} ·{" "}
+                                    <span style={{ fontWeight: 700, color: re > 0 ? "#dc2626" : "#059669" }}>RE {fmtIDR(re)}</span>
                                   </div>
                                 </div>
                                 <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
@@ -892,14 +892,14 @@ export default function Receivables({
                                   {outLedger.map(e => (
                                     <div key={e.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3, fontFamily: "Figtree, sans-serif" }}>
                                       <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#374151" }}>{e.description} · {e.tx_date}</span>
-                                      <span style={{ fontWeight: 700, color: "#dc2626", flexShrink: 0, marginLeft: 6 }}>{fmtIDR(Number(e.amount || 0), true)}</span>
+                                      <span style={{ fontWeight: 700, color: "#dc2626", flexShrink: 0, marginLeft: 6 }}>{fmtIDR(Number(e.amount || 0))}</span>
                                     </div>
                                   ))}
                                   <div style={{ fontSize: 10, fontWeight: 700, color: "#059669", margin: "8px 0 4px", fontFamily: "Figtree, sans-serif" }}>IN</div>
                                   {inLedger.map(e => (
                                     <div key={e.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3, fontFamily: "Figtree, sans-serif" }}>
                                       <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#374151" }}>{e.description} · {e.tx_date}</span>
-                                      <span style={{ fontWeight: 700, color: "#059669", flexShrink: 0, marginLeft: 6 }}>+{fmtIDR(Number(e.amount || 0), true)}</span>
+                                      <span style={{ fontWeight: 700, color: "#059669", flexShrink: 0, marginLeft: 6 }}>+{fmtIDR(Number(e.amount || 0))}</span>
                                     </div>
                                   ))}
                                   <div style={{ borderTop: "0.5px solid #f3f4f6", paddingTop: 6, marginTop: 4, display: "flex", justifyContent: "space-between", fontSize: 12, fontFamily: "Figtree, sans-serif" }}>

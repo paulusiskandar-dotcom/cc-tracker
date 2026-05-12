@@ -25,6 +25,7 @@ export default function Transactions({
   onRefresh, setLedger, pendingSyncs, setPendingSyncs, incomeSrcs,
   employeeLoans = [], setEmployeeLoans,
   recurTemplates = [],
+  setReminders,
 }) {
   const allCurrencies = C || [];
   const pendingCount  = pendingSyncs?.length || 0;
@@ -319,6 +320,7 @@ export default function Transactions({
         employeeLoans={employeeLoans}
         setEmployeeLoans={setEmployeeLoans}
         recurTemplates={recurTemplates}
+        setReminders={setReminders}
         onRefresh={onRefresh}
       />
 

@@ -233,6 +233,7 @@ export default function TxVerticalBig({
   liabilities = [], receivables = [], incomeSrcs = [],
   employeeLoans = [], setEmployeeLoans,
   recurTemplates = [],
+  setReminders,
   onRefresh,
 }) {
   const [form,    setFormState] = useState(EMPTY);
@@ -732,6 +733,7 @@ export default function TxVerticalBig({
               .maybeSingle();
             if (pendingReminder) {
               await recurringApi.confirmReminder(pendingReminder.id);
+              setReminders?.(prev => prev.filter(r => r.id !== pendingReminder.id));
               showToast(`✓ Recurring linked and reminder confirmed`);
               if (onRefresh) await onRefresh();
             } else {

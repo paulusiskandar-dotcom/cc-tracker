@@ -60,6 +60,7 @@ export default function Email({
   user, accounts, categories, incomeSrcs = [], ledger, setLedger,
   pendingSyncs, setPendingSyncs,
   dark, onRefresh,
+  setReminders,
   employeeLoans = [],
   merchantMaps = [],
   recurTemplates = [],
@@ -207,6 +208,7 @@ export default function Email({
           ledger={ledger}
           setLedger={setLedger}
           onRefresh={onRefresh}
+          setReminders={setReminders}
           dark={dark}
           T={T}
           employeeLoans={employeeLoans}
@@ -371,7 +373,7 @@ export default function Email({
 // ─── EMAIL PENDING TAB ────────────────────────────────────────────
 const GMAIL_NO_CAT = new Set(["transfer","pay_cc","give_loan","collect_loan","fx_exchange","reimburse_in","reimburse_out","buy_asset","sell_asset","pay_liability"]);
 
-function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, incomeSrcs = [], user, ledger, setLedger, onRefresh, dark, T: theme, employeeLoans = [], merchantMaps = [], recurTemplates = [] }) {
+function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, incomeSrcs = [], user, ledger, setLedger, onRefresh, setReminders, dark, T: theme, employeeLoans = [], merchantMaps = [], recurTemplates = [] }) {
   const T = theme || LIGHT;
 
   // Local editable rows (mirrors pendingSyncs but editable)
@@ -566,6 +568,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
           if (pr) {
             await recurringApi.confirmReminder(pr.id);
             reminderConfirmed = true;
+            setReminders?.(prev => prev.filter(r => r.id !== pr.id));
           }
         } catch (err) { console.error("Auto-confirm reminder failed:", err); }
       }
@@ -643,7 +646,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
               .gte("due_date", minDate.toISOString().slice(0, 10))
               .lte("due_date", maxDate.toISOString().slice(0, 10))
               .order("due_date", { ascending: true }).limit(1).maybeSingle();
-            if (pr) { await recurringApi.confirmReminder(pr.id); matchedNames.push(r.description || "Recurring"); }
+            if (pr) { await recurringApi.confirmReminder(pr.id); matchedNames.push(r.description || "Recurring"); setReminders?.(prev => prev.filter(x => x.id !== pr.id)); }
           } catch (err) { console.error("Auto-confirm reminder failed:", err); }
         }
         if (r.tx_type === "collect_loan" && r.employee_loan_id) {

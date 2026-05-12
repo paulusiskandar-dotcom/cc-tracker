@@ -413,14 +413,18 @@ export default function Dashboard({
         });
       });
 
-    // D) Pending reimburse settlements (expected income)
+    // D) Pending reimburse settlements — show NET outstanding (total_out - total_in)
     reimburseSettlements.forEach(s => {
+      const totalOut = Number(s.total_out || 0);
+      const totalIn  = Number(s.total_in  || 0);
+      const net      = totalOut - totalIn;
+      if (net <= 0) return;
       all.push({
         id:   `rs-${s.id}`, type: "reimburse", raw: s,
         date: today,
         title: s.entity,
-        sub:   `Expected reimbursement · ${fmtIDR(Number(s.total_out || 0), true)}`,
-        amount: Number(s.total_out || 0),
+        sub:   `Expected reimbursement · ${fmtIDR(net)}`,
+        amount: net,
         amountColor: "#059669", amountSign: "+",
         icon: "💰", iconBg: "#dcfce7", iconColor: "#059669",
         actionable: true,
@@ -496,48 +500,12 @@ export default function Dashboard({
       });
     });
 
-    // H) Recurring income/expense with day_of_month within next 14 days
-    recurTemplates
-      .filter(t => t.day_of_month && (t.tx_type === "income" || t.tx_type === "expense"))
-      .forEach(t => {
-        const dueDateStr = nextDueDateStr(t.day_of_month);
-        if (dueDateStr > cutoffDate.toISOString().slice(0, 10)) return;
-        const isInc = t.tx_type === "income";
-        all.push({
-          id: `rt-${t.id}`, type: "recurring", raw: t,
-          date: dueDateStr,
-          title: t.name || "Recurring",
-          sub: `Recurring ${isInc ? "income" : "expense"}`,
-          amount: Number(t.amount || 0),
-          amountColor: isInc ? "#059669" : "#dc2626",
-          amountSign: isInc ? "+" : "−",
-          icon: "🔄", iconBg: isInc ? "#dcfce7" : "#fee2e2", iconColor: isInc ? "#059669" : "#dc2626",
-          actionable: true, confirmLabel: "Log", confirmStyle: "primary",
-        });
-      });
-
-    // I) Pending reimburse settlements — no date filter, show all pending
-    reimburseSettlements.forEach(s => {
-      // Skip if already added by section D (same id prefix used there is 'rs-')
-      if (all.some(x => x.id === `rs-${s.id}`)) return;
-      const outstanding = Math.max(0, Number(s.total_out || 0) - Number(s.total_in || 0));
-      all.push({
-        id: `rsp-${s.id}`, type: "reimburse_pending", raw: s,
-        date: today,
-        title: s.entity,
-        sub: "Pending reimbursement",
-        amount: outstanding,
-        amountColor: "#059669", amountSign: "+",
-        icon: "🧾", iconBg: "#dcfce7", iconColor: "#059669",
-        actionable: true, confirmLabel: "Mark", confirmStyle: "primary",
-      });
-    });
 
     return all
       .filter(item => !dismissed.has(item.id))
       .sort((a, b) => a.date.localeCompare(b.date) || (a.type === "installment" ? 1 : -1))
       .slice(0, 8);
-  }, [reminders, loansWithStats, receivables, installments, creditCards, dismissed, reimburseSettlements, assets, bankAccounts, recurTemplates, ledger]);
+  }, [reminders, loansWithStats, receivables, installments, creditCards, dismissed, reimburseSettlements, assets, bankAccounts, ledger]);
 
   // Group upcoming by date
   const UPCOMING_DEFAULT_VISIBLE = 4;
