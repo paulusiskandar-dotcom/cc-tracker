@@ -29,6 +29,7 @@ const SUBTABS = [
   { id: "reimburse", label: "Reimburse"      },
   { id: "loans",     label: "Employee Loans" },
   { id: "history",   label: "History"        },
+  { id: "activity",  label: "Activity"       },
 ];
 
 const ENTITY_CHOICES = REIMBURSE_ENTITIES;
@@ -96,6 +97,179 @@ function LoanFormFields({ form, setForm, T, showAlreadyPaid = false }) {
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
               <span style={{ color: "#374151" }}>Ends</span>
               <span style={{ fontWeight: 700, color: "#111827" }}>{endDate}</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function KPITile({ label, value, color, showSign = false, sublabel = null }) {
+  const sign = showSign && value > 0 ? "+" : "";
+  return (
+    <div style={{
+      background: "#f9fafb",
+      border: "1px solid #f3f4f6",
+      borderRadius: 12,
+      padding: "12px 14px",
+    }}>
+      <div style={{
+        fontSize: 10,
+        fontWeight: 700,
+        color: "#6b7280",
+        textTransform: "uppercase",
+        letterSpacing: 0.5,
+        marginBottom: 6,
+      }}>
+        {label}
+      </div>
+      <div style={{
+        fontSize: 18,
+        fontWeight: 800,
+        color,
+        letterSpacing: -0.3,
+      }}>
+        {sign}{fmtIDR(value)}
+      </div>
+      {sublabel && (
+        <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 4 }}>
+          {sublabel}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SettlementCard({ settlement, ledger, expanded, onToggle }) {
+  const totalOut  = Number(settlement.total_out || 0);
+  const totalIn   = Number(settlement.total_in  || 0);
+  const net       = settlement.netAmount;
+  const isLoss    = settlement.isLoss;
+  const isSurplus = settlement.isSurplus;
+
+  const badgeColor = isLoss ? "#dc2626" : isSurplus ? "#059669" : "#6b7280";
+  const badgeBg    = isLoss ? "#fef2f2" : isSurplus ? "#ecfdf5" : "#f3f4f6";
+  const badgeLabel = isLoss ? "LOSS"    : isSurplus ? "SURPLUS" : "BALANCED";
+
+  const outLedgerIds = settlement.out_ledger_ids || [];
+  const inLedgerIds  = settlement.in_ledger_ids  || [];
+  const outEntries   = ledger.filter(e => outLedgerIds.includes(e.id));
+  const inEntries    = ledger.filter(e => inLedgerIds.includes(e.id));
+
+  const dateStr = settlement.settled_at
+    ? new Date(settlement.settled_at).toLocaleDateString("en-US", {
+        year: "numeric", month: "long", day: "numeric",
+      })
+    : "Unknown date";
+
+  return (
+    <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
+      <div
+        onClick={onToggle}
+        style={{
+          padding: "12px 16px",
+          cursor: "pointer",
+          userSelect: "none",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          background: expanded ? "#fafafa" : "#fff",
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", marginBottom: 2 }}>
+            {settlement.entity || "Unknown entity"}
+          </div>
+          <div style={{ fontSize: 11, color: "#6b7280" }}>
+            {dateStr} · Out: {fmtIDR(totalOut)} · In: {fmtIDR(totalIn)}
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <span style={{
+            fontSize: 9,
+            fontWeight: 700,
+            color: badgeColor,
+            background: badgeBg,
+            padding: "3px 8px",
+            borderRadius: 4,
+            letterSpacing: 0.5,
+          }}>
+            {badgeLabel}
+          </span>
+          {!settlement.isBalanced && (
+            <span style={{ fontSize: 13, fontWeight: 800, color: badgeColor }}>
+              {isSurplus ? "+" : ""}{fmtIDR(Math.abs(net))}
+            </span>
+          )}
+          <span style={{
+            fontSize: 10,
+            color: "#9ca3af",
+            display: "inline-block",
+            marginLeft: 4,
+            transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
+            transition: "transform 0.15s",
+          }}>▶</span>
+        </div>
+      </div>
+
+      {expanded && (
+        <div style={{ borderTop: "1px solid #f3f4f6", padding: "12px 16px", background: "#fafafa" }}>
+          {outEntries.length > 0 && (
+            <div style={{ marginBottom: inEntries.length > 0 ? 12 : 0 }}>
+              <div style={{
+                fontSize: 10,
+                fontWeight: 700,
+                color: "#6b7280",
+                textTransform: "uppercase",
+                letterSpacing: 0.5,
+                marginBottom: 6,
+              }}>
+                Reimburse Out ({outEntries.length})
+              </div>
+              {outEntries.map(e => (
+                <div key={e.id} style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 12,
+                  padding: "3px 0",
+                  color: "#374151",
+                }}>
+                  <span>{e.tx_date} · {e.description || e.merchant_name || "—"}</span>
+                  <span style={{ fontWeight: 600, color: "#dc2626" }}>
+                    -{fmtIDR(Number(e.amount_idr || 0))}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          {inEntries.length > 0 && (
+            <div>
+              <div style={{
+                fontSize: 10,
+                fontWeight: 700,
+                color: "#6b7280",
+                textTransform: "uppercase",
+                letterSpacing: 0.5,
+                marginBottom: 6,
+              }}>
+                Reimburse In ({inEntries.length})
+              </div>
+              {inEntries.map(e => (
+                <div key={e.id} style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 12,
+                  padding: "3px 0",
+                  color: "#374151",
+                }}>
+                  <span>{e.tx_date} · {e.description || e.merchant_name || "—"}</span>
+                  <span style={{ fontWeight: 600, color: "#059669" }}>
+                    +{fmtIDR(Number(e.amount_idr || 0))}
+                  </span>
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -330,6 +504,51 @@ export default function Receivables({
 
   const REIMBURSABLE_LOSS_CATEGORY_ID   = 'e054e34e-9251-461b-a118-718077cf3293';
   const REIMBURSABLE_SURPLUS_SRC_ID     = '0afb406d-fc3d-49af-a002-c40d3d865c4d';
+
+  const reimburseSummary = useMemo(() => {
+    const totalOut = ledger
+      .filter(e => e.tx_type === "reimburse_out")
+      .reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+    const totalIn = ledger
+      .filter(e => e.tx_type === "reimburse_in")
+      .reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+    const lossEntries = ledger.filter(e =>
+      e.reimburse_settlement_id &&
+      e.category_id === REIMBURSABLE_LOSS_CATEGORY_ID
+    );
+    const surplusEntries = ledger.filter(e =>
+      e.reimburse_settlement_id &&
+      e.from_id === REIMBURSABLE_SURPLUS_SRC_ID
+    );
+    const totalLoss    = lossEntries.reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+    const totalSurplus = surplusEntries.reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+    const netAdjustment = totalSurplus - totalLoss;
+    return {
+      totalOut, totalIn, totalLoss, totalSurplus, netAdjustment,
+      lossCount: lossEntries.length,
+      surplusCount: surplusEntries.length,
+    };
+  }, [ledger, REIMBURSABLE_LOSS_CATEGORY_ID, REIMBURSABLE_SURPLUS_SRC_ID]);
+
+  const settledGroups = useMemo(() =>
+    (settlements || [])
+      .filter(s => s.status === "settled")
+      .map(s => {
+        const totalOut = Number(s.total_out || 0);
+        const totalIn  = Number(s.total_in  || 0);
+        const net = totalIn - totalOut;
+        return { ...s, netAmount: net, isLoss: net < 0, isSurplus: net > 0, isBalanced: net === 0 };
+      })
+      .sort((a, b) => (b.settled_at || "").localeCompare(a.settled_at || "")),
+  [settlements]);
+
+  const pendingGroups = useMemo(() =>
+    (settlements || []).filter(s => s.status === "pending"),
+  [settlements]);
+
+  const [expandedSettlements, setExpandedSettlements] = useState({});
+  const toggleSettlement = (id) =>
+    setExpandedSettlements(prev => ({ ...prev, [id]: !prev[id] }));
 
   const getSettleDate = (rId) => settleDate[rId] || todayStr();
 
@@ -1194,6 +1413,133 @@ export default function Receivables({
               );
             })
           )}
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════ */}
+      {/* ── ACTIVITY TAB ─────────────────────────────── */}
+      {/* ══════════════════════════════════════════════════ */}
+      {subTab === "activity" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, fontFamily: "Figtree, sans-serif" }}>
+
+          {/* Pending banner — defensive for legacy stuck pending */}
+          {pendingGroups.length > 0 && (
+            <div style={{
+              background: "#fef3c7",
+              border: "1px solid #fde68a",
+              borderRadius: 12,
+              padding: "12px 16px",
+            }}>
+              <div style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: "#92400e",
+                textTransform: "uppercase",
+                letterSpacing: 0.5,
+                marginBottom: 4,
+              }}>
+                Pending Settlements ({pendingGroups.length})
+              </div>
+              <div style={{ fontSize: 12, color: "#78350f" }}>
+                These settlements have not been marked as settled. Review and update via Outstanding tab.
+              </div>
+            </div>
+          )}
+
+          {/* All-time summary */}
+          <div style={{
+            background: "#fff",
+            border: "0.5px solid #e5e7eb",
+            borderRadius: 16,
+            overflow: "hidden",
+          }}>
+            <div style={{ height: 3, background: "linear-gradient(90deg, #3b5bdb, #6366f1)" }} />
+            <div style={{ padding: "20px 24px" }}>
+              <div style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: "#6b7280",
+                textTransform: "uppercase",
+                letterSpacing: 0.5,
+                marginBottom: 4,
+              }}>
+                Reimbursable Activity
+              </div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: "#111827", marginBottom: 20 }}>
+                All-Time Summary
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                <KPITile
+                  label="Total Out (Gross)"
+                  value={reimburseSummary.totalOut}
+                  color="#6b7280"
+                />
+                <KPITile
+                  label="Total In (Gross)"
+                  value={reimburseSummary.totalIn}
+                  color="#6b7280"
+                />
+                <KPITile
+                  label="Net Adjustments"
+                  value={reimburseSummary.netAdjustment}
+                  color={reimburseSummary.netAdjustment >= 0 ? "#059669" : "#dc2626"}
+                  showSign={true}
+                  sublabel={
+                    reimburseSummary.lossCount + reimburseSummary.surplusCount > 0
+                      ? `${reimburseSummary.surplusCount} surplus · ${reimburseSummary.lossCount} loss`
+                      : "No adjustments yet"
+                  }
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Settlement history list */}
+          <div style={{
+            background: "#fff",
+            border: "0.5px solid #e5e7eb",
+            borderRadius: 16,
+            overflow: "hidden",
+          }}>
+            <div style={{ height: 3, background: "linear-gradient(90deg, #059669, #10b981)" }} />
+            <div style={{ padding: "20px 24px" }}>
+              <div style={{
+                fontSize: 11,
+                fontWeight: 700,
+                color: "#6b7280",
+                textTransform: "uppercase",
+                letterSpacing: 0.5,
+                marginBottom: 4,
+              }}>
+                Settlement History ({settledGroups.length})
+              </div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: "#111827", marginBottom: 20 }}>
+                Settled Reimbursements
+              </div>
+              {settledGroups.length === 0 ? (
+                <div style={{
+                  padding: "32px 16px",
+                  textAlign: "center",
+                  color: "#9ca3af",
+                  fontSize: 13,
+                }}>
+                  No settled reimbursements yet
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {settledGroups.map(s => (
+                    <SettlementCard
+                      key={s.id}
+                      settlement={s}
+                      ledger={ledger}
+                      expanded={!!expandedSettlements[s.id]}
+                      onToggle={() => toggleSettlement(s.id)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
