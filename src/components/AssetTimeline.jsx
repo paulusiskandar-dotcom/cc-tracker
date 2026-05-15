@@ -96,11 +96,10 @@ export default function AssetTimeline({
   , [ledger, asset.id]);
 
   const costBasis = useMemo(() => {
-    const base = Number(asset.purchase_price || 0);
     const adds = assetLedger
       .filter(e => e.tx_type === "buy_asset" && e.to_id === asset.id)
       .reduce((s, e) => s + Number(e.amount_idr || 0), 0);
-    return base + adds;
+    return adds > 0 ? adds : Number(asset.purchase_price || 0);
   }, [asset, assetLedger]);
 
   const currentValue = Number(asset.current_value || 0);
