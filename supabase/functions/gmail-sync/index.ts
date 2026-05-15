@@ -126,7 +126,7 @@ Analyze this bank email and extract ALL transactions.
 User accounts for matching:
 ${JSON.stringify(accounts.map(a => ({
   id: a.id, name: a.name, type: a.type,
-  last4: a.last4, account_no: a.account_no, bank_name: a.bank_name,
+  card_last4: a.card_last4, account_no: a.account_no, bank_name: a.bank_name,
 })))}
 
 ${categoryContext}
@@ -259,7 +259,7 @@ function matchAccount(
   const txBankLower = bankName?.toLowerCase() || null;
   const pool = txBankLower
     ? accounts.filter(a => {
-        if (!a.bank_name || !a.is_active) return false;
+        if (!a.bank_name || a.is_active === false) return false;
         const accBank = a.bank_name.toLowerCase();
         return accBank === txBankLower
           || txBankLower.includes(accBank)
@@ -358,7 +358,7 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
   }
 
   // Load user accounts for matching
-  const { data: accounts } = await supabase.from("accounts").select("id,name,type,last4,account_no,bank_name").eq("user_id", userId).eq("is_active", true);
+  const { data: accounts } = await supabase.from("accounts").select("id,name,type,card_last4,account_no,bank_name,is_active,currency,sort_order,subtype").eq("user_id", userId).eq("is_active", true);
   const userAccounts = accounts || [];
 
   // Load merchant mappings + categories + income sources for AI context
@@ -689,7 +689,7 @@ async function reprocessEmails(supabase: any, userId: string, ids: string[], ant
     { data: incomeSrcs },
   ] = await Promise.all([
     supabase.from("accounts")
-      .select("id,name,type,last4,account_no,bank_name").eq("user_id", userId).eq("is_active", true),
+      .select("id,name,type,card_last4,account_no,bank_name,is_active,currency,sort_order,subtype").eq("user_id", userId).eq("is_active", true),
     supabase.from("merchant_mappings")
       .select("merchant_name,canonical_name,category_id,category_name,tx_type,account_id").eq("user_id", userId),
     supabase.from("expense_categories")
