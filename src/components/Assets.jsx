@@ -47,7 +47,7 @@ function DonutChart({ data, colors, size = 120, thickness = 24 }) {
 
 
 // ─── ASSET CARD ───────────────────────────────────────────────
-function AssetCard({ asset: a, color, onUpdate, onEdit, onTimeline, fxRates = {} }) {
+function AssetCard({ asset: a, color, onUpdate, onEdit, onSell, onTimeline, fxRates = {} }) {
   const isForeign = !!(a.currency && a.currency !== "IDR");
   const rate      = isForeign ? (fxRates[a.currency] || 1) : 1;
   const cur       = Number(a.current_value || 0);
@@ -121,6 +121,16 @@ function AssetCard({ asset: a, color, onUpdate, onEdit, onTimeline, fxRates = {}
         </div>
 
       </div>
+      {onSell && (
+        <div onClick={e => e.stopPropagation()} style={{ borderTop: "0.5px solid #f3f4f6", padding: "8px 16px" }}>
+          <button
+            onClick={() => onSell()}
+            style={{ fontSize: 11, fontWeight: 600, color: "#d97706", background: "#fef9ec", border: "1px solid #fde68a", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: "Figtree, sans-serif" }}
+          >
+            💰 Sell
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -265,8 +275,34 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
   const [editAssetForm,  setEditAssetForm]  = useState({});
   const setEAF = (k, v) => setEditAssetForm(f => ({ ...f, [k]: v }));
 
+  // Sell asset modal
+  const [sellAsset,  setSellAsset]  = useState(null);
+  const [sellForm,   setSellForm]   = useState({ amount: "", to_id: "", date: "", notes: "" });
+  const [sellSaving, setSellSaving] = useState(false);
+
+  // Archived assets (is_active=false)
+  const [archivedAssets, setArchivedAssets] = useState([]);
+  const [archivedOpen,   setArchivedOpen]   = useState(false);
+  const [archivedLoaded, setArchivedLoaded] = useState(false);
+
+  const loadArchivedAssets = () => {
+    if (archivedLoaded) { setArchivedOpen(o => !o); return; }
+    supabase.from("accounts")
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("type", "asset")
+      .eq("is_active", false)
+      .order("updated_at", { ascending: false })
+      .then(({ data }) => {
+        setArchivedAssets(data || []);
+        setArchivedLoaded(true);
+        setArchivedOpen(true);
+      });
+  };
+
   // ── DERIVED ─────────────────────────────────────────────────
   const assets = useMemo(() => accounts.filter(a => a.type === "asset"), [accounts]);
+  const bankAccounts = useMemo(() => accounts.filter(a => a.type === "bank" && a.is_active !== false), [accounts]);
 
   const totalValue    = assets.reduce((s, a) => s + Number(a.current_value  || 0), 0);
   const totalCost     = assets.reduce((s, a) => s + Number(a.purchase_price || 0), 0);
@@ -457,6 +493,36 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
     setSaving(false);
   };
 
+  const openSell = (asset) => {
+    setSellAsset(asset);
+    setSellForm({ amount: String(asset.current_value || ""), to_id: "", date: todayStr(), notes: "" });
+  };
+
+  const handleSell = async () => {
+    if (!sellAsset) return;
+    const amt = Number(sellForm.amount) || 0;
+    if (!amt)            return showToast("Enter sell price", "error");
+    if (!sellForm.to_id) return showToast("Select destination bank account", "error");
+    setSellSaving(true);
+    try {
+      await ledgerApi.create(user.id, {
+        tx_date:     sellForm.date || todayStr(),
+        description: sellForm.notes || `${sellAsset.name} — Sold`,
+        amount: amt, currency: "IDR", fx_rate_used: null, amount_idr: amt,
+        tx_type: "sell_asset", from_type: "account", to_type: "account",
+        from_id: sellAsset.id, to_id: sellForm.to_id,
+        entity: "Personal", category_id: null, category_name: null,
+        notes: sellForm.notes || "",
+      }, accounts);
+      await accountsApi.update(sellAsset.id, { is_active: false, current_value: 0 });
+      setAccounts(p => p.filter(a => a.id !== sellAsset.id));
+      await onRefresh?.();
+      showToast(`${sellAsset.name} — Rp ${amt.toLocaleString("id-ID")} sold`);
+      setSellAsset(null);
+    } catch (e) { showToast(e.message, "error"); }
+    setSellSaving(false);
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
@@ -538,10 +604,48 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
                   fxRates={fxRates}
                   onUpdate={() => openUpdateModal(a)}
                   onEdit={() => openEditAsset(a)}
+                  onSell={() => openSell(a)}
                   onTimeline={() => navigate(`/accounts/${a.id}/statement`)}
                 />
               );
             })}
+          </div>
+
+          {/* ── ARCHIVED ASSETS section ──────────────────── */}
+          <div style={{ marginTop: 4 }}>
+            <button
+              onClick={loadArchivedAssets}
+              style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", padding: "4px 0", fontFamily: "Figtree, sans-serif", fontSize: 12, fontWeight: 600, color: "#9ca3af" }}
+            >
+              <span style={{ fontSize: 10 }}>{archivedOpen ? "▼" : "▶"}</span>
+              Archived Assets {archivedLoaded && archivedAssets.length > 0 ? `(${archivedAssets.length})` : ""}
+            </button>
+            {archivedOpen && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                {archivedAssets.length === 0 ? (
+                  <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif", padding: "6px 0" }}>No archived assets.</div>
+                ) : archivedAssets.map(a => (
+                  <div key={a.id} style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, opacity: 0.75 }}>
+                    <div style={{ width: 32, height: 32, borderRadius: 8, background: (ASSET_COL[a.subtype] || "#9ca3af") + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>
+                      {ASSET_ICON[a.subtype] || "📦"}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#374151", fontFamily: "Figtree, sans-serif" }}>{a.name}</div>
+                      <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
+                        {a.subtype || "Asset"} · Sold/Archived
+                        {Number(a.purchase_price || 0) > 0 && ` · Cost ${fmtIDR(Number(a.purchase_price))}`}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => navigate(`/accounts/${a.id}/statement`)}
+                      style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, border: "1px solid #e5e7eb", background: "#fff", color: "#6b7280", cursor: "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 600, flexShrink: 0 }}
+                    >
+                      📄 History
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </>
       )}
@@ -724,6 +828,39 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
               placeholder="Optional notes…" />
           </Field>
         </div>
+      </Modal>
+
+      {/* ── SELL ASSET MODAL ──────────────────────────────── */}
+      <Modal
+        isOpen={!!sellAsset}
+        onClose={() => setSellAsset(null)}
+        title="Sell Asset"
+        footer={<Button fullWidth onClick={handleSell} busy={sellSaving}>💰 Sell Asset</Button>}
+      >
+        {sellAsset && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ background: "#fef9ec", borderRadius: 10, padding: "10px 14px", fontFamily: "Figtree, sans-serif", border: "1px solid #fde68a" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{sellAsset.name}</div>
+              <div style={{ fontSize: 11, color: "#d97706", marginTop: 2, fontWeight: 600 }}>
+                Current value: {fmtIDR(Number(sellAsset.current_value || 0))}
+              </div>
+            </div>
+            <AmountInput label="Sell Price (Rp)" value={sellForm.amount}
+              onChange={v => setSellForm(f => ({ ...f, amount: v }))} />
+            <Field label="Transfer proceeds to *">
+              <Select
+                value={sellForm.to_id}
+                onChange={e => setSellForm(f => ({ ...f, to_id: e.target.value }))}
+                options={bankAccounts.map(a => ({ value: a.id, label: a.name }))}
+                placeholder="Select bank account…"
+              />
+            </Field>
+            <Input label="Sale Date" type="date" value={sellForm.date || todayStr()}
+              onChange={e => setSellForm(f => ({ ...f, date: e.target.value }))} />
+            <Input label="Notes (optional)" value={sellForm.notes}
+              onChange={e => setSellForm(f => ({ ...f, notes: e.target.value }))} />
+          </div>
+        )}
       </Modal>
 
     </div>
