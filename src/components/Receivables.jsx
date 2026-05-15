@@ -922,6 +922,7 @@ export default function Receivables({
               const totalOutSel  = selOutEntries.reduce((s, e) => s + Number(e.amount || 0), 0);
               const totalInSel   = selInEntries.reduce((s, e) => s + Number(e.amount || 0), 0);
               const reimbursable = totalOutSel - totalInSel;
+              const surplus      = Math.max(0, totalInSel - totalOutSel);
               const canSettle    = selOut.size > 0 && selIn.size > 0;
 
               return (
@@ -1060,6 +1061,14 @@ export default function Receivables({
                                 {fmtIDR(Math.max(0, reimbursable))}
                               </div>
                             </div>
+                            {surplus > 0 && (
+                              <div>
+                                <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>Reimbursable Surplus</div>
+                                <div style={{ fontSize: 16, fontWeight: 900, fontFamily: "Figtree, sans-serif", color: "#059669" }}>
+                                  +{fmtIDR(surplus)}
+                                </div>
+                              </div>
+                            )}
                           </div>
                           <button
                             onClick={() => handleSettleEntity(r.entity, r)}
