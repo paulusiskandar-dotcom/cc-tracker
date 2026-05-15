@@ -78,15 +78,17 @@ export default function AssetTimeline({
   const icon = ASSET_ICON[asset.subtype] || "📦";
 
   useEffect(() => {
-    if (!asset?.id) return;
+    if (!asset?.id || !user?.id) return;
     setHistLoading(true);
     supabase
       .from("asset_value_history")
       .select("*")
+      .eq("user_id", user.id)
       .eq("account_id", asset.id)
       .order("date", { ascending: true })
+      .order("created_at", { ascending: true })
       .then(({ data }) => { setValueHistory(data || []); setHistLoading(false); });
-  }, [asset?.id]);
+  }, [asset?.id, user?.id]);
 
   // ── Derived metrics ──────────────────────────────────────────
   const assetLedger = useMemo(() =>
