@@ -102,10 +102,15 @@ export default function AssetTimeline({
   }, [asset, assetLedger]);
 
   const currentValue = Number(asset.current_value || 0);
-  const unrealizedPL = currentValue - costBasis;
-  const returnPct    = costBasis > 0 ? (unrealizedPL / costBasis) * 100 : 0;
-  const plColor      = unrealizedPL >= 0 ? "#059669" : "#dc2626";
-  const plBg         = unrealizedPL >= 0 ? "#f0fdf4" : "#fff1f2";
+
+  const saleProceeds = assetLedger
+    .filter(e => e.tx_type === "sell_asset" && e.from_id === asset.id)
+    .reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+
+  const pnl       = isArchived ? saleProceeds - costBasis : currentValue - costBasis;
+  const returnPct = costBasis > 0 ? (pnl / costBasis) * 100 : 0;
+  const plColor   = pnl >= 0 ? "#059669" : "#dc2626";
+  const plBg      = pnl >= 0 ? "#f0fdf4" : "#fff1f2";
 
   // ── Sparkline data ────────────────────────────────────────────
   const sparkData = useMemo(() => {
@@ -113,10 +118,17 @@ export default function AssetTimeline({
     if (asset.purchase_date && Number(asset.purchase_price || 0) > 0)
       points.push({ date: asset.purchase_date, value: Number(asset.purchase_price) });
     valueHistory.forEach(h => points.push({ date: h.date, value: Number(h.new_value || 0) }));
-    if (points.length === 0 || points[points.length - 1].value !== currentValue)
+    if (isArchived && saleProceeds > 0) {
+      const sellEntry = assetLedger
+        .filter(e => e.tx_type === "sell_asset" && e.from_id === asset.id)
+        .sort((a, b) => a.tx_date.localeCompare(b.tx_date))
+        .pop();
+      points.push({ date: sellEntry?.tx_date || todayStr(), value: saleProceeds });
+    } else if (points.length === 0 || points[points.length - 1].value !== currentValue) {
       points.push({ date: todayStr(), value: currentValue });
+    }
     return points.map(p => ({ date: p.date, label: fmtDateShort(p.date), value: p.value }));
-  }, [asset, valueHistory, currentValue]);
+  }, [asset, valueHistory, currentValue, isArchived, saleProceeds, assetLedger]);
 
   // ── All events sorted chronologically (oldest first) ─────────
   const allEvents = useMemo(() => {
@@ -214,7 +226,7 @@ export default function AssetTimeline({
       ["Asset Statement — Paulus Finance"],
       ["Asset", asset.name], ["Type", asset.subtype || "Asset"], [],
       ["Current Value", currentValue], ["Cost Basis", costBasis],
-      ["Unrealized P&L", unrealizedPL], ["Return %", returnPct.toFixed(2) + "%"],
+      [isArchived ? "Realized P&L" : "Unrealized P&L", pnl], ["Return %", returnPct.toFixed(2) + "%"],
     ]), "Summary");
     const hdr = ["Tanggal", "Keterangan", "Jenis", "Debit", "Kredit", "Nilai"];
     const rows = eventsWithValue.map(ev => {
@@ -294,7 +306,7 @@ export default function AssetTimeline({
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
         <MetricCard label="Current Value"  value={fmtIDR(currentValue)} color="#3b5bdb" bg="#eff6ff" />
         <MetricCard label="Cost Basis"     value={fmtIDR(costBasis)}    color="#111827" bg="#f9fafb" />
-        <MetricCard label="Unrealized P&L" value={`${unrealizedPL >= 0 ? "+" : ""}${fmtIDR(Math.abs(unrealizedPL))}`} color={plColor} bg={plBg} />
+        <MetricCard label={isArchived ? "Realized P&L" : "Unrealized P&L"} value={`${pnl >= 0 ? "+" : ""}${fmtIDR(Math.abs(pnl))}`} color={plColor} bg={plBg} />
         <MetricCard label="Return %"       value={`${returnPct >= 0 ? "+" : ""}${returnPct.toFixed(1)}%`} color={plColor} bg={plBg} />
       </div>
 
@@ -477,7 +489,7 @@ export default function AssetTimeline({
             {allEvents.length} event{allEvents.length !== 1 ? "s" : ""}
           </span>
           <span style={{ fontSize: 12, fontWeight: 700, color: plColor, fontFamily: FF }}>
-            P&L: {unrealizedPL >= 0 ? "+" : ""}{fmtIDR(Math.abs(unrealizedPL))} ({returnPct >= 0 ? "+" : ""}{returnPct.toFixed(1)}%)
+            P&L: {pnl >= 0 ? "+" : ""}{fmtIDR(Math.abs(pnl))} ({returnPct >= 0 ? "+" : ""}{returnPct.toFixed(1)}%)
           </span>
         </div>
       )}
