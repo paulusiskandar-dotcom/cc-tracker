@@ -301,6 +301,8 @@ export default function TxVerticalBig({
         loan_start_date:  initialData.loan_start_date || todayStr(),
         fx_rate_used:     initialData.fx_rate_used || "",
         recurring_template_id: initialData.recurring_template_id || null,
+        // buy_asset edit: back-fill asset_id from to_id so dropdown pre-selects correctly
+        asset_id: txType === "buy_asset" ? (initialData.to_id || null) : null,
       });
       setGroup(groupForType(txType));
 
@@ -563,7 +565,19 @@ export default function TxVerticalBig({
         const assetName = isExst
           ? (assetAccs.find(a => a.id === form.asset_id)?.name || "Asset")
           : form.asset_name.trim();
-        const toId = isExst ? uuid(form.asset_id) : null;
+        // For new asset: create the account first so we have its ID for to_id linkage
+        let newAsset = null;
+        if (!isExst) {
+          try {
+            newAsset = await assetsApi.create(user.id, {
+              name: form.asset_name.trim(), type: form.asset_type || "Investment",
+              current_value: 0, purchase_price: price,
+              purchase_date: form.tx_date, notes: form.notes || null,
+            });
+          } catch (ae) { console.warn("[buy_asset] asset create failed:", ae.message); }
+        }
+        const toId = isExst ? uuid(form.asset_id) : (newAsset?.id || null);
+        const ledgerAccounts = newAsset ? [...accounts, newAsset] : accounts;
         const entry = {
           tx_date: form.tx_date, description: assetName,
           amount: price, currency: "IDR", amount_idr: price,
@@ -574,16 +588,11 @@ export default function TxVerticalBig({
           attachment_url: null, ai_categorized: false, ai_confidence: null,
           installment_id: null, scan_batch_id: null,
         };
-        const created = await ledgerApi.create(user.id, entry, accounts);
+        const created = await ledgerApi.create(user.id, entry, ledgerAccounts);
         setLedger?.(p => [created, ...p]);
-        if (!isExst) {
-          try {
-            await assetsApi.create(user.id, {
-              name: form.asset_name.trim(), type: form.asset_type || "Investment",
-              current_value: price, purchase_price: price,
-              purchase_date: form.tx_date, notes: form.notes || null,
-            });
-          } catch (ae) { console.warn("[buy_asset] asset create failed:", ae.message); }
+        // Recalculate asset balance to guarantee current_value is correct
+        if (toId) {
+          try { await recalculateBalance(toId, user.id); } catch (_) {}
         }
         showToast("Asset purchased");
         await onRefresh?.();

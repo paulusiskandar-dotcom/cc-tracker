@@ -53,6 +53,7 @@ function SparkTooltip({ active, payload, label }) {
 export default function AssetTimeline({
   asset, user, accounts, ledger, setLedger, onBack, onRefresh, setAccounts,
   categories = [], fxRates = {}, allCurrencies = [],
+  isArchived = false,
 }) {
   const [valueHistory, setValueHistory] = useState([]);
   const [histLoading,  setHistLoading]  = useState(true);
@@ -266,7 +267,14 @@ export default function AssetTimeline({
           {icon}
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 18, fontWeight: 800, color: "#111827" }}>{asset.name}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "#111827" }}>{asset.name}</div>
+            {isArchived && (
+              <span style={{ fontSize: 10, fontWeight: 700, background: "#f3f4f6", color: "#6b7280", padding: "2px 8px", borderRadius: 20, border: "1px solid #e5e7eb", whiteSpace: "nowrap" }}>
+                Archived
+              </span>
+            )}
+          </div>
           <div style={{ fontSize: 12, color: "#9ca3af" }}>{asset.subtype || "Asset"}</div>
         </div>
         <div style={{ display: "flex", gap: 6, flexShrink: 0, flexWrap: "wrap" }}>

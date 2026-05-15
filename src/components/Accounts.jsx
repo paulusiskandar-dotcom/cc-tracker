@@ -90,6 +90,26 @@ export default function Accounts({
     setPendingReconcileNav?.(null);
   }, [pendingReconcileNav]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ─── ARCHIVED ASSETS (is_active=false) ──────────────────────
+  const [archivedAssets,      setArchivedAssets]      = useState([]);
+  const [archivedOpen,        setArchivedOpen]        = useState(false);
+  const [archivedLoaded,      setArchivedLoaded]      = useState(false);
+
+  const loadArchivedAssets = () => {
+    if (archivedLoaded) { setArchivedOpen(o => !o); return; }
+    supabase.from("accounts")
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("type", "asset")
+      .eq("is_active", false)
+      .order("updated_at", { ascending: false })
+      .then(({ data }) => {
+        setArchivedAssets(data || []);
+        setArchivedLoaded(true);
+        setArchivedOpen(true);
+      });
+  };
+
   // ─── FILTERED ACCOUNTS ──────────────────────────────────────
   const filtered = useMemo(() => {
     if (subTab === "all") return accounts;
@@ -352,15 +372,15 @@ export default function Accounts({
 
   const saveWithdraw = async () => {
     if (!withdrawAcc) return;
+    const isDeposito = isDepositoAcc(withdrawAcc);
     const amt  = Number(withdrawForm.amount) || 0;
     if (!amt)            { showToast("Enter withdrawal amount", "error"); return; }
     if (!withdrawForm.to_id) { showToast("Select destination bank account", "error"); return; }
     setWithdrawSaving(true);
     try {
-      // Insert sell_asset ledger entry
       await ledgerApi.create(user.id, {
         tx_date:     withdrawForm.date || todayStr(),
-        description: withdrawForm.notes || `${withdrawAcc.name} — Cair`,
+        description: withdrawForm.notes || `${withdrawAcc.name} — ${isDeposito ? "Cair" : "Sold"}`,
         amount:      amt, currency: "IDR", fx_rate_used: null, amount_idr: amt,
         tx_type:     "sell_asset",
         from_type:   "account", to_type: "account",
@@ -370,13 +390,13 @@ export default function Accounts({
         category_id: null, category_name: null,
         notes:       withdrawForm.notes || "",
       }, accounts);
-      // Mark deposit as closed
-      const updated = await accountsApi.update(withdrawAcc.id, {
-        deposit_status: "closed", is_active: false, current_value: 0,
-      });
+      const updateFields = isDeposito
+        ? { deposit_status: "closed", is_active: false, current_value: 0 }
+        : { is_active: false, current_value: 0 };
+      const updated = await accountsApi.update(withdrawAcc.id, updateFields);
       setAccounts(p => p.map(a => a.id === withdrawAcc.id ? { ...a, ...updated } : a));
       await onRefresh?.();
-      showToast(`${withdrawAcc.name} — Rp ${amt.toLocaleString("id-ID")} cair ke bank`);
+      showToast(`${withdrawAcc.name} — Rp ${amt.toLocaleString("id-ID")} ${isDeposito ? "cair ke bank" : "sold"}`);
       setModal(null);
     } catch (e) { showToast(e.message, "error"); }
     setWithdrawSaving(false);
@@ -504,9 +524,46 @@ export default function Accounts({
                 onHistory={() => { setHistAcc(a); setModal("history"); }}
                 onUpdateNilai={() => openUpdateNilai(a)}
                 onWithdraw={isDepositoAcc(a) ? () => openWithdraw(a) : undefined}
+                onSell={a.type === "asset" && !isDepositoAcc(a) ? () => openWithdraw(a) : undefined}
                 onStatement={() => navigate(`/accounts/${a.id}/statement`)}
               />
             ))}
+          </div>
+        )}
+
+        {/* ── ARCHIVED ASSETS section (sold / inactive) ── */}
+        {(subTab === "asset" || subTab === "all") && (
+          <div style={{ marginTop: 4 }}>
+            <button
+              onClick={loadArchivedAssets}
+              style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", cursor: "pointer", padding: "4px 0", fontFamily: "Figtree, sans-serif", fontSize: 12, fontWeight: 600, color: "#9ca3af" }}
+            >
+              <span style={{ fontSize: 10 }}>{archivedOpen ? "▼" : "▶"}</span>
+              Archived Assets {archivedLoaded && archivedAssets.length > 0 ? `(${archivedAssets.length})` : ""}
+            </button>
+            {archivedOpen && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                {archivedAssets.length === 0 ? (
+                  <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif", padding: "6px 0" }}>No archived assets.</div>
+                ) : archivedAssets.map(a => (
+                  <div key={a.id} style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, opacity: 0.75 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: "#374151", fontFamily: "Figtree, sans-serif" }}>{a.name}</div>
+                      <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
+                        {a.subtype || "Asset"} · Sold/Archived
+                        {a.purchase_price > 0 && ` · Cost ${fmtIDR(Number(a.purchase_price))}`}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => navigate(`/accounts/${a.id}/statement`)}
+                      style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, border: "1px solid #e5e7eb", background: "#fff", color: "#6b7280", cursor: "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 600, flexShrink: 0 }}
+                    >
+                      📄 History
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </>)}
@@ -664,13 +721,15 @@ export default function Accounts({
         )}
       </Modal>
 
-      {/* ── WITHDRAW / CAIR MODAL (Deposito) ── */}
+      {/* ── WITHDRAW / CAIR / SELL ASSET MODAL ── */}
       <Modal
         isOpen={modal === "withdraw"}
         onClose={() => setModal(null)}
-        title="Cairkan Deposito"
+        title={withdrawAcc && isDepositoAcc(withdrawAcc) ? "Cairkan Deposito" : "Sell Asset"}
         footer={
-          <Button fullWidth onClick={saveWithdraw} busy={withdrawSaving}>💰 Cairkan</Button>
+          <Button fullWidth onClick={saveWithdraw} busy={withdrawSaving}>
+            {withdrawAcc && isDepositoAcc(withdrawAcc) ? "💰 Cairkan" : "💰 Sell Asset"}
+          </Button>
         }
       >
         {withdrawAcc && (
@@ -681,7 +740,7 @@ export default function Accounts({
                 <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{withdrawAcc.bank_name}</div>
               )}
               <div style={{ fontSize: 11, color: "#d97706", marginTop: 2, fontWeight: 600 }}>
-                Principal: {fmtIDR(Number(withdrawAcc.current_value || 0))}
+                {isDepositoAcc(withdrawAcc) ? "Principal" : "Current value"}: {fmtIDR(Number(withdrawAcc.current_value || 0))}
                 {withdrawAcc.maturity_date && (
                   <span style={{ marginLeft: 6, fontWeight: 400, color: "#9ca3af" }}>
                     · Maturity: {new Date(withdrawAcc.maturity_date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
@@ -689,7 +748,7 @@ export default function Accounts({
                 )}
               </div>
             </div>
-            <AmountInput label="Jumlah Cair (Rp)" value={withdrawForm.amount}
+            <AmountInput label={isDepositoAcc(withdrawAcc) ? "Jumlah Cair (Rp)" : "Sell Price (Rp)"} value={withdrawForm.amount}
               onChange={v => setWithdrawForm(f => ({ ...f, amount: v }))} />
             <Field label="Transfer ke Rekening *">
               <Select
@@ -1104,7 +1163,7 @@ function CashPageContent({ accounts, fxRates, CURRENCIES: C = [], ledger, onEdit
 }
 
 // ─── ACCOUNT CARD ────────────────────────────────────────────
-function AccountCard({ account: a, ledger, accounts, fxRates = {}, onEdit, onDelete, onHistory, onUpdateNilai, onWithdraw, onStatement }) {
+function AccountCard({ account: a, ledger, accounts, fxRates = {}, onEdit, onDelete, onHistory, onUpdateNilai, onWithdraw, onSell, onStatement }) {
   const isCash = a.type === "bank" && a.subtype === "cash";
   const bg    = isCash ? "#f0fdf4" : (TYPE_BG[a.type]    || "#f9fafb");
   const color = isCash ? "#059669" : (TYPE_COLOR[a.type] || "#6b7280");
@@ -1397,6 +1456,11 @@ function AccountCard({ account: a, ledger, accounts, fxRates = {}, onEdit, onDel
             💰 Cair
           </button>
         </>}
+        {onSell && (
+          <button onClick={onSell} style={{ ...ACTION_BTN, background: "#fef9ec", color: "#d97706", border: "1px solid #fde68a" }}>
+            💰 Sell
+          </button>
+        )}
         {a.type === "asset" && onStatement && (
           <button onClick={onStatement} style={ACTION_BTN}>
             📄 Statement

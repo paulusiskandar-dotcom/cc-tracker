@@ -1,8 +1,10 @@
+import { useState, useEffect } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
 import BankStatement       from "../components/BankStatement";
 import CCStatement         from "../components/CCStatement";
 import AssetTimeline       from "../components/AssetTimeline";
 import EmployeeLoanStatement from "../components/EmployeeLoanStatement";
+import { supabase }        from "../lib/supabase";
 
 const FF = "Figtree, sans-serif";
 
@@ -20,7 +22,26 @@ export default function StatementPage({
   const seeds   = location.state?.reconcileSeeds || null;
   const onBack  = () => navigate(-1);
 
-  if (!account) {
+  // Fallback: fetch archived (inactive) asset directly if not in active accounts
+  const [archivedAccount, setArchivedAccount] = useState(null);
+  useEffect(() => {
+    if (account || !id) return;
+    supabase.from("accounts").select("*").eq("id", id).maybeSingle()
+      .then(({ data }) => { if (data) setArchivedAccount(data); });
+  }, [id, account]);
+
+  const effectiveAccount = account || archivedAccount;
+
+  if (!effectiveAccount) {
+    // Still loading the fallback fetch — show nothing rather than "not found"
+    if (!account && !archivedAccount) {
+      return (
+        <div style={{ padding: 40, textAlign: "center", fontFamily: FF }}>
+          <div style={{ fontSize: 14, color: "#6b7280" }}>Loading…</div>
+          <button onClick={onBack} style={{ marginTop: 16, fontSize: 13, color: "#3b5bdb", background: "none", border: "none", cursor: "pointer" }}>← Back</button>
+        </div>
+      );
+    }
     return (
       <div style={{ padding: 40, textAlign: "center", fontFamily: FF }}>
         <div style={{ fontSize: 14, color: "#6b7280" }}>Account not found.</div>
@@ -29,12 +50,13 @@ export default function StatementPage({
     );
   }
 
-  const { type } = account;
+  const { type } = effectiveAccount;
+  const isArchived = effectiveAccount.is_active === false;
 
   if (type === "bank" || type === "cash") {
     return (
       <BankStatement
-        initialAccount={account}
+        initialAccount={effectiveAccount}
         accounts={accounts}
         user={user}
         categories={categories}
@@ -64,7 +86,7 @@ export default function StatementPage({
   if (type === "credit_card") {
     return (
       <CCStatement
-        initialAccount={account}
+        initialAccount={effectiveAccount}
         accounts={accounts}
         user={user}
         categories={categories}
@@ -94,7 +116,8 @@ export default function StatementPage({
   if (type === "asset") {
     return (
       <AssetTimeline
-        asset={account}
+        asset={effectiveAccount}
+        isArchived={isArchived}
         user={user}
         accounts={accounts}
         ledger={ledger}
@@ -112,7 +135,7 @@ export default function StatementPage({
   if (type === "receivable") {
     return (
       <EmployeeLoanStatement
-        receivable={account}
+        receivable={effectiveAccount}
         ledger={ledger}
         accounts={accounts}
         user={user}
