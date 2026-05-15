@@ -1077,13 +1077,18 @@ export const assetsApi = {
   },
   // d = { name, type (subtype), current_value, purchase_price, purchase_date, notes, currency }
   create: async (userId, d) => {
+    // initial_balance = 0: cost is tracked via the buy_asset ledger entry created after this call.
+    // Setting initial_balance = purchase_price causes recalculateBalance to double-count
+    // (balance = initial_balance + ledger_sum = 2× amount).
     return accountsApi.create(userId, {
       name:            d.name,
       type:            "asset",
       subtype:         d.type || d.subtype || null,
       currency:        d.currency || "IDR",
       current_value:   Number(d.current_value || 0),
-      initial_balance: Number(d.purchase_price || d.current_value || 0),
+      purchase_price:  Number(d.purchase_price || 0),
+      purchase_date:   d.purchase_date || null,
+      initial_balance: 0,
       notes:           d.notes || (d.purchase_date ? `Purchased ${d.purchase_date}` : null),
     });
   },

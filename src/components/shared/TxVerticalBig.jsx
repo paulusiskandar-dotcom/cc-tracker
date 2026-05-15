@@ -247,6 +247,7 @@ export default function TxVerticalBig({
   const [creatingBorrower,   setCreatingBorrower]   = useState(false);
   const [loanAccTab,         setLoanAccTab]         = useState("bank");
   const [fetchedLoans,       setFetchedLoans]       = useState([]);
+  const [extraAsset,         setExtraAsset]         = useState(null);
 
   // ── Fetch employee loans when needed but not provided ─────────
   const type = form.tx_type;
@@ -340,6 +341,21 @@ export default function TxVerticalBig({
     }
   }, [open, mode, initialData, defaultGroup, defaultTxType, defaultAccount, openCicilan, defaultEmployeeName]);
 
+  // Fetch archived asset for edit-mode buy_asset when to_id refers to an inactive asset
+  useEffect(() => {
+    setExtraAsset(null);
+    if (mode !== "edit") return;
+    if (!initialData?.to_id) return;
+    if (form.tx_type !== "buy_asset") return;
+    if (assets.find(a => a.id === initialData.to_id && a.is_active !== false)) return;
+    supabase
+      .from("accounts")
+      .select("*")
+      .eq("id", initialData.to_id)
+      .maybeSingle()
+      .then(({ data }) => { if (data && data.type === "asset") setExtraAsset(data); });
+  }, [mode, initialData?.to_id, form.tx_type]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const set = (k, v) => setFormState(f => ({ ...f, [k]: v }));
 
   // ── Switch type (also update group) ──────────────────────────
@@ -365,6 +381,10 @@ export default function TxVerticalBig({
   const cashAccs  = bankAccounts.filter(a => a.is_active !== false && a.subtype === "cash");
   const ccAccs    = creditCards.filter(a => a.is_active !== false);
   const assetAccs = assets.filter(a => a.is_active !== false);
+  // For edit mode: include archived asset in dropdown if it's the buy_asset reference target
+  const assetAccsForDropdown = extraAsset && !assetAccs.find(a => a.id === extraAsset.id)
+    ? [...assetAccs, { ...extraAsset, name: `${extraAsset.name} (Archived)` }]
+    : assetAccs;
 
   // FX: derive currencies from selected accounts (bidirectional — no Buy/Sell toggle)
   const fxFromAcc = accounts.find(a => a.id === form.from_id);
@@ -574,6 +594,15 @@ export default function TxVerticalBig({
               current_value: 0, purchase_price: price,
               purchase_date: form.tx_date, notes: form.notes || null,
             });
+            if (newAsset?.id) {
+              try {
+                await supabase.from("asset_value_history").insert({
+                  user_id: user.id, account_id: newAsset.id,
+                  old_value: 0, new_value: price,
+                  date: form.tx_date, notes: "Initial purchase",
+                });
+              } catch (he) { console.warn("[buy_asset] asset_value_history insert failed:", he); }
+            }
           } catch (ae) { console.warn("[buy_asset] asset create failed:", ae.message); }
         }
         const toId = isExst ? uuid(form.asset_id) : (newAsset?.id || null);
@@ -1043,7 +1072,7 @@ export default function TxVerticalBig({
     // ── Buy Asset ────────────────────────────────────────────────
     if (type === "buy_asset") {
       const modeVal = form.asset_mode || "existing";
-      const selectedAsset = assetAccs.find(a => a.id === form.asset_id);
+      const selectedAsset = assetAccsForDropdown.find(a => a.id === form.asset_id);
       return (
         <>
           {DIVIDER}
@@ -1072,11 +1101,11 @@ export default function TxVerticalBig({
                 <select value={form.asset_id || ""} onChange={e => {
                   const id = e.target.value || null;
                   set("asset_id", id);
-                  const a = assetAccs.find(x => x.id === id);
+                  const a = assetAccsForDropdown.find(x => x.id === id);
                   if (a) { set("asset_name", a.name); set("asset_type", a.subtype || a.type || "Investment"); }
                 }} style={SEL}>
                   <option value="">Select asset…</option>
-                  {assetAccs.map(a => <option key={a.id} value={a.id}>{a.name}{a.subtype ? ` · ${a.subtype}` : ""}</option>)}
+                  {assetAccsForDropdown.map(a => <option key={a.id} value={a.id}>{a.name}{a.subtype ? ` · ${a.subtype}` : ""}</option>)}
                 </select>
               </Field>
               {selectedAsset?.current_value > 0 && (
