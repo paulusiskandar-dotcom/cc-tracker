@@ -99,7 +99,13 @@ function TabbedAcctSelect({ accounts, value, onChange, placeholder = "Select…"
           {tabs.map(t => tabBtn(t.id, t.label))}
         </div>
       )}
-      <select style={{ ...inSel(T), flex: 1, minWidth: 0 }}
+      <select
+        style={{
+          ...inSel(T),
+          flex: 1,
+          minWidth: 0,
+          ...(!value ? { borderColor: "#d97706", borderWidth: 1.5 } : {}),
+        }}
         value={value || ""}
         onChange={e => onChange(e.target.value)}>
         <option value="">{placeholder}</option>

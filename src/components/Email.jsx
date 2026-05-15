@@ -431,7 +431,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
             currency:  aiTx?.currency || s.currency || null,
             accounts:  spendAccounts,
           });
-          if (detected && (detected.confidence === 'high' || detected.confidence === 'medium')) {
+          if (detected && detected.accountId) {
             return { ...row, from_id: detected.accountId, _autoDetect: detected };
           }
         }
