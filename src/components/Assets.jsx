@@ -47,7 +47,7 @@ function DonutChart({ data, colors, size = 120, thickness = 24 }) {
 
 
 // ─── ASSET CARD ───────────────────────────────────────────────
-function AssetCard({ asset: a, color, onUpdate, onEdit, onSell, onTimeline, fxRates = {} }) {
+function AssetCard({ asset: a, color, onUpdate, onEdit, onTimeline, fxRates = {} }) {
   const isForeign = !!(a.currency && a.currency !== "IDR");
   const rate      = isForeign ? (fxRates[a.currency] || 1) : 1;
   const cur       = Number(a.current_value || 0);
@@ -121,16 +121,6 @@ function AssetCard({ asset: a, color, onUpdate, onEdit, onSell, onTimeline, fxRa
         </div>
 
       </div>
-      {onSell && (
-        <div onClick={e => e.stopPropagation()} style={{ borderTop: "0.5px solid #f3f4f6", padding: "8px 16px" }}>
-          <button
-            onClick={() => onSell()}
-            style={{ fontSize: 11, fontWeight: 600, color: "#d97706", background: "#fef9ec", border: "1px solid #fde68a", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontFamily: "Figtree, sans-serif" }}
-          >
-            💰 Sell
-          </button>
-        </div>
-      )}
     </div>
   );
 }
@@ -275,11 +265,6 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
   const [editAssetForm,  setEditAssetForm]  = useState({});
   const setEAF = (k, v) => setEditAssetForm(f => ({ ...f, [k]: v }));
 
-  // Sell asset modal
-  const [sellAsset,  setSellAsset]  = useState(null);
-  const [sellForm,   setSellForm]   = useState({ amount: "", to_id: "", date: "", notes: "" });
-  const [sellSaving, setSellSaving] = useState(false);
-
   // Archived assets (is_active=false)
   const [archivedAssets, setArchivedAssets] = useState([]);
   const [archivedOpen,   setArchivedOpen]   = useState(false);
@@ -302,7 +287,6 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
 
   // ── DERIVED ─────────────────────────────────────────────────
   const assets = useMemo(() => accounts.filter(a => a.type === "asset"), [accounts]);
-  const bankAccounts = useMemo(() => accounts.filter(a => a.type === "bank" && a.is_active !== false), [accounts]);
 
   const totalValue    = assets.reduce((s, a) => s + Number(a.current_value  || 0), 0);
   const totalCost     = assets.reduce((s, a) => s + Number(a.purchase_price || 0), 0);
@@ -493,36 +477,6 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
     setSaving(false);
   };
 
-  const openSell = (asset) => {
-    setSellAsset(asset);
-    setSellForm({ amount: String(asset.current_value || ""), to_id: "", date: todayStr(), notes: "" });
-  };
-
-  const handleSell = async () => {
-    if (!sellAsset) return;
-    const amt = Number(sellForm.amount) || 0;
-    if (!amt)            return showToast("Enter sell price", "error");
-    if (!sellForm.to_id) return showToast("Select destination bank account", "error");
-    setSellSaving(true);
-    try {
-      await ledgerApi.create(user.id, {
-        tx_date:     sellForm.date || todayStr(),
-        description: sellForm.notes || `${sellAsset.name} — Sold`,
-        amount: amt, currency: "IDR", fx_rate_used: null, amount_idr: amt,
-        tx_type: "sell_asset", from_type: "account", to_type: "account",
-        from_id: sellAsset.id, to_id: sellForm.to_id,
-        entity: "Personal", category_id: null, category_name: null,
-        notes: sellForm.notes || "",
-      }, accounts);
-      await accountsApi.update(sellAsset.id, { is_active: false, current_value: 0 });
-      setAccounts(p => p.filter(a => a.id !== sellAsset.id));
-      await onRefresh?.();
-      showToast(`${sellAsset.name} — Rp ${amt.toLocaleString("id-ID")} sold`);
-      setSellAsset(null);
-    } catch (e) { showToast(e.message, "error"); }
-    setSellSaving(false);
-  };
-
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
@@ -604,7 +558,6 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
                   fxRates={fxRates}
                   onUpdate={() => openUpdateModal(a)}
                   onEdit={() => openEditAsset(a)}
-                  onSell={() => openSell(a)}
                   onTimeline={() => navigate(`/accounts/${a.id}/statement`)}
                 />
               );
@@ -828,39 +781,6 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
               placeholder="Optional notes…" />
           </Field>
         </div>
-      </Modal>
-
-      {/* ── SELL ASSET MODAL ──────────────────────────────── */}
-      <Modal
-        isOpen={!!sellAsset}
-        onClose={() => setSellAsset(null)}
-        title="Sell Asset"
-        footer={<Button fullWidth onClick={handleSell} busy={sellSaving}>💰 Sell Asset</Button>}
-      >
-        {sellAsset && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ background: "#fef9ec", borderRadius: 10, padding: "10px 14px", fontFamily: "Figtree, sans-serif", border: "1px solid #fde68a" }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{sellAsset.name}</div>
-              <div style={{ fontSize: 11, color: "#d97706", marginTop: 2, fontWeight: 600 }}>
-                Current value: {fmtIDR(Number(sellAsset.current_value || 0))}
-              </div>
-            </div>
-            <AmountInput label="Sell Price (Rp)" value={sellForm.amount}
-              onChange={v => setSellForm(f => ({ ...f, amount: v }))} />
-            <Field label="Transfer proceeds to *">
-              <Select
-                value={sellForm.to_id}
-                onChange={e => setSellForm(f => ({ ...f, to_id: e.target.value }))}
-                options={bankAccounts.map(a => ({ value: a.id, label: a.name }))}
-                placeholder="Select bank account…"
-              />
-            </Field>
-            <Input label="Sale Date" type="date" value={sellForm.date || todayStr()}
-              onChange={e => setSellForm(f => ({ ...f, date: e.target.value }))} />
-            <Input label="Notes (optional)" value={sellForm.notes}
-              onChange={e => setSellForm(f => ({ ...f, notes: e.target.value }))} />
-          </div>
-        )}
       </Modal>
 
     </div>
