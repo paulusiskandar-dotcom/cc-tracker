@@ -112,23 +112,32 @@ export default function AssetTimeline({
   const plColor   = pnl >= 0 ? "#059669" : "#dc2626";
   const plBg      = pnl >= 0 ? "#f0fdf4" : "#fff1f2";
 
-  // ── Sparkline data ────────────────────────────────────────────
+  // ── Sparkline data — primary source: asset_value_history ────────
   const sparkData = useMemo(() => {
-    const points = [];
-    if (asset.purchase_date && Number(asset.purchase_price || 0) > 0)
-      points.push({ date: asset.purchase_date, value: Number(asset.purchase_price) });
-    valueHistory.forEach(h => points.push({ date: h.date, value: Number(h.new_value || 0) }));
+    if (valueHistory.length === 0) return [];
+
+    // Build from value history records (backfill ensures at least purchase_price as first point)
+    const points = valueHistory.map(h => ({
+      date:  h.date,
+      label: fmtDateShort(h.date),
+      value: Number(h.new_value || 0),
+    }));
+
     if (isArchived && saleProceeds > 0) {
+      // Archived: final point = sale proceeds on sell date
       const sellEntry = assetLedger
         .filter(e => e.tx_type === "sell_asset" && e.from_id === asset.id)
         .sort((a, b) => a.tx_date.localeCompare(b.tx_date))
         .pop();
-      points.push({ date: sellEntry?.tx_date || todayStr(), value: saleProceeds });
-    } else if (points.length === 0 || points[points.length - 1].value !== currentValue) {
-      points.push({ date: todayStr(), value: currentValue });
+      const sellDate = sellEntry?.tx_date || todayStr();
+      points.push({ date: sellDate, label: fmtDateShort(sellDate), value: saleProceeds });
+    } else if (!isArchived && currentValue > 0 && points[points.length - 1]?.value !== currentValue) {
+      // Active: append a "now" point if current value has changed since last history record
+      points.push({ date: todayStr(), label: "Now", value: currentValue });
     }
-    return points.map(p => ({ date: p.date, label: fmtDateShort(p.date), value: p.value }));
-  }, [asset, valueHistory, currentValue, isArchived, saleProceeds, assetLedger]);
+
+    return points;
+  }, [valueHistory, currentValue, isArchived, saleProceeds, assetLedger, asset.id]);
 
   // ── All events sorted chronologically (oldest first) ─────────
   const allEvents = useMemo(() => {
@@ -311,6 +320,24 @@ export default function AssetTimeline({
       </div>
 
       {/* ── Sparkline chart ── */}
+      {!histLoading && sparkData.length === 0 && (
+        <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", padding: "28px 16px", textAlign: "center" }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#6b7280", fontFamily: FF }}>No value history yet</div>
+          <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 4, fontFamily: FF }}>Click "📈 Update Value" to start tracking</div>
+        </div>
+      )}
+      {sparkData.length === 1 && (
+        <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", padding: "16px 16px 12px" }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 10, fontFamily: FF }}>
+            Value History
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ fontSize: 13, color: "#374151", fontFamily: FF }}>{sparkData[0].label}</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "#3b5bdb", fontFamily: FF }}>{fmtIDR(sparkData[0].value)}</div>
+          </div>
+          <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 8, fontFamily: FF }}>💡 Update value to track changes over time</div>
+        </div>
+      )}
       {sparkData.length >= 2 && (
         <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", padding: "16px 16px 8px" }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: 10 }}>
