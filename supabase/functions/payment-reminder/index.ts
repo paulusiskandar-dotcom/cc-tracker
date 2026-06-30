@@ -61,6 +61,17 @@ Deno.serve(async (_req) => {
     .filter((c: any) => c.when <= horizon)
     .sort((a: any, b: any) => a.when - b.when);
 
+  // ── Recurring monthly bills (subscriptions, rent, insurance…) ──
+  let rtQ = sb.from("recurring_templates").select("name,amount,currency,tx_type,day_of_month,is_active,user_id")
+    .eq("is_active", true).not("tx_type", "in", "(income)");
+  if (USER_ID) rtQ = rtQ.eq("user_id", USER_ID);
+  const { data: rts } = await rtQ;
+  const bills = (rts || [])
+    .filter((t: any) => t.day_of_month)
+    .map((t: any) => ({ ...t, when: nextDue(today, t.day_of_month) }))
+    .filter((t: any) => t.when <= horizon)
+    .sort((a: any, b: any) => a.when - b.when);
+
   // ── Reimburse outstanding per entity (out − in) ───────────────
   let ledQ = sb.from("ledger").select("tx_type,amount_idr,entity")
     .in("tx_type", ["reimburse_out", "reimburse_in"]);
@@ -83,6 +94,11 @@ Deno.serve(async (_req) => {
     lines.push(`  Total: ${fmtIDR(due.reduce((s: number, c: any) => s + Number(c.outstanding_amount || 0), 0))}`);
   } else {
     lines.push("", "💳 Tidak ada CC jatuh tempo dalam 7 hari. ✅");
+  }
+
+  if (bills.length) {
+    lines.push("", `📅 Tagihan bulanan (≤${LEAD_DAYS} hari):`);
+    for (const b of bills) lines.push(`  • ${d2(b.when)} · ${b.name} — ${fmtIDR(b.amount)}`);
   }
 
   // Only surface entities that still OWE Paulus (net reimburse_out > reimburse_in).
