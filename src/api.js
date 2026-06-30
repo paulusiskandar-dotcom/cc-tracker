@@ -1489,10 +1489,14 @@ export function flattenEmailSync(rows) {
         amount:                  tx.amount,
         currency:                tx.currency || "IDR",
         amount_idr:              tx.amount_idr || tx.amount,
-        // If a card_last4 is present it's a CC debit — never classify as transfer
-        tx_type: (tx.card_last4 && normEmailTxType(tx.suggested_tx_type) === "transfer")
-          ? "expense"
-          : normEmailTxType(tx.suggested_tx_type),
+        // A "transfer" is a real internal transfer ONLY when the destination is a known
+        // own account. CC debits (card_last4) and external payees (no matched to_account)
+        // are spending, not transfers → downgrade to expense.
+        tx_type: (() => {
+          const t = normEmailTxType(tx.suggested_tx_type);
+          if (t === "transfer" && (tx.card_last4 || !tx.to_account_id)) return "expense";
+          return t;
+        })(),
         matched_account_id:      tx.from_account_id,
         to_account_id:           tx.to_account_id,
         suggested_category_label: tx.suggested_category,

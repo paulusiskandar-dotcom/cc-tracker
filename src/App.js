@@ -239,9 +239,13 @@ function Finance({ user, signOut }) {
   const loadData = useCallback(async () => {
     const safe = (p, fallback) => p.catch(e => { console.warn("[loadData]", e.message); return fallback; });
 
+    // Single-shot ledger load cap. NOTE: full cursor pagination is a separate follow-up;
+    // until then we hard-warn if the cap is hit so older rows are never silently dropped.
+    const LEDGER_LOAD_CAP = 10000;
+
     const [acc, led, cats, inc, inst, rtempl, rem, merch, fx, dark, pending, loans, payments, reimburse, recon, bdg] = await Promise.all([
       safe(accountsApi.getAll(user.id),                      []),
-      safe(ledgerApi.getAll(user.id, { limit: 10000 }),       []),
+      safe(ledgerApi.getAll(user.id, { limit: LEDGER_LOAD_CAP }), []),
       safe(categoriesApi.getAll(user.id),                    []),
       safe(incomeSrcApi.getAll(user.id),                     []),
       safe(installmentsApi.getAll(user.id),                  []),
@@ -257,6 +261,12 @@ function Finance({ user, signOut }) {
       safe(reconcileApi.getAll(user.id),                     []),
       safe(supabase.from("budgets").select("*").eq("user_id", user.id).then(r => r.data || []), []),
     ]);
+
+    // Guard against silent truncation: if we hit the cap, older transactions are missing
+    // and totals/reports would be wrong — surface it loudly until pagination exists.
+    if (Array.isArray(led) && led.length >= LEDGER_LOAD_CAP) {
+      console.warn(`[ledger] loaded ${led.length} rows at the ${LEDGER_LOAD_CAP} cap — older transactions may be truncated. Implement pagination before relying on full history.`);
+    }
 
 
     // Auto-create default receivable accounts on first run

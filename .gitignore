@@ -14,6 +14,12 @@
 # misc
 .DS_Store
 .env.local
+.secrets.local
+_headless_entry.js
+*.headless.cjs
+*.headless.json
+engine.headless.cjs
+approve.headless.cjs
 .env.development.local
 .env.test.local
 .env.production.local
@@ -22,3 +28,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 supabase/.temp/
+
+# financial statements (never commit)
+statements/
