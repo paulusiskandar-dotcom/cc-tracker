@@ -4,7 +4,8 @@ import { supabase } from "../lib/supabase";
 import { undoManager } from "../lib/undoManager";
 import { merchantRules } from "../lib/merchantRules";
 import { detectAccount } from "../lib/accountDetection";
-import { todayStr, autoCategorize } from "../utils";
+import { todayStr, autoCategorize, toIDR } from "../utils";
+import { CURRENCIES } from "../constants";
 import { LIGHT, DARK } from "../theme";
 import {
   Button, EmptyState, showToast,
@@ -64,6 +65,7 @@ export default function Email({
   employeeLoans = [],
   merchantMaps = [],
   recurTemplates = [],
+  fxRates = {},
   initialTab = "pending",
 }) {
   const T = dark ? DARK : LIGHT;
@@ -214,6 +216,7 @@ export default function Email({
           employeeLoans={employeeLoans}
           merchantMaps={merchantMaps}
           recurTemplates={recurTemplates}
+          fxRates={fxRates}
         />
       )}
 
@@ -373,7 +376,7 @@ export default function Email({
 // ─── EMAIL PENDING TAB ────────────────────────────────────────────
 const GMAIL_NO_CAT = new Set(["transfer","pay_cc","give_loan","collect_loan","fx_exchange","reimburse_in","reimburse_out","buy_asset","sell_asset","pay_liability"]);
 
-function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, incomeSrcs = [], user, ledger, setLedger, onRefresh, setReminders, dark, T: theme, employeeLoans = [], merchantMaps = [], recurTemplates = [] }) {
+function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, incomeSrcs = [], user, ledger, setLedger, onRefresh, setReminders, dark, T: theme, employeeLoans = [], merchantMaps = [], recurTemplates = [], fxRates = {} }) {
   const T = theme || LIGHT;
 
   // Local editable rows (mirrors pendingSyncs but editable)
@@ -413,11 +416,36 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       (a.type === "bank" && a.subtype !== "reimburse") ||
       a.type === "credit_card"
     );
+    // Flag pending items that look like a transaction already in the ledger
+    // (same amount_idr within ±1, same date within ±2 days) — likely a duplicate
+    // parsed from a second email. These are NOT auto-checked so they aren't re-imported.
+    const isLedgerDup = (s) => {
+      const amt = Number(s.amount_idr || s.amount || 0);
+      const d   = s.transaction_date || (s.received_at || "").slice(0, 10);
+      if (!amt || !d) return false;
+      return (ledger || []).some(e =>
+        Math.abs(Number(e.amount_idr || 0) - amt) < 1 &&
+        e.tx_date && Math.abs((new Date(e.tx_date) - new Date(d)) / 86400000) <= 2);
+    };
+    const dupIds = new Set((pendingSyncs || []).filter(isLedgerDup).map(s => s.id));
+
     setRows(prev => {
       const prevMap = new Map(prev.map(r => [r._id, r]));
       const built = (pendingSyncs || []).map(s => {
         if (prevMap.has(s.id)) return prevMap.get(s.id);
-        const row = applyMerchantRule(syncToRow(s));
+        let row = applyMerchantRule(syncToRow(s));
+        if (dupIds.has(s.id)) row = { ...row, _dup: true };
+        // FX estimate: foreign-currency tx usually arrive with amount_idr == raw foreign
+        // amount (parser doesn't convert). Convert with the app's rate as an ESTIMATE so the
+        // pending value is sane; the monthly statement reconciliation later overwrites it
+        // with the bank's exact settled IDR (the authoritative rate).
+        if (row.currency && row.currency !== "IDR") {
+          const amt = Number(row.amount || 0), aidr = Number(row.amount_idr || 0);
+          if (!aidr || Math.abs(aidr - amt) < 1) {
+            const est = Math.round(toIDR(amt, row.currency, fxRates, CURRENCIES));
+            if (est && est !== amt) row = { ...row, amount_idr: String(est), _fxEst: true };
+          }
+        }
         // Per-row auto-detect if server didn't match an account
         if (!row.from_id) {
           const sender = s.sender_email || "";
@@ -441,7 +469,8 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     });
     setSelected(prev => {
       const next = {};
-      (pendingSyncs || []).forEach(s => { next[s.id] = s.id in prev ? prev[s.id] : true; });
+      // Duplicates default to UNCHECKED so they aren't accidentally re-imported.
+      (pendingSyncs || []).forEach(s => { next[s.id] = s.id in prev ? prev[s.id] : !dupIds.has(s.id); });
       return next;
     });
   }, [pendingSyncs]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -736,6 +765,16 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
           processed={processedCount}
           pending={rows.length}
         />
+      )}
+      {rows.some(r => r._dup) && (
+        <div style={{ fontSize: 12, color: "#92400e", background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 8, padding: "8px 12px", fontFamily: "Figtree, sans-serif" }}>
+          ⚠️ {rows.filter(r => r._dup).length} kemungkinan duplikat (nominal &amp; tanggal sudah ada di ledger) — tidak dicentang otomatis. Cek dulu sebelum approve.
+        </div>
+      )}
+      {rows.some(r => r._fxEst) && (
+        <div style={{ fontSize: 12, color: "#1e40af", background: "#dbeafe", border: "1px solid #bfdbfe", borderRadius: 8, padding: "8px 12px", fontFamily: "Figtree, sans-serif" }}>
+          💱 {rows.filter(r => r._fxEst).length} transaksi mata uang asing dikonversi pakai kurs estimasi — nilai pasti (IDR) menyusul dari statement.
+        </div>
       )}
       {rows.length > 0 && (
         <TxHorizontal

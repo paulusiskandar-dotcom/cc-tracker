@@ -150,6 +150,16 @@ SPECIAL EMAIL PATTERNS — apply these before generic extraction:
    - from_bank_name = "CIMB Niaga"
    - confidence = 0.95
 
+2. BCA QRIS NOTIFICATION (BCA email; body or subject mentions "QRIS", "Pembayaran QRIS", or "Transaksi QRIS"):
+   - Extract "Nominal" / "Jumlah" / "Nominal Transaksi" → amount (remove "Rp", dots → integer IDR)
+   - Extract "Tanggal" / "Tanggal Transaksi" → date (YYYY-MM-DD)
+   - Extract "Nama Merchant" / "Merchant" / "Penerima" / "Acquirer" → merchant_name and description
+   - Extract "Sumber Dana" / "Sumber Rekening" / source account (e.g. "TAHAPAN - 0831****88") → from_account_masked (copy raw string exactly)
+   - is_qris = true
+   - suggested_tx_type = "expense"  — QRIS payments are ALWAYS spending, NEVER "transfer"
+   - from_bank_name = "BCA"
+   - confidence = 0.95
+
 3. MANDIRI "PEMBAYARAN BERHASIL" (subject contains "Pembayaran Berhasil", sender bankmandiri.co.id or livin.bankmandiri.co.id):
    - Extract "Nominal Transaksi" → amount (remove "Rp", dots → integer IDR)
    - Extract "Tanggal" → date (DD/MM/YYYY or DD Bulan YYYY → YYYY-MM-DD)
