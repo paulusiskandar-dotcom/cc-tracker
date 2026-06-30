@@ -680,8 +680,11 @@ export default function Receivables({
         await supabase.from("ledger").update({ reimburse_settlement_id: null }).in("id", linkedIds);
         setLedger(prev => prev.map(e => linkedIds.includes(e.id) ? { ...e, reimburse_settlement_id: null } : e));
       }
-      // Delete the RE expense entry created for this settlement
-      await supabase.from("ledger").delete().eq("reimburse_settlement_id", s.id).eq("tx_type", "expense");
+      // Delete the generated Reimbursable Loss (expense) AND Reimbursable Surplus (income)
+      // entries for this settlement. Originals were unmarked above, so this only hits the
+      // generated loss/surplus rows — previously the surplus/income entry was leaked.
+      await supabase.from("ledger").delete().eq("reimburse_settlement_id", s.id);
+      setLedger(prev => prev.filter(e => e.reimburse_settlement_id !== s.id));
       // Delete the settlement record itself
       await supabase.from("reimburse_settlements").delete().eq("id", s.id);
       setSettlements(prev => prev.filter(x => x.id !== s.id));
