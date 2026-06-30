@@ -7,8 +7,8 @@
 // reimburse_out/in net per entity, then pushes one message.
 //
 // Deploy: supabase functions deploy payment-reminder
-// Schedule (daily 08:00 WIB = 01:00 UTC) via Supabase Dashboard → Functions → Schedules
-//   cron: 0 1 * * *
+// Schedule (daily 21:00 WIB = 14:00 UTC) via Supabase Dashboard → Functions → Schedules
+//   cron: 0 14 * * *
 // ─────────────────────────────────────────────────────────────────
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 
