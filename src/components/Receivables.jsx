@@ -105,6 +105,48 @@ function LoanFormFields({ form, setForm, T, showAlreadyPaid = false }) {
   );
 }
 
+// Suggest likely OUT↔IN reimburse pairs: amount within 10% and date within 7 days.
+// Greedy best-match (closest amount, then closest date). Returns maps + ordered lists.
+function suggestReimbursePairs(outRows, inRows) {
+  const AMT_TOL = 0.10, DAY_TOL = 7;
+  const day = d => new Date(d + "T00:00:00").getTime();
+  const usedIn = new Set();
+  const outToIn = {}, inToOut = {}, pairIndex = {};
+  // process larger amounts first so big-ticket items claim their match
+  const outSorted = [...outRows].sort((a, b) => Number(b.amount || 0) - Number(a.amount || 0));
+  let idx = 0;
+  for (const o of outSorted) {
+    const oAmt = Number(o.amount || 0), oDate = day(o.tx_date);
+    let best = null, bestScore = Infinity;
+    for (const i of inRows) {
+      if (usedIn.has(i.id)) continue;
+      const iAmt = Number(i.amount || 0);
+      const amtDiff = Math.abs(oAmt - iAmt) / Math.max(oAmt, iAmt, 1);
+      if (amtDiff > AMT_TOL) continue;
+      const dayDiff = Math.abs(oDate - day(i.tx_date)) / 86400000;
+      if (dayDiff > DAY_TOL) continue;
+      const score = amtDiff * 1000 + dayDiff; // amount closeness dominates, then date
+      if (score < bestScore) { bestScore = score; best = i; }
+    }
+    if (best) {
+      idx += 1;
+      usedIn.add(best.id);
+      outToIn[o.id] = best.id; inToOut[best.id] = o.id;
+      pairIndex[o.id] = idx; pairIndex[best.id] = idx;
+    }
+  }
+  // order: paired first (by pair index), unpaired after (keep incoming order)
+  const orderedOut = [
+    ...outSorted.filter(o => outToIn[o.id]).sort((a, b) => pairIndex[a.id] - pairIndex[b.id]),
+    ...outRows.filter(o => !outToIn[o.id]),
+  ];
+  const orderedIn = [
+    ...orderedOut.filter(o => outToIn[o.id]).map(o => inRows.find(i => i.id === outToIn[o.id])),
+    ...inRows.filter(i => !inToOut[i.id]),
+  ];
+  return { outToIn, inToOut, pairIndex, orderedOut, orderedIn };
+}
+
 function KPITile({ label, value, color, showSign = false, sublabel = null }) {
   const sign = showSign && value > 0 ? "+" : "";
   return (
@@ -550,6 +592,7 @@ export default function Receivables({
   const toggleSettlement = (id) =>
     setExpandedSettlements(prev => ({ ...prev, [id]: !prev[id] }));
   const [showSettlementHistory, setShowSettlementHistory] = useState(false);
+  const [suggestMatch, setSuggestMatch] = useState(true);
 
   const getSettleDate = (rId) => settleDate[rId] || todayStr();
 
@@ -878,7 +921,22 @@ export default function Receivables({
             <EmptyState icon="📋" message="No reimburse accounts. Add one from Accounts (type: Receivable → Reimburse)." />
           ) : (
             <>
-              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => setSuggestMatch(v => !v)}
+                  title="Sort likely OUT↔IN matches together (amount within 10%, date within 7 days)"
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5,
+                    height: 32, padding: "0 12px", borderRadius: 8, cursor: "pointer",
+                    border: suggestMatch ? "1px solid #a78bfa" : "1px solid #e5e7eb",
+                    background: suggestMatch ? "#f5f3ff" : "#fff",
+                    color: suggestMatch ? "#7c3aed" : "#6b7280",
+                    fontSize: 12, fontWeight: 700, fontFamily: "Figtree, sans-serif",
+                  }}
+                >
+                  ✨ Suggested match: {suggestMatch ? "On" : "Off"}
+                </button>
                 <SortDropdown
                   storageKey="sort_receivables"
                   options={[
@@ -916,6 +974,11 @@ export default function Receivables({
               ).sort((a, b) => b.tx_date.localeCompare(a.tx_date));
               const outRows = allOutRows.filter(e => !e.reimburse_settlement_id);
               const inRows  = allInRows.filter(e => !e.reimburse_settlement_id);
+              // Suggested match: reorder both columns so likely pairs align at top + badge them
+              const sugg = suggestMatch ? suggestReimbursePairs(outRows, inRows) : null;
+              const displayOut = sugg ? sugg.orderedOut : outRows;
+              const displayIn  = sugg ? sugg.orderedIn  : inRows;
+              const pairIdx = sugg ? sugg.pairIndex : {};
 
               const entitySettlements = settlements.filter(s => s.entity === r.entity);
 
@@ -965,12 +1028,13 @@ export default function Receivables({
                         <div style={{ fontSize: 10, fontWeight: 700, color: "#dc2626", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif", marginBottom: 6 }}>
                           Expenses (Out)
                         </div>
-                        {outRows.length === 0 ? (
+                        {displayOut.length === 0 ? (
                           <div style={{ fontSize: 11, color: "#9ca3af", padding: "6px 0" }}>No expenses recorded</div>
-                        ) : outRows.map(e => {
+                        ) : displayOut.map(e => {
                           const settled    = !!e.reimburse_settlement_id;
                           const isSelected = !settled && selOut.has(e.id);
                           const fromAcc    = accounts.find(a => a.id === e.from_id);
+                          const pidx       = pairIdx[e.id];
                           return (
                             <div
                               key={e.id}
@@ -978,14 +1042,17 @@ export default function Receivables({
                               style={{
                                 cursor: settled ? "default" : "pointer",
                                 opacity: settled ? 0.45 : 1,
-                                border: isSelected ? "1.5px solid #dc2626" : "1px solid #f3f4f6",
+                                border: isSelected ? "1.5px solid #dc2626" : pidx ? "1px solid #ddd6fe" : "1px solid #f3f4f6",
                                 borderRadius: 8, padding: "8px 10px", marginBottom: 4,
-                                background: isSelected ? "#fff5f5" : "#fafafa",
+                                background: isSelected ? "#fff5f5" : pidx ? "#faf5ff" : "#fafafa",
                               }}
                             >
                               <div style={{ display: "flex", justifyContent: "space-between", gap: 4 }}>
                                 <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "Figtree, sans-serif" }}>{e.description}</div>
+                                  <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "Figtree, sans-serif" }}>
+                                    {pidx && <span style={{ color: "#7c3aed", fontWeight: 800, marginRight: 4 }}>✨{pidx}</span>}
+                                    {e.description}
+                                  </div>
                                   <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1 }}>
                                     {e.tx_date} · {fromAcc?.name || "—"}
                                     {settled && <span style={{ marginLeft: 4, color: "#d1d5db" }}>· settled</span>}
@@ -1003,12 +1070,13 @@ export default function Receivables({
                         <div style={{ fontSize: 10, fontWeight: 700, color: "#059669", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif", marginBottom: 6 }}>
                           Received (In)
                         </div>
-                        {inRows.length === 0 ? (
+                        {displayIn.length === 0 ? (
                           <div style={{ fontSize: 11, color: "#9ca3af", padding: "6px 0" }}>No payments received</div>
-                        ) : inRows.map(e => {
+                        ) : displayIn.map(e => {
                           const settled    = !!e.reimburse_settlement_id;
                           const isSelected = !settled && selIn.has(e.id);
                           const toAcc      = accounts.find(a => a.id === e.to_id);
+                          const pidx       = pairIdx[e.id];
                           return (
                             <div
                               key={e.id}
@@ -1016,14 +1084,17 @@ export default function Receivables({
                               style={{
                                 cursor: settled ? "default" : "pointer",
                                 opacity: settled ? 0.45 : 1,
-                                border: isSelected ? "1.5px solid #059669" : "1px solid #f3f4f6",
+                                border: isSelected ? "1.5px solid #059669" : pidx ? "1px solid #ddd6fe" : "1px solid #f3f4f6",
                                 borderRadius: 8, padding: "8px 10px", marginBottom: 4,
-                                background: isSelected ? "#f0fdf4" : "#fafafa",
+                                background: isSelected ? "#f0fdf4" : pidx ? "#faf5ff" : "#fafafa",
                               }}
                             >
                               <div style={{ display: "flex", justifyContent: "space-between", gap: 4 }}>
                                 <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "Figtree, sans-serif" }}>{e.description}</div>
+                                  <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "Figtree, sans-serif" }}>
+                                    {pidx && <span style={{ color: "#7c3aed", fontWeight: 800, marginRight: 4 }}>✨{pidx}</span>}
+                                    {e.description}
+                                  </div>
                                   <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1 }}>
                                     {e.tx_date} · {toAcc?.name || "—"}
                                     {settled && <span style={{ marginLeft: 4, color: "#d1d5db" }}>· settled</span>}
