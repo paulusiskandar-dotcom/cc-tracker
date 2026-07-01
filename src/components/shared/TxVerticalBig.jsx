@@ -732,8 +732,8 @@ export default function TxVerticalBig({
         to_type:        type === "reimburse_out" ? "expense" : (type === "reimburse_in" ? "account" : to_type),
         from_id:        type === "reimburse_in" ? null : uuid(form.from_id),
         to_id:          type === "reimburse_out" ? null : uuid(form.to_id),
-        category_id:    isReimb ? null : uuid(form.category_id),
-        category_name:  isReimb ? null : (cat?.name || form.category_name || null),
+        category_id:    (isReimb || type === "income") ? null : uuid(form.category_id),
+        category_name:  (isReimb || type === "income") ? null : (cat?.name || form.category_name || null),
         entity:         (type === "reimburse_out" || type === "reimburse_in") ? (form.entity || "Hamasa") : "Personal",
         is_reimburse:   isReimb,
         merchant_name:  null,
@@ -1372,15 +1372,28 @@ export default function TxVerticalBig({
             ≈ {fmtIDR(amtIDR)} IDR
           </div>
         )}
-        {/* 8. Category (Expense only) */}
+        {/* 8. Category (Expense) / Income Source (Income) */}
         {showCat && (
-          <Field label="Category">
-            <select value={form.category_id || ""} onChange={e => {
-              const found = categories.find(c => c.id === e.target.value);
-              set("category_id", e.target.value || null);
-              set("category_name", found?.name || null);
-            }} style={SEL}>
-              <option value="">Select category…</option>
+          <Field label={isIncome ? "Income Source" : "Category"}>
+            <select
+              value={(isIncome ? form.from_id : form.category_id) || ""}
+              onChange={e => {
+                const val = e.target.value || null;
+                if (isIncome) {
+                  // income source is stored in from_id (from_type=income_source), category stays null
+                  set("from_id", val);
+                  set("from_type", "income_source");
+                  set("category_id", null);
+                  set("category_name", null);
+                } else {
+                  const found = categories.find(c => c.id === val);
+                  set("category_id", val);
+                  set("category_name", found?.name || null);
+                }
+              }}
+              style={SEL}
+            >
+              <option value="">{isIncome ? "Select source…" : "Select category…"}</option>
               {catOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </Field>
