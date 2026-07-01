@@ -579,6 +579,20 @@ export const recalculateBalance = async (accountId, userId) => {
     return outstanding;
   }
 
+  if (accType === "liability") {
+    // A debt like a CC: drawing/borrowing (from_id=liability) raises outstanding;
+    // a payment (to_id=liability, e.g. pay_liability) lowers it. initial_balance = the
+    // outstanding when the loan originated.
+    let outstanding = Number(acc?.initial_balance || 0);
+    for (const tx of (txns || [])) {
+      const amt = txAmt(tx);
+      if (tx.from_id === accountId && tx.from_type === "account") outstanding += amt; // borrow / draw
+      if (tx.to_id   === accountId && tx.to_type   === "account") outstanding -= amt; // payment reduces debt
+    }
+    await supabase.from("accounts").update({ outstanding_amount: outstanding }).eq("id", accountId);
+    return outstanding;
+  }
+
   const field = balField(accType);
   if (!field) return null;
   let balance = Number(acc?.initial_balance || 0);
