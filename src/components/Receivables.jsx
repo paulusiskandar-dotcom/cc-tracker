@@ -727,8 +727,13 @@ export default function Receivables({
       // Delete the generated Reimbursable Loss (expense) AND Reimbursable Surplus (income)
       // entries for this settlement. Originals were unmarked above, so this only hits the
       // generated loss/surplus rows — previously the surplus/income entry was leaked.
+      // Capture accounts touched by those rows first, so we can recompute their balances after.
+      const { data: genRows } = await supabase.from("ledger").select("from_id, to_id").eq("reimburse_settlement_id", s.id);
       await supabase.from("ledger").delete().eq("reimburse_settlement_id", s.id);
       setLedger(prev => prev.filter(e => e.reimburse_settlement_id !== s.id));
+      // Recompute balances for any account those generated rows touched (deterministic, no drift).
+      const touched = [...new Set((genRows || []).flatMap(r => [r.from_id, r.to_id]).filter(Boolean))];
+      for (const accId of touched) { try { await recalculateBalance(accId, user.id); } catch (e) { /* noop */ } }
       // Delete the settlement record itself
       await supabase.from("reimburse_settlements").delete().eq("id", s.id);
       setSettlements(prev => prev.filter(x => x.id !== s.id));

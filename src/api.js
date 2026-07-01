@@ -429,6 +429,9 @@ export const ledgerApi = {
   },
 
   update: async (id, d) => {
+    // Capture the previously-affected accounts BEFORE the write.
+    const { data: old } = await supabase
+      .from("ledger").select("user_id, from_id, to_id, from_type, to_type").eq("id", id).single();
     const { data, error } = await supabase
       .from("ledger")
       .update(sanitizeUUIDs(d))
@@ -436,6 +439,14 @@ export const ledgerApi = {
       .select()
       .single();
     if (error) throw new Error(error.message);
+    // Recompute balances from the ledger for every account touched (old + new sides).
+    // Deterministic (initial_balance + Σ ledger deltas) — edits can never drift the balance.
+    const uid = data?.user_id || old?.user_id;
+    const affected = [...new Set([old?.from_id, old?.to_id, data?.from_id, data?.to_id].filter(Boolean))];
+    for (const accId of affected) {
+      try { await recalculateBalance(accId, uid); }
+      catch (e) { console.error("[ledgerApi.update recalc]", e?.message); }
+    }
     return data;
   },
 
@@ -518,6 +529,16 @@ export const ledgerApi = {
               .eq("id", entry.employee_loan_id);
           }
         } catch (e) { console.error("[ledgerApi.delete] give_loan reverse failed:", e); }
+      }
+
+      // Recompute balances deterministically for touched accounts. Authoritative over the
+      // delta reversal above (initial_balance + Σ ledger) so a delete can never drift a balance.
+      const uid = entry.user_id;
+      if (uid) {
+        for (const accId of [...new Set([entry.from_id, entry.to_id].filter(Boolean))]) {
+          try { await recalculateBalance(accId, uid); }
+          catch (e) { console.error("[ledgerApi.delete recalc]", e?.message); }
+        }
       }
     }
   },
