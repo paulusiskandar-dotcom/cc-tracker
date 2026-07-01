@@ -360,14 +360,28 @@ export default function TxVerticalBig({
 
   // ── Switch type (also update group) ──────────────────────────
   const handleTypeChange = (txType) => {
-    setFormState(f => ({
-      ...f,
-      tx_type: txType,
-      from_id: null, to_id: null,
-      entity: txType === "reimburse_out" ? (f.entity || "Hamasa") : "Personal",
-    }));
+    setFormState(f => {
+      // Preserve the account already picked — carry it into whichever side is an
+      // "account" for the new type (e.g. Cashflow→Reimburse keeps the bank).
+      const prevAcct = f.from_id || f.to_id || null;
+      const tt = getTxFromToTypes(txType);
+      let from_id = null, to_id = null;
+      if (tt.from_type === "account")      from_id = prevAcct;
+      else if (tt.to_type === "account")   to_id   = prevAcct;
+      return {
+        ...f,
+        tx_type: txType,
+        from_id, to_id,
+        entity: (txType === "reimburse_out" || txType === "reimburse_in")
+          ? (f.entity && f.entity !== "Personal" ? f.entity : "Hamasa")
+          : "Personal",
+      };
+    });
     if (!cicilan) setCicilan(false);
-    setLoanAccTab("bank");
+    // keep the Bank/Cash tab in sync with the carried account (loan types)
+    const carried = form.from_id || form.to_id || null;
+    const acc = carried ? accounts.find(a => a.id === carried) : null;
+    setLoanAccTab(acc?.subtype === "cash" ? "cash" : "bank");
   };
 
   const handleGroupChange = (g) => {
