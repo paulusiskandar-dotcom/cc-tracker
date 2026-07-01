@@ -549,6 +549,7 @@ export default function Receivables({
   const [expandedSettlements, setExpandedSettlements] = useState({});
   const toggleSettlement = (id) =>
     setExpandedSettlements(prev => ({ ...prev, [id]: !prev[id] }));
+  const [showSettlementHistory, setShowSettlementHistory] = useState(false);
 
   const getSettleDate = (rId) => settleDate[rId] || todayStr();
 
@@ -1525,40 +1526,74 @@ export default function Receivables({
           }}>
             <div style={{ height: 3, background: "linear-gradient(90deg, #059669, #10b981)" }} />
             <div style={{ padding: "20px 24px" }}>
-              <div style={{
-                fontSize: 11,
-                fontWeight: 700,
-                color: "#6b7280",
-                textTransform: "uppercase",
-                letterSpacing: 0.5,
-                marginBottom: 4,
-              }}>
-                Settlement History ({settledGroups.length})
-              </div>
-              <div style={{ fontSize: 18, fontWeight: 800, color: "#111827", marginBottom: 20 }}>
-                Settled Reimbursements
-              </div>
-              {settledGroups.length === 0 ? (
-                <div style={{
-                  padding: "32px 16px",
-                  textAlign: "center",
-                  color: "#9ca3af",
-                  fontSize: 13,
-                }}>
-                  No settled reimbursements yet
+              <div
+                onClick={() => setShowSettlementHistory(v => !v)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  cursor: "pointer",
+                  marginBottom: showSettlementHistory ? 20 : 0,
+                }}
+              >
+                <div>
+                  <div style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    color: "#6b7280",
+                    textTransform: "uppercase",
+                    letterSpacing: 0.5,
+                    marginBottom: 4,
+                  }}>
+                    Settlement History ({settledGroups.length})
+                  </div>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: "#111827" }}>
+                    Settled Reimbursements
+                  </div>
                 </div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {settledGroups.map(s => (
-                    <SettlementCard
-                      key={s.id}
-                      settlement={s}
-                      ledger={ledger}
-                      expanded={!!expandedSettlements[s.id]}
-                      onToggle={() => toggleSettlement(s.id)}
-                    />
-                  ))}
-                </div>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setShowSettlementHistory(v => !v); }}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
+                    background: "#f3f4f6",
+                    border: "0.5px solid #e5e7eb",
+                    borderRadius: 8,
+                    padding: "6px 12px",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: "#374151",
+                    cursor: "pointer",
+                  }}
+                >
+                  {showSettlementHistory ? "Hide ▲" : "Show ▼"}
+                </button>
+              </div>
+              {showSettlementHistory && (
+                settledGroups.length === 0 ? (
+                  <div style={{
+                    padding: "32px 16px",
+                    textAlign: "center",
+                    color: "#9ca3af",
+                    fontSize: 13,
+                  }}>
+                    No settled reimbursements yet
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {settledGroups.map(s => (
+                      <SettlementCard
+                        key={s.id}
+                        settlement={s}
+                        ledger={ledger}
+                        expanded={!!expandedSettlements[s.id]}
+                        onToggle={() => toggleSettlement(s.id)}
+                      />
+                    ))}
+                  </div>
+                )
               )}
             </div>
           </div>
