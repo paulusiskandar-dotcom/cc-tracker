@@ -654,10 +654,13 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
   const importAll = async (selectedRows) => {
     if (!selectedRows.length) return;
     setImporting(true);
-    let count = 0;
+    let count = 0, skippedFx = 0;
     const newLedgerIds = [];
     const matchedNames = [];
     for (const r of selectedRows) {
+      // Foreign-currency (valas) email-sync tx are unreliable (est. rate, no exact IDR) —
+      // leave them pending and take the accurate figures from the monthly statement instead.
+      if (r.currency && r.currency !== "IDR") { skippedFx++; continue; }
       try {
         const builtEntry = buildEntry(r);
         const created = await ledgerApi.create(user.id, builtEntry, accounts);
@@ -702,6 +705,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     setImporting(false);
     setProcessedCount(n => n + count);
     showToast(`${count} transaction${count !== 1 ? "s" : ""} imported`);
+    if (skippedFx > 0) showToast(`${skippedFx} transaksi valas ditahan — tunggu statement (nilai asli valas)`, "info");
     if (matchedNames.length === 1) showToast(`✓ "${matchedNames[0]}" recurring linked and reminder confirmed`);
     else if (matchedNames.length > 1) showToast(`${matchedNames.length} recurring expenses linked`);
     if (newLedgerIds.length) undoManager.register({ type: "save_batch", ids: newLedgerIds, label: `Saved ${newLedgerIds.length} transaction${newLedgerIds.length !== 1 ? "s" : ""}` });
