@@ -530,13 +530,16 @@ export const ledgerApi = {
 export const recalculateBalance = async (accountId, userId) => {
   if (!accountId || !userId) return null;
   const { data: acc } = await supabase
-    .from("accounts").select("initial_balance, type").eq("id", accountId).single();
+    .from("accounts").select("initial_balance, type, currency").eq("id", accountId).single();
   const { data: txns } = await supabase
     .from("ledger")
     .select("tx_type, amount, amount_idr, fx_rate_used, fx_rate, from_id, from_type, to_id, to_type")
     .eq("user_id", userId)
     .or(`from_id.eq.${accountId},to_id.eq.${accountId}`);
   const accType = acc?.type;
+  // Foreign-currency accounts track balance in native currency (amount), not IDR.
+  const isForeign = acc?.currency && acc.currency !== "IDR";
+  const txAmt = (tx) => isForeign ? Number(tx.amount || tx.amount_idr || 0) : Number(tx.amount_idr || tx.amount || 0);
 
   if (accType === "credit_card") {
     let outstanding = Number(acc?.initial_balance || 0);
@@ -567,7 +570,7 @@ export const recalculateBalance = async (accountId, userId) => {
       if (tx.to_id   === accountId && tx.to_type   === "account") balance += toAmount;
       continue;
     }
-    const amt = Number(tx.amount_idr || 0);
+    const amt = txAmt(tx);
     if (tx.to_id   === accountId && tx.to_type   === "account") balance += amt;
     if (tx.from_id === accountId && tx.from_type === "account") balance -= amt;
   }
