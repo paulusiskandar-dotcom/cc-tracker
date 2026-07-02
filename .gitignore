@@ -31,3 +31,5 @@ supabase/.temp/
 
 # financial statements (never commit)
 statements/
+statement_fetch_config.json
+statement_fetch.log

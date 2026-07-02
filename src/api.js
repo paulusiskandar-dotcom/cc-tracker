@@ -563,18 +563,18 @@ export const recalculateBalance = async (accountId, userId) => {
   const txAmt = (tx) => isForeign ? Number(tx.amount || tx.amount_idr || 0) : Number(tx.amount_idr || tx.amount || 0);
 
   if (accType === "credit_card") {
-    let outstanding = Number(acc?.initial_balance || 0);
-    let cr = 0;
+    // Order-independent: sum charges and payments separately, net once at the end.
+    // (Previously subtracted per-row with a 0-clamp, which leaked overpayments to credit
+    // balance and overstated outstanding when payments were processed before charges.)
+    let charges = 0, payments = 0;
     for (const tx of (txns || [])) {
       const amt = Number(tx.amount_idr || tx.amount || 0);
-      if (tx.from_id === accountId && tx.from_type === "account") {
-        outstanding += amt; // charge
-      }
-      if (tx.to_id === accountId && tx.to_type === "account") {
-        if (amt <= outstanding) { outstanding -= amt; }
-        else { cr += (amt - outstanding); outstanding = 0; }
-      }
+      if (tx.from_id === accountId && tx.from_type === "account") charges += amt;   // charge raises outstanding
+      if (tx.to_id === accountId && tx.to_type === "account") payments += amt;      // payment/credit lowers it
     }
+    const net = Number(acc?.initial_balance || 0) + charges - payments;
+    const outstanding = net > 0 ? net : 0;
+    const cr = net < 0 ? -net : 0; // overpayment -> credit balance
     await supabase.from("accounts").update({ outstanding_amount: outstanding, current_balance: cr }).eq("id", accountId);
     return outstanding;
   }

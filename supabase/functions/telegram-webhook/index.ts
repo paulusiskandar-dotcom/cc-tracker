@@ -249,21 +249,9 @@ Deno.serve(async (req: Request) => {
       const text: string = message.text.trim();
 
       if (text.startsWith("/")) {
-        if (text === "/start") {
-          await sendTelegramMessage(
-            TELEGRAM_BOT_TOKEN,
-            chatId,
-            "Halo Paulus\\! 👋\n\nKirim:\n• Text SMS bank yang di\\-copy\n• Foto/screenshot notifikasi bank\n• PDF e\\-statement bank\n• Atau ketik manual transaksi\n\nSaya akan parse otomatis dan save ke Paulus Finance\\.",
-          );
-        } else if (text === "/help") {
-          await sendTelegramMessage(
-            TELEGRAM_BOT_TOKEN,
-            chatId,
-            "Forward SMS bank, foto notif, atau text manual\\. Saya akan parse jadi transaksi pending review\\.",
-          );
-        } else {
-          await sendTelegramMessage(TELEGRAM_BOT_TOKEN, chatId, "Command tidak dikenali\\. Coba /start atau /help\\.");
-        }
+        const cmd = text.split(/\s+/)[0].toLowerCase().replace(/@[\w_]+$/, "");
+        const arg = text.slice(text.split(/\s+/)[0].length).trim();
+        await handleCommand(cmd, arg, supabase, AUTHORIZED_USER_ID, TELEGRAM_BOT_TOKEN, chatId);
         return new Response("ok", { status: 200 });
       }
 
@@ -610,4 +598,282 @@ function formatIDR(n: number): string {
 // Escape special chars for MarkdownV2
 function escapeMarkdown(text: string): string {
   return text.replace(/[_*[\]()~`>#+\-=|{}.!\\]/g, (c) => "\\" + c);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// COMMAND CENTER (T1: query commands)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+async function sendTelegramHTML(token: string, chatId: number, html: string) {
+  try {
+    await fetch(`${TELEGRAM_API}/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: html, parse_mode: "HTML", disable_web_page_preview: true }),
+    });
+  } catch (err) {
+    console.error("[telegram-webhook] sendHTML error:", err);
+  }
+}
+
+function esc(s: any): string {
+  return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function idr(n: number): string {
+  return "Rp" + Math.round(Number(n) || 0).toLocaleString("id-ID");
+}
+function fx(n: number, cur: string): string {
+  return cur + " " + (Number(n) || 0).toLocaleString("id-ID", { maximumFractionDigits: 2 });
+}
+// pad a value to width, right-aligned (monospace <pre>)
+function padL(s: string, w: number): string {
+  s = String(s);
+  return s.length >= w ? s : " ".repeat(w - s.length) + s;
+}
+function padR(s: string, w: number): string {
+  s = String(s);
+  return s.length >= w ? s.slice(0, w) : s + " ".repeat(w - s.length);
+}
+
+const ID_MONTHS = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+// Jakarta = UTC+7
+function jakartaNow(): Date {
+  return new Date(Date.now() + 7 * 3600 * 1000);
+}
+function ymd(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+async function getActiveAccounts(supabase: any, uid: string): Promise<any[]> {
+  const { data, error } = await supabase
+    .from("accounts")
+    .select("id, name, type, subtype, currency, current_balance, current_value, outstanding_amount, card_limit, due_day, entity, include_networth, monthly_installment, is_active")
+    .eq("user_id", uid);
+  if (error) { console.error("[cmd] accounts:", error); return []; }
+  return (data || []).filter((a: any) => a.is_active !== false);
+}
+
+async function handleCommand(cmd: string, arg: string, supabase: any, uid: string, token: string, chatId: number) {
+  try {
+    switch (cmd) {
+      case "/start":
+      case "/menu":
+      case "/help":
+        return sendTelegramHTML(token, chatId, cmdMenu());
+      case "/saldo": return sendTelegramHTML(token, chatId, await cmdSaldo(supabase, uid));
+      case "/cc": return sendTelegramHTML(token, chatId, await cmdCC(supabase, uid));
+      case "/reimburse": return sendTelegramHTML(token, chatId, await cmdReimburse(supabase, uid));
+      case "/hutang": return sendTelegramHTML(token, chatId, await cmdHutang(supabase, uid));
+      case "/investasi": return sendTelegramHTML(token, chatId, await cmdInvestasi(supabase, uid));
+      case "/hari": return sendTelegramHTML(token, chatId, await cmdHari(supabase, uid));
+      case "/bulan": return sendTelegramHTML(token, chatId, await cmdBulan(supabase, uid, arg));
+      case "/report":
+        return sendTelegramHTML(token, chatId, "📊 <b>/report</b> (PDF/HTML lengkap) — coming soon (T5).\nSementara pakai /bulan untuk ringkasan bulan ini.");
+      default:
+        return sendTelegramHTML(token, chatId, "Command tidak dikenali.\n\n" + cmdMenu());
+    }
+  } catch (err: any) {
+    console.error("[cmd] error:", cmd, err);
+    await sendTelegramHTML(token, chatId, "❌ Error di " + esc(cmd) + ": " + esc(err?.message || "unknown"));
+  }
+}
+
+function cmdMenu(): string {
+  return [
+    "🤖 <b>Paulus Finance — Command Center</b>",
+    "",
+    "💰 /saldo — semua saldo bank + net worth",
+    "💳 /cc — outstanding tiap kartu + jatuh tempo",
+    "🔄 /reimburse — piutang Hamasa/SDC",
+    "🏦 /hutang — liabilities (BYD, dll)",
+    "📈 /investasi — nilai aset/investasi",
+    "📅 /hari — transaksi hari ini",
+    "📆 /bulan — ringkasan bulan ini (income/expense)",
+    "📊 /report — laporan lengkap (segera)",
+    "",
+    "Atau forward SMS bank / foto / PDF → auto-parse jadi transaksi.",
+  ].join("\n");
+}
+
+async function cmdSaldo(supabase: any, uid: string): Promise<string> {
+  const acc = await getActiveAccounts(supabase, uid);
+  const banksIDR = acc.filter((a) => a.type === "bank" && a.currency === "IDR");
+  const banksFX = acc.filter((a) => a.type === "bank" && a.currency !== "IDR" && Math.abs(Number(a.current_balance) || 0) > 0);
+  const cc = acc.filter((a) => a.type === "credit_card");
+  const assets = acc.filter((a) => a.type === "asset" && a.include_networth !== false);
+  const liab = acc.filter((a) => a.type === "liability");
+
+  const sumBankIDR = banksIDR.reduce((s, a) => s + (Number(a.current_balance) || 0), 0);
+  const sumAsset = assets.reduce((s, a) => s + (Number(a.current_value) || 0), 0);
+  const sumCC = cc.reduce((s, a) => s + (Number(a.outstanding_amount) || 0), 0);
+  const sumLiab = liab.reduce((s, a) => s + (Number(a.outstanding_amount) || 0), 0);
+  const netWorth = sumBankIDR + sumAsset - sumCC - sumLiab;
+
+  const topBanks = banksIDR
+    .filter((a) => Math.abs(Number(a.current_balance) || 0) > 0)
+    .sort((a, b) => (Number(b.current_balance) || 0) - (Number(a.current_balance) || 0));
+
+  let out = "💰 <b>SALDO</b>\n<pre>";
+  for (const a of topBanks) out += padR(a.name, 20) + padL(idr(a.current_balance), 16) + "\n";
+  out += "─".repeat(36) + "\n";
+  out += padR("Total Bank (IDR)", 20) + padL(idr(sumBankIDR), 16) + "\n</pre>";
+
+  if (banksFX.length) {
+    out += "\n💱 <b>Valas</b>\n<pre>";
+    for (const a of banksFX) out += padR(a.name, 16) + padL(fx(a.current_balance, a.currency), 18) + "\n";
+    out += "</pre>";
+  }
+
+  out += "\n📊 <b>Net Worth</b>\n<pre>";
+  out += padR("Bank (IDR)", 16) + padL(idr(sumBankIDR), 18) + "\n";
+  out += padR("Investasi", 16) + padL(idr(sumAsset), 18) + "\n";
+  out += padR("Kartu Kredit", 16) + padL("-" + idr(sumCC), 18) + "\n";
+  out += padR("Liabilities", 16) + padL("-" + idr(sumLiab), 18) + "\n";
+  out += "─".repeat(34) + "\n";
+  out += padR("NET WORTH", 16) + padL(idr(netWorth), 18) + "\n</pre>";
+  out += "<i>*valas belum dikonversi ke net worth</i>";
+  return out;
+}
+
+async function cmdCC(supabase: any, uid: string): Promise<string> {
+  const acc = await getActiveAccounts(supabase, uid);
+  const cc = acc.filter((a) => a.type === "credit_card")
+    .sort((a, b) => (Number(b.outstanding_amount) || 0) - (Number(a.outstanding_amount) || 0));
+  const total = cc.reduce((s, a) => s + (Number(a.outstanding_amount) || 0), 0);
+  const today = jakartaNow().getUTCDate();
+
+  let out = "💳 <b>KARTU KREDIT</b>\n<pre>";
+  out += padR("Kartu", 16) + padL("Tagihan", 13) + " " + "Due\n";
+  for (const a of cc) {
+    const os = Number(a.outstanding_amount) || 0;
+    if (os === 0) continue;
+    const due = a.due_day ? "tgl" + a.due_day : "-";
+    const soon = a.due_day && ((a.due_day - today + 31) % 31) <= 3 ? "⚠️" : "";
+    out += padR(a.name, 16) + padL(idr(os), 13) + " " + padR(due, 6) + soon + "\n";
+  }
+  out += "─".repeat(36) + "\n";
+  out += padR("TOTAL", 16) + padL(idr(total), 13) + "\n</pre>";
+  const zero = cc.filter((a) => (Number(a.outstanding_amount) || 0) === 0).length;
+  if (zero) out += `<i>${zero} kartu saldo 0 (disembunyikan)</i>`;
+  return out;
+}
+
+async function cmdReimburse(supabase: any, uid: string): Promise<string> {
+  const { data: led, error } = await supabase
+    .from("ledger").select("tx_type, amount_idr, entity")
+    .eq("user_id", uid).in("tx_type", ["reimburse_out", "reimburse_in"]);
+  if (error) throw error;
+  const ent: Record<string, { out: number; in: number }> = {};
+  for (const e of led || []) {
+    const k = e.entity || "?";
+    ent[k] = ent[k] || { out: 0, in: 0 };
+    if (e.tx_type === "reimburse_out") ent[k].out += Number(e.amount_idr) || 0;
+    else ent[k].in += Number(e.amount_idr) || 0;
+  }
+  let out = "🔄 <b>REIMBURSE</b>\n<i>talangin (out) − dibalikin (in) = sisa piutang</i>\n";
+  for (const [k, v] of Object.entries(ent)) {
+    const net = v.out - v.in;
+    out += `\n<b>${esc(k)}</b>\n<pre>`;
+    out += padR("Talangin", 14) + padL(idr(v.out), 16) + "\n";
+    out += padR("Dibalikin", 14) + padL(idr(v.in), 16) + "\n";
+    out += "─".repeat(30) + "\n";
+    out += padR(net >= 0 ? "Sisa ke Paulus" : "Overpaid", 14) + padL(idr(net), 16) + "\n</pre>";
+  }
+  return out;
+}
+
+async function cmdHutang(supabase: any, uid: string): Promise<string> {
+  const acc = await getActiveAccounts(supabase, uid);
+  const liab = acc.filter((a) => a.type === "liability");
+  if (!liab.length) return "🏦 <b>HUTANG</b>\nTidak ada liability aktif.";
+  let out = "🏦 <b>HUTANG / LIABILITIES</b>\n<pre>";
+  let total = 0;
+  for (const a of liab) {
+    const os = Number(a.outstanding_amount) || 0; total += os;
+    out += padR(a.name, 22) + "\n";
+    out += "  sisa   " + padL(idr(os), 20) + "\n";
+    if (a.monthly_installment) out += "  cicilan" + padL(idr(a.monthly_installment) + "/bln", 20) + "\n";
+  }
+  out += "─".repeat(30) + "\n" + padR("TOTAL", 8) + padL(idr(total), 22) + "\n</pre>";
+  return out;
+}
+
+async function cmdInvestasi(supabase: any, uid: string): Promise<string> {
+  const acc = await getActiveAccounts(supabase, uid);
+  const assets = acc.filter((a) => a.type === "asset" && a.include_networth !== false)
+    .sort((a, b) => (Number(b.current_value) || 0) - (Number(a.current_value) || 0));
+  const total = assets.reduce((s, a) => s + (Number(a.current_value) || 0), 0);
+  let out = "📈 <b>INVESTASI / ASET</b>\n<pre>";
+  for (const a of assets) {
+    const v = Number(a.current_value) || 0;
+    if (v === 0) continue;
+    out += padR(a.name, 24) + padL(idr(v), 15) + "\n";
+  }
+  out += "─".repeat(39) + "\n" + padR("TOTAL", 24) + padL(idr(total), 15) + "\n</pre>";
+  return out;
+}
+
+function txLabel(t: any): string {
+  return t.merchant_name || t.description || t.category_name || t.tx_type || "—";
+}
+
+async function cmdHari(supabase: any, uid: string): Promise<string> {
+  const today = ymd(jakartaNow());
+  const { data: led, error } = await supabase
+    .from("ledger").select("tx_type, amount_idr, description, merchant_name, category_name")
+    .eq("user_id", uid).eq("tx_date", today).order("created_at", { ascending: true });
+  if (error) throw error;
+  const d = jakartaNow();
+  const header = `📅 <b>Hari ini</b> — ${d.getUTCDate()} ${ID_MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+  if (!led || !led.length) return header + "\n\nBelum ada transaksi hari ini.";
+  let inc = 0, exp = 0, out = header + "\n<pre>";
+  for (const t of led) {
+    const amt = Number(t.amount_idr) || 0;
+    const isIn = ["income", "reimburse_in", "collect_loan", "sell_asset"].includes(t.tx_type);
+    if (isIn) inc += amt; else if (t.tx_type === "expense" || t.tx_type === "reimburse_out") exp += amt;
+    const sign = isIn ? "+" : "-";
+    out += padR(txLabel(t), 22) + padL(sign + idr(amt), 14) + "\n";
+  }
+  out += "</pre>";
+  out += `\n<b>Masuk:</b> ${idr(inc)}  •  <b>Keluar:</b> ${idr(exp)}`;
+  return out;
+}
+
+async function cmdBulan(supabase: any, uid: string, arg: string): Promise<string> {
+  const now = jakartaNow();
+  let year = now.getUTCFullYear(), month = now.getUTCMonth(); // 0-based
+  const m = arg.match(/(\d{4})-(\d{2})/);
+  if (m) { year = Number(m[1]); month = Number(m[2]) - 1; }
+  const start = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+  const endDate = new Date(Date.UTC(year, month + 1, 0));
+  const end = ymd(endDate);
+  const { data: led, error } = await supabase
+    .from("ledger").select("tx_type, amount_idr, category_name")
+    .eq("user_id", uid).gte("tx_date", start).lte("tx_date", end);
+  if (error) throw error;
+  let inc = 0, exp = 0;
+  const cats: Record<string, number> = {};
+  for (const t of led || []) {
+    const amt = Number(t.amount_idr) || 0;
+    if (t.tx_type === "income") inc += amt;
+    else if (t.tx_type === "expense") {
+      exp += amt;
+      const c = t.category_name || "Lainnya";
+      cats[c] = (cats[c] || 0) + amt;
+    }
+  }
+  const net = inc - exp;
+  const top = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  let out = `📆 <b>${ID_MONTHS[month]} ${year}</b>\n<pre>`;
+  out += padR("Income", 12) + padL(idr(inc), 18) + "\n";
+  out += padR("Expense", 12) + padL("-" + idr(exp), 18) + "\n";
+  out += "─".repeat(30) + "\n";
+  out += padR("Net", 12) + padL((net >= 0 ? "+" : "") + idr(net), 18) + "\n</pre>";
+  if (top.length) {
+    out += "\n<b>Top kategori (expense)</b>\n<pre>";
+    for (const [c, v] of top) out += padR(c, 20) + padL(idr(v), 14) + "\n";
+    out += "</pre>";
+  }
+  out += "<i>*P&amp;L tidak termasuk transfer/pay_cc/reimburse/aset</i>";
+  return out;
 }
