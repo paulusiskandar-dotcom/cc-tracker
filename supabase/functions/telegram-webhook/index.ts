@@ -222,7 +222,8 @@ Deno.serve(async (req: Request) => {
           { command: "pending", description: "👀 Lihat antrian pending" },
           { command: "undo", description: "↩️ Batalkan import terakhir" },
           { command: "reimburse", description: "🔄 Piutang Hamasa/SDC" },
-          { command: "hutang", description: "🏦 Sisa hutang & cicilan" },
+          { command: "hutang", description: "🏛 Hutang, kartu & cicilan" },
+          { command: "piutang", description: "🤝 Utang karyawan & reimburse" },
           { command: "investasi", description: "📈 Nilai investasi/aset" },
           { command: "report", description: "📊 Laporan lengkap (segera)" },
         ];
@@ -740,6 +741,7 @@ async function handleCommand(cmd: string, arg: string, supabase: any, uid: strin
       case "/cc": return sendTelegramHTML(token, chatId, await cmdCC(supabase, uid));
       case "/reimburse": return sendTelegramHTML(token, chatId, await cmdReimburse(supabase, uid));
       case "/hutang": return sendTelegramHTML(token, chatId, await cmdHutang(supabase, uid));
+      case "/piutang": return sendTelegramHTML(token, chatId, await cmdPiutang(supabase, uid));
       case "/investasi": return sendTelegramHTML(token, chatId, await cmdInvestasi(supabase, uid));
       case "/hari": return sendTelegramHTML(token, chatId, await cmdHari(supabase, uid));
       case "/bulan": return sendTelegramHTML(token, chatId, await cmdBulan(supabase, uid, arg));
@@ -775,7 +777,8 @@ function cmdMenu(): string {
     "/hari — transaksi hari ini",
     "/bulan — income & expense bulan ini",
     "/reimburse — piutang Hamasa/SDC",
-    "/hutang — sisa hutang & cicilan",
+    "/hutang — hutang, kartu & cicilan",
+    "/piutang — utang karyawan & reimburse",
     "/investasi — nilai aset",
     "",
     "<b>📥 Transaksi masuk</b>",
@@ -812,22 +815,22 @@ async function cmdSaldo(supabase: any, uid: string): Promise<string> {
     .sort((a, b) => (Number(b.current_balance) || 0) - (Number(a.current_balance) || 0));
 
   // compact <pre> tables sized for phone width (~27 chars) so columns stay aligned
-  const num = (n: number) => Math.round(Number(n) || 0).toLocaleString("id-ID");
-  let out = "💰 <b>SALDO BANK</b> <i>(Rp)</i>\n<pre>";
-  for (const a of topBanks) out += padR(a.name, 12) + padL(num(a.current_balance), 15) + "\n";
-  out += "─".repeat(27) + "\n" + padR("TOTAL", 12) + padL(num(sumBankIDR), 15) + "</pre>\n";
+  // amount-first lines: every angka starts flush-left, so nothing can look crooked
+  let out = "💰 <b>SALDO BANK</b>\n\n";
+  for (const a of topBanks) out += `${esc(a.name)}\n<b>${idr(a.current_balance)}</b>\n\n`;
+  out += `━━━━━━━━━━━━━━━\nTotal bank: <b>${idr(sumBankIDR)}</b>\n`;
 
   if (banksFX.length) {
     out += "\n💱 <b>VALAS</b>\n";
-    out += banksFX.map((a) => `${esc(a.name)} ${fx(a.current_balance, a.currency)}`).join(" · ") + "\n";
+    for (const a of banksFX) out += `${esc(a.name)}\n<b>${fx(a.current_balance, a.currency)}</b>\n\n`;
   }
 
-  out += "\n💎 <b>NET WORTH</b> <i>(Rp)</i>\n<pre>";
-  out += padR("Bank", 11) + padL(num(sumBankIDR), 16) + "\n";
-  out += padR("Investasi", 11) + padL(num(sumAsset), 16) + "\n";
-  out += padR("Kartu", 11) + padL("-" + num(sumCC), 16) + "\n";
-  out += padR("Hutang", 11) + padL("-" + num(sumLiab), 16) + "\n";
-  out += "─".repeat(27) + "\n" + padR("NET WORTH", 11) + padL(num(netWorth), 16) + "</pre>\n";
+  out += "\n💎 <b>NET WORTH</b>\n";
+  out += `Bank: ${idr(sumBankIDR)}\n`;
+  out += `Investasi: ${idr(sumAsset)}\n`;
+  out += `Kartu kredit: −${idr(sumCC)}\n`;
+  out += `Hutang: −${idr(sumLiab)}\n`;
+  out += `━━━━━━━━━━━━━━━\n<b>${idr(netWorth)}</b>\n`;
   out += "<i>valas belum dihitung ke net worth</i>";
   return out;
 }
@@ -839,20 +842,18 @@ async function cmdCC(supabase: any, uid: string): Promise<string> {
   const total = cc.reduce((s, a) => s + (Number(a.outstanding_amount) || 0), 0);
   const today = jakartaNow().getUTCDate();
 
-  const num = (n: number) => Math.round(Number(n) || 0).toLocaleString("id-ID");
-  let out = "💳 <b>KARTU KREDIT</b> <i>(Rp · tgl = jatuh tempo)</i>\n<pre>";
-  out += padR("Kartu", 11) + padL("Tagihan", 12) + padL("tgl", 4) + "\n" + "─".repeat(27) + "\n";
+  let out = "💳 <b>KARTU KREDIT</b>\n\n";
   for (const a of cc) {
     const os = Number(a.outstanding_amount) || 0;
     if (os === 0) continue;
     const daysTo = a.due_day ? ((a.due_day - today + 31) % 31) : null;
-    const soon = daysTo !== null && daysTo <= 3 ? "⚠" : "";
-    out += padR(a.name, 11) + padL(num(os), 12) + padL((a.due_day || "-") + soon, 4) + "\n";
+    const soon = daysTo !== null && daysTo <= 3 ? " ⚠️" : "";
+    out += `${esc(a.name)}${a.due_day ? ` · tgl ${a.due_day}` : ""}${soon}\n<b>${idr(os)}</b>\n\n`;
   }
-  out += "─".repeat(27) + "\n" + padR("TOTAL", 11) + padL(num(total), 12) + "</pre>\n";
+  out += `━━━━━━━━━━━━━━━\nTotal: <b>${idr(total)}</b>\n`;
   const zero = cc.filter((a) => (Number(a.outstanding_amount) || 0) === 0).length;
   if (zero) out += `<i>${zero} kartu lunas (Rp0) disembunyikan</i>\n`;
-  out += "Jadwal lengkap: /due";
+  out += "Jadwal jatuh tempo: /due";
   return out;
 }
 
@@ -870,15 +871,35 @@ async function cmdDue(supabase: any, uid: string): Promise<string> {
     const dd = a.due_day || null;
     items.push({ name: a.name + " (cicilan)", amt: Number(a.monthly_installment), due: dd || "?", days: dd ? (dd - today + 31) % 31 : 99 });
   }
-  if (!items.length) return "🗓 <b>JATUH TEMPO</b>\n\nTidak ada tagihan aktif. 🎉";
-  let out = "🗓 <b>JATUH TEMPO BILLING</b>\n";
+  // recurring bills (IPL, listrik, internet, subscription…) — amount may be unknown (0)
+  const { data: rts } = await supabase.from("recurring_templates").select("name, amount, day_of_month, tx_type, is_active").eq("user_id", uid).eq("is_active", true);
+  const bills = (rts || []).filter((r: any) => r.tx_type === "expense" && r.day_of_month);
+  // paid-this-month detection: any expense this month whose description contains the template name
+  const monthStart = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
+  const { data: mLed } = await supabase.from("ledger").select("description").eq("user_id", uid).eq("tx_type", "expense").gte("tx_date", monthStart);
+  const normB = (s: any) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const paidSet = (mLed || []).map((r: any) => normB(r.description));
+  const isPaid = (name: string) => { const n = normB(name).slice(0, 8); return n.length >= 4 && paidSet.some((d: string) => d.includes(n)); };
+
+  if (!items.length && !bills.length) return "🗓 <b>JATUH TEMPO</b>\n\nTidak ada tagihan aktif. 🎉";
+  let out = "🗓 <b>JATUH TEMPO BILLING</b>\n\n💳 <b>Kartu & cicilan</b>\n";
   let tot7 = 0;
   for (const it of items) {
     const when = it.days === 0 ? "HARI INI ‼️" : it.days === 1 ? "besok ⚠️" : it.days <= 3 ? `${it.days} hari lagi ⚠️` : `${it.days} hari lagi`;
-    out += `\n<b>tgl ${it.due}</b> — ${when}\n•  ${esc(it.name)}:  <b>Rp${num(it.amt)}</b>\n`;
+    out += `\n<b>tgl ${it.due}</b> — ${when}\n${esc(it.name)}\n<b>Rp${num(it.amt)}</b>\n`;
     if (it.days <= 7) tot7 += it.amt;
   }
-  out += `\n━━━━━━━━━━━━━━━\n💸 Perlu disiapkan ≤7 hari:  <b>Rp${num(tot7)}</b>`;
+  if (bills.length) {
+    out += "\n🧾 <b>Tagihan rutin bulan ini</b>\n";
+    const bl = bills.map((b: any) => ({ name: b.name, amt: Number(b.amount) || 0, due: b.day_of_month, days: (b.day_of_month - today + 31) % 31, paid: isPaid(b.name) }))
+      .sort((x: any, y: any) => (x.paid === y.paid ? x.days - y.days : x.paid ? 1 : -1));
+    for (const b of bl) {
+      const status = b.paid ? "✅ sudah dibayar" : b.days === 0 ? "HARI INI ‼️" : b.days === 1 ? "besok ⚠️" : `${b.days} hari lagi`;
+      out += `\n<b>tgl ${b.due}</b> — ${status}\n${esc(b.name)}\n${b.amt > 0 ? `<b>Rp${num(b.amt)}</b>` : "<i>nilai belum pasti</i>"}\n`;
+      if (!b.paid && b.days <= 7) tot7 += b.amt;
+    }
+  }
+  out += `\n━━━━━━━━━━━━━━━\n💸 Perlu disiapkan ≤7 hari: <b>Rp${num(tot7)}</b>`;
   return out;
 }
 
@@ -910,16 +931,61 @@ async function cmdReimburse(supabase: any, uid: string): Promise<string> {
 async function cmdHutang(supabase: any, uid: string): Promise<string> {
   const acc = await getActiveAccounts(supabase, uid);
   const liab = acc.filter((a) => a.type === "liability");
-  if (!liab.length) return "🏛 <b>HUTANG</b>\n\nTidak ada hutang aktif. 🎉";
-  let out = "🏛 <b>HUTANG</b>\n";
-  let total = 0;
+  const ccTotal = acc.filter((a) => a.type === "credit_card").reduce((s, a) => s + (Number(a.outstanding_amount) || 0), 0);
+  // cicilan berjalan di kartu (installments)
+  const { data: inst } = await supabase.from("installments").select("description, monthly_amount, total_months, tenor_months, paid_months, status").eq("user_id", uid).eq("status", "active");
+  const instList = (inst || []).map((i: any) => {
+    const tenor = Number(i.total_months || i.tenor_months || 0), paid = Number(i.paid_months || 0);
+    const left = Math.max(0, tenor - paid);
+    return { name: String(i.description || "-").slice(0, 28), monthly: Number(i.monthly_amount || 0), left, sisa: left * Number(i.monthly_amount || 0) };
+  }).filter((i: any) => i.left > 0).sort((a: any, b: any) => b.sisa - a.sisa);
+  const instMonthly = instList.reduce((s: number, i: any) => s + i.monthly, 0);
+  const instSisa = instList.reduce((s: number, i: any) => s + i.sisa, 0);
+  let liabTotal = 0;
+
+  let out = "🏛 <b>HUTANG & CICILAN</b>\n";
+  out += `\n💳 <b>Kartu kredit</b>\n<b>${idr(ccTotal)}</b> · detail /cc\n`;
   for (const a of liab) {
-    const os = Number(a.outstanding_amount) || 0; total += os;
-    out += `\n<b>${esc(a.name)}</b>\n`;
-    out += `•  Sisa:  <b>${idr(os)}</b>\n`;
-    if (a.monthly_installment) out += `•  Cicilan:  ${idr(a.monthly_installment)}/bln\n`;
+    const os = Number(a.outstanding_amount) || 0; liabTotal += os;
+    out += `\n🚗 <b>${esc(a.name)}</b>\nSisa: <b>${idr(os)}</b>${a.monthly_installment ? `\nCicilan: <b>${idr(a.monthly_installment)}</b>/bln` : ""}\n`;
   }
-  out += `\n<b>TOTAL:  ${idr(total)}</b>`;
+  if (instList.length) {
+    out += `\n📆 <b>Cicilan di kartu</b> <i>(termasuk di tagihan kartu)</i>\n\n`;
+    for (const i of instList) out += `${esc(i.name)} · sisa ${i.left}×\n<b>${idr(i.monthly)}</b>/bln (sisa ${idr(i.sisa)})\n\n`;
+    out += `Total cicilan/bln: <b>${idr(instMonthly)}</b>\nTotal sisa cicilan: <b>${idr(instSisa)}</b>\n`;
+  }
+  out += `\n━━━━━━━━━━━━━━━\nTOTAL KEWAJIBAN: <b>${idr(ccTotal + liabTotal)}</b>\n<i>(kartu + pinjaman; cicilan kartu sudah di dalam tagihan kartu)</i>\n\nPiutang (yang orang utang ke kamu): /piutang`;
+  return out;
+}
+
+async function cmdPiutang(supabase: any, uid: string): Promise<string> {
+  // 1. utang karyawan
+  const { data: loans } = await supabase.from("employee_loans").select("employee_name, total_amount, monthly_installment, paid_months, status").eq("user_id", uid).eq("status", "active");
+  let loanTotal = 0;
+  let out = "🤝 <b>PIUTANG</b> <i>(yang orang utang ke kamu)</i>\n";
+  out += "\n👥 <b>Utang karyawan</b>\n\n";
+  for (const l of (loans || [])) {
+    const sisa = Math.max(0, Number(l.total_amount || 0) - Number(l.paid_months || 0) * Number(l.monthly_installment || 0));
+    if (sisa <= 0) continue;
+    loanTotal += sisa;
+    out += `${esc(l.employee_name)} · cicilan ${idr(l.monthly_installment)}/bln\n<b>${idr(sisa)}</b>\n\n`;
+  }
+  out += `Total utang karyawan: <b>${idr(loanTotal)}</b>\n`;
+  // 2. reimburse belum settled per entity
+  const { data: led } = await supabase.from("ledger").select("tx_type, amount_idr, entity").eq("user_id", uid).in("tx_type", ["reimburse_out", "reimburse_in"]).is("reimburse_settlement_id", null);
+  const ent: Record<string, { out: number; in: number }> = {};
+  for (const e of led || []) {
+    const k = e.entity || "?"; ent[k] = ent[k] || { out: 0, in: 0 };
+    if (e.tx_type === "reimburse_out") ent[k].out += Number(e.amount_idr) || 0; else ent[k].in += Number(e.amount_idr) || 0;
+  }
+  out += "\n🔄 <b>Reimburse belum settled</b>\n\n";
+  let reimbTotal = 0;
+  for (const [k, v] of Object.entries(ent)) {
+    const net = v.out - v.in;
+    reimbTotal += net;
+    out += `${esc(k)} · talangin ${idr(v.out)} − balik ${idr(v.in)}\n<b>${net >= 0 ? idr(net) : "−" + idr(-net) + " (kelebihan bayar)"}</b>\n\n`;
+  }
+  out += `━━━━━━━━━━━━━━━\nTOTAL PIUTANG: <b>${idr(loanTotal + Math.max(0, reimbTotal))}</b>`;
   return out;
 }
 
@@ -928,14 +994,13 @@ async function cmdInvestasi(supabase: any, uid: string): Promise<string> {
   const assets = acc.filter((a) => a.type === "asset" && a.include_networth !== false)
     .sort((a, b) => (Number(b.current_value) || 0) - (Number(a.current_value) || 0));
   const total = assets.reduce((s, a) => s + (Number(a.current_value) || 0), 0);
-  const num = (n: number) => Math.round(Number(n) || 0).toLocaleString("id-ID");
-  let out = "📈 <b>INVESTASI & ASET</b> <i>(Rp)</i>\n<pre>";
+  let out = "📈 <b>INVESTASI & ASET</b>\n\n";
   for (const a of assets) {
     const v = Number(a.current_value) || 0;
     if (v === 0) continue;
-    out += padR(a.name, 14) + padL(num(v), 13) + "\n";
+    out += `${esc(a.name)}\n<b>${idr(v)}</b>\n\n`;
   }
-  out += "─".repeat(27) + "\n" + padR("TOTAL", 12) + padL(num(total), 15) + "</pre>";
+  out += `\n━━━━━━━━━━━━━━━\nTotal: <b>${idr(total)}</b>`;
   return out;
 }
 
