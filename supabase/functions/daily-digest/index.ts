@@ -111,30 +111,27 @@ Deno.serve(async () => {
     if (!list.length) return "";
     const meta = TYPE_META[ty];
     const sub = list.reduce((a, t) => a + t.amount, 0);
-    let s = `\n${meta.icon} <b>${meta.label}</b> · ${rp(sub)}\n`;
+    let s = `\n${meta.icon} <b>${meta.label}</b>  ·  ${rp(sub)}\n`;
     if (ty === "pay_cc" || ty === "pay_liability" || ty === "transfer") {
-      for (const t of list) s += `${t.ambiguous ? "❓" : "•"} ${esc(t.fromN || "?")} → <b>${esc(t.toN || "?")}</b> — ${rp(t.amount)}\n`;
+      for (const t of list) s += `${t.ambiguous ? "❓" : "•"}  ${esc(t.fromN || "?")} → <b>${esc(t.toN || "?")}</b>\n     ${rp(t.amount)}\n`;
     } else if (ty === "expense") {
-      const byCat: Record<string, Tx[]> = {};
-      for (const t of list) { const k = t.cat || "Lainnya"; (byCat[k] ||= []).push(t); }
-      for (const [cat, items] of Object.entries(byCat)) {
-        for (const t of items) {
-          const ent = t.entity && t.entity !== "Personal" ? ` <i>[${esc(t.entity)}]</i>` : "";
-          s += `${t.ambiguous ? "❓" : "•"} ${esc(t.desc)} — ${rp(t.amount)} <i>(${esc(cat)}${t.fromN ? " · " + esc(t.fromN) : ""})</i>${ent}\n`;
-        }
+      for (const t of list) {
+        const ent = t.entity && t.entity !== "Personal" ? `  [${esc(t.entity)}]` : "";
+        s += `${t.ambiguous ? "❓" : "•"}  ${esc(t.desc)}${ent}\n     ${rp(t.amount)}  ·  <i>${esc(t.cat || "Lainnya")}${t.fromN ? " · " + esc(t.fromN) : ""}</i>\n`;
       }
     } else {
-      for (const t of list) s += `${t.ambiguous ? "❓" : "•"} ${esc(t.desc)} — ${rp(t.amount)}${t.toN ? ` → ${esc(t.toN)}` : ""} <i>(${esc(t.cat || "Income")})</i>\n`;
+      for (const t of list) s += `${t.ambiguous ? "❓" : "•"}  ${esc(t.desc)}${t.toN ? ` → ${esc(t.toN)}` : ""}\n     ${rp(t.amount)}  ·  <i>${esc(t.cat || "Income")}</i>\n`;
     }
     return s;
   };
   const merged = txs.length - shown.length;
   const msg =
-    `📊 <b>CC Tracker — ${dateStr}</b>\n` +
-    `${shown.length} transaksi siap import:\n` +
+    `📊 <b>CC TRACKER</b>  ·  ${dateStr}\n` +
+    `${shown.length} transaksi siap import\n` +
+    `━━━━━━━━━━━━━━━\n` +
     section("pay_cc") + section("pay_liability") + section("transfer") + section("expense") + section("income") +
-    (merged ? `\n<i>🔗 ${merged} notifikasi dobel di-merge otomatis</i>` : "") +
-    (amb.length ? `\n⚠️ ${amb.length} ambigu — tap 🏢/🦷/👤 dulu sebelum import` : `\n✅ Semua jelas — tap Import buat masukin ke ledger`);
+    (merged ? `\n🔗 <i>${merged} notifikasi dobel sudah di-merge</i>` : "") +
+    (amb.length ? `\n⚠️ <b>${amb.length} ambigu</b> — tap ❌/🏢/🦷/👤 dulu, baru Import` : `\n✅ Semua jelas — tap <b>Import</b> untuk masukin ke ledger`);
 
   // Inline buttons: one classify row per ambiguous item (max 8) + import-all + open-app.
   // callback_data "cls:<emailSyncId>:<txIdx>:<H|S|P>" is handled by telegram-webhook (safe: tags entity on pending).
