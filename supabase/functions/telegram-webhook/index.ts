@@ -61,6 +61,13 @@ Common patterns:
 
 CRITICAL: If the message mentions CS "14000" or "Mandiri" or "TB xxx" format → from_bank_name MUST be "Mandiri". If "1500888" or sender BCA → "BCA". If "14041" → "CIMB Niaga". CS number overrides any other guess.
 
+BCA MUTASI SCREENSHOT RULES (CRITICAL — myBCA/BCA mobile transaction list):
+- Account masks like "083-136-1688" / "083 - 026 - 7743" are BCA account numbers → from_bank_name MUST be "BCA" (NOT Mandiri!). 0831361688 / 0830267743 etc.
+- COLOR = DIRECTION: BLUE amount = money IN (type "in", KREDIT). RED amount = money OUT (type "out", DEBIT). Trust the color over any other hint.
+- Text suffix also tells direction: "CR" = masuk (type "in"), "DB" = keluar (type "out"). "TRSF E-BANKING CR" = INCOMING transfer even though it says transfer.
+- Names of these people transferring IN = employee LOAN REPAYMENT (suggested_tx_type "collect_loan"): Kamdani, Fairuz, Lieche, Desy, Daniel, Chicie.
+- "Gaji" / "SAHABAT DENTAL CEM Gaji" incoming = income, suggested_category "Salary".
+
 SETORAN TUNAI RULE (TELEGRAM ONLY):
 If the text or image contains the keywords "Setoran Tunai" (cash deposit), apply these overrides regardless of other patterns:
 - suggested_tx_type: "reimburse_in"
@@ -191,6 +198,49 @@ Deno.serve(async (req: Request) => {
     });
   }
 
+  if (req.method === "GET") {
+    // one-time webhook maintenance: ?wh=info | ?wh=fix (re-register webhook incl. callback_query)
+    const url = new URL(req.url);
+    const wh = url.searchParams.get("wh");
+    const token = Deno.env.get("TELEGRAM_BOT_TOKEN");
+    if (wh && token) {
+      if (wh === "info") {
+        const r = await fetch(`${TELEGRAM_API}/bot${token}/getWebhookInfo`);
+        return new Response(JSON.stringify(await r.json()), { headers: { "Content-Type": "application/json" } });
+      }
+      if (wh === "cmds") {
+        // register the command list shown when typing "/" in Telegram
+        const commands = [
+          { command: "menu", description: "📋 Semua fitur & cara pakai" },
+          { command: "saldo", description: "💰 Semua saldo bank + net worth" },
+          { command: "cc", description: "💳 Tagihan tiap kartu + jatuh tempo" },
+          { command: "hari", description: "📅 Transaksi hari ini" },
+          { command: "bulan", description: "📆 Income/expense bulan ini" },
+          { command: "digest", description: "📬 Kirim digest transaksi pending" },
+          { command: "import", description: "📥 Import semua pending ke ledger" },
+          { command: "reimburse", description: "🔄 Piutang Hamasa/SDC" },
+          { command: "hutang", description: "🏦 Sisa hutang & cicilan" },
+          { command: "investasi", description: "📈 Nilai investasi/aset" },
+          { command: "report", description: "📊 Laporan lengkap (segera)" },
+        ];
+        const r = await fetch(`${TELEGRAM_API}/bot${token}/setMyCommands`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ commands }),
+        });
+        return new Response(JSON.stringify(await r.json()), { headers: { "Content-Type": "application/json" } });
+      }
+      if (wh === "fix") {
+        const self = (Deno.env.get("SUPABASE_URL") || "") + "/functions/v1/telegram-webhook";
+        const r = await fetch(`${TELEGRAM_API}/bot${token}/setWebhook`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: self, allowed_updates: ["message", "callback_query"] }),
+        });
+        return new Response(JSON.stringify(await r.json()), { headers: { "Content-Type": "application/json" } });
+      }
+    }
+    return new Response("ok", { status: 200 });
+  }
+
   if (req.method !== "POST") {
     return new Response("Method not allowed", { status: 405 });
   }
@@ -222,9 +272,26 @@ Deno.serve(async (req: Request) => {
     return new Response("Invalid JSON", { status: 400 });
   }
 
+  // ── 2-way callbacks (inline button taps from the daily digest) ──
+  if (update?.callback_query) {
+    const cb = update.callback_query;
+    if (cb.message?.chat?.id === AUTHORIZED_CHAT_ID) {
+      const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+      try { await handleCallback(cb, TELEGRAM_BOT_TOKEN, sb, AUTHORIZED_USER_ID); }
+      catch (err: any) {
+        console.error("[telegram-webhook] callback error:", err);
+        // answerCallback may already be consumed — send a real message so failures are never silent
+        await sendTelegramHTML(TELEGRAM_BOT_TOKEN, cb.message.chat.id, "❌ Gagal: " + esc(err?.message || "error"));
+      }
+    } else {
+      await answerCallback(TELEGRAM_BOT_TOKEN, cb.id, "Unauthorized");
+    }
+    return new Response("ok", { status: 200 });
+  }
+
   const message = update?.message;
   if (!message) {
-    // Ignore non-message updates (edits, callbacks, etc.)
+    // Ignore other non-message updates (edits, etc.)
     return new Response("ok", { status: 200 });
   }
 
@@ -252,6 +319,12 @@ Deno.serve(async (req: Request) => {
         const cmd = text.split(/\s+/)[0].toLowerCase().replace(/@[\w_]+$/, "");
         const arg = text.slice(text.split(/\s+/)[0].length).trim();
         await handleCommand(cmd, arg, supabase, AUTHORIZED_USER_ID, TELEGRAM_BOT_TOKEN, chatId);
+        return new Response("ok", { status: 200 });
+      }
+
+      // Free-text router: a question -> AI Q&A over his finances; otherwise -> bank-notification parse.
+      if (looksLikeQuestion(text)) {
+        await handleQuestion(text, ANTHROPIC_API_KEY, supabase, AUTHORIZED_USER_ID, TELEGRAM_BOT_TOKEN, chatId);
         return new Response("ok", { status: 200 });
       }
 
@@ -667,6 +740,12 @@ async function handleCommand(cmd: string, arg: string, supabase: any, uid: strin
       case "/investasi": return sendTelegramHTML(token, chatId, await cmdInvestasi(supabase, uid));
       case "/hari": return sendTelegramHTML(token, chatId, await cmdHari(supabase, uid));
       case "/bulan": return sendTelegramHTML(token, chatId, await cmdBulan(supabase, uid, arg));
+      case "/digest": {
+        const url = (Deno.env.get("SUPABASE_URL") || "") + "/functions/v1/daily-digest";
+        fetch(url, { method: "POST", headers: { "Content-Type": "application/json" } }).catch(() => {});
+        return sendTelegramHTML(token, chatId, "📬 Digest dikirim...");
+      }
+      case "/import": return sendTelegramHTML(token, chatId, await importPending(supabase, uid));
       case "/report":
         return sendTelegramHTML(token, chatId, "📊 <b>/report</b> (PDF/HTML lengkap) — coming soon (T5).\nSementara pakai /bulan untuk ringkasan bulan ini.");
       default:
@@ -689,9 +768,15 @@ function cmdMenu(): string {
     "📈 /investasi — nilai aset/investasi",
     "📅 /hari — transaksi hari ini",
     "📆 /bulan — ringkasan bulan ini (income/expense)",
+    "📬 /digest — kirim digest pending sekarang",
+    "📥 /import — import semua pending ke ledger",
     "📊 /report — laporan lengkap (segera)",
     "",
-    "Atau forward SMS bank / foto / PDF → auto-parse jadi transaksi.",
+    "💬 <b>Atau tanya langsung</b> (tanpa command):",
+    "   \"berapa abis makan bulan ini?\", \"sisa hutang BYD?\",",
+    "   \"net worth ku berapa?\", \"kartu mana yang paling gede?\"",
+    "",
+    "📥 Forward SMS bank / foto / PDF → auto-parse jadi transaksi.",
   ].join("\n");
 }
 
@@ -876,4 +961,388 @@ async function cmdBulan(supabase: any, uid: string, arg: string): Promise<string
   }
   out += "<i>*P&amp;L tidak termasuk transfer/pay_cc/reimburse/aset</i>";
   return out;
+}
+
+// ── 2-way callback handling (digest classify buttons) ──
+async function answerCallback(token: string, cbId: string, text: string) {
+  try {
+    await fetch(`${TELEGRAM_API}/bot${token}/answerCallbackQuery`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ callback_query_id: cbId, text }),
+    });
+  } catch (err) { console.error("[telegram-webhook] answerCallback error:", err); }
+}
+
+const ENT_MAP: Record<string, string> = { H: "Hamasa", S: "SDC", P: "Personal" };
+
+async function handleCallback(cb: any, token: string, supabase: any, uid: string) {
+  const data: string = cb.data || "";
+  const parts = data.split(":");
+
+  // classify/reject: cls:<emailSyncId>:<txIdx>:<H|S|P|X>  → tag entity, or X = tolak (won't be imported)
+  if (parts[0] === "cls" && parts.length === 4) {
+    const [, esId, idxS, entC] = parts;
+    const idx = Number(idxS);
+    const { data: row, error } = await supabase.from("email_sync").select("ai_raw_result").eq("id", esId).eq("user_id", uid).single();
+    if (error || !row) { await answerCallback(token, cb.id, "⚠️ item tidak ketemu"); return; }
+    let arr: any = row.ai_raw_result;
+    try { if (typeof arr === "string") arr = JSON.parse(arr); } catch { arr = null; }
+    if (!Array.isArray(arr) || !arr[idx]) { await answerCallback(token, cb.id, "⚠️ index error"); return; }
+    const label = String(arr[idx].merchant_name || arr[idx].description || "tx").slice(0, 24);
+    if (entC === "X") {
+      arr[idx]._skipped = true; arr[idx]._tg_classified = true;
+      await supabase.from("email_sync").update({ ai_raw_result: arr }).eq("id", esId);
+      await answerCallback(token, cb.id, `🗑 ${label} DITOLAK — tidak akan diimport`);
+      return;
+    }
+    const entity = ENT_MAP[entC] || "Personal";
+    arr[idx].suggested_entity = entity;
+    arr[idx].suggested_tx_type = entity === "Personal" ? "expense" : "reimburse_out";
+    arr[idx].is_reimburse = entity !== "Personal";
+    arr[idx]._tg_classified = true;
+    delete arr[idx]._skipped;
+    await supabase.from("email_sync").update({ ai_raw_result: arr }).eq("id", esId);
+    await answerCallback(token, cb.id, `✅ ${label} → ${entity}`);
+    return;
+  }
+
+  // review-all: one message listing EVERY pending item, each with reject/classify buttons
+  if (data === "dg:reviewall") {
+    const { data: rows } = await supabase.from("email_sync").select("id, ai_raw_result").eq("user_id", uid).eq("status", "pending");
+    const lines: string[] = []; const kb: any[] = []; let n = 0;
+    for (const r of rows || []) {
+      let arr: any = r.ai_raw_result; try { if (typeof arr === "string") arr = JSON.parse(arr); } catch { arr = null; }
+      (Array.isArray(arr) ? arr : []).forEach((t: any, idx: number) => {
+        if (t._imported || t._skipped || n >= 20) return;
+        n++;
+        lines.push(`<b>${n}.</b> ${esc(t.merchant_name || t.description || "-")} — ${idr(t.amount_idr || t.amount)}`);
+        kb.push([
+          { text: `${n}`, callback_data: `noop:${n}` },
+          { text: "❌", callback_data: `cls:${r.id}:${idx}:X` },
+          { text: "🏢", callback_data: `cls:${r.id}:${idx}:H` },
+          { text: "🦷", callback_data: `cls:${r.id}:${idx}:S` },
+          { text: "👤", callback_data: `cls:${r.id}:${idx}:P` },
+        ]);
+      });
+    }
+    await answerCallback(token, cb.id, n ? `${n} item` : "kosong");
+    if (n) {
+      await fetch(`${TELEGRAM_API}/bot${token}/sendMessage`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: cb.message.chat.id, parse_mode: "HTML", text: `✏️ <b>Review pending (${n})</b>\n${lines.join("\n")}\n\n❌ tolak · 🏢 Hamasa · 🦷 SDC · 👤 Pribadi`, reply_markup: { inline_keyboard: kb } }),
+      });
+    } else {
+      await sendTelegramHTML(token, cb.message.chat.id, "📭 Tidak ada item pending.");
+    }
+    return;
+  }
+
+  // review: list today's still-ambiguous pending items
+  if (data === "dg:review") {
+    const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+    const { data: rows } = await supabase.from("email_sync").select("ai_raw_result").eq("user_id", uid).eq("status", "pending").gte("received_at", since);
+    let n = 0, txt = "";
+    for (const r of rows || []) {
+      let arr: any = r.ai_raw_result; try { if (typeof arr === "string") arr = JSON.parse(arr); } catch { arr = null; }
+      for (const t of (Array.isArray(arr) ? arr : [])) {
+        const amb = (Number(t.confidence ?? 1) < 0.7) || /tokopedia|tokped/i.test(String(t.merchant_name ?? t.description ?? ""));
+        if (amb && !t._tg_classified) { n++; txt += `• ${esc(t.merchant_name || t.description || "-")} ${idr(t.amount_idr || t.amount)} <i>(${t.suggested_entity || "?"})</i>\n`; }
+      }
+    }
+    await answerCallback(token, cb.id, n ? `${n} item ambigu` : "Tidak ada yang ambigu 🎉");
+    if (n) await sendTelegramHTML(token, cb.message.chat.id, `❓ <b>Perlu keputusan (${n})</b>\n${txt}\nTap tombol entity di digest untuk klasifikasi.`);
+    return;
+  }
+
+  // legacy button ids from older digest messages
+  if (data === "digest:import_all") { return handleCallback({ ...cb, data: "dg:importall" }, token, supabase, uid); }
+  if (data === "digest:review") { return handleCallback({ ...cb, data: "dg:review" }, token, supabase, uid); }
+
+  // import-all: run the real importer (reclassify -> merge -> dedup -> insert -> recalc -> mark imported)
+  if (data === "dg:importall") {
+    await answerCallback(token, cb.id, "⏳ Importing...");
+    const summary = await importPending(supabase, uid);
+    await sendTelegramHTML(token, cb.message.chat.id, summary);
+    return;
+  }
+
+  await answerCallback(token, cb.id, "ok");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// IMPORTER: pending email_sync -> ledger (typed correctly), then hide from app.
+// Type is derived from the RESOLVED destination account (statement-of-truth), not the
+// AI's suggested label: to=credit_card => pay_cc, to=liability => pay_liability,
+// bank->bank => transfer (double legs merged), else expense/income.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const DAYMS = 86400000;
+const dnum = (d: string) => new Date((d || "2026-01-01") + "T00:00:00Z").getTime();
+// issuer/brand -> card_last4 (for unresolved to-side): Mayapada issues Skorcard
+const ISSUER_CARD: Array<[RegExp, string]> = [[/mayapada|skorcard/i, "2362"]];
+
+async function recalcAccountEdge(supabase: any, uid: string, acc: any) {
+  const { data: txns } = await supabase.from("ledger")
+    .select("tx_type, amount, amount_idr, from_id, from_type, to_id, to_type")
+    .eq("user_id", uid).or(`from_id.eq.${acc.id},to_id.eq.${acc.id}`);
+  const isForeign = acc.currency && acc.currency !== "IDR";
+  const amtOf = (tx: any) => isForeign ? Number(tx.amount || tx.amount_idr || 0) : Number(tx.amount_idr || tx.amount || 0);
+  if (acc.type === "credit_card") {
+    let ch = 0, pa = 0;
+    for (const tx of txns || []) {
+      const a = Number(tx.amount_idr || tx.amount || 0);
+      if (tx.from_id === acc.id && tx.from_type === "account") ch += a;
+      if (tx.to_id === acc.id && tx.to_type === "account") pa += a;
+    }
+    const net = Number(acc.initial_balance || 0) + ch - pa;
+    await supabase.from("accounts").update({ outstanding_amount: net > 0 ? net : 0, current_balance: net < 0 ? -net : 0 }).eq("id", acc.id);
+    return;
+  }
+  if (acc.type === "liability") {
+    let out = Number(acc.initial_balance || 0);
+    for (const tx of txns || []) {
+      const a = amtOf(tx);
+      if (tx.from_id === acc.id && tx.from_type === "account") out += a;
+      if (tx.to_id === acc.id && tx.to_type === "account") out -= a;
+    }
+    await supabase.from("accounts").update({ outstanding_amount: out }).eq("id", acc.id);
+    return;
+  }
+  const field = acc.type === "asset" ? "current_value" : acc.type === "receivable" ? "receivable_outstanding" : "current_balance";
+  let bal = Number(acc.initial_balance || 0);
+  for (const tx of txns || []) {
+    const a = amtOf(tx);
+    if (tx.to_id === acc.id && tx.to_type === "account") bal += a;
+    if (tx.from_id === acc.id && tx.from_type === "account") bal -= a;
+  }
+  await supabase.from("accounts").update({ [field]: bal }).eq("id", acc.id);
+}
+
+async function importPending(supabase: any, uid: string): Promise<string> {
+  const { data: accountsRaw } = await supabase.from("accounts").select("*").eq("user_id", uid);
+  const accounts = (accountsRaw || []).filter((a: any) => a.is_active !== false);
+  const byId: Record<string, any> = Object.fromEntries(accounts.map((a: any) => [a.id, a]));
+  const byL4: Record<string, any> = Object.fromEntries(accounts.filter((a: any) => a.card_last4).map((a: any) => [a.card_last4, a]));
+  const { data: rows } = await supabase.from("email_sync").select("id, ai_raw_result").eq("user_id", uid).eq("status", "pending");
+  const { data: cats } = await supabase.from("expense_categories").select("id,name").or(`user_id.is.null,user_id.eq.${uid}`);
+  const catId = (n: string | null) => (cats || []).find((c: any) => c.name === n)?.id || (cats || []).find((c: any) => c.name === "Other")?.id || null;
+  const { data: srcs } = await supabase.from("income_sources").select("id,name");
+  const srcId = (n: string) => ((srcs || []).find((s: any) => s.name === n) || (srcs || []).find((s: any) => s.name === "Other Income"))?.id;
+
+  type Item = { esId: string; idx: number; t: any; res?: any; drop?: string; dupInfo?: string; skippedByUser?: boolean };
+  const items: Item[] = [];
+  for (const r of rows || []) {
+    let arr: any = r.ai_raw_result; try { if (typeof arr === "string") arr = JSON.parse(arr); } catch { arr = null; }
+    (Array.isArray(arr) ? arr : []).forEach((t: any, idx: number) => { if (!t._imported && !t._skipped) items.push({ esId: r.id, idx, t, skippedByUser: false }); });
+  }
+  if (!items.length) return "📭 Tidak ada transaksi pending.";
+
+  const today = ymd(jakartaNow());
+  // 1) resolve + reclassify
+  for (const it of items) {
+    const t = it.t;
+    if (t.currency && t.currency !== "IDR") { it.drop = "valas"; continue; }
+    const amt = Math.round(Number(t.amount_idr ?? t.amount ?? 0));
+    if (!amt || amt <= 0) { it.drop = "no-amount"; continue; }
+    const fromA = byId[t.from_account_id]; let toA = byId[t.to_account_id];
+    if (!toA) {
+      const hay = `${t.to_bank_name || ""} ${t.merchant_name || ""} ${t.description || ""}`;
+      for (const [re, l4] of ISSUER_CARD) if (re.test(hay) && byL4[l4]) { toA = byL4[l4]; break; }
+    }
+    const date = (t.date && /^\d{4}-\d{2}-\d{2}$/.test(t.date)) ? t.date : today;
+    const desc = String(t.merchant_name || t.description || "-").slice(0, 80);
+    let ty: string;
+    if (toA?.type === "credit_card") ty = "pay_cc";
+    else if (toA?.type === "liability") ty = "pay_liability";
+    else if (t.suggested_tx_type === "collect_loan" && (toA || fromA)) ty = "collect_loan";
+    else if (fromA && toA) ty = "transfer";
+    else if ((t.suggested_tx_type === "income" || t.type === "in") && (toA || fromA)) ty = "income";
+    else if (t.suggested_tx_type === "reimburse_out" && fromA) ty = "reimburse_out";
+    else if (fromA) ty = "expense";
+    else { it.drop = "no-account"; continue; }
+    it.res = { ty, amt, date, fromA, toA, desc, cat: t.suggested_category || null, entity: t.suggested_entity || "Personal" };
+  }
+
+  const live = items.filter((i) => i.res && !i.drop);
+  // 2) merge pay_cc double legs: card-side notif (from=card, is_cc_payment) + bank-side notif same amount
+  for (const a of live) {
+    if (a.drop || !a.res) continue;
+    if (a.res.fromA?.type === "credit_card" && a.t.is_cc_payment) {
+      const b = live.find((x) => x !== a && !x.drop && x.res && x.res.fromA?.type === "bank" && x.t.is_cc_payment && x.res.amt === a.res.amt && Math.abs(dnum(x.res.date) - dnum(a.res.date)) <= 2 * DAYMS);
+      if (b) { b.res.ty = "pay_cc"; b.res.toA = a.res.fromA; b.res.desc = "Bayar CC " + a.res.fromA.name; a.drop = "merged-leg"; }
+    }
+  }
+  // 3) merge transfer double legs (same amount + same account pair)
+  const seenTf = new Set<string>();
+  for (const it of live) {
+    if (it.drop || !it.res || it.res.ty !== "transfer") continue;
+    const key = it.res.amt + "|" + [it.res.fromA?.id, it.res.toA?.id].sort().join("~");
+    if (seenTf.has(key)) it.drop = "merged-leg"; else seenTf.add(key);
+  }
+  // 4) dedup vs existing ledger. Exact amount + shares an account, PLUS:
+  //    same-day always counts as dup; ±3d only if the description/merchant also matches
+  //    (so recurring same-amount txns like daily Grab 9.000 are NOT wrongly rejected).
+  const norm = (s: any) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const descMatch = (a: any, b: any) => { const x = norm(a), y = norm(b); if (!x || !y) return false; return x.includes(y.slice(0, 8)) || y.includes(x.slice(0, 8)); };
+  const { data: led } = await supabase.from("ledger").select("amount_idr, tx_date, from_id, to_id, description").eq("user_id", uid).gte("tx_date", "2026-06-15");
+  for (const it of live) {
+    if (it.drop || !it.res) continue; const r = it.res;
+    const dup = (led || []).find((L: any) => {
+      if (Math.round(Number(L.amount_idr || 0)) !== r.amt) return false;
+      if (!(L.from_id === r.fromA?.id || L.to_id === r.toA?.id || L.to_id === r.fromA?.id)) return false;
+      const dd = Math.abs(dnum(L.tx_date) - dnum(r.date));
+      if (dd === 0) return true;                                  // same day, same amount, same account = dup
+      return dd <= 3 * DAYMS && descMatch(L.description, r.desc); // near-day needs matching description too
+    });
+    if (dup) { it.drop = "dup-ledger"; it.dupInfo = `${r.desc} — ${idr(r.amt)} (sudah ada ${dup.tx_date})`; }
+  }
+
+  // 5) build inserts
+  const INCOME_SRC = ["Salary", "Dividend", "Freelance", "Rental Income", "Bank Interest", "Cashback"];
+  const PIU: Record<string, string> = {};
+  for (const a of accounts) if (a.type === "receivable" && a.entity) PIU[a.entity] = a.id;
+  const ins: any[] = []; const counts: Record<string, number> = {}; let totalAmt = 0;
+  const handled = new Set<Item>();
+  for (const it of live) {
+    if (it.drop === "merged-leg") { handled.add(it); continue; }
+    if (it.drop) continue;
+    const r = it.res; handled.add(it);
+    const base = { user_id: uid, tx_date: r.date, amount: r.amt, amount_idr: r.amt, currency: "IDR", description: r.desc, source: "telegram_import" };
+    if (r.ty === "collect_loan") {
+      // match employee loan by counterparty name; if none, hold it (never guess)
+      const { data: loans } = await supabase.from("employee_loans").select("id, employee_name, paid_months").eq("user_id", uid);
+      const nm = norm(r.desc);
+      const loan = (loans || []).find((l: any) => nm.includes(norm(l.employee_name).slice(0, 5)));
+      if (!loan) { it.drop = "no-account"; handled.delete(it); continue; }
+      ins.push({ ...base, tx_type: "collect_loan", from_type: "employee_loan", from_id: null, employee_loan_id: loan.id, to_type: "account", to_id: (r.toA || r.fromA).id, description: "Cicilan " + loan.employee_name });
+      await supabase.from("employee_loans").update({ paid_months: (loan.paid_months || 0) + 1 }).eq("id", loan.id);
+    } else if (r.ty === "pay_cc" || r.ty === "pay_liability" || r.ty === "transfer") {
+      ins.push({ ...base, tx_type: r.ty, from_type: "account", from_id: r.fromA.id, to_type: "account", to_id: r.toA.id, description: r.ty === "pay_cc" ? "Bayar CC " + r.toA.name : r.ty === "pay_liability" ? "Bayar " + r.toA.name : r.desc });
+    } else if (r.ty === "income") {
+      ins.push({ ...base, tx_type: "income", from_type: "income_source", from_id: srcId(INCOME_SRC.includes(r.cat) ? r.cat : "Other Income"), to_type: "account", to_id: (r.toA || r.fromA).id });
+    } else if (r.ty === "reimburse_out" && PIU[r.entity]) {
+      ins.push({ ...base, tx_type: "reimburse_out", from_type: "account", from_id: r.fromA.id, to_type: "account", to_id: PIU[r.entity], entity: r.entity, is_reimburse: true });
+    } else {
+      ins.push({ ...base, tx_type: "expense", from_type: "account", from_id: r.fromA.id, to_type: "expense", to_id: null, category_id: catId(r.cat || "Other"), category_name: r.cat || "Other", entity: "Personal" });
+    }
+    counts[r.ty] = (counts[r.ty] || 0) + 1; totalAmt += r.amt;
+  }
+  if (ins.length) { const { error } = await supabase.from("ledger").insert(ins); if (error) throw new Error("insert: " + error.message); }
+
+  // 6) recalc affected accounts
+  const affected = new Set<string>();
+  for (const it of handled) { const r = it.res; if (!r) continue; if (r.fromA) affected.add(r.fromA.id); if (r.toA && byId[r.toA.id]) affected.add(r.toA.id); }
+  for (const id of affected) if (byId[id]) await recalcAccountEdge(supabase, uid, byId[id]);
+
+  // 7) mark items imported; row disappears from the app's pending list when all its items are done
+  const byRow: Record<string, Item[]> = {};
+  for (const it of items) (byRow[it.esId] ||= []).push(it);
+  for (const [esId, list] of Object.entries(byRow)) {
+    const row = (rows || []).find((r: any) => r.id === esId); if (!row) continue;
+    let arr: any = row.ai_raw_result; try { if (typeof arr === "string") arr = JSON.parse(arr); } catch { continue; }
+    if (!Array.isArray(arr)) continue;
+    let all = true, impCount = 0;
+    for (const it of list) {
+      const done = handled.has(it) || it.drop === "dup-ledger";
+      if (done) { arr[it.idx]._imported = true; impCount++; } else all = false;
+    }
+    await supabase.from("email_sync").update({ ai_raw_result: arr, status: all ? "imported" : "pending", imported_count: impCount }).eq("id", esId);
+  }
+
+  // rows whose every item is already imported/skipped (none made it into `items`) → clear from app too
+  const liveRowIds = new Set(items.map((i) => i.esId));
+  for (const r of rows || []) {
+    if (liveRowIds.has(r.id)) continue;
+    let arr: any = r.ai_raw_result; try { if (typeof arr === "string") arr = JSON.parse(arr); } catch { continue; }
+    if (Array.isArray(arr) && arr.length && arr.every((t: any) => t._imported || t._skipped)) {
+      await supabase.from("email_sync").update({ status: "imported" }).eq("id", r.id);
+    }
+  }
+
+  const parts = Object.entries(counts).map(([k, v]) => `${v}× ${k}`).join(" · ") || "-";
+  const dupList = items.filter((i) => i.drop === "dup-ledger");
+  const left = items.filter((i) => i.drop === "no-account" || i.drop === "valas").length;
+  let dupTxt = "";
+  if (dupList.length) {
+    dupTxt = `\n↩️ <b>${dupList.length} DITOLAK — duplikat, sudah ada di ledger:</b>\n`;
+    for (const d of dupList.slice(0, 8)) dupTxt += `• ${esc(d.dupInfo || "")}\n`;
+    if (dupList.length > 8) dupTxt += `… +${dupList.length - 8} lagi\n`;
+  }
+  return `✅ <b>Imported ${ins.length} transaksi ke ledger</b>\n${parts}\nTotal ${idr(totalAmt)}\n` + dupTxt +
+    (left ? `⚠️ ${left} tertahan (akun tak dikenal / valas) — cek di app\n` : "") +
+    `🧹 Pending di app sudah dibersihkan. Cek /saldo & /cc.`;
+}
+
+// ── AI Q&A over Paulus's finances (free-text questions) ──
+function looksLikeQuestion(t: string): boolean {
+  const s = t.trim();
+  if (/\?\s*$/.test(s)) return true;
+  return /^(berapa|brp|apa|apakah|kapan|gimana|gmn|bagaimana|kenapa|napa|mengapa|list|tampilkan|show|lihat|liat|total|sisa|siapa|mana|dimana|di ?mana|ada berapa|hitung|jelas|cek|status|net ?worth|worth|abis|abisin|habis|pengeluaran|pemasukan|income|expense|saldo|hutang|piutang|udah|sudah|kenapa)\b/i.test(s);
+}
+
+async function callClaudeAnswerText(apiKey: string, prompt: string): Promise<string> {
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1024, messages: [{ role: "user", content: prompt }] }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) { console.error("[telegram-webhook] Q&A API error:", data); throw new Error(data.error?.message || "AI error"); }
+  return (data.content?.[0]?.text || "(kosong)").trim();
+}
+
+async function buildFinancialContext(supabase: any, uid: string): Promise<string> {
+  const acc = await getActiveAccounts(supabase, uid);
+  const banksIDR = acc.filter((a) => a.type === "bank" && a.currency === "IDR" && Math.abs(Number(a.current_balance) || 0) > 0);
+  const cc = acc.filter((a) => a.type === "credit_card" && Number(a.outstanding_amount) > 0);
+  const assets = acc.filter((a) => a.type === "asset" && a.include_networth !== false && Number(a.current_value) > 0);
+  const liab = acc.filter((a) => a.type === "liability");
+  const sumBank = banksIDR.reduce((s, a) => s + (Number(a.current_balance) || 0), 0);
+  const sumCC = cc.reduce((s, a) => s + (Number(a.outstanding_amount) || 0), 0);
+  const sumAsset = assets.reduce((s, a) => s + (Number(a.current_value) || 0), 0);
+  const sumLiab = liab.reduce((s, a) => s + (Number(a.outstanding_amount) || 0), 0);
+
+  // this month P&L + top categories
+  const now = jakartaNow();
+  const start = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
+  const { data: mLed } = await supabase.from("ledger").select("tx_type, amount_idr, category_name, entity").eq("user_id", uid).gte("tx_date", start).lte("tx_date", ymd(now));
+  let inc = 0, exp = 0; const cats: Record<string, number> = {};
+  for (const t of mLed || []) { const a = Number(t.amount_idr) || 0; if (t.tx_type === "income") inc += a; else if (t.tx_type === "expense") { exp += a; const c = t.category_name || "Lainnya"; cats[c] = (cats[c] || 0) + a; } }
+  const topCats = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([c, v]) => `${c} ${idr(v)}`).join(", ");
+
+  // reimburse per entity
+  const { data: rLed } = await supabase.from("ledger").select("tx_type, amount_idr, entity").eq("user_id", uid).in("tx_type", ["reimburse_out", "reimburse_in"]);
+  const ent: Record<string, { out: number; in: number }> = {};
+  for (const e of rLed || []) { const k = e.entity || "?"; ent[k] = ent[k] || { out: 0, in: 0 }; if (e.tx_type === "reimburse_out") ent[k].out += Number(e.amount_idr) || 0; else ent[k].in += Number(e.amount_idr) || 0; }
+
+  const L: string[] = [];
+  L.push(`NET WORTH: ${idr(sumBank + sumAsset - sumCC - sumLiab)} (bank ${idr(sumBank)} + investasi ${idr(sumAsset)} - kartu kredit ${idr(sumCC)} - hutang ${idr(sumLiab)})`);
+  L.push(`BANK (IDR): ${banksIDR.map((a) => `${a.name} ${idr(a.current_balance)}`).join(", ")}`);
+  L.push(`KARTU KREDIT (outstanding, due): ${cc.map((a) => `${a.name} ${idr(a.outstanding_amount)}${a.due_day ? " (tgl" + a.due_day + ")" : ""}`).join(", ")}`);
+  L.push(`INVESTASI: ${assets.map((a) => `${a.name} ${idr(a.current_value)}`).join(", ")}`);
+  L.push(`HUTANG/LIABILITAS: ${liab.map((a) => `${a.name} ${idr(a.outstanding_amount)}${a.monthly_installment ? " cicilan " + idr(a.monthly_installment) + "/bln" : ""}`).join(", ") || "-"}`);
+  L.push(`BULAN INI (${ID_MONTHS[now.getUTCMonth()]}): income ${idr(inc)}, expense ${idr(exp)}, net ${idr(inc - exp)}. Top kategori: ${topCats || "-"}`);
+  L.push(`REIMBURSE (talangin-dibalikin=sisa): ${Object.entries(ent).map(([k, v]) => `${k} ${idr(v.out - v.in)}`).join(", ")}`);
+  return L.join("\n");
+}
+
+async function handleQuestion(text: string, apiKey: string, supabase: any, uid: string, botToken: string, chatId: number) {
+  await sendTelegramHTML(botToken, chatId, "💭 <i>Sebentar...</i>");
+  const ctx = await buildFinancialContext(supabase, uid);
+  const d = jakartaNow();
+  const prompt = `Kamu asisten keuangan pribadi Paulus. Jawab pertanyaannya pakai bahasa Indonesia santai & ringkas, berdasarkan DATA di bawah. Selalu pakai format Rupiah (mis. Rp1.234.567). Kalau datanya nggak cukup buat jawab, bilang terus terang jangan mengarang angka. Hari ini ${d.getUTCDate()} ${ID_MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}.
+
+=== DATA KEUANGAN PAULUS ===
+${ctx}
+
+=== PERTANYAAN ===
+${text}
+
+Jawab singkat & to-the-point. Boleh pakai <b>tebal</b> HTML sederhana (JANGAN markdown, JANGAN pakai * atau #):`;
+  try {
+    const ans = await callClaudeAnswerText(apiKey, prompt);
+    await sendTelegramHTML(botToken, chatId, ans);
+  } catch (err: any) {
+    await sendTelegramHTML(botToken, chatId, "❌ Gagal jawab: " + esc(err?.message || "error"));
+  }
 }

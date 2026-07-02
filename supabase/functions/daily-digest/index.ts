@@ -39,23 +39,53 @@ Deno.serve(async () => {
     .order("received_at", { ascending: true });
 
   // Flatten extracted transactions from ai_raw_result
-  type Tx = { desc: string; amount: number; dir: string; entity?: string; cat?: string; conf?: number; ambiguous?: boolean };
+  // Resolve accounts so we can show the TRUE type (destination=card => PAY CC, etc.)
+  const { data: accRaw } = await sb.from("accounts").select("id, name, type, card_last4, is_active").eq("user_id", USER_ID);
+  const accounts = (accRaw || []).filter((a: any) => a.is_active !== false);
+  const byId: Record<string, any> = Object.fromEntries(accounts.map((a: any) => [a.id, a]));
+  const byL4: Record<string, any> = Object.fromEntries(accounts.filter((a: any) => a.card_last4).map((a: any) => [a.card_last4, a]));
+  const ISSUER_CARD: Array<[RegExp, string]> = [[/mayapada|skorcard/i, "2362"]];
+  const dnum = (d: string) => new Date((d || "2026-01-01") + "T00:00:00Z").getTime();
+
+  type Tx = { desc: string; amount: number; dir: string; ty: string; fromN?: string; toN?: string; entity?: string; cat?: string; ambiguous?: boolean; esId?: string; idx?: number; date?: string; fromType?: string; isCcPay?: boolean; _skip?: boolean };
   const txs: Tx[] = [];
   for (const r of rows || []) {
     let arr: unknown = r.ai_raw_result;
     try { if (typeof arr === "string") arr = JSON.parse(arr); } catch { arr = null; }
     const list = Array.isArray(arr) ? arr : (arr as { transactions?: unknown[] })?.transactions;
-    for (const t of (Array.isArray(list) ? list : [])) {
+    (Array.isArray(list) ? list : []).forEach((t, idx) => {
       const tx = t as Record<string, unknown>;
+      if (tx._imported || tx._skipped) return; // already imported or rejected via Telegram
       const amt = Number(tx.amount_idr ?? tx.amount ?? 0);
       const dir = (tx.type === "in" || tx.type === "income") ? "in" : "out";
       const entity = (tx.suggested_entity as string) || "Personal";
-      const cat = (tx.suggested_category as string) || (tx.suggested_tx_type as string) || "";
+      const cat = (tx.suggested_category as string) || "";
       const conf = Number(tx.confidence ?? 1);
-      // ambiguous = low confidence, or an entity/reimburse decision Paulus should confirm
-      const ambiguous = conf < 0.7 || /tokopedia|tokped/i.test(String(tx.merchant_name ?? tx.description ?? ""));
-      txs.push({ desc: String(tx.merchant_name ?? tx.description ?? "-").slice(0, 18), amount: amt, dir, entity, cat, conf, ambiguous });
+      const fromA = byId[tx.from_account_id as string];
+      let toA = byId[tx.to_account_id as string];
+      if (!toA) { const hay = `${tx.to_bank_name || ""} ${tx.merchant_name || ""} ${tx.description || ""}`; for (const [re, l4] of ISSUER_CARD) if (re.test(hay) && byL4[l4]) { toA = byL4[l4]; break; } }
+      let ty = "expense";
+      if (toA?.type === "credit_card") ty = "pay_cc";
+      else if (toA?.type === "liability") ty = "pay_liability";
+      else if (fromA && toA) ty = "transfer";
+      else if (dir === "in") ty = "income";
+      const ambiguous = !(tx._tg_classified) && (conf < 0.7 || /tokopedia|tokped/i.test(String(tx.merchant_name ?? tx.description ?? "")));
+      txs.push({ desc: String(tx.merchant_name ?? tx.description ?? "-").slice(0, 28), amount: amt, dir, ty, fromN: fromA?.name, toN: toA?.name, entity, cat, ambiguous, esId: r.id as string, idx, date: (tx.date as string) || "", fromType: fromA?.type, isCcPay: tx.is_cc_payment === true });
+    });
+  }
+  // merge display legs: pay_cc card-side + bank-side same amount; transfer same amount+pair
+  for (const a of txs) {
+    if (a._skip) continue;
+    if (a.fromType === "credit_card" && a.isCcPay) {
+      const b = txs.find((x) => x !== a && !x._skip && x.fromType === "bank" && x.isCcPay && x.amount === a.amount);
+      if (b) { b.ty = "pay_cc"; b.toN = a.fromN; a._skip = true; }
     }
+  }
+  const seenTf = new Set<string>();
+  for (const t of txs) {
+    if (t._skip || t.ty !== "transfer") continue;
+    const key = t.amount + "|" + [t.fromN, t.toN].sort().join("~");
+    if (seenTf.has(key)) t._skip = true; else seenTf.add(key);
   }
 
   const dateStr = new Date().toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
@@ -64,30 +94,63 @@ Deno.serve(async () => {
     return new Response(JSON.stringify({ ok: true, txs: 0 }));
   }
 
-  const totIn  = txs.filter(t => t.dir === "in").reduce((s, t) => s + t.amount, 0);
-  const totOut = txs.filter(t => t.dir === "out").reduce((s, t) => s + t.amount, 0);
-  const amb = txs.filter(t => t.ambiguous);
+  const shown = txs.filter(t => !t._skip);
+  const amb = shown.filter(t => t.ambiguous);
+  const esc = (s: unknown) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-  // Monospace table
-  let table = "";
-  for (const t of txs) {
-    const mark = t.ambiguous ? "❓" : "✅";
-    const amtS = rp(t.amount).padStart(12);
-    table += `${mark} ${t.desc.padEnd(18)} ${amtS}\n`;
-  }
+  // Sections by TRUE transaction type (what will actually be imported)
+  const TYPE_META: Record<string, { label: string; icon: string }> = {
+    pay_cc: { label: "BAYAR KARTU KREDIT", icon: "💳" },
+    pay_liability: { label: "BAYAR HUTANG", icon: "🏦" },
+    transfer: { label: "TRANSFER ANTAR REKENING", icon: "🔁" },
+    expense: { label: "PENGELUARAN", icon: "💸" },
+    income: { label: "PEMASUKAN", icon: "💰" },
+  };
+  const section = (ty: string): string => {
+    const list = shown.filter(t => t.ty === ty);
+    if (!list.length) return "";
+    const meta = TYPE_META[ty];
+    const sub = list.reduce((a, t) => a + t.amount, 0);
+    let s = `\n${meta.icon} <b>${meta.label}</b> · ${rp(sub)}\n`;
+    if (ty === "pay_cc" || ty === "pay_liability" || ty === "transfer") {
+      for (const t of list) s += `${t.ambiguous ? "❓" : "•"} ${esc(t.fromN || "?")} → <b>${esc(t.toN || "?")}</b> — ${rp(t.amount)}\n`;
+    } else if (ty === "expense") {
+      const byCat: Record<string, Tx[]> = {};
+      for (const t of list) { const k = t.cat || "Lainnya"; (byCat[k] ||= []).push(t); }
+      for (const [cat, items] of Object.entries(byCat)) {
+        for (const t of items) {
+          const ent = t.entity && t.entity !== "Personal" ? ` <i>[${esc(t.entity)}]</i>` : "";
+          s += `${t.ambiguous ? "❓" : "•"} ${esc(t.desc)} — ${rp(t.amount)} <i>(${esc(cat)}${t.fromN ? " · " + esc(t.fromN) : ""})</i>${ent}\n`;
+        }
+      }
+    } else {
+      for (const t of list) s += `${t.ambiguous ? "❓" : "•"} ${esc(t.desc)} — ${rp(t.amount)}${t.toN ? ` → ${esc(t.toN)}` : ""} <i>(${esc(t.cat || "Income")})</i>\n`;
+    }
+    return s;
+  };
+  const merged = txs.length - shown.length;
   const msg =
     `📊 <b>CC Tracker — ${dateStr}</b>\n` +
-    `━━━━━━━━━━━━━━━━━━\n` +
-    `💰 Masuk  ${rp(totIn)}  (${txs.filter(t=>t.dir==="in").length})\n` +
-    `💸 Keluar ${rp(totOut)}  (${txs.filter(t=>t.dir==="out").length})\n` +
-    `━━━━━━━━━━━━━━━━━━\n` +
-    `<pre>${table}</pre>` +
-    (amb.length ? `\n⚠️ ${amb.length} perlu keputusanmu (tap di bawah)` : `\n✅ Semua jelas — konfirmasi buat import`);
+    `${shown.length} transaksi siap import:\n` +
+    section("pay_cc") + section("pay_liability") + section("transfer") + section("expense") + section("income") +
+    (merged ? `\n<i>🔗 ${merged} notifikasi dobel di-merge otomatis</i>` : "") +
+    (amb.length ? `\n⚠️ ${amb.length} ambigu — tap 🏢/🦷/👤 dulu sebelum import` : `\n✅ Semua jelas — tap Import buat masukin ke ledger`);
 
-  // Inline buttons: confirm-all + review-in-app; (per-item classify handled by telegram-webhook callbacks)
+  // Inline buttons: one classify row per ambiguous item (max 8) + import-all + open-app.
+  // callback_data "cls:<emailSyncId>:<txIdx>:<H|S|P>" is handled by telegram-webhook (safe: tags entity on pending).
+  const classifyRows = amb.slice(0, 8).map((t) => {
+    const tag = `${t.esId}:${t.idx}`;
+    return [
+      { text: `❓ ${t.desc.slice(0, 10)}`, callback_data: `noop:${t.idx}` },
+      { text: "❌", callback_data: `cls:${tag}:X` },
+      { text: "🏢", callback_data: `cls:${tag}:H` },
+      { text: "🦷", callback_data: `cls:${tag}:S` },
+      { text: "👤", callback_data: `cls:${tag}:P` },
+    ];
+  });
   const keyboard = [
-    [{ text: "✅ Import Semua", callback_data: "digest:import_all" }],
-    ...(amb.length ? [[{ text: `❓ Review ${amb.length} ambigu`, callback_data: "digest:review" }]] : []),
+    ...classifyRows,
+    [{ text: "✅ Import Semua", callback_data: "dg:importall" }, { text: "✏️ Review semua", callback_data: "dg:reviewall" }],
     [{ text: "🌐 Buka App", url: "https://cc.paulusiskandar.com" }],
   ];
   const res = await sendTelegram(BOT_TOKEN, CHAT_ID, msg, keyboard);
