@@ -41,6 +41,8 @@ export default function Transactions({
   const [filterEntity, setFilterEntity] = useState("");
   const [filterAccId,  setFilterAccId]  = useState("");
   const [search,       setSearch]       = useState("");
+  const [dateFrom,     setDateFrom]     = useState("");
+  const [dateTo,       setDateTo]       = useState("");
 
   // ── Account name lookup (for search) ──
   const accountNameById = useMemo(() => {
@@ -62,6 +64,8 @@ export default function Transactions({
     if (filterMonth)  list = list.filter(e => ym(e.tx_date) === filterMonth);
     if (filterEntity) list = list.filter(e => e.entity === filterEntity);
     if (filterAccId)  list = list.filter(e => e.from_id === filterAccId || e.to_id === filterAccId);
+    if (dateFrom)     list = list.filter(e => e.tx_date && e.tx_date >= dateFrom);
+    if (dateTo)       list = list.filter(e => e.tx_date && e.tx_date <= dateTo);
     if (search) {
       const tokens = search.toLowerCase().trim().split(/\s+/).filter(Boolean);
       if (tokens.length > 0) {
@@ -82,7 +86,7 @@ export default function Transactions({
       }
     }
     return list;
-  }, [ledger, subTab, filterMonth, filterEntity, filterAccId, search, accountNameById]);
+  }, [ledger, subTab, filterMonth, filterEntity, filterAccId, dateFrom, dateTo, search, accountNameById]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
@@ -208,9 +212,22 @@ export default function Transactions({
           <option value="">All accounts</option>
           {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
-        {(filterMonth || filterEntity || filterAccId || search) && (
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <input
+            type="date" value={dateFrom} max={dateTo || undefined}
+            onChange={e => setDateFrom(e.target.value)} title="Dari tanggal"
+            style={{ ...FILTER_SELECT, appearance: "auto", WebkitAppearance: "auto", cursor: "text", color: dateFrom ? "#374151" : "#9ca3af" }}
+          />
+          <span style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>–</span>
+          <input
+            type="date" value={dateTo} min={dateFrom || undefined}
+            onChange={e => setDateTo(e.target.value)} title="Sampai tanggal"
+            style={{ ...FILTER_SELECT, appearance: "auto", WebkitAppearance: "auto", cursor: "text", color: dateTo ? "#374151" : "#9ca3af" }}
+          />
+        </div>
+        {(filterMonth || filterEntity || filterAccId || dateFrom || dateTo || search) && (
           <button
-            onClick={() => { setFilterMonth(""); setFilterEntity(""); setFilterAccId(""); setSearch(""); }}
+            onClick={() => { setFilterMonth(""); setFilterEntity(""); setFilterAccId(""); setDateFrom(""); setDateTo(""); setSearch(""); }}
             style={{ ...FILTER_SELECT, background: "#fee2e2", color: "#dc2626", border: "1.5px solid #fecaca", cursor: "pointer" }}
           >
             ✕ Clear
@@ -440,11 +457,19 @@ function TxRow({ entry: e, accounts, categories = [], onEdit, onDelete }) {
   const isMove   = ["transfer","fx_exchange"].includes(e.tx_type);
 
   const catDef   = categories?.find(c => c.id === e.category_id);
-  const amtColor = isOut ? "#dc2626" : isIn ? "#059669" : "#3b5bdb";
+  const isReimOut = e.tx_type === "reimburse_out";
+  const isReimIn  = e.tx_type === "reimburse_in";
+  // reimburse settles later → not a real expense/income: amber (out) / teal (in)
+  const amtColor = isReimOut ? "#d97706" : isReimIn ? "#0891b2"
+    : isOut ? "#dc2626" : isIn ? "#059669" : "#3b5bdb";
   const prefix   = isOut ? "−" : isIn ? "+" : "";
 
-  const iconEmoji = catDef?.icon || (isOut ? "↑" : isIn ? "↓" : "↔");
-  const iconBg    = catDef ? catDef.color + "18" : isOut ? "#fee2e2" : isIn ? "#dcfce7" : "#dbeafe";
+  const iconColor = isReimOut ? "#d97706" : isReimIn ? "#0891b2"
+    : (catDef?.color || (isOut ? "#dc2626" : isIn ? "#059669" : "#2563eb"));
+  const iconEmoji = catDef?.icon || (isReimOut ? "↻" : isReimIn ? "↺" : isOut ? "↑" : isIn ? "↓" : "↔");
+  const iconBg    = catDef ? catDef.color + "18"
+    : isReimOut ? "#d9770618" : isReimIn ? "#0891b218"
+    : isOut ? "#fee2e2" : isIn ? "#dcfce7" : "#dbeafe";
 
   const expandedContent = isTwoDir ? getTxExpandedContent(e, fromAcc, toAcc) : null;
   const tealLabel = expandedContent?.label || null;
@@ -462,8 +487,8 @@ function TxRow({ entry: e, accounts, categories = [], onEdit, onDelete }) {
     buy_asset:     { bg: "#FDE8E8", color: "#C0392B", label: "Buy Asset"     },
     sell_asset:    { bg: "#DFF5E8", color: "#1A7A42", label: "Sell Asset"    },
     // fx_exchange: no badge — title already shows "SGD → IDR" direction
-    reimburse_out: { bg: "#FDE8E8", color: "#C0392B", label: "Reimburse Out" },
-    reimburse_in:  { bg: "#DFF5E8", color: "#1A7A42", label: "Reimburse In"  },
+    reimburse_out: { bg: "#FDEFDD", color: "#B45309", label: "Reimburse Out" },
+    reimburse_in:  { bg: "#DEF2F7", color: "#0E7490", label: "Reimburse In"  },
     give_loan:     { bg: "#FDE8E8", color: "#C0392B", label: "Give Loan"     },
     collect_loan:  { bg: "#DFF5E8", color: "#1A7A42", label: "Collect Loan"  },
     pay_liability: { bg: "#FFE8DC", color: "#A04A0A", label: "Pay Liability" },
@@ -555,7 +580,7 @@ function TxRow({ entry: e, accounts, categories = [], onEdit, onDelete }) {
         {/* Icon */}
         <div style={{
           width: 36, height: 36, borderRadius: 10,
-          background: iconBg,
+          background: iconBg, color: iconColor,
           display: "flex", alignItems: "center", justifyContent: "center",
           fontSize: 16, flexShrink: 0,
         }}>

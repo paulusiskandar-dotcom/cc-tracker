@@ -19,14 +19,12 @@ function computePendingDue(cc, ledger, today) {
   const lastStmt = getLastStatementDate(cc.statement_day, today);
   if (!lastStmt) return outstanding;
   const lastStmtStr = lastStmt.toISOString().slice(0, 10);
+  // charges AFTER cutoff belong to the NEXT statement (due next month), so they
+  // must be excluded from the current bill. A charge on a card = the card is the
+  // from-account (matches recalculateBalance): from_id===card && from_type==="account".
   const chargesAfter = ledger
-    .filter(e => {
-      if (!e.tx_date || e.tx_date <= lastStmtStr) return false;
-      if (e.tx_type === "expense"       && e.to_id   === cc.id) return true;
-      if (e.tx_type === "reimburse_out" && e.from_id === cc.id) return true;
-      if (e.tx_type === "buy_asset"     && e.from_id === cc.id) return true;
-      return false;
-    })
+    .filter(e => e.tx_date && e.tx_date > lastStmtStr
+      && e.from_id === cc.id && e.from_type === "account")
     .reduce((s, e) => s + Number(e.amount_idr || 0), 0);
   return Math.max(0, outstanding - chargesAfter);
 }
@@ -69,7 +67,7 @@ export default function Billing({
         const when = dueDateInMonth(c.due_day, today);
         return { id: c.id, name: c.name, when, dayLeft: dayLeft(when), amount: pending, known: true };
       })
-      .filter(c => c.amount > 0)                       // hide already-paid
+      .filter(c => c.amount >= 25000)                  // hide already-paid + ignore trivial (< Rp 25rb)
       .sort((a, b) => a.when - b.when);
 
     // 📆 Installments — liability cicilan (BYD) + installments table (ongoing)
@@ -138,23 +136,28 @@ export default function Billing({
         )}
       </div>
 
-      {/* Sub-tabs */}
-      <div style={{ display: "flex", gap: 8, padding: "0 16px 14px", overflowX: "auto" }}>
+      {/* Sub-tabs — same pill style as Transactions */}
+      <div style={{ display: "flex", gap: 6, padding: "0 16px 14px", flexWrap: "wrap" }}>
         {SUBTABS.map(st => {
           const active = tab === st.key;
           const n = countOf(st.key);
           return (
             <button key={st.key} onClick={() => setTab(st.key)} style={{
-              display: "flex", alignItems: "center", gap: 6, whiteSpace: "nowrap",
-              height: 34, padding: "0 14px", borderRadius: 20, cursor: "pointer",
+              height: 30, padding: "0 12px", borderRadius: 20,
               border: `1.5px solid ${active ? "#111827" : "#e5e7eb"}`,
               background: active ? "#111827" : "#fff",
-              color: active ? "#fff" : "#374151", fontSize: 12.5, fontWeight: 700,
-              fontFamily: "Figtree, sans-serif",
+              color: active ? "#fff" : "#6b7280",
+              fontSize: 12, fontWeight: active ? 700 : 500,
+              cursor: "pointer", fontFamily: "Figtree, sans-serif",
+              display: "flex", alignItems: "center", gap: 5,
             }}>
-              <span>{st.icon}</span>{st.label}
-              {n > 0 && <span style={{ fontSize: 11, fontWeight: 800, background: active ? "rgba(255,255,255,0.22)" : "#f3f4f6",
-                color: active ? "#fff" : "#6b7280", borderRadius: 10, padding: "1px 7px" }}>{n}</span>}
+              {st.label}
+              {n > 0 && <span style={{
+                background: active ? "rgba(255,255,255,0.22)" : "#f3f4f6",
+                color: active ? "#fff" : "#6b7280",
+                fontSize: 10, fontWeight: 700, padding: "0 6px",
+                borderRadius: 99, lineHeight: "16px", minWidth: 16, textAlign: "center",
+              }}>{n}</span>}
             </button>
           );
         })}

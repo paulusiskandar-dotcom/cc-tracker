@@ -22,16 +22,12 @@ export default function PILogo({ size = 30, white = false }) {
       role="img"
       aria-label="Ryusei 隆盛"
     >
+      {/* horizontal 隆盛 — reads clearer than stacked at small sizes */}
       <text
-        x="50" y="27"
+        x="50" y="52"
         textAnchor="middle" dominantBaseline="central"
-        fontSize="50" fontWeight="700" fontFamily={KANJI_FONT} fill={ink}
-      >隆</text>
-      <text
-        x="50" y="73"
-        textAnchor="middle" dominantBaseline="central"
-        fontSize="50" fontWeight="700" fontFamily={KANJI_FONT} fill={ink}
-      >盛</text>
+        fontSize="46" fontWeight="700" fontFamily={KANJI_FONT} fill={ink}
+      >隆盛</text>
     </svg>
   );
 }

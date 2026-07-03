@@ -51,8 +51,8 @@ export const TYPE_META = {
   transfer:      { label: "Transfer",      icon: "↔",  color: "#3b5bdb" },
   pay_cc:        { label: "Pay CC",        icon: "💳", color: "#7c3aed" },
   pay_liability: { label: "Pay Liability", icon: "📉", color: "#d97706" },
-  reimburse_out: { label: "Reimburse Out", icon: "↗",  color: "#d97706" },
-  reimburse_in:  { label: "Reimburse In",  icon: "↙",  color: "#059669" },
+  reimburse_out: { label: "Reimburse Out", icon: "↻",  color: "#d97706" },
+  reimburse_in:  { label: "Reimburse In",  icon: "↺",  color: "#0891b2" },
   buy_asset:     { label: "Buy Asset",     icon: "📈", color: "#0891b2" },
   sell_asset:    { label: "Sell Asset",    icon: "💰", color: "#059669" },
   give_loan:     { label: "Give Loan",     icon: "↗",  color: "#d97706" },
@@ -921,7 +921,7 @@ export default function TxVerticalBig({
 
   // ── Entity pills ─────────────────────────────────────────────
   const renderEntityPills = () => {
-    const entColor = type === "reimburse_out" ? "#d97706" : "#059669";
+    const entColor = type === "reimburse_out" ? "#d97706" : "#0891b2";
     return (
       <Field label="Entity *">
         <div style={{ display: "flex", gap: 6 }}>

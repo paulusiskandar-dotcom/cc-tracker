@@ -94,7 +94,9 @@ function CategoryIcon({ categoryId, categoryName, txType, size = 36, categories 
 
 // ─── AMOUNT COLOR ─────────────────────────────────────────────
 function amountColor(txType) {
-  if (["income", "reimburse_in", "collect_loan", "sell_asset"].includes(txType)) return "#059669";
+  if (txType === "reimburse_out") return "#d97706";   // amber — settles later, not a real expense
+  if (txType === "reimburse_in")  return "#0891b2";   // teal  — settles later, not a real income
+  if (["income", "collect_loan", "sell_asset"].includes(txType)) return "#059669";
   if (["transfer", "fx_exchange"].includes(txType)) return "#3b5bdb";
   return "#dc2626";
 }
@@ -145,8 +147,8 @@ export default function TransactionRow({
     buy_asset:     { bg: "#FDE8E8", color: "#C0392B", label: "Buy Asset"     },
     sell_asset:    { bg: "#DFF5E8", color: "#1A7A42", label: "Sell Asset"    },
     fx_exchange:   { bg: "#FFF4DC", color: "#A0620A", label: "FX Exchange"   },
-    reimburse_out: { bg: "#FDE8E8", color: "#C0392B", label: "Reimburse Out" },
-    reimburse_in:  { bg: "#DFF5E8", color: "#1A7A42", label: "Reimburse In"  },
+    reimburse_out: { bg: "#FDEFDD", color: "#B45309", label: "Reimburse Out" },
+    reimburse_in:  { bg: "#DEF2F7", color: "#0E7490", label: "Reimburse In"  },
     give_loan:     { bg: "#FDE8E8", color: "#C0392B", label: "Give Loan"     },
     collect_loan:  { bg: "#DFF5E8", color: "#1A7A42", label: "Collect Loan"  },
     pay_liability: { bg: "#FFE8DC", color: "#A04A0A", label: "Pay Liability" },

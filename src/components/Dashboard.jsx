@@ -128,14 +128,11 @@ function computePendingDue(cc, ledger, today) {
   const lastStmt = getLastStatementDate(cc.statement_day, today);
   if (!lastStmt) return outstanding;
   const lastStmtStr = lastStmt.toISOString().slice(0, 10);
+  // charges AFTER cutoff belong to the next statement; exclude them from the
+  // current bill. Charge = card is the from-account (matches recalculateBalance).
   const chargesAfter = ledger
-    .filter(e => {
-      if (!e.tx_date || e.tx_date <= lastStmtStr) return false;
-      if (e.tx_type === "expense"       && e.to_id   === cc.id) return true;
-      if (e.tx_type === "reimburse_out" && e.from_id === cc.id) return true;
-      if (e.tx_type === "buy_asset"     && e.from_id === cc.id) return true;
-      return false;
-    })
+    .filter(e => e.tx_date && e.tx_date > lastStmtStr
+      && e.from_id === cc.id && e.from_type === "account")
     .reduce((s, e) => s + Number(e.amount_idr || 0), 0);
   return Math.max(0, outstanding - chargesAfter);
 }
