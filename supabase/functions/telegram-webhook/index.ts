@@ -1360,8 +1360,9 @@ async function handleTextCorrection(text: string, supabase: any, uid: string, bo
   const wantKW = Object.entries(KW).filter(([, re]) => re.test(s)).map(([k]) => k);
   const explicitAll = /\b(semua|semuanya|keduanya|dua|ketiga|tiga|ini|itu)\b/.test(s);
 
-  // flatten all pending items across email_sync rows (arr is a live ref per row)
-  const { data: rows } = await supabase.from("email_sync").select("id, ai_raw_result").eq("user_id", uid).eq("status", "pending");
+  // flatten all pending items across email_sync rows (ordered by id so the
+  // numbering the user sees stays stable between /pending and a follow-up reply)
+  const { data: rows } = await supabase.from("email_sync").select("id, ai_raw_result").eq("user_id", uid).eq("status", "pending").order("id", { ascending: true });
   const rowArr = new Map<string, any[]>();
   const flat: { rowId: string; t: any }[] = [];
   for (const r of rows || []) {
@@ -1372,24 +1373,27 @@ async function handleTextCorrection(text: string, supabase: any, uid: string, bo
   }
   if (!flat.length) { await sendTelegramHTML(botToken, chatId, "📭 Ga ada transaksi pending buat diubah."); return true; }
 
+  // numeric selection: "2 sdc out", "1 3 food" -> pick items by their list number
+  // (only integers within 1..N; anything bigger is treated as an amount, not an index)
+  const idxSel = Array.from(new Set((s.match(/\b\d{1,2}\b/g) || []).map(Number).filter((n) => n >= 1 && n <= flat.length)));
+
   const labelOf = (t: any) => nrm(t.merchant_name || t.description);
   const kwHit = (t: any) => { const l = labelOf(t); return wantKW.some((k) => l.includes(k.slice(0, 6)) || (k === "tokopedia" && /tokp/.test(l))); };
+  const numberedList = () => flat.map((f, i) => `${i + 1}. ${esc(f.t.merchant_name || f.t.description || "tx")} — ${esc(idr(f.t.amount_idr || f.t.amount))}`).join("\n");
 
   let targets: { rowId: string; t: any }[];
-  if (wantKW.length) {
-    targets = flat.filter(({ t }) => kwHit(t));
+  if (idxSel.length) {
+    targets = idxSel.map((n) => flat[n - 1]);          // pick specific rows by number
+  } else if (wantKW.length) {
+    targets = flat.filter(({ t }) => kwHit(t));         // pick by merchant name
   } else if (explicitAll || flat.length === 1) {
-    targets = flat;                       // "semua", or the single-item digest case
+    targets = flat;                                     // "semua", or the single-item case
   } else {
-    // multiple pending, no hint — tag the ambiguous ones; if none, ask which
-    targets = flat.filter(({ t }) => (Number(t.confidence ?? 1) < 0.7) || /tokopedia|tokped/i.test(String(t.merchant_name ?? t.description ?? "")));
-    if (!targets.length) {
-      const list = flat.map((f, i) => `${i + 1}. ${esc(f.t.merchant_name || f.t.description || "tx")} — ${esc(idr(f.t.amount_idr || f.t.amount))}`).join("\n");
-      await sendTelegramHTML(botToken, chatId, `❓ Ada ${flat.length} transaksi pending. Yang mana mau diubah jadi <b>${esc(entity || category || "")}</b>?\nBalas <b>semua</b>, atau sebut nama merchant-nya:\n${list}`);
-      return true;
-    }
+    // multiple pending, no hint — don't guess: show numbered list and ask
+    await sendTelegramHTML(botToken, chatId, `❓ Ada <b>${flat.length}</b> transaksi pending. Yang mana mau diubah jadi <b>${esc(entity || category || "")}</b>?\n${numberedList()}\n\nBalas pakai <b>nomor</b> (mis. <code>2 ${esc(text)}</code> atau <code>1 3 ${esc(text)}</code>), atau <b>semua</b>.`);
+    return true;
   }
-  if (!targets.length) { await sendTelegramHTML(botToken, chatId, `⚠️ Ga nemu transaksi pending yang cocok.`); return true; }
+  if (!targets.length) { await sendTelegramHTML(botToken, chatId, `⚠️ Ga nemu transaksi pending yang cocok.\n${numberedList()}\n\nCoba balas pakai nomornya.`); return true; }
 
   // resolve account/bank names so the reply shows detail (e.g. "Mandiri Signa")
   const { data: accs } = await supabase.from("accounts").select("id, name").eq("user_id", uid);
