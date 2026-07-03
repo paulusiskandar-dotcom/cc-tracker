@@ -226,6 +226,7 @@ Deno.serve(async (req: Request) => {
           { command: "import", description: "📥 Import semua pending ke ledger" },
           { command: "pending", description: "👀 Lihat antrian pending" },
           { command: "undo", description: "↩️ Batalkan import terakhir" },
+          { command: "cek", description: "🩺 Health check (anomali)" },
           { command: "reimburse", description: "🔄 Piutang Hamasa/SDC" },
           { command: "hutang", description: "🏛 Hutang, kartu & cicilan" },
           { command: "piutang", description: "🤝 Utang karyawan & reimburse" },
@@ -797,6 +798,8 @@ async function handleCommand(cmd: string, arg: string, supabase: any, uid: strin
         return sendTelegramHTML(token, chatId, "📬 Digest dikirim...");
       }
       case "/import": return sendTelegramHTML(token, chatId, await importPending(supabase, uid));
+      case "/cek":
+      case "/health": return sendTelegramHTML(token, chatId, await cmdCek(supabase, uid));
       case "/pending": return sendTelegramHTML(token, chatId, await cmdPending(supabase, uid));
       case "/due":
       case "/jatuhtempo": return sendTelegramHTML(token, chatId, await cmdDue(supabase, uid));
@@ -1621,6 +1624,54 @@ async function importPending(supabase: any, uid: string): Promise<string> {
   return `✅ <b>Imported ${ins.length} transaksi ke ledger</b>\n${parts}\nTotal ${idr(totalAmt)}\n` + dupTxt +
     (left ? `⚠️ ${left} tertahan (akun tak dikenal / valas) — cek di app\n` : "") +
     `🧹 Pending di app sudah dibersihkan. Cek /saldo & /cc.`;
+}
+
+// ── /cek: health-check keuangan (anomali) ──
+async function cmdCek(supabase: any, uid: string): Promise<string> {
+  const acc = await getActiveAccounts(supabase, uid);
+  const nm: Record<string, string> = Object.fromEntries(acc.map((a: any) => [a.id, a.name]));
+  const issues: string[] = [];
+
+  // 1. saldo bank minus
+  for (const a of acc.filter((x: any) => x.type === "bank" && Number(x.current_balance) < -1000)) {
+    issues.push(`🔴 Saldo minus: <b>${esc(a.name)}</b> ${idr(a.current_balance)}`);
+  }
+  // 2. CC / liability minus (outstanding negatif = kelebihan bayar, biasanya ok tapi flag besar)
+  for (const a of acc.filter((x: any) => x.type === "credit_card" && Number(x.outstanding_amount) < -1000)) {
+    issues.push(`🟡 Kartu saldo kredit: <b>${esc(a.name)}</b> ${idr(a.outstanding_amount)}`);
+  }
+  // 3. transaksi dobel (amount+tx_date+from+to sama persis, 90 hari terakhir)
+  const since = ymd(new Date(Date.now() - 90 * 86400000));
+  const { data: led } = await supabase.from("ledger").select("id, tx_date, amount_idr, tx_type, from_id, to_id, description").eq("user_id", uid).gte("tx_date", since).neq("tx_type", "opening_balance");
+  const seen: Record<string, any> = {}; const dups: any[] = [];
+  const nrmD = (x: any) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const DUP_TYPES = new Set(["expense", "reimburse_out", "reimburse_in", "income", "buy_asset"]);
+  const RECUR = /notifikasi|stamp|materai|reimbursable|iuran|biaya|admin|interest|bunga|cashback/i;
+  for (const r of led || []) {
+    if (Number(r.amount_idr) < 50000) continue;           // tiny fees off
+    if (!DUP_TYPES.has(r.tx_type)) continue;               // pay_cc/transfer repeats are legit
+    if (RECUR.test(r.description || "")) continue;         // recurring fees/loss off
+    const k = `${Math.round(r.amount_idr)}|${r.tx_date}|${r.from_id || "-"}|${r.to_id || "-"}|${nrmD(r.description).slice(0, 12)}`;
+    if (seen[k]) dups.push({ a: seen[k], b: r }); else seen[k] = r;
+  }
+  if (dups.length) {
+    issues.push(`🟠 <b>${dups.length} kemungkinan transaksi DOBEL:</b>`);
+    for (const d of dups.slice(0, 6)) issues.push(`   • ${esc((d.b.description || "-").slice(0, 24))} ${idr(d.b.amount_idr)} (${d.b.tx_date})`);
+  }
+  // 4. settlement pincang (out 0 / in 0)
+  const { data: sts } = await supabase.from("reimburse_settlements").select("id, entity, total_out, total_in, settled_at").eq("user_id", uid);
+  const lame = (sts || []).filter((s: any) => (Number(s.total_out) === 0) !== (Number(s.total_in) === 0));
+  if (lame.length) issues.push(`🟠 <b>${lame.length} settlement pincang</b> (satu sisi kosong) — cek halaman Receivables`);
+  // 5. transaksi jumbo (>50jt) 14 hari terakhir → info, bukan error
+  const since2 = ymd(new Date(Date.now() - 14 * 86400000));
+  const jumbo = (led || []).filter((r: any) => Number(r.amount_idr) >= 50000000 && r.tx_date >= since2 && ["expense", "reimburse_out"].includes(r.tx_type));
+
+  let out = "🩺 <b>HEALTH CHECK</b>\n";
+  if (!issues.length) out += "\n✅ Semua sehat — ga ada anomali kedeteksi.\n";
+  else out += "\n" + issues.join("\n") + "\n";
+  if (jumbo.length) out += `\nℹ️ ${jumbo.length} transaksi jumbo (≥50jt) 14 hari terakhir — normal? cek: ${jumbo.slice(0, 3).map((r: any) => esc((r.description || "-").slice(0, 14)) + " " + idr(r.amount_idr)).join(", ")}`;
+  out += `\n<i>Cek ${(led || []).length} transaksi (90 hari).</i>`;
+  return out;
 }
 
 // ── AI Q&A over Paulus's finances (free-text questions) ──
