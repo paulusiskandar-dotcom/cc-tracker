@@ -1254,7 +1254,7 @@ function extractJSON(text) {
 // ─── SCAN BATCHES ─────────────────────────────────────────────
 export const scanApi = {
   // Scan a file (image/PDF) via AI proxy → returns array of transaction objects
-  scan: async (userId, file, { accounts = [], employeeLoans = [], bankHint = "", model = "claude-sonnet-5" } = {}) => {
+  scan: async (userId, file, { accounts = [], employeeLoans = [], bankHint = "", model = "claude-haiku-4-5-20251001" } = {}) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = async (e) => {
@@ -1987,7 +1987,7 @@ export const tagsApi = {
   },
 };
 
-const AI_MODEL = "claude-sonnet-5";
+const AI_MODEL = "claude-haiku-4-5-20251001";
 
 // ─── AI PROXY ─────────────────────────────────────────────────
 export async function aiCall(body) {

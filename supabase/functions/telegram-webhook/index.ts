@@ -342,10 +342,14 @@ Deno.serve(async (req: Request) => {
         return new Response("ok", { status: 200 });
       }
 
-      // Free-text router: question -> AI Q&A; short "makan 50rb bca" -> quick-add; else -> bank-notification parse.
+      // Free-text router: question -> AI Q&A; classify-reply -> tag pending; quick-add; else -> notification parse.
       if (looksLikeQuestion(text)) {
         await handleQuestion(text, ANTHROPIC_API_KEY, supabase, AUTHORIZED_USER_ID, TELEGRAM_BOT_TOKEN, chatId);
         return new Response("ok", { status: 200 });
+      }
+      if (looksLikeCorrection(text)) {
+        const done = await handleTextCorrection(text, supabase, AUTHORIZED_USER_ID, TELEGRAM_BOT_TOKEN, chatId);
+        if (done) return new Response("ok", { status: 200 });
       }
       if (looksLikeQuickAdd(text)) {
         await handleQuickAdd(text, ANTHROPIC_API_KEY, supabase, AUTHORIZED_USER_ID, TELEGRAM_BOT_TOKEN, chatId);
@@ -400,7 +404,7 @@ async function callClaudeText(apiKey: string, prompt: string): Promise<any[]> {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-5",
+      model: "claude-haiku-4-5-20251001",
       max_tokens: 2048,
       messages: [{ role: "user", content: prompt }],
     }),
@@ -436,7 +440,7 @@ async function callClaudeVision(apiKey: string, imageBytes: Uint8Array, prompt: 
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-5",
+      model: "claude-haiku-4-5-20251001",
       max_tokens: 2048,
       messages: [
         {
@@ -471,7 +475,7 @@ async function callClaudePDF(apiKey: string, pdfBytes: Uint8Array, prompt: strin
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: "claude-sonnet-5",
+      model: "claude-haiku-4-5-20251001",
       max_tokens: 4096,
       messages: [
         {
@@ -1262,6 +1266,51 @@ async function handleCallback(cb: any, token: string, supabase: any, uid: string
   await answerCallback(token, cb.id, "ok");
 }
 
+// ── TEXT CORRECTION: reply to classify pending items ("dua ini reimburse out hamasa", "tokped hamasa") ──
+function looksLikeCorrection(t: string): boolean {
+  const s = t.toLowerCase();
+  if (s.length > 90) return false;
+  const hasEntity = /\b(hamasa|sdc|pribadi|personal|reimburse)\b/.test(s);
+  const isNotif = /(rp\s*[\d.,]{4,}|\botp\b|kode|debet|kredit|saldo|va |virtual|berhasil)/.test(s);
+  return hasEntity && !isNotif;
+}
+
+async function handleTextCorrection(text: string, supabase: any, uid: string, botToken: string, chatId: number): Promise<boolean> {
+  const s = text.toLowerCase();
+  const entity = /\bsdc\b/.test(s) ? "SDC" : /hamasa/.test(s) ? "Hamasa" : (/pribadi|personal/.test(s) ? "Personal" : null);
+  if (!entity) return false;
+  const nrm = (x: any) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  // merchant keyword mentioned? (tokped/tokopedia, grab, lazada, blibli, gojek, shopee, dst)
+  const KW: Record<string, RegExp> = { tokopedia: /tokped|tokopedia/, grab: /\bgrab\b/, gojek: /gojek|gopay/, lazada: /lazada/, blibli: /blibli/, shopee: /shopee/, allianz: /allianz/, digitalocean: /digitalocean|ocean/ };
+  const wantKW = Object.entries(KW).filter(([, re]) => re.test(s)).map(([k]) => k);
+  const allSel = /\b(semua| semua|dua|ketiga|tiga|ini|itu|semuanya|keduanya)\b/.test(s) || wantKW.length === 0;
+
+  const { data: rows } = await supabase.from("email_sync").select("id, ai_raw_result").eq("user_id", uid).eq("status", "pending");
+  let n = 0; const changed: string[] = [];
+  for (const r of rows || []) {
+    let arr: any = r.ai_raw_result; try { if (typeof arr === "string") arr = JSON.parse(arr); } catch { arr = null; }
+    if (!Array.isArray(arr)) continue; let dirty = false;
+    arr.forEach((t: any) => {
+      if (t._imported || t._skipped) return;
+      const isAmbig = (Number(t.confidence ?? 1) < 0.7) || /tokopedia|tokped/i.test(String(t.merchant_name ?? t.description ?? ""));
+      const label = nrm(t.merchant_name || t.description);
+      const kwMatch = wantKW.length ? wantKW.some((k) => label.includes(k.slice(0, 6)) || (k === "tokopedia" && /tokp/.test(label))) : false;
+      const take = wantKW.length ? kwMatch : (allSel && isAmbig);
+      if (!take) return;
+      t.suggested_entity = entity;
+      t.suggested_tx_type = entity === "Personal" ? (t.type === "in" ? "income" : "expense") : (/\bin\b|masuk/.test(s) ? "reimburse_in" : "reimburse_out");
+      t.is_reimburse = entity !== "Personal";
+      t._tg_classified = true;
+      n++; dirty = true; changed.push(`${t.merchant_name || t.description || "tx"} ${idr(t.amount_idr || t.amount)}`);
+    });
+    if (dirty) await supabase.from("email_sync").update({ ai_raw_result: arr }).eq("id", r.id);
+  }
+  if (!n) { await sendTelegramHTML(botToken, chatId, `⚠️ Ga nemu transaksi pending yang cocok buat di-tag ${entity}.`); return true; }
+  const tt = entity === "Personal" ? "personal" : (/\bin\b|masuk/.test(s) ? "reimburse_in" : "reimburse_out") + " " + entity;
+  await sendTelegramHTML(botToken, chatId, `✅ <b>${n} item → ${esc(tt)}</b>\n${changed.slice(0, 8).map((c) => "• " + esc(c)).join("\n")}\n\nTap <b>Import Semua</b> di digest buat masukin ke ledger.`);
+  return true;
+}
+
 // ── QUICK-ADD: "makan 50rb bca" -> expense langsung ke ledger ──
 function looksLikeQuickAdd(t: string): boolean {
   const s = t.trim();
@@ -1585,7 +1634,7 @@ async function callClaudeAnswerText(apiKey: string, prompt: string): Promise<str
   const resp = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 1024, messages: [{ role: "user", content: prompt }] }),
+    body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1024, messages: [{ role: "user", content: prompt }] }),
   });
   const data = await resp.json();
   if (!resp.ok) { console.error("[telegram-webhook] Q&A API error:", data); throw new Error(data.error?.message || "AI error"); }
