@@ -1292,12 +1292,44 @@ async function handleCallback(cb: any, token: string, supabase: any, uid: string
 }
 
 // ── TEXT CORRECTION: reply to classify pending items ("dua ini reimburse out hamasa", "tokped hamasa") ──
+// Short category words -> canonical expense_categories.name. First match wins,
+// so more-specific rows (Groceries, Coffee) come before broad ones (Shopping).
+const CAT_KW: [RegExp, string][] = [
+  [/\bcoffee\b|kopi|snack|cemilan|jajan/, "Coffee & Snacks"],
+  [/grocer|belanja\s*bulanan|sembako|supermarket|indomaret|alfamart/, "Groceries"],
+  [/\bfood\b|makan|makanan|resto|restoran|f\s*&?\s*b|fnb|kuliner/, "Food & Drink"],
+  [/gadget|elektronik|electronic|gawai|hp\b|laptop/, "Electronics & Gadgets"],
+  [/\bhome\b|furnitur|furniture|rumah|perabot|dekorasi/, "Home & Furniture"],
+  [/fuel|bensin|bbm|pertamax|vehicle|kendaraan|bengkel|servis\s*mobil|parkir|\btol\b/, "Fuel & Vehicle"],
+  [/transport|transportasi|ojek|taksi|taxi|angkot|kereta|busway|mrt/, "Transport"],
+  [/health|kesehatan|obat|dokter|rumah\s*sakit|klinik|apotek/, "Health"],
+  [/fashion|apparel|baju|pakaian|sepatu|clothing|tas\b/, "Fashion & Apparel"],
+  [/bills?|utilit|listrik|\bpln\b|\bpdam\b|internet|wifi|pulsa|telepon/, "Bills (Utilities)"],
+  [/charity|donasi|sedekah|zakat|amal/, "Charity"],
+  [/education|pendidikan|sekolah|kuliah|kursus|\bles\b|buku/, "Education"],
+  [/entertainment|hiburan|nonton|bioskop|\bgame\b|\bfilm\b/, "Entertainment"],
+  [/family|keluarga/, "Family"],
+  [/subscription|langganan|netflix|spotify|icloud|apple\s*one|youtube/, "Subscription"],
+  [/\btax\b|pajak|pph|ppn/, "Tax"],
+  [/travel|liburan|hotel|tiket|pesawat|wisata/, "Travel"],
+  [/personal\s*care|perawatan|salon|\bspa\b|barber|skincare/, "Personal Care"],
+  [/property|\bipl\b|apartemen|apartment/, "Property & IPL"],
+  [/bank\s*charge|biaya\s*bank|admin\s*bank/, "Bank Charges"],
+  [/staff|salary|gaji|payroll/, "Staff & Salary"],
+  [/shopping|belanja/, "Shopping"],
+];
+function matchCategory(s: string): string | null {
+  for (const [re, name] of CAT_KW) if (re.test(s)) return name;
+  return null;
+}
+
 function looksLikeCorrection(t: string): boolean {
   const s = t.toLowerCase();
   if (s.length > 90) return false;
   const hasEntity = /\b(hamasa|sdc|travelio|pribadi|personal|reimburse|expense|income|pengeluaran|pemasukan|transfer|bayar|masuk|keluar)\b/.test(s);
+  const hasCat = matchCategory(s) !== null;
   const isNotif = /(rp\s*[\d.,]{4,}|\botp\b|kode|debet|kredit|saldo|va |virtual|berhasil)/.test(s);
-  return hasEntity && !isNotif;
+  return (hasEntity || hasCat) && !isNotif;
 }
 
 // Two-way correction: the digest told the user what a pending tx is; the user
@@ -1314,11 +1346,13 @@ async function handleTextCorrection(text: string, supabase: any, uid: string, bo
     /hamasa/.test(s) ? "Hamasa" :
     /travelio/.test(s) ? "Travelio" :
     (/pribadi|personal|expense|income|pengeluaran|pemasukan/.test(s) ? "Personal" : null);
-  if (!entity) return false;
+  const category = matchCategory(s);
+  if (!entity && !category) return false;
   const nrm = (x: any) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   // direction: explicit override, else fall back to the item's own in/out
   const forceIn = /\b(in|masuk|pemasukan|income)\b/.test(s);
   const forceOut = /\b(out|keluar|pengeluaran|expense)\b/.test(s);
+  const wantTransfer = /\b(transfer|tf|pindah)\b/.test(s);
   // merchant keyword mentioned? (tokped/tokopedia, grab, lazada, blibli, gojek, shopee, dst)
   const KW: Record<string, RegExp> = { tokopedia: /tokped|tokopedia/, grab: /\bgrab\b/, gojek: /gojek|gopay/, lazada: /lazada/, blibli: /blibli/, shopee: /shopee/, allianz: /allianz/, digitalocean: /digitalocean|ocean/, auto2000: /auto\s*2000/ };
   const wantKW = Object.entries(KW).filter(([, re]) => re.test(s)).map(([k]) => k);
@@ -1349,27 +1383,40 @@ async function handleTextCorrection(text: string, supabase: any, uid: string, bo
     targets = flat.filter(({ t }) => (Number(t.confidence ?? 1) < 0.7) || /tokopedia|tokped/i.test(String(t.merchant_name ?? t.description ?? "")));
     if (!targets.length) {
       const list = flat.map((f, i) => `${i + 1}. ${esc(f.t.merchant_name || f.t.description || "tx")} — ${esc(idr(f.t.amount_idr || f.t.amount))}`).join("\n");
-      await sendTelegramHTML(botToken, chatId, `❓ Ada ${flat.length} transaksi pending. Yang mana mau di-tag <b>${esc(entity)}</b>?\nBalas <b>semua</b>, atau sebut nama merchant-nya:\n${list}`);
+      await sendTelegramHTML(botToken, chatId, `❓ Ada ${flat.length} transaksi pending. Yang mana mau diubah jadi <b>${esc(entity || category || "")}</b>?\nBalas <b>semua</b>, atau sebut nama merchant-nya:\n${list}`);
       return true;
     }
   }
-  if (!targets.length) { await sendTelegramHTML(botToken, chatId, `⚠️ Ga nemu transaksi pending yang cocok buat di-tag ${esc(entity)}.`); return true; }
+  if (!targets.length) { await sendTelegramHTML(botToken, chatId, `⚠️ Ga nemu transaksi pending yang cocok.`); return true; }
+
+  // resolve account/bank names so the reply shows detail (e.g. "Mandiri Signa")
+  const { data: accs } = await supabase.from("accounts").select("id, name").eq("user_id", uid);
+  const accName = (id: any) => (accs || []).find((a: any) => a.id === id)?.name || null;
+  const bankOf = (t: any) => accName(t.from_account_id) || accName(t.to_account_id) || t.from_bank_name || t.to_bank_name || "—";
 
   const changed: string[] = []; const touched = new Set<string>();
   for (const { rowId, t } of targets) {
     const isIn = forceIn ? true : forceOut ? false : (t.type === "in");
-    t.suggested_entity = entity;
-    t.suggested_tx_type = entity === "Personal" ? (isIn ? "income" : "expense") : (isIn ? "reimburse_in" : "reimburse_out");
-    t.is_reimburse = entity !== "Personal";
+    if (wantTransfer) {
+      t.suggested_tx_type = "transfer"; t.suggested_entity = null; t.is_reimburse = false;
+    } else if (entity && entity !== "Personal") {
+      t.suggested_tx_type = isIn ? "reimburse_in" : "reimburse_out"; t.suggested_entity = entity; t.is_reimburse = true;
+    } else {
+      t.suggested_tx_type = isIn ? "income" : "expense"; t.suggested_entity = "Personal"; t.is_reimburse = false;
+      if (category) t.suggested_category = category;
+    }
     t._tg_classified = true;
-    changed.push(`${t.merchant_name || t.description || "tx"} ${idr(t.amount_idr || t.amount)}`);
+    changed.push(`${t.merchant_name || t.description || "tx"} · ${idr(t.amount_idr || t.amount)} · <i>${esc(bankOf(t))}</i>`);
     touched.add(rowId);
   }
   for (const id of touched) await supabase.from("email_sync").update({ ai_raw_result: rowArr.get(id) }).eq("id", id);
 
-  const dir = targets.some(({ t }) => (forceIn ? true : forceOut ? false : (t.type === "in"))) && !forceOut ? "in" : "out";
-  const tt = entity === "Personal" ? (dir === "in" ? "income (pribadi)" : "expense (pribadi)") : `reimburse_${dir} ${entity}`;
-  await sendTelegramHTML(botToken, chatId, `✅ <b>${changed.length} transaksi → ${esc(tt)}</b>\n${changed.slice(0, 8).map((c) => "• " + esc(c)).join("\n")}\n\nTap <b>✅ Import Semua</b> di digest buat masukin ke ledger.`);
+  const t0 = targets[0].t;
+  const dir0 = forceIn ? true : forceOut ? false : (t0.type === "in");
+  const tt = wantTransfer ? "transfer"
+    : (entity && entity !== "Personal") ? `reimburse_${dir0 ? "in" : "out"} ${entity}`
+    : `${dir0 ? "income" : "expense"} (pribadi)${category ? " · " + category : ""}`;
+  await sendTelegramHTML(botToken, chatId, `✅ <b>${changed.length} transaksi → ${esc(tt)}</b>\n${changed.slice(0, 8).map((c) => "• " + c).join("\n")}\n\nTap <b>✅ Import Semua</b> di digest buat masukin ke ledger.`);
   return true;
 }
 
