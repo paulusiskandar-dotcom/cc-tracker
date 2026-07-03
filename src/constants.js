@@ -116,7 +116,6 @@ export const TABS = [
   { id: "budget",       label: "Budget"       },
   { id: "tags",         label: "Tags"         },
   { id: "calendar",     label: "Calendar"     },
-  { id: "reconcile",    label: "Reconcile"    },
   { id: "settings",     label: "Settings"     },
 ];
 
@@ -131,7 +130,6 @@ export const MOBILE_MORE_TABS = [
   { id: "budget",      label: "Budget"       },
   { id: "tags",        label: "Tags"         },
   { id: "calendar",    label: "Calendar"     },
-  { id: "reconcile",   label: "Reconcile"    },
   { id: "settings",    label: "Settings"     },
 ];
 

@@ -1893,6 +1893,29 @@ async function buildFinancialContext(supabase: any, uid: string): Promise<string
   L.push(`HUTANG/LIABILITAS: ${liab.map((a) => `${a.name} ${idr(a.outstanding_amount)}${a.monthly_installment ? " cicilan " + idr(a.monthly_installment) + "/bln" : ""}`).join(", ") || "-"}`);
   L.push(`BULAN INI (${ID_MONTHS[now.getUTCMonth()]}): income ${idr(inc)}, expense ${idr(exp)}, net ${idr(inc - exp)}. Top kategori: ${topCats || "-"}`);
   L.push(`REIMBURSE (talangin-dibalikin=sisa): ${Object.entries(ent).map(([k, v]) => `${k} ${idr(v.out - v.in)}`).join(", ")}`);
+
+  // Recent transactions so SPECIFIC questions can be answered ("ke Jepang habis
+  // berapa", "makan bulan lalu berapa"). The summary above is not enough — Claude
+  // needs the actual rows to search by merchant/category/date.
+  const since120 = ymd(new Date(Date.now() - 120 * 86400000));
+  const { data: recent } = await supabase
+    .from("ledger")
+    .select("tx_date, tx_type, amount_idr, description, merchant_name, category_name, entity")
+    .eq("user_id", uid)
+    .gte("tx_date", since120)
+    .in("tx_type", ["expense", "reimburse_out", "buy_asset", "income", "sell_asset", "reimburse_in", "collect_loan"])
+    .order("tx_date", { ascending: false })
+    .limit(300);
+  const SIGN_OUT = new Set(["expense", "reimburse_out", "buy_asset"]);
+  const txLines = (recent || []).map((t: any) => {
+    const p = String(t.tx_date).split("-");           // YYYY-MM-DD
+    const nm = String(t.description || t.merchant_name || "-").slice(0, 36);
+    const cat = t.category_name ? ` [${t.category_name}]` : "";
+    const en = t.entity && t.entity !== "Personal" ? ` @${t.entity}` : "";
+    const sign = SIGN_OUT.has(t.tx_type) ? "-" : "+";
+    return `${p[2]}/${p[1]} ${nm}${cat}${en} ${sign}${idr(t.amount_idr)}`;
+  });
+  L.push(`\nTRANSAKSI 120 HARI TERAKHIR (${txLines.length} baris; "-"=keluar, "+"=masuk. Untuk pertanyaan trip/perjalanan mis. Jepang, jumlahkan transaksi kategori Travel atau yang nama merchant-nya di negara itu, mis. hotel/toko Jepang):\n${txLines.join("\n")}`);
   return L.join("\n");
 }
 
