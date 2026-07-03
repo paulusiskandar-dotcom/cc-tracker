@@ -32,6 +32,7 @@ import Reports      from "./components/Reports";
 import Budget       from "./components/Budget";
 import SearchModal  from "./components/SearchModal";
 import Calendar     from "./components/Calendar";
+import Billing      from "./components/Billing";
 import Settings     from "./components/Settings";
 import AIImport     from "./components/AIImport";
 import Email        from "./components/Email";
@@ -421,6 +422,7 @@ function Finance({ user, signOut }) {
       case "budget":       return <Budget       {...shared} />;
       case "tags":         return <Tags         user={user} ledger={ledger} onRefresh={loadData} />;
       case "calendar":     return <Calendar     {...shared} />;
+      case "billing":      return <Billing      {...shared} />;
       case "settings":     return <Settings     {...shared} signOut={signOut} initialTab={settingsInitialTab} />;
       case "reconcile":    return <Reconcile    {...shared} />;
       case "scan":         return <AIImport     {...shared} />;
