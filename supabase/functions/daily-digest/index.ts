@@ -90,7 +90,7 @@ Deno.serve(async () => {
 
   const dateStr = new Date().toLocaleDateString("id-ID", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
   if (!txs.length) {
-    await sendTelegram(BOT_TOKEN, CHAT_ID, `📊 <b>CC Tracker — ${dateStr}</b>\n\nTidak ada transaksi baru hari ini. ✅`);
+    await sendTelegram(BOT_TOKEN, CHAT_ID, `🌟 <b>Ryūsei 隆盛 — ${dateStr}</b>\n\nTidak ada transaksi baru hari ini. ✅`);
     return new Response(JSON.stringify({ ok: true, txs: 0 }));
   }
 
@@ -126,7 +126,7 @@ Deno.serve(async () => {
   };
   const merged = txs.length - shown.length;
   const msg =
-    `📊 <b>CC TRACKER</b>  ·  ${dateStr}\n` +
+    `🌟 <b>Ryūsei 隆盛</b>  ·  ${dateStr}\n` +
     `${shown.length} transaksi siap import\n` +
     `━━━━━━━━━━━━━━━\n` +
     section("pay_cc") + section("pay_liability") + section("transfer") + section("expense") + section("income") +

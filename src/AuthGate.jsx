@@ -54,7 +54,7 @@ export default function AuthGate({ children }) {
       <style>{CSS}</style>
       <div style={S.card}>
         <div style={S.logo}>💳</div>
-        <div style={S.title}>CC Tracker</div>
+        <div style={S.title}>Ryūsei 隆盛</div>
         <div style={S.sub}>Hamasa · SDC · Pribadi</div>
 
         <div style={S.tabs}>

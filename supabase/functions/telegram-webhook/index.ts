@@ -827,7 +827,7 @@ async function handleCommand(cmd: string, arg: string, supabase: any, uid: strin
 
 function cmdMenu(): string {
   return [
-    "🤖 <b>PAULUS FINANCE</b>",
+    "🌟 <b>Ryūsei 隆盛</b>",
     "",
     "<b>📊 Lihat data</b>",
     "/saldo — saldo bank + net worth",
@@ -1517,7 +1517,7 @@ async function cmdReport(supabase: any, uid: string, arg: string, token: string,
   <h2>Income</h2><table>${Object.entries(incSrc).sort((a, b) => b[1] - a[1]).map(([d, v]) => `<tr><td>${d}</td><td class="r">${rpn(v)}</td></tr>`).join("")}</table>
   <h2>Saldo bank saat ini</h2><table>${banks.map((a) => `<tr><td>${a.name}</td><td class="r">${rpn(Number(a.current_balance))}</td></tr>`).join("")}</table>
   <h2>Tagihan kartu saat ini</h2><table>${ccs.map((a) => `<tr><td>${a.name}</td><td class="r">${rpn(Number(a.outstanding_amount))}</td></tr>`).join("")}</table>
-  <p style="color:#64748b;font-size:12px">Dibuat otomatis oleh CC Tracker · P&amp;L tidak termasuk transfer/pay_cc/reimburse/aset</p>`;
+  <p style="color:#64748b;font-size:12px">Dibuat otomatis oleh Ryūsei 隆盛 · P&amp;L tidak termasuk transfer/pay_cc/reimburse/aset</p>`;
   const form = new FormData();
   form.append("chat_id", String(chatId));
   form.append("document", new Blob([html], { type: "text/html" }), `Laporan-${start.slice(0, 7)}.html`);

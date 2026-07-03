@@ -1,0 +1,30 @@
+{
+  "version": "5",
+  "redirects": {
+    "https://esm.sh/@supabase/supabase-js@2": "https://esm.sh/@supabase/supabase-js@2.110.0"
+  },
+  "remote": {
+    "https://esm.sh/@supabase/supabase-js@2.110.0": "b99c0ce7729f9de7797f836b93ab9ec94f1cfe079b4f937fa4144fe13525e979",
+    "https://esm.sh/@supabase/supabase-js@2.39.0": "f51aeb2dbf8f67c8fa396628af45793e3513067d45705f1ea158f5c678bb0cea"
+  },
+  "workspace": {
+    "packageJson": {
+      "dependencies": [
+        "npm:@supabase/supabase-js@^2.101.1",
+        "npm:@testing-library/dom@^10.4.1",
+        "npm:@testing-library/jest-dom@^6.9.1",
+        "npm:@testing-library/react@^16.3.2",
+        "npm:@testing-library/user-event@^13.5.0",
+        "npm:lucide-react@^1.7.0",
+        "npm:react-dom@^19.2.4",
+        "npm:react-router-dom@^7.14.2",
+        "npm:react-scripts@5.0.1",
+        "npm:react@^19.2.4",
+        "npm:recharts@^3.8.1",
+        "npm:sharp@~0.34.5",
+        "npm:web-vitals@^2.1.4",
+        "npm:xlsx@~0.18.5"
+      ]
+    }
+  }
+}

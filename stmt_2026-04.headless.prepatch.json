@@ -1,0 +1,2345 @@
+{
+  "month": "2026-04",
+  "accounts": [
+    {
+      "name": "CIMB Niaga MC Platinum Reguler",
+      "last4": "2578",
+      "account_no": "5289 19XX XXXX 2578",
+      "type": "credit_card",
+      "currency": "IDR",
+      "opening": 186000.0,
+      "closing": 186000.0,
+      "transactions": [
+        {
+          "date": "2026-04-01",
+          "desc": "PAYMENT-THANK YOU",
+          "amount": 186000.0,
+          "sign": "credit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-04-18",
+          "desc": "NETFLIX.COM Singapore SGP",
+          "amount": 186000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        }
+      ]
+    },
+    {
+      "name": "CIMB Niaga MC World Accor Reguler",
+      "last4": "8587",
+      "account_no": "5192 99XX XXXX 8587",
+      "type": "credit_card",
+      "currency": "IDR",
+      "opening": 55139589.47,
+      "closing": 18285806.67,
+      "transactions": [
+        {
+          "date": "2026-03-23",
+          "desc": "DM DROGERIE SAGT DANKE Berlin DEU (EUR 4.40 @20015.49)",
+          "amount": 88068.18,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-24",
+          "desc": "BVG BERLIN DEU (EUR 35.30 @20056.85)",
+          "amount": 708006.97,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-24",
+          "desc": "KADEWE 002626 Berlin DEU (EUR 116.59 @20056.85)",
+          "amount": 2338428.69,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-24",
+          "desc": "KADEWE 002528 Berlin DEU (EUR 124.90 @20056.85)",
+          "amount": 2505101.14,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-25",
+          "desc": "GALERIA KURFURSTENDAM BERLIN (EUR 139.00 @20056.85)",
+          "amount": 2787902.79,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-25",
+          "desc": "WHOP*TOMTRADES Newar 6/12",
+          "amount": 2810773.33,
+          "sign": "debit",
+          "kind": "installment"
+        },
+        {
+          "date": "2026-03-25",
+          "desc": "(0.00% 12BLN) 3/12",
+          "amount": 3822583.33,
+          "sign": "debit",
+          "kind": "installment"
+        },
+        {
+          "date": "2026-03-27",
+          "desc": "Refund Globalblue.com Stockholm SWE",
+          "amount": 164545.45,
+          "sign": "credit",
+          "kind": "refund"
+        },
+        {
+          "date": "2026-03-29",
+          "desc": "GOOGLE*MOBILE LEGENDS SINGAPORE SGP (SGD 3.19 @13405.95)",
+          "amount": 42765.01,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-29",
+          "desc": "Google One SINGAPORE SGP (SGD 5.48 @13405.95)",
+          "amount": 73464.65,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-29",
+          "desc": "GOOGLE*MOBILE LEGENDS SINGAPORE SGP (SGD 31.19 @13405.95)",
+          "amount": 418131.87,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-30",
+          "desc": "Google Mobile Legends SINGAPORE SGP (SGD 3.19 @13405.95)",
+          "amount": 42765.01,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-31",
+          "desc": "ADMINISTRATION FEE MAR'2026",
+          "amount": 10000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-01",
+          "desc": "UNIQLO-DOKU Jakarta Sela IDN",
+          "amount": 1047000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-02",
+          "desc": "GYU KAKU - CITYWALK G Jakarta Bara IDN",
+          "amount": 270864.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-03",
+          "desc": "GOOGLE*MOBILE LEGENDS SINGAPORE SGP (SGD 7.49 @13474.82)",
+          "amount": 100926.45,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-05",
+          "desc": "Google nzb360 Media S SINGAPORE SGP (SGD 3.99 @13439.15)",
+          "amount": 53622.23,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-05",
+          "desc": "POP MART KELAPA GADING JAKARTA UTARA IDN",
+          "amount": 185000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-05",
+          "desc": "IPPEKE KOMACHI-HO JAKARTA UTARA IDN",
+          "amount": 307450.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-06",
+          "desc": "PAYMENT-THANK YOU",
+          "amount": 55139589.0,
+          "sign": "credit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-04-11",
+          "desc": "XIAO XIANG EMPO JAKARTA UTARA IDN",
+          "amount": 310200.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-22",
+          "desc": "MCDONALD'S DT18501 JAKARTA UTARA IDN",
+          "amount": 104001.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-22",
+          "desc": "Tokopedia Jakarta IDN",
+          "amount": 413297.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-24",
+          "desc": "BEA METERAI LUNAS",
+          "amount": 10000.0,
+          "sign": "debit",
+          "kind": "fee"
+        }
+      ]
+    },
+    {
+      "name": "Mandiri Kartu Kredit (Basic)",
+      "last4": "8237",
+      "account_no": "4149 31XX XXXX 8237",
+      "type": "credit_card",
+      "currency": "IDR",
+      "opening": 39156097.0,
+      "closing": 618960.0,
+      "transactions": [
+        {
+          "date": "2026-03-17",
+          "desc": "ALDI NORD BERLIN DE (EUR 1.24 @19641.71)",
+          "amount": 24356.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-19",
+          "desc": "HAPPY WC E.K. BERLIN DE (EUR 1.40 @19679.78)",
+          "amount": 27552.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-21",
+          "desc": "Aral Tankstelle 27059800 Wustermark DE (EUR 2.99 @19749.58)",
+          "amount": 59052.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-29",
+          "desc": "TIX ID",
+          "amount": 208000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-31",
+          "desc": "E-BILLING STATEMENT CHRGE",
+          "amount": 5000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-01",
+          "desc": "Metropole Food Court Jakarta Pusat ID",
+          "amount": 147000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-11",
+          "desc": "MVA Close 8825300846923581",
+          "amount": 138000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-01",
+          "desc": "PAYMENT THANK YOU - Livin",
+          "amount": 39156097.0,
+          "sign": "credit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-04-15",
+          "desc": "STAMP DUTY/BIAYA MATERAI",
+          "amount": 10000.0,
+          "sign": "debit",
+          "kind": "fee"
+        }
+      ]
+    },
+    {
+      "name": "Mandiri Signature (Basic)",
+      "last4": "9929",
+      "account_no": "4149 31XX XXXX 9929",
+      "type": "credit_card",
+      "currency": "IDR",
+      "opening": 3376275.0,
+      "closing": 4949177.0,
+      "transactions": [
+        {
+          "date": "2026-03-30",
+          "desc": "TRX NOTIFICATION CHARGE",
+          "amount": 7500.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-03-31",
+          "desc": "E-BILLING STATEMENT CHRGE",
+          "amount": 5000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-01",
+          "desc": "JONI STEAK Jakarta Pusat ID",
+          "amount": 306100.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-04",
+          "desc": "TRAVELIO.COM Jakarta 012/012",
+          "amount": 3067500.0,
+          "sign": "debit",
+          "kind": "installment"
+        },
+        {
+          "date": "2026-04-04",
+          "desc": "BUNGA CICILAN",
+          "amount": 0.0,
+          "sign": "debit",
+          "kind": "interest"
+        },
+        {
+          "date": "2026-04-04",
+          "desc": "BEBEK GORENG H. SLAMET",
+          "amount": 139502.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-07",
+          "desc": "CV GIAT KURNIA HEALTH &",
+          "amount": 270000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-11",
+          "desc": "ERASPACE.COM Jakarta 007/024",
+          "amount": 885375.0,
+          "sign": "debit",
+          "kind": "installment"
+        },
+        {
+          "date": "2026-04-11",
+          "desc": "BUNGA CICILAN",
+          "amount": 0.0,
+          "sign": "debit",
+          "kind": "interest"
+        },
+        {
+          "date": "2026-04-11",
+          "desc": "Sociolla SEP 1 235",
+          "amount": 268200.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-01",
+          "desc": "PAYMENT THANK YOU - Livin",
+          "amount": 3376275.0,
+          "sign": "credit",
+          "kind": "payment"
+        }
+      ]
+    },
+    {
+      "name": "Bank Mega Credit Card",
+      "last4": "4623",
+      "account_no": "4714-39XX-XXXX-4623",
+      "type": "credit_card",
+      "currency": "IDR",
+      "opening": 500000.0,
+      "closing": -494999.0,
+      "transactions": [
+        {
+          "date": "2026-04-01",
+          "desc": "PAYMENT VIA BIFAST RECEIVED-PAULUS ISKANDAR",
+          "amount": 500000.0,
+          "sign": "credit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-04-18",
+          "desc": "E-BILLING STATEMENT FEE APR 26",
+          "amount": 5000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-01",
+          "desc": "ADJ ANNUAL FEES - BASIC CALL CENTER (1-rupiah rounding on printed total)",
+          "amount": 500000.0,
+          "sign": "credit",
+          "kind": "refund"
+        }
+      ]
+    },
+    {
+      "name": "UOB VISA PRVI Miles",
+      "last4": "7288",
+      "account_no": "4726-2920-0030-7288",
+      "type": "credit_card",
+      "currency": "IDR",
+      "opening": 12500.0,
+      "closing": 17500.0,
+      "transactions": [
+        {
+          "date": "2026-03-25",
+          "desc": "E-STATEMENT FEE",
+          "amount": 5000.0,
+          "sign": "debit",
+          "kind": "fee"
+        }
+      ]
+    },
+    {
+      "name": "Maybank JCB Platinum",
+      "last4": "8003",
+      "account_no": "3562 85XX XXXX 8003",
+      "type": "credit_card",
+      "currency": "IDR",
+      "opening": 9625942.0,
+      "closing": 10222437.0,
+      "transactions": [
+        {
+          "date": "2026-03-26",
+          "desc": "XA BIAYA NOTIFIKASI",
+          "amount": 10000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-01",
+          "desc": "PAYMENT BIFAST ISPIDJA010O0200087871",
+          "amount": 9625942.0,
+          "sign": "credit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-04-18",
+          "desc": "TOKOPEDIA JAKARTA ID",
+          "amount": 9612437.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-26",
+          "desc": "ANNUAL FEE",
+          "amount": 600000.0,
+          "sign": "debit",
+          "kind": "fee"
+        }
+      ]
+    },
+    {
+      "name": "Maybank Visa Infinite MINI",
+      "last4": "6005",
+      "account_no": "4047 76XX XXXX 6005",
+      "type": "credit_card",
+      "currency": "IDR",
+      "opening": 9463925.0,
+      "closing": 9435000.0,
+      "transactions": [
+        {
+          "date": "2026-03-19",
+          "desc": "XA BIAYA NOTIFIKASI",
+          "amount": 10000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-01",
+          "desc": "PAYMENT BIFAST ISPIDJA010O0200087581",
+          "amount": 9463925.0,
+          "sign": "credit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-04-09",
+          "desc": "ASURANSI ALLIAN*090426dlZ JAKARTA SLT ID",
+          "amount": 9425000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        }
+      ]
+    },
+    {
+      "name": "Maybank Visa Infinite",
+      "last4": "8002",
+      "account_no": "4047 76XX XXXX 8002",
+      "type": "credit_card",
+      "currency": "IDR",
+      "opening": 12308000.0,
+      "closing": 11235000.0,
+      "transactions": [
+        {
+          "date": "2026-03-19",
+          "desc": "XA BIAYA NOTIFIKASI",
+          "amount": 10000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-03-24",
+          "desc": "PAYMENT BIFAST ISPIDJA010O0200005909",
+          "amount": 12308000.0,
+          "sign": "credit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-03-24",
+          "desc": "ASURANSI ALLIAN*2403262Zs JAKARTA SLT ID",
+          "amount": 11225000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        }
+      ]
+    },
+    {
+      "name": "Maybank Visa Platinum",
+      "last4": "0008",
+      "account_no": "4260 13XX XXXX 0008",
+      "type": "credit_card",
+      "currency": "IDR",
+      "opening": 9435000.0,
+      "closing": 12928000.0,
+      "transactions": [
+        {
+          "date": "2026-03-19",
+          "desc": "XA BIAYA NOTIFIKASI",
+          "amount": 10000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-03-31",
+          "desc": "XA POINT REDEEM FEE KF",
+          "amount": 20000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-01",
+          "desc": "PAYMENT BIFAST ISPIDJA010O0200087677",
+          "amount": 9435000.0,
+          "sign": "credit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-04-09",
+          "desc": "ASURANSI ALLIAN*090426lVf JAKARTA SLT ID",
+          "amount": 12298000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-21",
+          "desc": "ANNUAL FEE",
+          "amount": 600000.0,
+          "sign": "debit",
+          "kind": "fee"
+        }
+      ]
+    },
+    {
+      "name": "Maybank Visa Digital Card",
+      "last4": "8009",
+      "account_no": "4260 13XX XXXX 8009",
+      "type": "credit_card",
+      "currency": "IDR",
+      "opening": -886000.0,
+      "closing": 11311000.0,
+      "transactions": [
+        {
+          "date": "2026-03-31",
+          "desc": "BEA METERAI LUNAS BULAN LALU",
+          "amount": 10000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-19",
+          "desc": "PT. GLOBAL DIGITAL NIA https://xendi ID",
+          "amount": 12187000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        }
+      ]
+    },
+    {
+      "name": "Maybank U Transactional Account iB",
+      "last4": null,
+      "account_no": null,
+      "type": "bank",
+      "currency": "IDR",
+      "opening": null,
+      "closing": 980039.0,
+      "transactions": []
+    },
+    {
+      "name": "BCA Tahapan (IDR)",
+      "last4": null,
+      "account_no": "0831361688",
+      "type": "bank",
+      "currency": "IDR",
+      "opening": 34443236.28,
+      "closing": 19643329.05,
+      "transactions": [
+        {
+          "date": "2026-04-01",
+          "desc": "TRSF E-BANKING DB SITI RINA ALIYAH",
+          "amount": 600000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-01",
+          "desc": "TRSF E-BANKING DB DENNIS FERDIYANTO",
+          "amount": 164000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-01",
+          "desc": "TRSF E-BANKING CR ccln terakhir KAMDANI",
+          "amount": 500000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-02",
+          "desc": "TRANSAKSI DEBIT QR RELX CITYW",
+          "amount": 178000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-02",
+          "desc": "TRSF E-BANKING DB ARI PURWANTO",
+          "amount": 1200000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-03",
+          "desc": "TRSF E-BANKING DB SITI SARNAH",
+          "amount": 2000000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-04",
+          "desc": "TRSF E-BANKING DB NATALIA CHRISTINA",
+          "amount": 700000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-04",
+          "desc": "TRANSAKSI DEBIT QR PGDP PLUIT",
+          "amount": 100000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-04",
+          "desc": "TRANSAKSI DEBIT QR Otak otak",
+          "amount": 20000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-04",
+          "desc": "TRANSAKSI DEBIT QR IMPERIAL S",
+          "amount": 281000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-06",
+          "desc": "TRSF E-BANKING DB PAULUS ISKANDAR",
+          "amount": 25000000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-06",
+          "desc": "TRANSAKSI DEBIT QR REV STORE",
+          "amount": 237500.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-06",
+          "desc": "TRANSAKSI DEBIT QR ayam goren",
+          "amount": 94000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-07",
+          "desc": "TRANSAKSI DEBIT QR Karya Bun",
+          "amount": 44000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-08",
+          "desc": "TRSF E-BANKING CR PAULUS ISKANDAR",
+          "amount": 38066445.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-08",
+          "desc": "TRSF E-BANKING DB KARUNIA GEMILANG P",
+          "amount": 479000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-08",
+          "desc": "TRSF E-BANKING DB PPPSRS SUNTE 70217257080",
+          "amount": 719828.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-08",
+          "desc": "TRSF E-BANKING DB ASG TOKYO RI 00162812188168",
+          "amount": 1583328.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-08",
+          "desc": "TRSF E-BANKING CR Listrik - April 26 SAHABAT DENTAL CEM",
+          "amount": 5178622.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-08",
+          "desc": "TRANSAKSI DEBIT QR Bubur Bakm",
+          "amount": 88000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-09",
+          "desc": "TRANSAKSI DEBIT QR TIX ID",
+          "amount": 78000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-09",
+          "desc": "TRANSAKSI DEBIT QR XIAO MENG",
+          "amount": 477700.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-10",
+          "desc": "TRSF E-BANKING CR Kasbon Rina SAHABAT DENTAL CEM",
+          "amount": 600000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-10",
+          "desc": "BI-FAST CR HENNY DJOHARI",
+          "amount": 2385938.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-11",
+          "desc": "TRANSAKSI DEBIT QR SANCHA EMP",
+          "amount": 38000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-11",
+          "desc": "TRANSAKSI DEBIT QR KIKO SARI",
+          "amount": 133000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-12",
+          "desc": "TRANSAKSI DEBIT QRC ALFAMART R",
+          "amount": 38900.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-13",
+          "desc": "TRSF E-BANKING DB TOKOPEDIA 085773456512",
+          "amount": 251199.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-13",
+          "desc": "TRSF E-BANKING DB RIKY RESTU PUTRA",
+          "amount": 1500000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-14",
+          "desc": "TRSF E-BANKING DB SITI SARNAH",
+          "amount": 1210000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-14",
+          "desc": "BI-FAST CR HORIZON INTERNUSA",
+          "amount": 3905838.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-16",
+          "desc": "TRSF E-BANKING DB ZHONG YI",
+          "amount": 512600.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-17",
+          "desc": "TRSF E-BANKING DB ARI PURWANTO",
+          "amount": 568000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-17",
+          "desc": "BIAYA ADM",
+          "amount": 20000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-18",
+          "desc": "KARTU KREDIT/PL BCA CARD PAULUS ISKANDAR",
+          "amount": 1000000.0,
+          "sign": "debit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-04-19",
+          "desc": "TRSF E-BANKING DB EVI OKTAVIANI",
+          "amount": 500000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-20",
+          "desc": "TRANSAKSI DEBIT QR GIAT KURNI",
+          "amount": 220000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-21",
+          "desc": "TRANSAKSI DEBIT QR BUBUR AYAM",
+          "amount": 269000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-21",
+          "desc": "TRANSAKSI DEBIT QR TIX ID",
+          "amount": 78000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-21",
+          "desc": "TRANSAKSI DEBIT QR XXI NSR",
+          "amount": 140000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-21",
+          "desc": "TRSF E-BANKING DB SUNDORO",
+          "amount": 221000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-22",
+          "desc": "TRSF E-BANKING DB ASEP AZIZ MARYONO",
+          "amount": 300000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-22",
+          "desc": "TRANSAKSI DEBIT QR LYNK ID",
+          "amount": 5035.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-22",
+          "desc": "TRSF E-BANKING DB JONATHAN KRISETYA",
+          "amount": 1800000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-25",
+          "desc": "TRSF E-BANKING DB ZHONG YI",
+          "amount": 422400.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-25",
+          "desc": "BI-FAST CR TAN KENNETH",
+          "amount": 20000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-26",
+          "desc": "TRANSAKSI DEBIT QR Bakmi Alia",
+          "amount": 70400.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-26",
+          "desc": "TRANSAKSI DEBIT QR MATCHA BAE",
+          "amount": 77000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-27",
+          "desc": "SETORAN TUNAI",
+          "amount": 100000000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-27",
+          "desc": "BI-FAST DB BIF TRANSFER KE WISE MyBCA",
+          "amount": 135938090.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-27",
+          "desc": "BI-FAST DB BIF BIAYA TXN KE WISE",
+          "amount": 2500.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-28",
+          "desc": "BI-FAST DB BIF TRANSFER KE DRG. MOHAMMAD FAIR MyBCA",
+          "amount": 5000000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-28",
+          "desc": "BI-FAST DB BIF BIAYA TXN KE DRG. MOHAMMAD FAIR",
+          "amount": 2500.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-29",
+          "desc": "TRANSAKSI DEBIT QR XXI NSR",
+          "amount": 20000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-30",
+          "desc": "TRSF E-BANKING CR ANDREAN ANJAS",
+          "amount": 6000000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-30",
+          "desc": "TRSF E-BANKING CR DANIEL TOMY KUSPAR",
+          "amount": 13000000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-30",
+          "desc": "TRANSAKSI DEBIT QR Bubur Bakm",
+          "amount": 75000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-30",
+          "desc": "BUNGA",
+          "amount": 287.21,
+          "sign": "credit",
+          "kind": "interest"
+        },
+        {
+          "date": "2026-04-30",
+          "desc": "PAJAK BUNGA",
+          "amount": 57.44,
+          "sign": "debit",
+          "kind": "fee"
+        }
+      ]
+    },
+    {
+      "name": "BCA Tahapan Xpresi (IDR)",
+      "last4": null,
+      "account_no": "0830267743",
+      "type": "bank",
+      "currency": "IDR",
+      "opening": 2068536.08,
+      "closing": 14336722.15,
+      "transactions": [
+        {
+          "date": "2026-04-02",
+          "desc": "SETORAN TUNAI",
+          "amount": 4500000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-02",
+          "desc": "SETORAN TUNAI",
+          "amount": 11000000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-02",
+          "desc": "SETORAN TUNAI",
+          "amount": 15652000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-06",
+          "desc": "TRSF E-BANKING CR PAULUS ISKANDAR",
+          "amount": 25000000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-06",
+          "desc": "BI-FAST DB BIF TRANSFER KE PAULUS ISKANDAR MyBCA",
+          "amount": 58000000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-06",
+          "desc": "BI-FAST DB BIF BIAYA TXN KE PAULUS ISKANDAR",
+          "amount": 2500.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-06",
+          "desc": "SETORAN TUNAI ASURANSI BU HER NY DAN BU HENNY BULAN APRIL 2026",
+          "amount": 21723000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-07",
+          "desc": "SETORAN TUNAI",
+          "amount": 100000000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-08",
+          "desc": "TRSF E-BANKING DB PAULUS ISKANDAR",
+          "amount": 38066445.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-08",
+          "desc": "BI-FAST DB BIF TRANSFER KE PAULUSISKANDAR MyBCA",
+          "amount": 70000000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-08",
+          "desc": "BI-FAST DB BIF BIAYA TXN KE PAULUSISKANDAR",
+          "amount": 2500.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-10",
+          "desc": "KR OTOMATIS LLG-MANDIRI PAULUS ISKANDAR",
+          "amount": 65092057.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-11",
+          "desc": "BI-FAST DB BIF TRANSFER KE PAULUSISKANDAR MyBCA",
+          "amount": 78000000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-11",
+          "desc": "BI-FAST DB BIF BIAYA TXN KE PAULUSISKANDAR",
+          "amount": 2500.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-14",
+          "desc": "TRSF E-BANKING DB SRIKANDI DIAMOND M",
+          "amount": 400710.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-15",
+          "desc": "SETORAN TUNAI",
+          "amount": 42890250.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-15",
+          "desc": "SETORAN TUNAI",
+          "amount": 5182122.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-15",
+          "desc": "SETORAN TUNAI",
+          "amount": 2470040.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-16",
+          "desc": "TRSF E-BANKING DB CIRCLEONE 0554000546",
+          "amount": 342990.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-16",
+          "desc": "BI-FAST DB BIF TRANSFER KE PAULUSISKANDAR MyBCA",
+          "amount": 50000000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-16",
+          "desc": "BI-FAST DB BIF BIAYA TXN KE PAULUSISKANDAR",
+          "amount": 2500.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-17",
+          "desc": "SETORAN TUNAI",
+          "amount": 31674000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-17",
+          "desc": "BIAYA ADM",
+          "amount": 10000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-20",
+          "desc": "TRSF E-BANKING CR RICKY SUSANTO",
+          "amount": 12000000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-21",
+          "desc": "BI-FAST DB BIF TRANSFER KE PAULUSISKANDAR MyBCA",
+          "amount": 40000000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-21",
+          "desc": "BI-FAST DB BIF BIAYA TXN KE PAULUSISKANDAR",
+          "amount": 2500.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-22",
+          "desc": "BI-FAST DB BIF TRANSFER KE PAULUSISKANDAR MyBCA",
+          "amount": 4000000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-22",
+          "desc": "BI-FAST DB BIF BIAYA TXN KE PAULUSISKANDAR",
+          "amount": 2500.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-24",
+          "desc": "TRSF E-BANKING CR Internet - Apr 26 SAHABAT DENTAL CEM",
+          "amount": 387390.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-24",
+          "desc": "SETORAN TUNAI ASURANSI BU HER LINA DJOHARI APRIL 2026",
+          "amount": 11225000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-30",
+          "desc": "TRSF E-BANKING CR Alice Dental SAHABAT DENTAL CEM",
+          "amount": 2307055.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-30",
+          "desc": "BUNGA",
+          "amount": 521.34,
+          "sign": "credit",
+          "kind": "interest"
+        },
+        {
+          "date": "2026-04-30",
+          "desc": "PAJAK BUNGA",
+          "amount": 104.27,
+          "sign": "debit",
+          "kind": "fee"
+        }
+      ]
+    },
+    {
+      "name": "BCA Kartu Kredit (Visa)",
+      "last4": null,
+      "account_no": "14871216",
+      "type": "credit_card",
+      "currency": "IDR",
+      "opening": 31051741.0,
+      "closing": 27974352.0,
+      "transactions": [
+        {
+          "date": "2026-04-01",
+          "desc": "DIGITALOCEAN.COM AMSTERDAM NL (USD 62.16)",
+          "amount": 1073516.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-31",
+          "desc": "PEMBAYARAN - MYBCA (Visa Card)",
+          "amount": 1060393.0,
+          "sign": "credit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-04-18",
+          "desc": "PEMBAYARAN - MYBCA (Visa Card)",
+          "amount": 13123.0,
+          "sign": "credit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-03-22",
+          "desc": "CICILAN BCA KE 02 DARI 03, IKEA INDONESIA",
+          "amount": 683000.0,
+          "sign": "debit",
+          "kind": "installment"
+        },
+        {
+          "date": "2026-03-31",
+          "desc": "BLIBLI.COM *121919010 JAKARTA BARAT",
+          "amount": 4570750.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-03",
+          "desc": "CICILAN BCA KE 02 DARI 03, IKEA INDONESIA",
+          "amount": 666667.0,
+          "sign": "debit",
+          "kind": "installment"
+        },
+        {
+          "date": "2026-04-03",
+          "desc": "BLIBLI.COM *121920116 JAKARTA BARAT",
+          "amount": 8125000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-14",
+          "desc": "TOKOPEDIA.COM *PLS399208 JAKARTA SLT",
+          "amount": 1254167.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-14",
+          "desc": "TOKOPEDIA.COM *PLS399208 JAKARTA SLT",
+          "amount": 2385938.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-15",
+          "desc": "CULTS3D.COM 3D MODELS BRIVE LA GAIL FR (EUR 6.50)",
+          "amount": 135209.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-16",
+          "desc": "BLIBLI.COM *121924291 JAKARTA BARAT",
+          "amount": 10070105.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-31",
+          "desc": "PEMBAYARAN - MYBCA (Visa SQ Signature)",
+          "amount": 29991348.0,
+          "sign": "credit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-04-18",
+          "desc": "PEMBAYARAN - MYBCA (Visa SQ Signature)",
+          "amount": 986877.0,
+          "sign": "credit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-04-18",
+          "desc": "BEA METERAI LUNAS",
+          "amount": 10000.0,
+          "sign": "debit",
+          "kind": "fee"
+        }
+      ]
+    },
+    {
+      "name": "BCA Tapres RDN (IDR)",
+      "last4": null,
+      "account_no": "04587684798",
+      "type": "bank",
+      "currency": "IDR",
+      "opening": 6696.77,
+      "closing": 6696.77,
+      "transactions": []
+    },
+    {
+      "name": "Jenius Active Balance (IDR)",
+      "last4": null,
+      "account_no": "90010008216",
+      "type": "bank",
+      "currency": "IDR",
+      "opening": 16337409.0,
+      "closing": 1816793.0,
+      "transactions": [
+        {
+          "date": "2026-04-06",
+          "desc": "RINTIS 810128 Pembayaran Tagihan Rintis",
+          "amount": 200000.0,
+          "sign": "debit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-04-06",
+          "desc": "RINTIS 810128 Fee Pembayaran Rintis",
+          "amount": 2000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-08",
+          "desc": "PAULUS ISKANDAR BCA Cr Bifast Incoming",
+          "amount": 70000000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-08",
+          "desc": "Payment Jenius Credit Card",
+          "amount": 76233057.0,
+          "sign": "debit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-04-09",
+          "desc": "Feesible April 2026 (Biaya & pajak)",
+          "amount": 10000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-11",
+          "desc": "PAULUS ISKANDAR BCA Cr Bifast Incoming",
+          "amount": 78000000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-11",
+          "desc": "Payment Jenius Credit Card",
+          "amount": 50000000.0,
+          "sign": "debit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-04-13",
+          "desc": "PAULUS ISKANDAR OCBC NISP Outgoing Transfer",
+          "amount": 37000000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-13",
+          "desc": "Transfer Fee",
+          "amount": 5000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-16",
+          "desc": "PAULUS ISKANDAR BCA Cr Bifast Incoming",
+          "amount": 50000000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-16",
+          "desc": "PAULUS ISKANDAR OCBC NISP Outgoing Transfer",
+          "amount": 50000000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-16",
+          "desc": "Transfer Fee",
+          "amount": 5000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-21",
+          "desc": "PAULUS ISKANDAR BCA Cr Bifast Incoming",
+          "amount": 40000000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-21",
+          "desc": "32 M T1 Db Bifast Outgoing",
+          "amount": 2046958.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-22",
+          "desc": "PAULUS ISKANDAR BCA Cr Bifast Incoming",
+          "amount": 4000000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-22",
+          "desc": "PAULUS ISKANDAR OCBC NISP Outgoing Transfer",
+          "amount": 41000000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-04-22",
+          "desc": "Transfer Fee",
+          "amount": 5000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-25",
+          "desc": "WISE SAHMIDJA Db Bifast Outgoing",
+          "amount": 13601.0,
+          "sign": "debit",
+          "kind": "transfer"
+        }
+      ]
+    },
+    {
+      "name": "Jenius Cash Cow (IDR)",
+      "last4": null,
+      "account_no": "90010008216",
+      "type": "bank",
+      "currency": "IDR",
+      "opening": 25406.0,
+      "closing": 27514.0,
+      "transactions": [
+        {
+          "date": "2026-04-06",
+          "desc": "Cashback top up e-Wallet GOPAY",
+          "amount": 2000.0,
+          "sign": "credit",
+          "kind": "refund"
+        },
+        {
+          "date": "2026-04-24",
+          "desc": "Bunga",
+          "amount": 135.0,
+          "sign": "credit",
+          "kind": "interest"
+        },
+        {
+          "date": "2026-04-24",
+          "desc": "Pajak",
+          "amount": 27.0,
+          "sign": "debit",
+          "kind": "fee"
+        }
+      ]
+    },
+    {
+      "name": "Mandiri Tabungan (IDR)",
+      "last4": null,
+      "account_no": "121-00-0016886-8",
+      "type": "bank",
+      "currency": "IDR",
+      "opening": 254867.41,
+      "closing": 47754754.41,
+      "transactions": [
+        {
+          "date": "2026-03-01",
+          "desc": "MONTHLY CARD CHARGE 0004098730106021089",
+          "amount": 1000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-03-06",
+          "desc": "NISPIDJA/PAULUS ISKANDAR 020810389369 (incoming)",
+          "amount": 10000000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-03-06",
+          "desc": "4149317000008237 (credit card payment)",
+          "amount": 8000000.0,
+          "sign": "debit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-03-07",
+          "desc": "4149317000008237 (credit card payment)",
+          "amount": 1000000.0,
+          "sign": "debit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-03-11",
+          "desc": "DD MANGGA BESAR 70403738309",
+          "amount": 155100.0,
+          "sign": "debit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-03-11",
+          "desc": "IMPERIAL SOUP 70402224996",
+          "amount": 579000.0,
+          "sign": "debit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-03-13",
+          "desc": "MCM InhouseTrf KE RIKO ALLPIYAN",
+          "amount": 125000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-03-14",
+          "desc": "UBP60146032901FFFFFF6032982713563110",
+          "amount": 200000.0,
+          "sign": "debit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-03-21",
+          "desc": "MONTHLY CARD CHARGE 0004617003700332555",
+          "amount": 9000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-03-31",
+          "desc": "MCM InhouseTrf DARI AGUSTINI",
+          "amount": 6000000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-03-31",
+          "desc": "Setor tunai PAULUS ISKANDAR",
+          "amount": 26521987.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-03-31",
+          "desc": "MCM InhouseTrf DARI IKFATUL KHAZANAH",
+          "amount": 6000000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-03-31",
+          "desc": "MCM InhouseTrf DARI LIECHE",
+          "amount": 2560000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-03-31",
+          "desc": "MCM InhouseTrf DARI LIECHE",
+          "amount": 6500000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-03-31",
+          "desc": "Biaya Adm",
+          "amount": 13000.0,
+          "sign": "debit",
+          "kind": "fee"
+        }
+      ]
+    },
+    {
+      "name": "HSBC Visa Signature",
+      "last4": "4672",
+      "account_no": "4034 09XX XXXX 4672",
+      "type": "credit_card",
+      "currency": "IDR",
+      "opening": -305.0,
+      "closing": -305.0,
+      "transactions": []
+    },
+    {
+      "name": "OCBC 90N Credit Card",
+      "last4": null,
+      "account_no": "4013530700453411",
+      "type": "credit_card",
+      "currency": "IDR",
+      "opening": 133740871.0,
+      "closing": 137611851.0,
+      "transactions": [
+        {
+          "date": "2026-03-13",
+          "desc": "PAYMENT (ATM), THANK YOU",
+          "amount": 60000000.0,
+          "sign": "credit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-03-16",
+          "desc": "PAYMENT (ATM), THANK YOU",
+          "amount": 60000000.0,
+          "sign": "credit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-03-16",
+          "desc": "PAYMENT (ATM), THANK YOU",
+          "amount": 10000000.0,
+          "sign": "credit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-03-18",
+          "desc": "PAYMENT (ATM), THANK YOU",
+          "amount": 5000000.0,
+          "sign": "credit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-03-31",
+          "desc": "PAYMENT (ATM), THANK YOU",
+          "amount": 1000000.0,
+          "sign": "credit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-04-08",
+          "desc": "PAYMENT (ATM), THANK YOU",
+          "amount": 3000000.0,
+          "sign": "credit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-03-13",
+          "desc": "PT. GLOBAL DIGITAL NIA https://xendi ID",
+          "amount": 2539750.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-13",
+          "desc": "PT. GLOBAL DIGITAL NIA https://xendi ID",
+          "amount": 1778125.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-13",
+          "desc": "PT. GLOBAL DIGITAL NIA https://xendi ID",
+          "amount": 47937677.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-13",
+          "desc": "PT. GLOBAL DIGITAL NIA https://xendi ID",
+          "amount": 10070105.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-16",
+          "desc": "PT. GLOBAL DIGITAL NIA https://xendi ID",
+          "amount": 67024000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-17",
+          "desc": "CHARGE BILLING E-STATEMENT FEE",
+          "amount": 5000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-03-20",
+          "desc": "APPLE.COM/BILL ITUNES.COM IE",
+          "amount": 14500.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-23",
+          "desc": "APPLE.COM/BILL ITUNES.COM IE",
+          "amount": 349000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-27",
+          "desc": "APPLE.COM/BILL ITUNES.COM IE",
+          "amount": 89000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-30",
+          "desc": "APPLE.COM/BILL ITUNES.COM IE",
+          "amount": 574000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-31",
+          "desc": "PT. GLOBAL DIGITAL NIA https://xendi ID",
+          "amount": 11171500.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-08",
+          "desc": "APPLE.COM/BILL ITUNES.COM IE (refund)",
+          "amount": 247677.0,
+          "sign": "credit",
+          "kind": "refund"
+        },
+        {
+          "date": "2026-04-08",
+          "desc": "APPLE.COM/BILL CORK IE",
+          "amount": 319000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-09",
+          "desc": "APPLE.COM/BILL ITUNES.COM IE",
+          "amount": 2227000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-12",
+          "desc": "BIAYA NOTIFIKASI",
+          "amount": 10000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-03-31",
+          "desc": "ANNUAL FEE WAIVER",
+          "amount": 1000000.0,
+          "sign": "credit",
+          "kind": "refund"
+        },
+        {
+          "date": "2026-04-12",
+          "desc": "STAMP DUTY",
+          "amount": 10000.0,
+          "sign": "debit",
+          "kind": "fee"
+        }
+      ]
+    },
+    {
+      "name": "BNI Credit Card",
+      "last4": "0966",
+      "account_no": "3567-68XX-XXXX-0966",
+      "type": "credit_card",
+      "currency": "IDR",
+      "opening": 17500.0,
+      "closing": 17500.0,
+      "transactions": []
+    },
+    {
+      "name": "BRI Credit Card (Tokopedia Co-brand)",
+      "last4": "2205",
+      "account_no": "4359-72XX-XXXX-2205",
+      "type": "credit_card",
+      "currency": "IDR",
+      "opening": 13916993.0,
+      "closing": 8062466.0,
+      "transactions": [
+        {
+          "date": "2026-03-20",
+          "desc": "TOKOPEDIA_CYBS_CCL12 : 8/12",
+          "amount": 483393.0,
+          "sign": "debit",
+          "kind": "installment"
+        },
+        {
+          "date": "2026-03-20",
+          "desc": "TOKOPEDIA_CYBS_CCL12 : 8/12",
+          "amount": 467931.0,
+          "sign": "debit",
+          "kind": "installment"
+        },
+        {
+          "date": "2026-03-21",
+          "desc": "TOKOPEDIA_CYBS_CCL12 : 12/12",
+          "amount": 357872.0,
+          "sign": "debit",
+          "kind": "installment"
+        },
+        {
+          "date": "2026-03-22",
+          "desc": "TOKOPEDIA_CYBS_CCL12 : 11/12",
+          "amount": 2706631.0,
+          "sign": "debit",
+          "kind": "installment"
+        },
+        {
+          "date": "2026-03-24",
+          "desc": "TOKOPEDIA_CYBS_CCL12 : 3/12",
+          "amount": 723533.0,
+          "sign": "debit",
+          "kind": "installment"
+        },
+        {
+          "date": "2026-03-25",
+          "desc": "TOKOPEDIA_CYBS_CCL12 : 10/12",
+          "amount": 273654.0,
+          "sign": "debit",
+          "kind": "installment"
+        },
+        {
+          "date": "2026-03-26",
+          "desc": "TOKOPEDIA_CYBS_CCL12 : 12/12",
+          "amount": 260812.0,
+          "sign": "debit",
+          "kind": "installment"
+        },
+        {
+          "date": "2026-03-27",
+          "desc": "TOKOPEDIA_CYBS_CCL12 : 3/12",
+          "amount": 529625.0,
+          "sign": "debit",
+          "kind": "installment"
+        },
+        {
+          "date": "2026-03-27",
+          "desc": "TOKOPEDIA_CYBS_CCL12 : 9/12",
+          "amount": 957615.0,
+          "sign": "debit",
+          "kind": "installment"
+        },
+        {
+          "date": "2026-03-29",
+          "desc": "TOKOPEDIA_CYBS_CCL12 : 9/12",
+          "amount": 735083.0,
+          "sign": "debit",
+          "kind": "installment"
+        },
+        {
+          "date": "2026-04-01",
+          "desc": "PAYMENT_PRIN_5019020",
+          "amount": 13916993.0,
+          "sign": "credit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-04-02",
+          "desc": "TOKOPEDIA_CYBS_CCL12 : 8/12",
+          "amount": 131588.0,
+          "sign": "debit",
+          "kind": "installment"
+        },
+        {
+          "date": "2026-04-09",
+          "desc": "TOKOPEDIA_CYBS_CCL12 : 8/12",
+          "amount": 268349.0,
+          "sign": "debit",
+          "kind": "installment"
+        },
+        {
+          "date": "2026-04-11",
+          "desc": "99_TOKOPEDIA_CYBS_CCL12_2 : 5/12",
+          "amount": 151380.0,
+          "sign": "debit",
+          "kind": "installment"
+        },
+        {
+          "date": "2026-04-15",
+          "desc": "BEA MATERAI LUNAS",
+          "amount": 10000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-15",
+          "desc": "E-STATEMENT FEE",
+          "amount": 5000.0,
+          "sign": "debit",
+          "kind": "fee"
+        }
+      ]
+    },
+    {
+      "name": "Danamon Lebih Pro (IDR)",
+      "last4": null,
+      "account_no": "903691853372",
+      "type": "bank",
+      "currency": "IDR",
+      "opening": 2768020.42,
+      "closing": 5399338.38,
+      "transactions": [
+        {
+          "date": "2026-03-11",
+          "desc": "Transfer ke PAULUS ISKANDAR Dari HENNY Reff:031112335168334",
+          "amount": 2386000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-03-13",
+          "desc": "Transfer ke PAULUS ISKANDAR Dari HENNY Reff:031310593093298",
+          "amount": 745000.0,
+          "sign": "credit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-03-22",
+          "desc": "RD Drawdown for Acct 003704939556",
+          "amount": 500000.0,
+          "sign": "debit",
+          "kind": "transfer"
+        },
+        {
+          "date": "2026-03-31",
+          "desc": "TAX Deducted",
+          "amount": 79.49,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-03-31",
+          "desc": "Credit Interest Capitalised",
+          "amount": 397.45,
+          "sign": "credit",
+          "kind": "interest"
+        }
+      ]
+    },
+    {
+      "name": "Danamon JCB Credit Card",
+      "last4": "9551",
+      "account_no": "3567-9600-0545-9551",
+      "type": "credit_card",
+      "currency": "IDR",
+      "opening": 800000.0,
+      "closing": 0.0,
+      "transactions": [
+        {
+          "date": "2026-04-01",
+          "desc": "BIFAST PYMT VIA BANK OCBC NISP",
+          "amount": 800000.0,
+          "sign": "credit",
+          "kind": "payment"
+        }
+      ]
+    },
+    {
+      "name": "Sinarmas Giro Personal (Rek Simas Dana Investor)",
+      "last4": null,
+      "account_no": "0013873828",
+      "type": "bank",
+      "currency": "IDR",
+      "opening": 1.0,
+      "closing": 1.0,
+      "transactions": []
+    },
+    {
+      "name": "Skorcard (Mayapada) Visa Credit Card",
+      "last4": "2362",
+      "account_no": "4938 2801 0038 2362",
+      "type": "credit_card",
+      "currency": "IDR",
+      "opening": 1733990.0,
+      "closing": 2789850.0,
+      "transactions": [
+        {
+          "date": "2026-04-01",
+          "desc": "PEMBAYARAN VIA BI-FAST",
+          "amount": 1733990.0,
+          "sign": "credit",
+          "kind": "payment"
+        },
+        {
+          "date": "2026-03-20",
+          "desc": "Grab* 990cd960ad044689 South Jakarta ID",
+          "amount": 9000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-28",
+          "desc": "Grab* A-95AT4NLGWBBSAV South Jakarta ID",
+          "amount": 209000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-28",
+          "desc": "GoPayID DKI Jakarta ID",
+          "amount": 93000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-29",
+          "desc": "GoPayID DKI Jakarta ID",
+          "amount": 148500.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-29",
+          "desc": "Grab* A-95DS5H8GWTLOAV South Jakarta ID",
+          "amount": 98600.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-03-31",
+          "desc": "GoPayID DKI Jakarta ID",
+          "amount": 125500.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-03",
+          "desc": "GOJEK RECURRING NON3DS JAKARTA SELAT ID",
+          "amount": 83400.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-03",
+          "desc": "Grab* 877216270024af75 South Jakarta ID",
+          "amount": 9000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-05",
+          "desc": "GOJEK RECURRING NON3DS JAKARTA SELAT ID",
+          "amount": 145050.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-05",
+          "desc": "Grab* A-96C2JCKWX4GFAV South Jakarta ID",
+          "amount": 276000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-05",
+          "desc": "GOJEK RECURRING NON3DS JAKARTA SELAT ID",
+          "amount": 96300.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-08",
+          "desc": "BIAYA E-STATEMENT MARET 2026",
+          "amount": 5000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-08",
+          "desc": "GoPayID DKI Jakarta ID",
+          "amount": 109000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-10",
+          "desc": "Grab* A-97WO6C2G2Q83AV South Jakarta ID",
+          "amount": 219000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-10",
+          "desc": "GoPayID DKI Jakarta ID",
+          "amount": 94100.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-12",
+          "desc": "GoPayID DKI Jakarta ID",
+          "amount": 67400.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-12",
+          "desc": "GoPayID DKI Jakarta ID",
+          "amount": 101500.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-12",
+          "desc": "GoPayID DKI Jakarta ID",
+          "amount": 164900.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-13",
+          "desc": "GoPayID DKI Jakarta ID",
+          "amount": 72700.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-13",
+          "desc": "GoPayID DKI Jakarta ID",
+          "amount": 5000.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-14",
+          "desc": "GoPayID DKI Jakarta ID",
+          "amount": 61700.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-15",
+          "desc": "GoPayID DKI Jakarta ID",
+          "amount": 95600.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-15",
+          "desc": "Grab* A-97LC9W8WX8GRAV South Jakarta ID",
+          "amount": 190100.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-16",
+          "desc": "Grab* A-97OCUNQWXAMDAV South Jakarta ID",
+          "amount": 163500.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-16",
+          "desc": "GoPayID DKI Jakarta ID",
+          "amount": 93500.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-16",
+          "desc": "GoPayID DKI Jakarta ID",
+          "amount": 34500.0,
+          "sign": "debit",
+          "kind": "purchase"
+        },
+        {
+          "date": "2026-04-20",
+          "desc": "BIAYA PEMBAYARAN BANK LAIN",
+          "amount": 9000.0,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-20",
+          "desc": "BIAYA NOTIFIKASI SMS",
+          "amount": 10000.0,
+          "sign": "debit",
+          "kind": "fee"
+        }
+      ]
+    },
+    {
+      "name": "Bibit / Superbank (Tabungan + Deposito)",
+      "last4": null,
+      "account_no": "000014687990",
+      "type": "investment",
+      "currency": "IDR",
+      "opening": 160699619.95,
+      "closing": 161517846.08,
+      "transactions": [
+        {
+          "date": "2026-04-15",
+          "desc": "Tabungan Utama - Hadiah Kartu Untung",
+          "amount": 3.0,
+          "sign": "credit",
+          "kind": "dividend"
+        },
+        {
+          "date": "2026-04-28",
+          "desc": "Tabungan Utama - Pajak atas Bunga",
+          "amount": 343.77,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-28",
+          "desc": "Tabungan Utama - Bunga Didapat",
+          "amount": 1718.83,
+          "sign": "credit",
+          "kind": "interest"
+        },
+        {
+          "date": "2026-04-29",
+          "desc": "Tabungan Utama - Hadiah Kartu Untung",
+          "amount": 3.0,
+          "sign": "credit",
+          "kind": "dividend"
+        },
+        {
+          "date": "2026-04-21",
+          "desc": "Deposito 050006975358 - Pajak Bunga Deposito",
+          "amount": 134541.89,
+          "sign": "debit",
+          "kind": "fee"
+        },
+        {
+          "date": "2026-04-21",
+          "desc": "Deposito 050006975358 - Bunga Deposito",
+          "amount": 672709.46,
+          "sign": "credit",
+          "kind": "interest"
+        },
+        {
+          "date": "2026-04-16",
+          "desc": "Deposito 050008849064 - Bunga Deposito",
+          "amount": 348346.88,
+          "sign": "credit",
+          "kind": "interest"
+        },
+        {
+          "date": "2026-04-16",
+          "desc": "Deposito 050008849064 - Pajak Bunga Deposito",
+          "amount": 69669.38,
+          "sign": "debit",
+          "kind": "fee"
+        }
+      ]
+    }
+  ]
+}

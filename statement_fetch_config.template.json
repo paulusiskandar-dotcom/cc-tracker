@@ -1,0 +1,21 @@
+{
+  "_note": "Copy this to statement_fetch_config.json (gitignored) and fill in. app_password = Gmail App Password (NOT your login password). Fix each 'from' to the bank's real sender address, and pdf_password if the PDF is locked (leave \"\" if not). Run: python3 fetch_statements.py  (or --all for full backfill).",
+  "gmail_user": "paulusiskandar@gmail.com",
+  "app_password": "PUT_YOUR_GMAIL_APP_PASSWORD_HERE",
+  "output_base": "/Users/paulusiskandar/cc-tracker/statements",
+  "since_days": 40,
+  "sources": [
+    {"name": "BCA",            "from": "CHANGE_ME@bca.co.id",          "pdf_password": ""},
+    {"name": "Mandiri",        "from": "CHANGE_ME@bankmandiri.co.id",  "pdf_password": "10101989"},
+    {"name": "OCBC",           "from": "CHANGE_ME@ocbc.id",            "pdf_password": "10Okt1989"},
+    {"name": "Jenius",         "from": "CHANGE_ME@jenius.com",         "pdf_password": ""},
+    {"name": "CIMB",           "from": "CHANGE_ME@cimbniaga.co.id",    "pdf_password": ""},
+    {"name": "Maybank",        "from": "CHANGE_ME@maybank.co.id",      "pdf_password": ""},
+    {"name": "BRI",            "from": "CHANGE_ME@bri.co.id",          "pdf_password": ""},
+    {"name": "BNI",            "from": "CHANGE_ME@bni.co.id",          "pdf_password": ""},
+    {"name": "Mega",           "from": "e-billing@bankmega.com",       "pdf_password": ""},
+    {"name": "Danamon",        "from": "CHANGE_ME@danamon.co.id",      "pdf_password": ""},
+    {"name": "UOB",            "from": "CHANGE_ME@uob.co.id",          "pdf_password": ""},
+    {"name": "Mayapada",       "from": "CHANGE_ME@mayapada.co.id",     "pdf_password": ""}
+  ]
+}
