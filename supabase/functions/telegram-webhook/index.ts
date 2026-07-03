@@ -1295,44 +1295,81 @@ async function handleCallback(cb: any, token: string, supabase: any, uid: string
 function looksLikeCorrection(t: string): boolean {
   const s = t.toLowerCase();
   if (s.length > 90) return false;
-  const hasEntity = /\b(hamasa|sdc|pribadi|personal|reimburse)\b/.test(s);
+  const hasEntity = /\b(hamasa|sdc|travelio|pribadi|personal|reimburse|expense|income|pengeluaran|pemasukan|transfer|bayar|masuk|keluar)\b/.test(s);
   const isNotif = /(rp\s*[\d.,]{4,}|\botp\b|kode|debet|kredit|saldo|va |virtual|berhasil)/.test(s);
   return hasEntity && !isNotif;
 }
 
+// Two-way correction: the digest told the user what a pending tx is; the user
+// replies (e.g. "reimburse sdc", "personal", "grab hamasa") and we re-tag the
+// matching pending item(s). Selection priority:
+//   1. merchant keyword mentioned  -> match by merchant
+//   2. explicit "semua/dua/ini/itu" -> all pending
+//   3. exactly ONE pending item     -> that one (the common digest case)
+//   4. multiple, no hint            -> ambiguous ones; if none, list & ask
 async function handleTextCorrection(text: string, supabase: any, uid: string, botToken: string, chatId: number): Promise<boolean> {
   const s = text.toLowerCase();
-  const entity = /\bsdc\b/.test(s) ? "SDC" : /hamasa/.test(s) ? "Hamasa" : (/pribadi|personal/.test(s) ? "Personal" : null);
+  const entity =
+    /\bsdc\b/.test(s) ? "SDC" :
+    /hamasa/.test(s) ? "Hamasa" :
+    /travelio/.test(s) ? "Travelio" :
+    (/pribadi|personal|expense|income|pengeluaran|pemasukan/.test(s) ? "Personal" : null);
   if (!entity) return false;
   const nrm = (x: any) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  // direction: explicit override, else fall back to the item's own in/out
+  const forceIn = /\b(in|masuk|pemasukan|income)\b/.test(s);
+  const forceOut = /\b(out|keluar|pengeluaran|expense)\b/.test(s);
   // merchant keyword mentioned? (tokped/tokopedia, grab, lazada, blibli, gojek, shopee, dst)
-  const KW: Record<string, RegExp> = { tokopedia: /tokped|tokopedia/, grab: /\bgrab\b/, gojek: /gojek|gopay/, lazada: /lazada/, blibli: /blibli/, shopee: /shopee/, allianz: /allianz/, digitalocean: /digitalocean|ocean/ };
+  const KW: Record<string, RegExp> = { tokopedia: /tokped|tokopedia/, grab: /\bgrab\b/, gojek: /gojek|gopay/, lazada: /lazada/, blibli: /blibli/, shopee: /shopee/, allianz: /allianz/, digitalocean: /digitalocean|ocean/, auto2000: /auto\s*2000/ };
   const wantKW = Object.entries(KW).filter(([, re]) => re.test(s)).map(([k]) => k);
-  const allSel = /\b(semua| semua|dua|ketiga|tiga|ini|itu|semuanya|keduanya)\b/.test(s) || wantKW.length === 0;
+  const explicitAll = /\b(semua|semuanya|keduanya|dua|ketiga|tiga|ini|itu)\b/.test(s);
 
+  // flatten all pending items across email_sync rows (arr is a live ref per row)
   const { data: rows } = await supabase.from("email_sync").select("id, ai_raw_result").eq("user_id", uid).eq("status", "pending");
-  let n = 0; const changed: string[] = [];
+  const rowArr = new Map<string, any[]>();
+  const flat: { rowId: string; t: any }[] = [];
   for (const r of rows || []) {
     let arr: any = r.ai_raw_result; try { if (typeof arr === "string") arr = JSON.parse(arr); } catch { arr = null; }
-    if (!Array.isArray(arr)) continue; let dirty = false;
-    arr.forEach((t: any) => {
-      if (t._imported || t._skipped) return;
-      const isAmbig = (Number(t.confidence ?? 1) < 0.7) || /tokopedia|tokped/i.test(String(t.merchant_name ?? t.description ?? ""));
-      const label = nrm(t.merchant_name || t.description);
-      const kwMatch = wantKW.length ? wantKW.some((k) => label.includes(k.slice(0, 6)) || (k === "tokopedia" && /tokp/.test(label))) : false;
-      const take = wantKW.length ? kwMatch : (allSel && isAmbig);
-      if (!take) return;
-      t.suggested_entity = entity;
-      t.suggested_tx_type = entity === "Personal" ? (t.type === "in" ? "income" : "expense") : (/\bin\b|masuk/.test(s) ? "reimburse_in" : "reimburse_out");
-      t.is_reimburse = entity !== "Personal";
-      t._tg_classified = true;
-      n++; dirty = true; changed.push(`${t.merchant_name || t.description || "tx"} ${idr(t.amount_idr || t.amount)}`);
-    });
-    if (dirty) await supabase.from("email_sync").update({ ai_raw_result: arr }).eq("id", r.id);
+    if (!Array.isArray(arr)) continue;
+    rowArr.set(r.id, arr);
+    arr.forEach((t: any) => { if (!t._imported && !t._skipped) flat.push({ rowId: r.id, t }); });
   }
-  if (!n) { await sendTelegramHTML(botToken, chatId, `⚠️ Ga nemu transaksi pending yang cocok buat di-tag ${entity}.`); return true; }
-  const tt = entity === "Personal" ? "personal" : (/\bin\b|masuk/.test(s) ? "reimburse_in" : "reimburse_out") + " " + entity;
-  await sendTelegramHTML(botToken, chatId, `✅ <b>${n} item → ${esc(tt)}</b>\n${changed.slice(0, 8).map((c) => "• " + esc(c)).join("\n")}\n\nTap <b>Import Semua</b> di digest buat masukin ke ledger.`);
+  if (!flat.length) { await sendTelegramHTML(botToken, chatId, "📭 Ga ada transaksi pending buat diubah."); return true; }
+
+  const labelOf = (t: any) => nrm(t.merchant_name || t.description);
+  const kwHit = (t: any) => { const l = labelOf(t); return wantKW.some((k) => l.includes(k.slice(0, 6)) || (k === "tokopedia" && /tokp/.test(l))); };
+
+  let targets: { rowId: string; t: any }[];
+  if (wantKW.length) {
+    targets = flat.filter(({ t }) => kwHit(t));
+  } else if (explicitAll || flat.length === 1) {
+    targets = flat;                       // "semua", or the single-item digest case
+  } else {
+    // multiple pending, no hint — tag the ambiguous ones; if none, ask which
+    targets = flat.filter(({ t }) => (Number(t.confidence ?? 1) < 0.7) || /tokopedia|tokped/i.test(String(t.merchant_name ?? t.description ?? "")));
+    if (!targets.length) {
+      const list = flat.map((f, i) => `${i + 1}. ${esc(f.t.merchant_name || f.t.description || "tx")} — ${esc(idr(f.t.amount_idr || f.t.amount))}`).join("\n");
+      await sendTelegramHTML(botToken, chatId, `❓ Ada ${flat.length} transaksi pending. Yang mana mau di-tag <b>${esc(entity)}</b>?\nBalas <b>semua</b>, atau sebut nama merchant-nya:\n${list}`);
+      return true;
+    }
+  }
+  if (!targets.length) { await sendTelegramHTML(botToken, chatId, `⚠️ Ga nemu transaksi pending yang cocok buat di-tag ${esc(entity)}.`); return true; }
+
+  const changed: string[] = []; const touched = new Set<string>();
+  for (const { rowId, t } of targets) {
+    const isIn = forceIn ? true : forceOut ? false : (t.type === "in");
+    t.suggested_entity = entity;
+    t.suggested_tx_type = entity === "Personal" ? (isIn ? "income" : "expense") : (isIn ? "reimburse_in" : "reimburse_out");
+    t.is_reimburse = entity !== "Personal";
+    t._tg_classified = true;
+    changed.push(`${t.merchant_name || t.description || "tx"} ${idr(t.amount_idr || t.amount)}`);
+    touched.add(rowId);
+  }
+  for (const id of touched) await supabase.from("email_sync").update({ ai_raw_result: rowArr.get(id) }).eq("id", id);
+
+  const dir = targets.some(({ t }) => (forceIn ? true : forceOut ? false : (t.type === "in"))) && !forceOut ? "in" : "out";
+  const tt = entity === "Personal" ? (dir === "in" ? "income (pribadi)" : "expense (pribadi)") : `reimburse_${dir} ${entity}`;
+  await sendTelegramHTML(botToken, chatId, `✅ <b>${changed.length} transaksi → ${esc(tt)}</b>\n${changed.slice(0, 8).map((c) => "• " + esc(c)).join("\n")}\n\nTap <b>✅ Import Semua</b> di digest buat masukin ke ledger.`);
   return true;
 }
 
