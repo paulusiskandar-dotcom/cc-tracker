@@ -388,23 +388,8 @@ export function AmountInput({ value, onChange, currency, onCurrencyChange, curre
 }
 
 // ─── NET WORTH CALCULATOR ─────────────────────────────────────
-export function calcNetWorth(accounts) {
-  let bank = 0, assets = 0, receivables = 0, ccDebt = 0, liabilities = 0;
-  (accounts||[]).forEach(a => {
-    // All bank accounts always included (reimburse/tracking accounts included)
-    if (a.type === "bank")
-      bank += Number(a.current_balance || 0);
-    else if (a.type === "asset")
-      assets += Number(a.current_value || 0);
-    else if (a.type === "receivable")
-      receivables += Number(a.receivable_outstanding || 0);  // money owed TO user
-    else if (a.type === "credit_card")
-      ccDebt += Number(a.outstanding_amount || 0);  // outstanding debt
-    else if (a.type === "liability")
-      liabilities += Number(a.outstanding_amount || 0);
-  });
-  return { bank, assets, receivables, ccDebt, liabilities, total: bank + assets + receivables - ccDebt - liabilities };
-}
+// NB: calcNetWorth lives in utils.js (single source of truth). The duplicate
+// that used to be here was dead code with a divergent formula — removed.
 
 // ─── MONTH SELECTOR ───────────────────────────────────────────
 export function MonthSelect({ value, onChange, th }) {

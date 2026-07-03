@@ -113,8 +113,8 @@ export const agingLabel = (dateStr) => {
 };
 
 // ─── NET WORTH CALCULATION ───────────────────────────────────
-export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], fxRates = {}, reimburseSettlements = [] } = {}) => {
-  let bank = 0, cash = 0, assets = 0, receivables = 0, liabilities = 0, ccBalance = 0;
+export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], fxRates = {}, ledger = [] } = {}) => {
+  let bank = 0, cash = 0, assets = 0, liabilities = 0, ccBalance = 0;
 
   const toIDRValue = (amount, currency) => {
     if (!currency || currency === "IDR") return Number(amount || 0);
@@ -135,11 +135,12 @@ export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], 
       ccBalance += toIDRValue(a.outstanding_amount || 0, a.currency);
     } else if (a.type === "asset") {
       assets += toIDRValue(a.current_value || a.current_balance || 0, a.currency);
-    } else if (a.type === "receivable") {
-      receivables += Number(a.receivable_outstanding || 0);
     } else if (a.type === "liability") {
       liabilities += Number(a.outstanding_amount || 0);
     }
+    // NB: receivable accounts (Piutang X) are NOT summed here. Their stored
+    // balance only accumulates reimburse_out and is never reduced by repayments,
+    // so it overstates. Reimburse receivable is computed from the ledger below.
   }
 
   // ccDebt = total outstanding (positive)
@@ -154,11 +155,20 @@ export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], 
       return sum + Math.max(0, Number(l.total_amount || 0) - paid);
     }, 0);
 
-  const reimburseOutstanding = reimburseSettlements
-    .reduce((sum, s) => sum + Math.max(0, Number(s.total_out || 0) - Number(s.total_in || 0)), 0);
+  // Reimburse receivable = UNSETTLED ledger (reimburse_out − reimburse_in) per
+  // entity, positive only. This is what an entity still owes Paulus. Source of
+  // truth = the ledger (matches Telegram /piutang), not the receivable accounts
+  // or the settlements table (which double-counted / overstated).
+  const ent = {};
+  for (const t of ledger) {
+    if (t.reimburse_settlement_id) continue;             // settled = already repaid
+    if (t.tx_type === "reimburse_out") { const e = t.entity || "?"; ent[e] = ent[e] || { out: 0, in: 0 }; ent[e].out += Number(t.amount_idr || 0); }
+    else if (t.tx_type === "reimburse_in") { const e = t.entity || "?"; ent[e] = ent[e] || { out: 0, in: 0 }; ent[e].in += Number(t.amount_idr || 0); }
+  }
+  const reimburseOutstanding = Object.values(ent).reduce((s, v) => s + Math.max(0, v.out - v.in), 0);
+  const receivables = reimburseOutstanding;
 
-  // subtract outstanding from net worth
-  const total = bank + cash + assets + receivables + employeeLoanTotal + reimburseOutstanding - ccBalance - liabilities;
+  const total = bank + cash + assets + receivables + employeeLoanTotal - ccBalance - liabilities;
   return { total, bank, cash, assets, receivables, ccDebt, liabilities, employeeLoanTotal, reimburseOutstanding };
 };
 
