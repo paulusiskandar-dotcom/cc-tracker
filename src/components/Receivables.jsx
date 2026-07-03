@@ -592,6 +592,7 @@ export default function Receivables({
   const toggleSettlement = (id) =>
     setExpandedSettlements(prev => ({ ...prev, [id]: !prev[id] }));
   const [showSettlementHistory, setShowSettlementHistory] = useState(false);
+  const [openSettHist, setOpenSettHist] = useState(new Set()); // per-entity settlement history collapse (hidden by default)
   const [suggestMatch, setSuggestMatch] = useState(true);
 
   const getSettleDate = (rId) => settleDate[rId] || todayStr();
@@ -1168,13 +1169,21 @@ export default function Receivables({
                       </div>
                     )}
 
-                    {/* ── Settlement history ── */}
+                    {/* ── Settlement history (hidden by default — click to expand) ── */}
                     {entitySettlements.length > 0 && (
                       <div style={{ marginTop: 14, borderTop: "0.5px solid #f3f4f6", paddingTop: 10 }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif", marginBottom: 6 }}>
-                          Settlement History
+                        <div
+                          onClick={() => setOpenSettHist(prev => { const ns = new Set(prev); ns.has(r.entity) ? ns.delete(r.entity) : ns.add(r.entity); return ns; })}
+                          style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", marginBottom: openSettHist.has(r.entity) ? 6 : 0 }}
+                        >
+                          <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif" }}>
+                            Settlement History ({entitySettlements.length})
+                          </div>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: "#3b5bdb", fontFamily: "Figtree, sans-serif" }}>
+                            {openSettHist.has(r.entity) ? "Hide ▲" : "Show ▼"}
+                          </div>
                         </div>
-                        {entitySettlements.map(s => {
+                        {openSettHist.has(r.entity) && entitySettlements.map(s => {
                           const isExpanded = expandedSett.has(s.id);
                           const date = s.settled_at
                             ? new Date(s.settled_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
