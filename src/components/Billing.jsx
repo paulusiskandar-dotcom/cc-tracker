@@ -217,7 +217,7 @@ function Row({ it, first }) {
       </div>
       <div style={{ textAlign: "right", whiteSpace: "nowrap" }}>
         <div style={{ fontSize: 14, fontWeight: 800, color: "#111827" }}>
-          {it.known ? fmtIDR(it.amount, true) : "nilai belum pasti"}
+          {it.known ? fmtIDR(it.amount) : "nilai belum pasti"}
         </div>
       </div>
     </div>
