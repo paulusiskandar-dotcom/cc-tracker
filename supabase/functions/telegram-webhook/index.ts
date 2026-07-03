@@ -61,6 +61,11 @@ Common patterns:
 
 CRITICAL: If the message mentions CS "14000" or "Mandiri" or "TB xxx" format → from_bank_name MUST be "Mandiri". If "1500888" or sender BCA → "BCA". If "14041" → "CIMB Niaga". CS number overrides any other guess.
 
+PAPER RECEIPT / STRUK RULES (foto struk fisik: setoran tunai ATM/CS, transfer, bukti bayar):
+- Struk BCA "SETORAN TUNAI" → suggested_tx_type "reimburse_in", entity "Hamasa" (setoran tunai rule), amount = jumlah setoran, date = tanggal di struk (format DD/MM/YY atau DD-MM-YYYY), account = rekening tujuan yang tercetak.
+- Struk transfer/pembayaran → type "out", amount & tanggal dari struk. Extract nomor rekening yang terlihat.
+- Foto struk sering miring/blur/rotated — TETAP EKSTRAK bacaan terbaikmu. Kalau nominal kurang yakin, tetap keluarkan dengan confidence rendah (0.3-0.5) — user akan review sebelum import. Return [] HANYA kalau gambar sama sekali bukan dokumen keuangan.
+
 BCA MUTASI SCREENSHOT RULES (CRITICAL — myBCA/BCA mobile transaction list):
 - Account masks like "083-136-1688" / "083 - 026 - 7743" are BCA account numbers → from_bank_name MUST be "BCA" (NOT Mandiri!). 0831361688 / 0830267743 etc.
 - COLOR = DIRECTION: BLUE amount = money IN (type "in", KREDIT). RED amount = money OUT (type "out", DEBIT). Trust the color over any other hint.
@@ -233,6 +238,17 @@ Deno.serve(async (req: Request) => {
         });
         return new Response(JSON.stringify(await r.json()), { headers: { "Content-Type": "application/json" } });
       }
+      if (wh === "report") {
+        // for pg_cron (tgl 1): kirim laporan bulan LALU ke chat Paulus
+        const chatId2 = Number(Deno.env.get("TELEGRAM_AUTHORIZED_CHAT_ID"));
+        const uid2 = Deno.env.get("TELEGRAM_AUTHORIZED_USER_ID") || "";
+        const sb2 = createClient(Deno.env.get("SUPABASE_URL") || "", Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "");
+        const nowJ = jakartaNow();
+        const prev = new Date(Date.UTC(nowJ.getUTCFullYear(), nowJ.getUTCMonth() - 1, 1));
+        const ym = `${prev.getUTCFullYear()}-${String(prev.getUTCMonth() + 1).padStart(2, "0")}`;
+        await cmdReport(sb2, uid2, ym, token, chatId2);
+        return new Response(JSON.stringify({ ok: true, month: ym }), { headers: { "Content-Type": "application/json" } });
+      }
       if (wh === "fix") {
         const self = (Deno.env.get("SUPABASE_URL") || "") + "/functions/v1/telegram-webhook";
         const r = await fetch(`${TELEGRAM_API}/bot${token}/setWebhook`, {
@@ -396,7 +412,7 @@ async function callClaudeText(apiKey: string, prompt: string): Promise<any[]> {
     throw new Error("AI parse failed: " + (data.error?.message || "Unknown"));
   }
 
-  const raw: string = data.content?.[0]?.text || "[]";
+  const raw: string = ((data.content || []).find((b: any) => b.type === "text")?.text) || "[]";
   return parseJsonArray(raw);
 }
 
@@ -409,7 +425,7 @@ function uint8ArrayToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-async function callClaudeVision(apiKey: string, imageBytes: Uint8Array, prompt: string): Promise<any[]> {
+async function callClaudeVision(apiKey: string, imageBytes: Uint8Array, prompt: string, mediaType = "image/jpeg"): Promise<any[]> {
   const base64 = uint8ArrayToBase64(imageBytes);
 
   const resp = await fetch("https://api.anthropic.com/v1/messages", {
@@ -426,7 +442,7 @@ async function callClaudeVision(apiKey: string, imageBytes: Uint8Array, prompt: 
         {
           role: "user",
           content: [
-            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
+            { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
             { type: "text", text: prompt },
           ],
         },
@@ -440,7 +456,7 @@ async function callClaudeVision(apiKey: string, imageBytes: Uint8Array, prompt: 
     throw new Error("AI vision parse failed: " + (data.error?.message || "Unknown"));
   }
 
-  const raw: string = data.content?.[0]?.text || "[]";
+  const raw: string = ((data.content || []).find((b: any) => b.type === "text")?.text) || "[]";
   return parseJsonArray(raw);
 }
 
@@ -475,7 +491,7 @@ async function callClaudePDF(apiKey: string, pdfBytes: Uint8Array, prompt: strin
     throw new Error("AI PDF parse failed: " + (data.error?.message || "Unknown"));
   }
 
-  const raw: string = data.content?.[0]?.text || "[]";
+  const raw: string = ((data.content || []).find((b: any) => b.type === "text")?.text) || "[]";
   return parseJsonArray(raw);
 }
 
@@ -605,9 +621,31 @@ async function handleDocument(
   chatId: number,
 ) {
   const doc = message.document;
+  const IMG_MIMES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+
+  // image sent as FILE (uncompressed — better than Telegram photo for small receipt text)
+  if (IMG_MIMES.includes(doc.mime_type)) {
+    await sendTelegramMessage(botToken, chatId, "🖼 Processing image\\.\\.\\.");
+    const imgBytes = await downloadTelegramFile(botToken, doc.file_id);
+    const caption0: string = message.caption || "";
+    const p = TG_PARSE_PROMPT(caption0 || "(no caption)", "image");
+    const txs = await callClaudeVision(apiKey, imgBytes, p, doc.mime_type);
+    if (!txs.length) { await sendTelegramMessage(botToken, chatId, "⚠️ Tidak bisa extract transaksi dari gambar ini\\."); return; }
+    await resolveAccountIds(supabase, userId, txs);
+    const { error: e0 } = await supabase.from("email_sync").insert({
+      user_id: userId, gmail_message_id: `tg-img-${message.message_id}-${Date.now()}`, sender_email: "telegram@paulus",
+      subject: `Telegram Image: ${doc.file_name || "image"}`, received_at: new Date().toISOString(), email_type: "transaction_notification",
+      raw_body: `[Image file from Telegram]\nFilename: ${doc.file_name}${caption0 ? "\nCaption: " + caption0 : ""}`,
+      attachment_name: doc.file_name || `img-${message.message_id}.jpg`, ai_raw_result: txs, extracted_count: txs.length,
+      imported_count: 0, status: "pending", source: "telegram",
+    });
+    if (e0) { await sendTelegramMessage(botToken, chatId, "❌ Gagal save: " + escapeMarkdown(e0.message)); return; }
+    await sendTelegramMessage(botToken, chatId, `✅ Saved ${txs.length} transaksi pending review:\n\n${buildSummary(txs)}\n\nKetik /digest untuk review \\+ import\\.`);
+    return;
+  }
 
   if (doc.mime_type !== "application/pdf") {
-    await sendTelegramMessage(botToken, chatId, `📄 Format ${escapeMarkdown(doc.mime_type || "unknown")} belum support\\. Cuma PDF yang support\\.`);
+    await sendTelegramMessage(botToken, chatId, `📄 Format ${escapeMarkdown(doc.mime_type || "unknown")} belum support\\. Kirim PDF atau gambar \\(jpg/png\\)\\.`);
     return;
   }
 
@@ -1551,7 +1589,7 @@ async function callClaudeAnswerText(apiKey: string, prompt: string): Promise<str
   });
   const data = await resp.json();
   if (!resp.ok) { console.error("[telegram-webhook] Q&A API error:", data); throw new Error(data.error?.message || "AI error"); }
-  return (data.content?.[0]?.text || "(kosong)").trim();
+  return (((data.content || []).find((b: any) => b.type === "text")?.text) || "(kosong)").trim();
 }
 
 async function buildFinancialContext(supabase: any, uid: string): Promise<string> {

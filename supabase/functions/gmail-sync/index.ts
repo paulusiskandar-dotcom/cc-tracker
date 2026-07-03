@@ -578,7 +578,7 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
 
       if (aiRes.ok) {
         const aiData = await aiRes.json();
-        const text = aiData.content?.[0]?.text || "[]";
+        const text = ((aiData.content || []).find((b: any) => b.type === "text")?.text) || "[]";
         try {
           let parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
           if (!Array.isArray(parsed) && parsed) parsed = [parsed];
@@ -753,7 +753,7 @@ async function reprocessEmails(supabase: any, userId: string, ids: string[], ant
       });
       if (aiRes.ok) {
         const aiData = await aiRes.json();
-        const text = aiData.content?.[0]?.text || "[]";
+        const text = ((aiData.content || []).find((b: any) => b.type === "text")?.text) || "[]";
         let parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
         if (!Array.isArray(parsed) && parsed) parsed = [parsed];
         if (Array.isArray(parsed) && parsed.length > 0) {

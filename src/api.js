@@ -1254,7 +1254,7 @@ function extractJSON(text) {
 // ─── SCAN BATCHES ─────────────────────────────────────────────
 export const scanApi = {
   // Scan a file (image/PDF) via AI proxy → returns array of transaction objects
-  scan: async (userId, file, { accounts = [], employeeLoans = [], bankHint = "", model = "claude-haiku-4-5-20251001" } = {}) => {
+  scan: async (userId, file, { accounts = [], employeeLoans = [], bankHint = "", model = "claude-sonnet-5" } = {}) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = async (e) => {
@@ -1395,7 +1395,7 @@ IMPORTANT - Year detection rules:
               throw new Error(msg);
             }
             const d   = await r.json();
-            const raw = d?.content?.[0]?.text || "";
+            const raw = (d?.content || []).find(b => b.type === "text")?.text || "";
             const stopReason = d?.stop_reason || "";
             // Log usage for token debugging
             const usage = d?.usage || {};
@@ -1987,7 +1987,7 @@ export const tagsApi = {
   },
 };
 
-const AI_MODEL = "claude-haiku-4-5-20251001";
+const AI_MODEL = "claude-sonnet-5";
 
 // ─── AI PROXY ─────────────────────────────────────────────────
 export async function aiCall(body) {
