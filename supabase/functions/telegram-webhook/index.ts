@@ -1893,48 +1893,145 @@ async function buildFinancialContext(supabase: any, uid: string): Promise<string
   L.push(`HUTANG/LIABILITAS: ${liab.map((a) => `${a.name} ${idr(a.outstanding_amount)}${a.monthly_installment ? " cicilan " + idr(a.monthly_installment) + "/bln" : ""}`).join(", ") || "-"}`);
   L.push(`BULAN INI (${ID_MONTHS[now.getUTCMonth()]}): income ${idr(inc)}, expense ${idr(exp)}, net ${idr(inc - exp)}. Top kategori: ${topCats || "-"}`);
   L.push(`REIMBURSE (talangin-dibalikin=sisa): ${Object.entries(ent).map(([k, v]) => `${k} ${idr(v.out - v.in)}`).join(", ")}`);
-
-  // Recent transactions so SPECIFIC questions can be answered ("ke Jepang habis
-  // berapa", "makan bulan lalu berapa"). The summary above is not enough — Claude
-  // needs the actual rows to search by merchant/category/date.
-  const since120 = ymd(new Date(Date.now() - 120 * 86400000));
-  const { data: recent } = await supabase
-    .from("ledger")
-    .select("tx_date, tx_type, amount_idr, description, merchant_name, category_name, entity")
-    .eq("user_id", uid)
-    .gte("tx_date", since120)
-    .in("tx_type", ["expense", "reimburse_out", "buy_asset", "income", "sell_asset", "reimburse_in", "collect_loan"])
-    .order("tx_date", { ascending: false })
-    .limit(300);
-  const SIGN_OUT = new Set(["expense", "reimburse_out", "buy_asset"]);
-  const txLines = (recent || []).map((t: any) => {
-    const p = String(t.tx_date).split("-");           // YYYY-MM-DD
-    const nm = String(t.description || t.merchant_name || "-").slice(0, 36);
-    const cat = t.category_name ? ` [${t.category_name}]` : "";
-    const en = t.entity && t.entity !== "Personal" ? ` @${t.entity}` : "";
-    const sign = SIGN_OUT.has(t.tx_type) ? "-" : "+";
-    return `${p[2]}/${p[1]} ${nm}${cat}${en} ${sign}${idr(t.amount_idr)}`;
-  });
-  L.push(`\nTRANSAKSI 120 HARI TERAKHIR (${txLines.length} baris; "-"=keluar, "+"=masuk. Untuk pertanyaan trip/perjalanan mis. Jepang, jumlahkan transaksi kategori Travel atau yang nama merchant-nya di negara itu, mis. hotel/toko Jepang):\n${txLines.join("\n")}`);
   return L.join("\n");
+}
+
+// ── AGENTIC Q&A (Tier A): Claude queries the ledger via tools, DB does the math ──
+const QA_TOOLS = [
+  {
+    name: "aggregate_transactions",
+    description: "Jumlahkan/hitung transaksi dengan filter. Pakai untuk 'berapa total ...' (mis. total pengeluaran Travel Juni, total makan tahun ini). Balikin grand_total + rincian per group. group_by bisa category/month/entity/tx_type.",
+    input_schema: {
+      type: "object",
+      properties: {
+        date_from: { type: "string", description: "YYYY-MM-DD (opsional)" },
+        date_to:   { type: "string", description: "YYYY-MM-DD (opsional)" },
+        tx_types:  { type: "array", items: { type: "string" }, description: "mis. ['expense'] / ['reimburse_out']. Kosong = semua." },
+        category:  { type: "string", description: "nama kategori partial, mis. 'Travel','Food'" },
+        entity:    { type: "string", description: "'Hamasa','SDC','Travelio','Personal'" },
+        search:    { type: "string", description: "kata kunci di deskripsi/merchant, mis. 'grab','tokyo'" },
+        group_by:  { type: "string", enum: ["none", "category", "month", "entity", "tx_type"] },
+        metric:    { type: "string", enum: ["sum", "count", "avg"] },
+      },
+    },
+  },
+  {
+    name: "list_transactions",
+    description: "Ambil daftar transaksi detail dengan filter. Pakai untuk 'transaksi apa aja / terbesar'. order: date|amount.",
+    input_schema: {
+      type: "object",
+      properties: {
+        date_from: { type: "string" }, date_to: { type: "string" },
+        tx_types: { type: "array", items: { type: "string" } },
+        category: { type: "string" }, entity: { type: "string" }, search: { type: "string" },
+        min_amount: { type: "number" }, order: { type: "string", enum: ["date", "amount"] },
+        limit: { type: "number", description: "default 30, max 80" },
+      },
+    },
+  },
+  {
+    name: "get_summary",
+    description: "Ringkasan: net worth, saldo bank, kartu kredit + jatuh tempo, investasi, hutang, P&L bulan ini, reimburse per entity. Pakai untuk saldo/net worth/hutang/investasi.",
+    input_schema: { type: "object", properties: {} },
+  },
+];
+
+async function agentFetchLedger(supabase: any, uid: string, f: any): Promise<any[]> {
+  let q = supabase.from("ledger")
+    .select("tx_date, tx_type, amount_idr, description, merchant_name, category_name, entity")
+    .eq("user_id", uid).neq("tx_type", "opening_balance");
+  if (f.date_from) q = q.gte("tx_date", f.date_from);
+  if (f.date_to)   q = q.lte("tx_date", f.date_to);
+  if (Array.isArray(f.tx_types) && f.tx_types.length) q = q.in("tx_type", f.tx_types);
+  if (f.entity)    q = q.eq("entity", f.entity);
+  if (f.category)  q = q.ilike("category_name", `%${f.category}%`);
+  q = q.limit(6000);
+  const { data } = await q;
+  let rows: any[] = data || [];
+  if (f.search) {
+    const s = String(f.search).toLowerCase();
+    rows = rows.filter((r) => `${r.description || ""} ${r.merchant_name || ""} ${r.category_name || ""} ${r.entity || ""}`.toLowerCase().includes(s));
+  }
+  if (f.min_amount) rows = rows.filter((r) => Number(r.amount_idr) >= Number(f.min_amount));
+  return rows;
+}
+
+async function runAgentTool(name: string, input: any, supabase: any, uid: string): Promise<any> {
+  if (name === "get_summary") return { summary: await buildFinancialContext(supabase, uid) };
+  if (name === "aggregate_transactions") {
+    const rows = await agentFetchLedger(supabase, uid, input || {});
+    const metric = input?.metric || "sum";
+    const gb = input?.group_by || "none";
+    const keyOf = (r: any) => gb === "category" ? (r.category_name || "Lainnya")
+      : gb === "entity" ? (r.entity || "Personal")
+      : gb === "month" ? String(r.tx_date).slice(0, 7)
+      : gb === "tx_type" ? r.tx_type : "total";
+    const groups: Record<string, { sum: number; count: number }> = {};
+    for (const r of rows) { const k = keyOf(r); groups[k] = groups[k] || { sum: 0, count: 0 }; groups[k].sum += Number(r.amount_idr) || 0; groups[k].count++; }
+    const val = (g: any) => metric === "count" ? g.count : metric === "avg" ? Math.round(g.sum / (g.count || 1)) : Math.round(g.sum);
+    const out = Object.entries(groups).map(([k, g]) => ({ group: k, value: val(g), count: g.count })).sort((a, b) => b.value - a.value).slice(0, 40);
+    return { metric, group_by: gb, rows_scanned: rows.length, grand_total: Math.round(rows.reduce((s, r) => s + (Number(r.amount_idr) || 0), 0)), groups: out };
+  }
+  if (name === "list_transactions") {
+    const rows = await agentFetchLedger(supabase, uid, input || {});
+    rows.sort((a, b) => (input?.order === "amount")
+      ? (Number(b.amount_idr) - Number(a.amount_idr))
+      : String(b.tx_date).localeCompare(String(a.tx_date)));
+    const lim = Math.min(Number(input?.limit) || 30, 80);
+    return {
+      count: rows.length,
+      transactions: rows.slice(0, lim).map((r) => ({ date: r.tx_date, name: r.description || r.merchant_name || "-", category: r.category_name || null, entity: r.entity || "Personal", type: r.tx_type, amount: Math.round(Number(r.amount_idr) || 0) })),
+    };
+  }
+  return { error: "unknown tool" };
+}
+
+async function callClaudeTools(apiKey: string, system: string, messages: any[], tools: any[]): Promise<any> {
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
+    body: JSON.stringify({ model: "claude-haiku-4-5-20251001", max_tokens: 1024, system, tools, messages }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) { console.error("[telegram-webhook] Q&A tools error:", data); throw new Error(data.error?.message || "AI error"); }
+  return data;
 }
 
 async function handleQuestion(text: string, apiKey: string, supabase: any, uid: string, botToken: string, chatId: number) {
   await sendTelegramHTML(botToken, chatId, "💭 <i>Sebentar...</i>");
-  const ctx = await buildFinancialContext(supabase, uid);
   const d = jakartaNow();
-  const prompt = `Kamu asisten keuangan pribadi Paulus. Jawab pertanyaannya pakai bahasa Indonesia santai & ringkas, berdasarkan DATA di bawah. Selalu pakai format Rupiah (mis. Rp1.234.567). Kalau datanya nggak cukup buat jawab, bilang terus terang jangan mengarang angka. Hari ini ${d.getUTCDate()} ${ID_MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}.
+  const system = `Kamu asisten keuangan pribadi Paulus. Jawab bahasa Indonesia santai & ringkas, pakai format Rupiah (mis. Rp1.234.567). Hari ini ${d.getUTCDate()} ${ID_MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()} (tahun default 2026).
 
-=== DATA KEUANGAN PAULUS ===
-${ctx}
+Kamu punya TOOLS untuk baca data keuangan Paulus dari database. SELALU pakai tool untuk dapat angka — JANGAN mengarang.
+- "berapa total X" → aggregate_transactions (pakai group_by kalau perlu rincian).
+- "transaksi apa aja / terbesar" → list_transactions.
+- saldo / net worth / hutang / investasi → get_summary.
+Untuk trip/perjalanan (mis. Jepang): coba category='Travel' pada rentang tanggalnya, dan/atau search kota/negara ('tokyo','osaka','japan'). Boleh panggil beberapa tool sebelum menjawab.
+Setelah dapat data, jawab singkat & to-the-point. Boleh <b>tebal</b> HTML (JANGAN markdown, JANGAN * atau #). Kalau data nggak cukup, bilang terus terang.`;
 
-=== PERTANYAAN ===
-${text}
-
-Jawab singkat & to-the-point. Boleh pakai <b>tebal</b> HTML sederhana (JANGAN markdown, JANGAN pakai * atau #):`;
+  const messages: any[] = [{ role: "user", content: text }];
   try {
-    const ans = await callClaudeAnswerText(apiKey, prompt);
-    await sendTelegramHTML(botToken, chatId, ans);
+    for (let i = 0; i < 6; i++) {
+      const resp = await callClaudeTools(apiKey, system, messages, QA_TOOLS);
+      if (resp.stop_reason === "tool_use") {
+        messages.push({ role: "assistant", content: resp.content });
+        const results: any[] = [];
+        for (const block of resp.content || []) {
+          if (block.type === "tool_use") {
+            let out: any;
+            try { out = await runAgentTool(block.name, block.input || {}, supabase, uid); }
+            catch (e: any) { out = { error: String(e?.message || e) }; }
+            results.push({ type: "tool_result", tool_use_id: block.id, content: JSON.stringify(out) });
+          }
+        }
+        messages.push({ role: "user", content: results });
+        continue;
+      }
+      const ans = (((resp.content || []).find((b: any) => b.type === "text")?.text) || "(kosong)").trim();
+      await sendTelegramHTML(botToken, chatId, ans);
+      return;
+    }
+    await sendTelegramHTML(botToken, chatId, "⚠️ Kebanyakan langkah — coba pertanyaan lebih spesifik.");
   } catch (err: any) {
     await sendTelegramHTML(botToken, chatId, "❌ Gagal jawab: " + esc(err?.message || "error"));
   }
