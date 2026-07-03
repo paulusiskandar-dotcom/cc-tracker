@@ -155,7 +155,7 @@ export default function ReimburseStatementPage({
   const exportExcel = () => {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-      [`Reimburse Statement — ${entity} — Paulus Finance`],
+      [`Reimburse Statement — ${entity} — Ryusei`],
       ["Period", `${applied.from} to ${applied.to}`], [],
       ["Total Out (Reimburse)", totalOut],
       ["Total In (Settled)",    totalIn],

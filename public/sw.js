@@ -1,4 +1,4 @@
-// Paulus Finance Service Worker
+// Ryusei Service Worker
 const CACHE_VERSION = 'pf-v1';
 const OFFLINE_URL = '/offline.html';
 

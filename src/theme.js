@@ -1,5 +1,5 @@
 // ─── DESIGN TOKENS ────────────────────────────────────────────
-// Paulus Finance v2.1.1 — Bento / soft pastel design system
+// Ryusei v2.1.1 — Bento / soft pastel design system
 
 export const LIGHT = {
   // Base

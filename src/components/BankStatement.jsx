@@ -344,7 +344,7 @@ export default function BankStatement({
 
     // Sheet 1: Summary
     const summaryRows = [
-      ["Bank Statement — Paulus Finance"],
+      ["Bank Statement — Ryusei"],
       ["Account", selectedAccount?.name || accountId],
       ["Period",  `${fromDate} to ${toDate}`],
       [],
@@ -462,7 +462,7 @@ export default function BankStatement({
 
       {/* ── Print-only header ── */}
       <div className="print-only" style={{ display: "none" }}>
-        <div style={{ fontSize: 18, fontWeight: 800, color: "#111827", fontFamily: FF }}>Paulus Finance — Bank Statement</div>
+        <div style={{ fontSize: 18, fontWeight: 800, color: "#111827", fontFamily: FF }}>Ryusei — Bank Statement</div>
         <div style={{ fontSize: 13, color: "#374151", fontFamily: FF, marginTop: 4 }}>
           {selectedAccount?.name || ""} · {fmtDateShort(fromDate)} – {fmtDateShort(toDate)}
         </div>

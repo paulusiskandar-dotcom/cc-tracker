@@ -1082,7 +1082,7 @@ export default function Settings({
             <SectionHeader title="About" />
             <div style={{ display: "flex", flexDirection: "column", gap: 0, marginTop: 10 }}>
               {[
-                { label: "App",      value: "Paulus Finance" },
+                { label: "App",      value: "Ryusei" },
                 { label: "Version",  value: `v${APP_VERSION}` },
                 { label: "Build",    value: APP_BUILD },
                 { label: "Database", value: "v5 (unified ledger)" },

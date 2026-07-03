@@ -148,7 +148,7 @@ export default function EmployeeLoanStatement({
     const wb   = XLSX.utils.book_new();
     const name = (receivable.name || "LoanStatement").replace(/[^a-zA-Z0-9]/g, "_");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-      ["Loan Statement — Paulus Finance"],
+      ["Loan Statement — Ryusei"],
       ["Person",       receivable.name],
       [],
       ["Total Loaned", totalLoaned],
@@ -218,7 +218,7 @@ export default function EmployeeLoanStatement({
 
       {/* ── Print header ── */}
       <div className="print-only" style={{ display: "none" }}>
-        <div style={{ fontSize: 18, fontWeight: 800, color: "#111827", fontFamily: FF }}>Paulus Finance — Loan Statement</div>
+        <div style={{ fontSize: 18, fontWeight: 800, color: "#111827", fontFamily: FF }}>Ryusei — Loan Statement</div>
         <div style={{ fontSize: 13, color: "#374151", fontFamily: FF, marginTop: 4 }}>{receivable.name} · {periodLabel}</div>
         <hr style={{ margin: "10px 0", borderColor: "#e5e7eb" }} />
       </div>

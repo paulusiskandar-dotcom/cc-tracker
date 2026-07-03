@@ -233,7 +233,7 @@ export default function AssetTimeline({
     const wb = XLSX.utils.book_new();
     const nm = (asset.name || "Asset").replace(/[^a-zA-Z0-9]/g, "_");
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-      ["Asset Statement — Paulus Finance"],
+      ["Asset Statement — Ryusei"],
       ["Asset", asset.name], ["Type", asset.subtype || "Asset"], [],
       ["Current Value", currentValue], ["Cost Basis", costBasis],
       [isArchived ? "Realized P&L" : "Unrealized P&L", pnl], ["Return %", returnPct.toFixed(2) + "%"],

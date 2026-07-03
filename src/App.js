@@ -99,7 +99,7 @@ function AuthGate({ children }) {
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 28 }}>
           <div style={S.logoIcon}><PILogo size={18} white /></div>
           <div>
-            <div style={S.logoName}>Paulus Finance</div>
+            <div style={S.logoName}>Ryusei</div>
             <div style={S.logoSub}>Personal Financial OS</div>
           </div>
         </div>
@@ -441,7 +441,7 @@ function Finance({ user, signOut }) {
         {/* Logo */}
         <div style={S.sidebarLogo}>
           <div style={S.logoIcon}><PILogo size={18} white /></div>
-          <div style={S.logoName}>Paulus Finance</div>
+          <div style={S.logoName}>Ryusei</div>
         </div>
 
         {/* Nav items */}

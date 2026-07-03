@@ -335,7 +335,7 @@ export default function CCStatement({
     const name = (selectedAccount?.name || "CCStatement").replace(/[^a-zA-Z0-9]/g, "_");
 
     const summaryRows = [
-      ["CC Statement — Paulus Finance"],
+      ["CC Statement — Ryusei"],
       ["Card",   selectedAccount?.name || accountId],
       ["Period", `${fromDate} to ${toDate}`],
       [],
@@ -429,7 +429,7 @@ export default function CCStatement({
 
       {/* ── Print-only header ── */}
       <div className="print-only" style={{ display: "none" }}>
-        <div style={{ fontSize: 18, fontWeight: 800, color: "#111827", fontFamily: FF }}>Paulus Finance — CC Statement</div>
+        <div style={{ fontSize: 18, fontWeight: 800, color: "#111827", fontFamily: FF }}>Ryusei — CC Statement</div>
         <div style={{ fontSize: 13, color: "#374151", fontFamily: FF, marginTop: 4 }}>
           {selectedAccount?.name || ""} · {fmtDateShort(fromDate)} – {fmtDateShort(toDate)}
         </div>
