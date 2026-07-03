@@ -294,6 +294,13 @@ Deno.serve(async (req: Request) => {
     return new Response("Invalid JSON", { status: 400 });
   }
 
+  // ── investment sync from the Mac reconcile script: compare parsed values vs app, alert if diff ──
+  if (update?.type === "investsync" && Array.isArray(update?.values)) {
+    const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+    const out = await handleInvestSync(update.values, TELEGRAM_BOT_TOKEN, sb, AUTHORIZED_USER_ID, AUTHORIZED_CHAT_ID);
+    return new Response(JSON.stringify(out), { headers: { "Content-Type": "application/json" } });
+  }
+
   // ── 2-way callbacks (inline button taps from the daily digest) ──
   if (update?.callback_query) {
     const cb = update.callback_query;
@@ -1261,6 +1268,18 @@ async function handleCallback(cb: any, token: string, supabase: any, uid: string
   if (data === "digest:import_all") { return handleCallback({ ...cb, data: "dg:importall" }, token, supabase, uid); }
   if (data === "digest:review") { return handleCallback({ ...cb, data: "dg:review" }, token, supabase, uid); }
 
+  // investment value update confirm: iset:<assetId>:<value>  (Paulus approved the change)
+  if (parts[0] === "iset" && parts.length === 3) {
+    const [, aid, valS] = parts; const val = Math.round(Number(valS));
+    const { data: a } = await supabase.from("accounts").select("id, name, current_value").eq("id", aid).eq("user_id", uid).single();
+    if (!a) { await answerCallback(token, cb.id, "⚠️ akun ga ketemu"); return; }
+    await supabase.from("accounts").update({ current_value: val }).eq("id", aid);
+    await answerCallback(token, cb.id, `✅ ${a.name} → ${idr(val)}`);
+    await sendTelegramHTML(token, cb.message.chat.id, `✅ <b>${esc(a.name)}</b> diupdate ke <b>${idr(val)}</b> <i>(dari ${idr(a.current_value)})</i>`);
+    return;
+  }
+  if (data.startsWith("iskip:")) { await answerCallback(token, cb.id, "⏭ Dilewati, nilai app tetap"); return; }
+
   // import-all: run the real importer (reclassify -> merge -> dedup -> insert -> recalc -> mark imported)
   if (data === "dg:importall") {
     await answerCallback(token, cb.id, "⏳ Importing...");
@@ -1627,6 +1646,32 @@ async function importPending(supabase: any, uid: string): Promise<string> {
   return `✅ <b>Imported ${ins.length} transaksi ke ledger</b>\n${parts}\nTotal ${idr(totalAmt)}\n` + dupTxt +
     (left ? `⚠️ ${left} tertahan (akun tak dikenal / valas) — cek di app\n` : "") +
     `🧹 Pending di app sudah dibersihkan. Cek /saldo & /cc.`;
+}
+
+// ── Investment reconcile: compare Mac-parsed values vs app assets, alert with confirm buttons ──
+async function handleInvestSync(values: any[], token: string, supabase: any, uid: string, chatId: number) {
+  const { data: assets } = await supabase.from("accounts").select("id, name, current_value").eq("user_id", uid).eq("type", "asset");
+  const nrm = (s: any) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  let flagged = 0; const okList: string[] = [];
+  for (const v of values) {
+    const val = Math.round(Number(v.value) || 0); if (!val) continue;
+    const a = (assets || []).find((x: any) => nrm(x.name).includes(nrm(v.name).slice(0, 5)) || nrm(v.name).includes(nrm(x.name).slice(0, 5)));
+    if (!a) { okList.push(`❓ ${esc(v.name)} ${idr(val)} (akun app ga ketemu)`); continue; }
+    const diff = val - Number(a.current_value || 0);
+    if (Math.abs(diff) <= 100000) { okList.push(`✅ ${esc(a.name)} cocok (${idr(val)})`); continue; }
+    flagged++;
+    const kb = [[
+      { text: `✅ Update ke ${idr(val)}`, callback_data: `iset:${a.id}:${val}` },
+      { text: "⏭ Skip", callback_data: `iskip:${a.id}` },
+    ]];
+    await fetch(`${TELEGRAM_API}/bot${token}/sendMessage`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, parse_mode: "HTML", reply_markup: { inline_keyboard: kb },
+        text: `📊 <b>${esc(a.name)}</b> beda${v.date ? " (per " + esc(v.date) + ")" : ""}\nApp: <b>${idr(a.current_value)}</b>\nStatement: <b>${idr(val)}</b>\nSelisih: <b>${diff > 0 ? "+" : ""}${idr(diff)}</b>` }),
+    });
+  }
+  if (flagged === 0) await sendTelegramHTML(token, chatId, `📊 <b>Investasi dicek</b> — semua cocok ✅\n${okList.slice(0, 12).join("\n")}`);
+  return { flagged, checked: values.length };
 }
 
 // ── /trend: P&L 4 bulan terakhir + net worth sekarang ──
