@@ -1,0 +1,26 @@
+name: CC Tracker scheduled jobs
+# Nge-trigger Supabase edge functions on schedule (functions deployed --no-verify-jwt, jadi cukup curl).
+# Waktu GitHub Actions = UTC. WIB = UTC+7.
+on:
+  schedule:
+    - cron: '0 14 * * *'   # 21:00 WIB — daily digest (transaksi pending)
+    - cron: '0 1 * * *'    # 08:00 WIB — payment reminder (jatuh tempo)
+    - cron: '0 1 1 * *'    # tgl 1, 08:00 WIB — laporan bulan lalu
+  workflow_dispatch: {}     # bisa dipicu manual dari tab Actions
+
+env:
+  BASE: https://zxkxfaoxzldxojwepnca.supabase.co/functions/v1
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Daily digest (21:00 WIB)
+        if: github.event.schedule == '0 14 * * *' || github.event_name == 'workflow_dispatch'
+        run: curl -fsS -X POST "$BASE/daily-digest" -H "Content-Type: application/json" -d '{}' || true
+      - name: Payment reminder (08:00 WIB)
+        if: github.event.schedule == '0 1 * * *' || github.event_name == 'workflow_dispatch'
+        run: curl -fsS -X POST "$BASE/payment-reminder" -H "Content-Type: application/json" -d '{}' || true
+      - name: Monthly report (tgl 1)
+        if: github.event.schedule == '0 1 1 * *'
+        run: curl -fsS "$BASE/telegram-webhook?wh=report" || true

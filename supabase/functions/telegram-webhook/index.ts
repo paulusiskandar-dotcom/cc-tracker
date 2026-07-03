@@ -227,6 +227,7 @@ Deno.serve(async (req: Request) => {
           { command: "pending", description: "👀 Lihat antrian pending" },
           { command: "undo", description: "↩️ Batalkan import terakhir" },
           { command: "cek", description: "🩺 Health check (anomali)" },
+          { command: "trend", description: "📈 Trend 4 bulan + net worth" },
           { command: "reimburse", description: "🔄 Piutang Hamasa/SDC" },
           { command: "hutang", description: "🏛 Hutang, kartu & cicilan" },
           { command: "piutang", description: "🤝 Utang karyawan & reimburse" },
@@ -331,8 +332,8 @@ Deno.serve(async (req: Request) => {
       await handlePhoto(message, TELEGRAM_BOT_TOKEN, ANTHROPIC_API_KEY, supabase, AUTHORIZED_USER_ID, chatId);
     } else if (message.document) {
       await handleDocument(message, TELEGRAM_BOT_TOKEN, ANTHROPIC_API_KEY, supabase, AUTHORIZED_USER_ID, chatId);
-    } else if (message.voice) {
-      await sendTelegramMessage(TELEGRAM_BOT_TOKEN, chatId, "🎙️ Voice support coming soon\\. Untuk sekarang, kirim text, foto, atau PDF\\.");
+    } else if (message.voice || message.audio) {
+      await sendTelegramMessage(TELEGRAM_BOT_TOKEN, chatId, "🎙️ Voice note belum bisa auto\\-transcribe\\. Ketik aja transaksinya \\(mis\\. _makan 50rb bca idr_\\), atau kirim screenshot/PDF\\.");
     } else if (message.text) {
       const text: string = message.text.trim();
 
@@ -800,6 +801,7 @@ async function handleCommand(cmd: string, arg: string, supabase: any, uid: strin
       case "/import": return sendTelegramHTML(token, chatId, await importPending(supabase, uid));
       case "/cek":
       case "/health": return sendTelegramHTML(token, chatId, await cmdCek(supabase, uid));
+      case "/trend": return sendTelegramHTML(token, chatId, await cmdTrend(supabase, uid));
       case "/pending": return sendTelegramHTML(token, chatId, await cmdPending(supabase, uid));
       case "/due":
       case "/jatuhtempo": return sendTelegramHTML(token, chatId, await cmdDue(supabase, uid));
@@ -824,6 +826,7 @@ function cmdMenu(): string {
     "/due — jadwal jatuh tempo billing",
     "/hari — transaksi hari ini",
     "/bulan — income & expense bulan ini",
+    "/trend — trend 4 bulan + net worth",
     "/reimburse — piutang Hamasa/SDC",
     "/hutang — hutang, kartu & cicilan",
     "/piutang — utang karyawan & reimburse",
@@ -1624,6 +1627,35 @@ async function importPending(supabase: any, uid: string): Promise<string> {
   return `✅ <b>Imported ${ins.length} transaksi ke ledger</b>\n${parts}\nTotal ${idr(totalAmt)}\n` + dupTxt +
     (left ? `⚠️ ${left} tertahan (akun tak dikenal / valas) — cek di app\n` : "") +
     `🧹 Pending di app sudah dibersihkan. Cek /saldo & /cc.`;
+}
+
+// ── /trend: P&L 4 bulan terakhir + net worth sekarang ──
+async function cmdTrend(supabase: any, uid: string): Promise<string> {
+  const now = jakartaNow();
+  const months: { y: number; m: number }[] = [];
+  for (let i = 3; i >= 0; i--) { const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1)); months.push({ y: d.getUTCFullYear(), m: d.getUTCMonth() }); }
+  const start = `${months[0].y}-${String(months[0].m + 1).padStart(2, "0")}-01`;
+  const { data: led } = await supabase.from("ledger").select("tx_date, tx_type, amount_idr").eq("user_id", uid).gte("tx_date", start);
+  const agg: Record<string, { inc: number; exp: number }> = {};
+  for (const t of led || []) {
+    const key = t.tx_date.slice(0, 7); agg[key] = agg[key] || { inc: 0, exp: 0 };
+    if (t.tx_type === "income") agg[key].inc += Number(t.amount_idr) || 0;
+    else if (t.tx_type === "expense") agg[key].exp += Number(t.amount_idr) || 0;
+  }
+  let out = "📈 <b>TREND 4 BULAN</b> <i>(income − expense)</i>\n";
+  for (const mm of months) {
+    const key = `${mm.y}-${String(mm.m + 1).padStart(2, "0")}`;
+    const a = agg[key] || { inc: 0, exp: 0 }; const net = a.inc - a.exp;
+    out += `\n<b>${ID_MONTHS[mm.m]} ${mm.y}</b>\nIn ${idr(a.inc)} · Out ${idr(a.exp)}\nNet: <b>${net >= 0 ? "+" : ""}${idr(net)}</b>\n`;
+  }
+  // net worth sekarang
+  const acc = await getActiveAccounts(supabase, uid);
+  const nw = acc.filter((a) => a.type === "bank" && a.currency === "IDR").reduce((s, a) => s + (Number(a.current_balance) || 0), 0)
+    + acc.filter((a) => a.type === "asset" && a.include_networth !== false).reduce((s, a) => s + (Number(a.current_value) || 0), 0)
+    - acc.filter((a) => a.type === "credit_card").reduce((s, a) => s + (Number(a.outstanding_amount) || 0), 0)
+    - acc.filter((a) => a.type === "liability").reduce((s, a) => s + (Number(a.outstanding_amount) || 0), 0);
+  out += `\n━━━━━━━━━━━━━━━\n💎 Net worth sekarang: <b>${idr(nw)}</b>`;
+  return out;
 }
 
 // ── /cek: health-check keuangan (anomali) ──
