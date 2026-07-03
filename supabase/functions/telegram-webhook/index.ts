@@ -1997,8 +1997,8 @@ async function callClaudeTools(apiKey: string, system: string, messages: any[], 
   return data;
 }
 
-async function handleQuestion(text: string, apiKey: string, supabase: any, uid: string, botToken: string, chatId: number) {
-  await sendTelegramHTML(botToken, chatId, "💭 <i>Sebentar...</i>");
+async function runAgentQA(text: string, apiKey: string, supabase: any, uid: string): Promise<{ answer: string; trace: any[] }> {
+  const trace: any[] = [];
   const d = jakartaNow();
   const system = `Kamu asisten keuangan pribadi Paulus. Jawab bahasa Indonesia santai & ringkas, pakai format Rupiah (mis. Rp1.234.567). Hari ini ${d.getUTCDate()} ${ID_MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()} (tahun default 2026).
 
@@ -2006,33 +2006,43 @@ Kamu punya TOOLS untuk baca data keuangan Paulus dari database. SELALU pakai too
 - "berapa total X" → aggregate_transactions (pakai group_by kalau perlu rincian).
 - "transaksi apa aja / terbesar" → list_transactions.
 - saldo / net worth / hutang / investasi → get_summary.
-Untuk trip/perjalanan (mis. Jepang): coba category='Travel' pada rentang tanggalnya, dan/atau search kota/negara ('tokyo','osaka','japan'). Boleh panggil beberapa tool sebelum menjawab.
-Setelah dapat data, jawab singkat & to-the-point. Boleh <b>tebal</b> HTML (JANGAN markdown, JANGAN * atau #). Kalau data nggak cukup, bilang terus terang.`;
+
+PENTING soal WAKTU: kata seperti "kemarin", "waktu itu", "tempo hari", "kmrn" sering berarti "baru-baru ini" — JANGAN diartikan harfiah tanggal kemarin. Kalau pencarian rentang sempit hasilnya KOSONG, LEBARKAN rentangnya (mis. 3-4 bulan terakhir, atau tanpa batas tanggal) SEBELUM menyimpulkan "tidak ada".
+
+Untuk pertanyaan TRIP/PERJALANAN (mis. Jepang): panggil aggregate_transactions dengan category='Travel' TANPA batas tanggal sempit (atau 4 bulan terakhir, group_by='month') untuk lihat bulan mana ada Travel besar — itu tripnya. Boleh juga search 'tokyo'/'osaka'/'japan'/'jpn'. Jangan menyerah setelah 1 pencarian sempit.
+
+Setelah dapat data, jawab singkat & to-the-point (sebut periodenya, mis. "sekitar Juni"). Boleh <b>tebal</b> HTML (JANGAN markdown, JANGAN * atau #). Kalau benar-benar tidak ada data, baru bilang terus terang.`;
 
   const messages: any[] = [{ role: "user", content: text }];
-  try {
-    for (let i = 0; i < 6; i++) {
-      const resp = await callClaudeTools(apiKey, system, messages, QA_TOOLS);
-      if (resp.stop_reason === "tool_use") {
-        messages.push({ role: "assistant", content: resp.content });
-        const results: any[] = [];
-        for (const block of resp.content || []) {
-          if (block.type === "tool_use") {
-            let out: any;
-            try { out = await runAgentTool(block.name, block.input || {}, supabase, uid); }
-            catch (e: any) { out = { error: String(e?.message || e) }; }
-            results.push({ type: "tool_result", tool_use_id: block.id, content: JSON.stringify(out) });
-          }
+  for (let i = 0; i < 6; i++) {
+    const resp = await callClaudeTools(apiKey, system, messages, QA_TOOLS);
+    trace.push({ iter: i, stop: resp.stop_reason, blocks: (resp.content || []).map((b: any) => b.type + (b.name ? ":" + b.name : "")) });
+    if (resp.stop_reason === "tool_use") {
+      messages.push({ role: "assistant", content: resp.content });
+      const results: any[] = [];
+      for (const block of resp.content || []) {
+        if (block.type === "tool_use") {
+          let out: any;
+          try { out = await runAgentTool(block.name, block.input || {}, supabase, uid); }
+          catch (e: any) { out = { error: String(e?.message || e) }; }
+          results.push({ type: "tool_result", tool_use_id: block.id, content: JSON.stringify(out) });
         }
-        messages.push({ role: "user", content: results });
-        continue;
       }
-      const ans = (((resp.content || []).find((b: any) => b.type === "text")?.text) || "(kosong)").trim();
-      await sendTelegramHTML(botToken, chatId, ans);
-      return;
+      messages.push({ role: "user", content: results });
+      continue;
     }
-    await sendTelegramHTML(botToken, chatId, "⚠️ Kebanyakan langkah — coba pertanyaan lebih spesifik.");
+    return { answer: (((resp.content || []).find((b: any) => b.type === "text")?.text) || "(kosong)").trim(), trace };
+  }
+  return { answer: "⚠️ Kebanyakan langkah — coba pertanyaan lebih spesifik.", trace };
+}
+
+async function handleQuestion(text: string, apiKey: string, supabase: any, uid: string, botToken: string, chatId: number) {
+  await sendTelegramHTML(botToken, chatId, "💭 <i>Sebentar...</i>");
+  try {
+    const { answer } = await runAgentQA(text, apiKey, supabase, uid);
+    await sendTelegramHTML(botToken, chatId, answer);
   } catch (err: any) {
+    console.error("[telegram-webhook] handleQuestion error:", err);
     await sendTelegramHTML(botToken, chatId, "❌ Gagal jawab: " + esc(err?.message || "error"));
   }
 }
