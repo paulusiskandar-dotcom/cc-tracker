@@ -39,10 +39,15 @@ function dueDateInMonth(dayOfMonth, base) {
 const MONTHS_ID = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
 
 const SUBTABS = [
-  { key: "cards",       icon: "💳", label: "Credit Card" },
-  { key: "installments",icon: "📆", label: "Installments" },
-  { key: "recurring",   icon: "🧾", label: "Recurring" },
+  { key: "cards",         label: "Credit Card" },
+  { key: "installments",  label: "Installments" },
+  { key: "recurring",     label: "Recurring" },
+  { key: "subscriptions", label: "Subscriptions" },
 ];
+
+// Manual-pay recurring bills (utilities, property, tax, telco) vs auto-charged
+// subscriptions on a card. Classified by name since there's no schema field.
+const MANUAL_RE = /listrik|metro|apart|internet|wifi|indihome|\bpph\b|pajak|telkomsel|\bipl\b|pdam|bpjs|iuran|residence|riverside|circleone/i;
 
 // ─── Component ────────────────────────────────────────────────────
 export default function Billing({
@@ -53,7 +58,7 @@ export default function Billing({
   const today = new Date();
   const curMonth = ym(today.toISOString().slice(0, 10));
 
-  const { cards, cicilan, rutin } = useMemo(() => {
+  const { cards, cicilan, rutinManual, subs } = useMemo(() => {
     const dayLeft = (dt) => Math.round(
       (new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).getTime()
         - new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) / 86400000
@@ -103,15 +108,18 @@ export default function Billing({
       .filter(r => !r.paid)                            // hide already-paid
       .sort((a, b) => a.when - b.when);
 
-    return { cards, cicilan, rutin };
+    const rutinManual = rutin.filter(r => MANUAL_RE.test(r.name || ""));
+    const subs        = rutin.filter(r => !MANUAL_RE.test(r.name || ""));
+
+    return { cards, cicilan, rutinManual, subs };
   }, [ledger, creditCards, liabilities, recurTemplates, installments, curMonth]); // eslint-disable-line
 
-  const byTab = { cards, installments: cicilan, recurring: rutin };
+  const byTab = { cards, installments: cicilan, recurring: rutinManual, subscriptions: subs };
   const items = byTab[tab] || [];
   const countOf = (k) => (byTab[k] || []).length;
 
-  const totalAll = [...cards, ...cicilan, ...rutin].filter(i => i.known).reduce((s, i) => s + i.amount, 0);
-  const hasUnpaid = cards.length + cicilan.length + rutin.length > 0;
+  const totalAll = [...cards, ...cicilan, ...rutinManual, ...subs].filter(i => i.known).reduce((s, i) => s + i.amount, 0);
+  const hasUnpaid = cards.length + cicilan.length + rutinManual.length + subs.length > 0;
   const tabTotal = items.filter(i => i.known).reduce((s, i) => s + i.amount, 0);
 
   const monthLabel = `${MONTHS_ID[today.getMonth()]} ${today.getFullYear()}`;
