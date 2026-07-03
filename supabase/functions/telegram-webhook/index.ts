@@ -736,12 +736,14 @@ function escapeMarkdown(text: string): string {
 // COMMAND CENTER (T1: query commands)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-async function sendTelegramHTML(token: string, chatId: number, html: string) {
+async function sendTelegramHTML(token: string, chatId: number, html: string, replyMarkup?: any) {
   try {
+    const body: any = { chat_id: chatId, text: html, parse_mode: "HTML", disable_web_page_preview: true };
+    if (replyMarkup) body.reply_markup = replyMarkup;
     await fetch(`${TELEGRAM_API}/bot${token}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text: html, parse_mode: "HTML", disable_web_page_preview: true }),
+      body: JSON.stringify(body),
     });
   } catch (err) {
     console.error("[telegram-webhook] sendHTML error:", err);
@@ -1416,7 +1418,9 @@ async function handleTextCorrection(text: string, supabase: any, uid: string, bo
   const tt = wantTransfer ? "transfer"
     : (entity && entity !== "Personal") ? `reimburse_${dir0 ? "in" : "out"} ${entity}`
     : `${dir0 ? "income" : "expense"} (pribadi)${category ? " · " + category : ""}`;
-  await sendTelegramHTML(botToken, chatId, `✅ <b>${changed.length} transaksi → ${esc(tt)}</b>\n${changed.slice(0, 8).map((c) => "• " + c).join("\n")}\n\nTap <b>✅ Import Semua</b> di digest buat masukin ke ledger.`);
+  await sendTelegramHTML(botToken, chatId,
+    `✅ <b>${changed.length} transaksi → ${esc(tt)}</b>\n${changed.slice(0, 8).map((c) => "• " + c).join("\n")}`,
+    { inline_keyboard: [[{ text: "✅ Import Semua", callback_data: "dg:importall" }]] });
   return true;
 }
 
