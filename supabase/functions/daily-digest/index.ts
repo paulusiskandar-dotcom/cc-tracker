@@ -148,7 +148,7 @@ Deno.serve(async () => {
   const keyboard = [
     ...classifyRows,
     [{ text: "✅ Import Semua", callback_data: "dg:importall" }, { text: "✏️ Review semua", callback_data: "dg:reviewall" }],
-    [{ text: "🌐 Buka App", url: "https://cc.paulusiskandar.com" }],
+    [{ text: "🌐 Buka App", url: "https://ryusei.paulusiskandar.com" }],
   ];
   const res = await sendTelegram(BOT_TOKEN, CHAT_ID, msg, keyboard);
   return new Response(JSON.stringify({ ok: true, txs: txs.length, ambiguous: amb.length, tg: res?.ok }));
