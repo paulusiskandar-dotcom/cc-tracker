@@ -326,9 +326,13 @@ Deno.serve(async (req: Request) => {
         return new Response("ok", { status: 200 });
       }
 
-      // Free-text router: a question -> AI Q&A over his finances; otherwise -> bank-notification parse.
+      // Free-text router: question -> AI Q&A; short "makan 50rb bca" -> quick-add; else -> bank-notification parse.
       if (looksLikeQuestion(text)) {
         await handleQuestion(text, ANTHROPIC_API_KEY, supabase, AUTHORIZED_USER_ID, TELEGRAM_BOT_TOKEN, chatId);
+        return new Response("ok", { status: 200 });
+      }
+      if (looksLikeQuickAdd(text)) {
+        await handleQuickAdd(text, ANTHROPIC_API_KEY, supabase, AUTHORIZED_USER_ID, TELEGRAM_BOT_TOKEN, chatId);
         return new Response("ok", { status: 200 });
       }
 
@@ -755,8 +759,7 @@ async function handleCommand(cmd: string, arg: string, supabase: any, uid: strin
       case "/due":
       case "/jatuhtempo": return sendTelegramHTML(token, chatId, await cmdDue(supabase, uid));
       case "/undo": return sendTelegramHTML(token, chatId, await cmdUndo(supabase, uid));
-      case "/report":
-        return sendTelegramHTML(token, chatId, "📊 <b>/report</b> (PDF/HTML lengkap) — coming soon (T5).\nSementara pakai /bulan untuk ringkasan bulan ini.");
+      case "/report": { await cmdReport(supabase, uid, arg, token, chatId); return; }
       default:
         return sendTelegramHTML(token, chatId, "Command tidak dikenali.\n\n" + cmdMenu());
     }
@@ -1221,6 +1224,105 @@ async function handleCallback(cb: any, token: string, supabase: any, uid: string
   await answerCallback(token, cb.id, "ok");
 }
 
+// ── QUICK-ADD: "makan 50rb bca" -> expense langsung ke ledger ──
+function looksLikeQuickAdd(t: string): boolean {
+  const s = t.trim();
+  if (s.length > 80) return false;
+  const hasAmt = /\b\d+\s*(rb|ribu|k|jt|juta)\b/i.test(s) || /\b\d{4,}\b/.test(s.replace(/[.,]/g, ""));
+  const isNotif = /(debet|kredit|rek\.|rekening|berhasil|bca info|transfer dari|saldo anda|otp|va |virtual)/i.test(s);
+  return hasAmt && !isNotif;
+}
+
+async function handleQuickAdd(text: string, apiKey: string, supabase: any, uid: string, botToken: string, chatId: number) {
+  const accounts = await getActiveAccounts(supabase, uid);
+  const spendable = accounts.filter((a) => a.type === "bank" || a.type === "credit_card");
+  const names = spendable.map((a) => a.name).join(", ");
+  const { data: cats } = await supabase.from("expense_categories").select("id,name").or(`user_id.is.null,user_id.eq.${uid}`);
+  const catNames = (cats || []).map((c: any) => c.name).join(", ");
+  const prompt = `Parse catatan pengeluaran singkat Indonesia menjadi JSON. Input: "${text}"
+
+Akun user (pilih yang PALING cocok disebut di input; null kalau tidak disebut): ${names}
+Kategori valid: ${catNames}
+
+Output HANYA JSON: {"amount": number (50rb=50000, 1.5jt=1500000), "account": "nama akun persis dari daftar atau null", "category": "kategori valid paling cocok", "description": "deskripsi singkat"}`;
+  try {
+    const raw = await callClaudeAnswerText(apiKey, prompt);
+    const j = JSON.parse(raw.replace(/```json?/g, "").replace(/```/g, "").trim());
+    const amt = Math.round(Number(j.amount) || 0);
+    if (!amt) { await sendTelegramHTML(botToken, chatId, "⚠️ Nominal tidak kebaca. Contoh: <i>makan 50rb bca</i>"); return; }
+    const accRow = j.account ? spendable.find((a) => a.name.toLowerCase() === String(j.account).toLowerCase()) : null;
+    if (!accRow) {
+      await sendTelegramHTML(botToken, chatId, `⚠️ Sebut akunnya ya. Contoh: <i>${esc(text)} <b>bca idr</b></i>\n\nAkun: ${esc(names)}`);
+      return;
+    }
+    // merchant-memory: kategori dari mapping kalau ada
+    const { data: mm } = await supabase.from("merchant_mappings").select("merchant_name, category_name").eq("user_id", uid);
+    const nrm = (s: any) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const nd = nrm(j.description);
+    const hit = (mm || []).filter((m: any) => { const n = nrm(m.merchant_name); return n.length >= 4 && (nd.includes(n) || n.includes(nd.slice(0, 10))); }).sort((a: any, b: any) => nrm(b.merchant_name).length - nrm(a.merchant_name).length)[0];
+    const catName = hit?.category_name || j.category || "Other";
+    const catRow = (cats || []).find((c: any) => c.name === catName) || (cats || []).find((c: any) => c.name === "Other");
+    const { error } = await supabase.from("ledger").insert({
+      user_id: uid, tx_date: ymd(jakartaNow()), tx_type: "expense", amount: amt, amount_idr: amt, currency: "IDR",
+      description: j.description || text, from_type: "account", from_id: accRow.id, to_type: "expense", to_id: null,
+      category_id: catRow?.id || null, category_name: catRow?.name || null, entity: "Personal", source: "telegram_import",
+    });
+    if (error) throw new Error(error.message);
+    await recalcAccountEdge(supabase, uid, accRow);
+    await sendTelegramHTML(botToken, chatId, `✅ <b>Tercatat</b>\n${esc(j.description || text)}\n<b>${idr(amt)}</b> · ${esc(catRow?.name || "-")} · ${esc(accRow.name)}${hit ? "\n<i>kategori dari memory merchant</i>" : ""}\n\nSalah? /undo`);
+  } catch (err: any) {
+    await sendTelegramHTML(botToken, chatId, "❌ Gagal quick-add: " + esc(err?.message || "error"));
+  }
+}
+
+// ── /report: laporan bulanan HTML dikirim sebagai file ──
+async function cmdReport(supabase: any, uid: string, arg: string, token: string, chatId: number) {
+  const now = jakartaNow();
+  let year = now.getUTCFullYear(), month = now.getUTCMonth();
+  const m = arg.match(/(\d{4})-(\d{2})/); if (m) { year = Number(m[1]); month = Number(m[2]) - 1; }
+  const start = `${year}-${String(month + 1).padStart(2, "0")}-01`;
+  const end = ymd(new Date(Date.UTC(year, month + 1, 0)));
+  const label = `${ID_MONTHS[month]} ${year}`;
+  await sendTelegramHTML(token, chatId, `📊 Membuat laporan <b>${label}</b>...`);
+  const { data: led } = await supabase.from("ledger").select("tx_date, tx_type, amount_idr, description, merchant_name, category_name, entity").eq("user_id", uid).gte("tx_date", start).lte("tx_date", end).order("tx_date");
+  const acc = await getActiveAccounts(supabase, uid);
+  let inc = 0, exp = 0; const cats: Record<string, number> = {}; const incSrc: Record<string, number> = {};
+  const topExp: any[] = [];
+  for (const t of led || []) {
+    const a = Number(t.amount_idr) || 0;
+    if (t.tx_type === "income") { inc += a; incSrc[t.description?.slice(0, 30) || "-"] = (incSrc[t.description?.slice(0, 30) || "-"] || 0) + a; }
+    else if (t.tx_type === "expense") { exp += a; const c = t.category_name || "Lainnya"; cats[c] = (cats[c] || 0) + a; topExp.push(t); }
+  }
+  topExp.sort((a, b) => Number(b.amount_idr) - Number(a.amount_idr));
+  const banks = acc.filter((a) => a.type === "bank" && a.currency === "IDR" && Number(a.current_balance) > 0).sort((a, b) => b.current_balance - a.current_balance);
+  const ccs = acc.filter((a) => a.type === "credit_card" && Number(a.outstanding_amount) > 0).sort((a, b) => b.outstanding_amount - a.outstanding_amount);
+  const rpn = (n: number) => "Rp" + Math.round(n).toLocaleString("id-ID");
+  const catRows = Object.entries(cats).sort((a, b) => b[1] - a[1]).map(([c, v]) => `<tr><td>${c}</td><td class="r">${rpn(v)}</td><td class="r">${exp ? Math.round(v / exp * 100) : 0}%</td></tr>`).join("");
+  const html = `<meta charset="utf-8"><title>Laporan ${label}</title><style>
+  body{font-family:-apple-system,Segoe UI,sans-serif;background:#0f172a;color:#e2e8f0;margin:0;padding:24px;max-width:720px;margin:auto}
+  h1{font-size:22px}h2{font-size:15px;color:#94a3b8;margin:28px 0 8px;text-transform:uppercase;letter-spacing:.05em}
+  .kpi{display:flex;gap:12px;flex-wrap:wrap}.kpi div{background:#1e293b;border-radius:12px;padding:14px 18px;flex:1;min-width:140px}
+  .kpi b{display:block;font-size:19px;margin-top:4px}.g{color:#4ade80}.r2{color:#f87171}
+  table{width:100%;border-collapse:collapse;background:#1e293b;border-radius:12px;overflow:hidden}
+  td,th{padding:8px 12px;border-bottom:1px solid #334155;font-size:13px;text-align:left}.r{text-align:right}
+  </style>
+  <h1>📊 Laporan Keuangan — ${label}</h1>
+  <div class="kpi"><div>Income<b class="g">${rpn(inc)}</b></div><div>Expense<b class="r2">${rpn(exp)}</b></div><div>Net<b class="${inc - exp >= 0 ? "g" : "r2"}">${rpn(inc - exp)}</b></div></div>
+  <h2>Pengeluaran per kategori</h2><table>${catRows}</table>
+  <h2>Top 15 pengeluaran</h2><table>${topExp.slice(0, 15).map((t) => `<tr><td>${t.tx_date.slice(5)}</td><td>${(t.merchant_name || t.description || "-").slice(0, 38)}</td><td class="r">${rpn(Number(t.amount_idr))}</td></tr>`).join("")}</table>
+  <h2>Income</h2><table>${Object.entries(incSrc).sort((a, b) => b[1] - a[1]).map(([d, v]) => `<tr><td>${d}</td><td class="r">${rpn(v)}</td></tr>`).join("")}</table>
+  <h2>Saldo bank saat ini</h2><table>${banks.map((a) => `<tr><td>${a.name}</td><td class="r">${rpn(Number(a.current_balance))}</td></tr>`).join("")}</table>
+  <h2>Tagihan kartu saat ini</h2><table>${ccs.map((a) => `<tr><td>${a.name}</td><td class="r">${rpn(Number(a.outstanding_amount))}</td></tr>`).join("")}</table>
+  <p style="color:#64748b;font-size:12px">Dibuat otomatis oleh CC Tracker · P&amp;L tidak termasuk transfer/pay_cc/reimburse/aset</p>`;
+  const form = new FormData();
+  form.append("chat_id", String(chatId));
+  form.append("document", new Blob([html], { type: "text/html" }), `Laporan-${start.slice(0, 7)}.html`);
+  form.append("caption", `📊 Laporan ${label} — buka di browser`);
+  const r = await fetch(`${TELEGRAM_API}/bot${token}/sendDocument`, { method: "POST", body: form });
+  const jr = await r.json();
+  if (!jr.ok) await sendTelegramHTML(token, chatId, "❌ Gagal kirim laporan: " + esc(jr.description || "error"));
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // IMPORTER: pending email_sync -> ledger (typed correctly), then hide from app.
 // Type is derived from the RESOLVED destination account (statement-of-truth), not the
@@ -1279,6 +1381,14 @@ async function importPending(supabase: any, uid: string): Promise<string> {
   const { data: cats } = await supabase.from("expense_categories").select("id,name").or(`user_id.is.null,user_id.eq.${uid}`);
   const catId = (n: string | null) => (cats || []).find((c: any) => c.name === n)?.id || (cats || []).find((c: any) => c.name === "Other")?.id || null;
   const { data: srcs } = await supabase.from("income_sources").select("id,name");
+  const { data: mmaps } = await supabase.from("merchant_mappings").select("merchant_name, category_name").eq("user_id", uid);
+  const nrmM = (x: any) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const mapCat = (desc: string): string | null => {
+    const nd = nrmM(desc);
+    const hit = (mmaps || []).filter((m: any) => { const n = nrmM(m.merchant_name); return n.length >= 4 && (nd.includes(n) || n.includes(nd.slice(0, 10))); })
+      .sort((a: any, b: any) => nrmM(b.merchant_name).length - nrmM(a.merchant_name).length)[0];
+    return hit?.category_name || null;
+  };
   const srcId = (n: string) => ((srcs || []).find((s: any) => s.name === n) || (srcs || []).find((s: any) => s.name === "Other Income"))?.id;
 
   type Item = { esId: string; idx: number; t: any; res?: any; drop?: string; dupInfo?: string; skippedByUser?: boolean };
@@ -1375,7 +1485,8 @@ async function importPending(supabase: any, uid: string): Promise<string> {
     } else if (r.ty === "reimburse_out" && PIU[r.entity]) {
       ins.push({ ...base, tx_type: "reimburse_out", from_type: "account", from_id: r.fromA.id, to_type: "account", to_id: PIU[r.entity], entity: r.entity, is_reimburse: true });
     } else {
-      ins.push({ ...base, tx_type: "expense", from_type: "account", from_id: r.fromA.id, to_type: "expense", to_id: null, category_id: catId(r.cat || "Other"), category_name: r.cat || "Other", entity: "Personal" });
+      const finalCat = mapCat(r.desc) || r.cat || "Other";
+      ins.push({ ...base, tx_type: "expense", from_type: "account", from_id: r.fromA.id, to_type: "expense", to_id: null, category_id: catId(finalCat), category_name: finalCat, entity: "Personal" });
     }
     counts[r.ty] = (counts[r.ty] || 0) + 1; totalAmt += r.amt;
   }
