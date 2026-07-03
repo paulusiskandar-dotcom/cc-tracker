@@ -4,7 +4,7 @@ import {
   Home, ArrowUpDown, Landmark, Wallet, CreditCard,
   TrendingUp, ClipboardList, ArrowDown, BarChart2,
   Calendar as CalendarIcon, Settings as SettingsIcon, LayoutGrid,
-  ClipboardCheck, PiggyBank, Tag,
+  ClipboardCheck, PiggyBank, Tag, Receipt,
 } from "lucide-react";
 import PILogo from "./components/PILogo";
 import { supabase } from "./lib/supabase";
@@ -616,6 +616,7 @@ function NAV_ICON({ id }) {
     case "bank":         return <Landmark      {...LUCIDE_PROPS} />;
     case "cash":         return <Wallet        {...LUCIDE_PROPS} />;
     case "cards":        return <CreditCard    {...LUCIDE_PROPS} />;
+    case "billing":      return <Receipt       {...LUCIDE_PROPS} />;
     case "assets":       return <TrendingUp    {...LUCIDE_PROPS} />;
     case "receivables":  return <ClipboardList {...LUCIDE_PROPS} />;
     case "income":       return <ArrowDown      {...LUCIDE_PROPS} />;

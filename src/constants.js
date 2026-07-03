@@ -108,7 +108,7 @@ export const TABS = [
   { id: "bank",         label: "Bank"         },
   { id: "cash",         label: "Cash"         },
   { id: "cards",        label: "Credit Cards" },
-  { id: "billing",      label: "Tagihan"      },
+  { id: "billing",      label: "Bills"        },
   { id: "assets",       label: "Assets"       },
   { id: "receivables",  label: "Receivables"  },
   { id: "income",       label: "Income"       },
@@ -124,7 +124,7 @@ export const MOBILE_MAIN_TABS = ["dashboard", "transactions", "bank", "assets"];
 export const MOBILE_MORE_TABS = [
   { id: "cash",        label: "Cash"         },
   { id: "cards",       label: "Credit Cards" },
-  { id: "billing",     label: "Tagihan"      },
+  { id: "billing",     label: "Bills"        },
   { id: "receivables", label: "Receivables"  },
   { id: "income",      label: "Income"       },
   { id: "reports",     label: "Reports"      },

@@ -137,7 +137,7 @@ export default function Billing({
   return (
     <div style={{ maxWidth: 640, margin: "0 auto", padding: "8px 0 40px", fontFamily: "Figtree, sans-serif" }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", padding: "4px 16px 12px" }}>
-        <h1 style={{ fontSize: 22, fontWeight: 800, color: "#111827", margin: 0 }}>Tagihan</h1>
+        <h1 style={{ fontSize: 22, fontWeight: 800, color: "#111827", margin: 0 }}>Bills</h1>
         <span style={{ fontSize: 13, fontWeight: 600, color: "#6b7280" }}>{monthLabel}</span>
       </div>
 
