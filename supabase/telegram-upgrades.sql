@@ -9,6 +9,9 @@ create table if not exists tg_chat_memory (
   turns      jsonb        default '[]'::jsonb,
   updated_at timestamptz  default now()
 );
+-- Enable RLS with NO policies: only the edge function (service-role, bypasses RLS)
+-- touches this table; anon/authenticated API access is fully blocked.
+alter table tg_chat_memory enable row level security;
 
 -- #6 Insight mingguan — Senin 08:00 WIB (01:00 UTC)
 select cron.schedule('ryusei-weekly-insight', '0 1 * * 1', $$
