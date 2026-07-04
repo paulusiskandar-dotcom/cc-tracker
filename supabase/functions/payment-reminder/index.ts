@@ -48,18 +48,43 @@ Deno.serve(async (_req) => {
   }
   const sb = createClient(SUPABASE_URL, SERVICE_KEY);
 
-  // ── CC due dates ──────────────────────────────────────────────
-  let accQ = sb.from("accounts").select("name,card_last4,due_day,outstanding_amount,type,user_id,is_active")
+  // ── CC due dates (statement-aware: only the PENDING bill, not post-cutoff usage) ──
+  let accQ = sb.from("accounts").select("id,name,card_last4,due_day,statement_day,outstanding_amount,type,user_id,is_active")
     .eq("type", "credit_card").not("due_day", "is", null);
   if (USER_ID) accQ = accQ.eq("user_id", USER_ID);
   const { data: ccs } = await accQ;
 
   const today = new Date(Date.now() + 7 * 3600 * 1000); // Jakarta (UTC+7)
   const horizon = new Date(today.getFullYear(), today.getMonth(), today.getDate() + LEAD_DAYS);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const dstr = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+  // Charges after the last statement cutoff belong to NEXT month's bill, so
+  // subtract them from outstanding to get the amount actually due now. If the
+  // statement is already paid, pending = 0 and the card is skipped. (< Rp25rb ignored.)
+  const sinceStr = dstr(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 62));
+  let chQ = sb.from("ledger").select("from_id,from_type,amount_idr,tx_date").eq("from_type", "account").gte("tx_date", sinceStr);
+  if (USER_ID) chQ = chQ.eq("user_id", USER_ID);
+  const { data: charges } = await chQ;
+  const lastStmt = (statementDay: any, ref: Date): Date | null => {
+    if (!statementDay) return null;
+    const cand = new Date(ref.getFullYear(), ref.getMonth(), Number(statementDay));
+    return cand < ref ? cand : new Date(ref.getFullYear(), ref.getMonth() - 1, Number(statementDay));
+  };
+  const pendingDue = (c: any): number => {
+    const outstanding = Number(c.outstanding_amount || 0);
+    if (outstanding <= 0) return 0;
+    if (!c.statement_day) return outstanding;
+    const ls = lastStmt(c.statement_day, today);
+    if (!ls) return outstanding;
+    const lsStr = dstr(ls);
+    const after = (charges || []).filter((e: any) => e.from_id === c.id && e.from_type === "account" && e.tx_date > lsStr).reduce((s: number, e: any) => s + Number(e.amount_idr || 0), 0);
+    return Math.max(0, outstanding - after);
+  };
   const due = (ccs || [])
-    .filter((c: any) => c.is_active !== false && Number(c.outstanding_amount || 0) >= 50000)
-    .map((c: any) => ({ name: c.name, amt: Number(c.outstanding_amount || 0), when: nextDue(today, c.due_day) }))
-    .filter((c: any) => c.when <= horizon);
+    .filter((c: any) => c.is_active !== false)
+    .map((c: any) => ({ name: c.name, amt: pendingDue(c), when: nextDue(today, c.due_day) }))
+    .filter((c: any) => c.amt >= 25000 && c.when <= horizon);
   // liability cicilan (BYD dll) with due_day
   let liabQ = sb.from("accounts").select("name,monthly_installment,due_day,type,user_id,is_active").eq("type", "liability").not("due_day", "is", null);
   if (USER_ID) liabQ = liabQ.eq("user_id", USER_ID);
@@ -76,8 +101,11 @@ Deno.serve(async (_req) => {
     .eq("is_active", true).not("tx_type", "in", "(income)");
   if (USER_ID) rtQ = rtQ.eq("user_id", USER_ID);
   const { data: rts } = await rtQ;
+  // Only MANUAL bills (utilities/property/tax/telco) need reminders. Subscriptions
+  // that auto-charge on a card don't — they already show up in the CC bill.
+  const MANUAL_RE = /listrik|metro|apart|internet|wifi|indihome|\bpph\b|pajak|telkomsel|\bipl\b|pdam|bpjs|iuran|residence|riverside|circleone/i;
   const bills = (rts || [])
-    .filter((t: any) => t.day_of_month)
+    .filter((t: any) => t.day_of_month && MANUAL_RE.test(t.name || ""))
     .map((t: any) => ({ ...t, when: nextDue(today, t.day_of_month) }))
     .filter((t: any) => t.when <= horizon)
     .sort((a: any, b: any) => a.when - b.when);
