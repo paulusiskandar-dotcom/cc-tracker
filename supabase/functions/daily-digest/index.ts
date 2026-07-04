@@ -47,12 +47,14 @@ Deno.serve(async () => {
   const ISSUER_CARD: Array<[RegExp, string]> = [[/mayapada|skorcard/i, "2362"]];
   const dnum = (d: string) => new Date((d || "2026-01-01") + "T00:00:00Z").getTime();
 
-  type Tx = { desc: string; amount: number; dir: string; ty: string; fromN?: string; toN?: string; entity?: string; cat?: string; ambiguous?: boolean; esId?: string; idx?: number; date?: string; fromType?: string; isCcPay?: boolean; _skip?: boolean };
+  type Tx = { desc: string; amount: number; dir: string; ty: string; fromN?: string; toN?: string; entity?: string; cat?: string; ambiguous?: boolean; esId?: string; idx?: number; date?: string; fromType?: string; isCcPay?: boolean; _skip?: boolean; _no?: number };
   const txs: Tx[] = [];
+  const rowArrays: Record<string, any[]> = {};   // keep parsed arrays to write _tg_no back
   for (const r of rows || []) {
     let arr: unknown = r.ai_raw_result;
     try { if (typeof arr === "string") arr = JSON.parse(arr); } catch { arr = null; }
     const list = Array.isArray(arr) ? arr : (arr as { transactions?: unknown[] })?.transactions;
+    if (Array.isArray(arr)) rowArrays[r.id as string] = arr;
     (Array.isArray(list) ? list : []).forEach((t, idx) => {
       const tx = t as Record<string, unknown>;
       if (tx._imported || tx._skipped) return; // already imported or rejected via Telegram
@@ -98,6 +100,18 @@ Deno.serve(async () => {
   const amb = shown.filter(t => t.ambiguous);
   const esc = (s: unknown) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+  // Number the SHOWN items in display order and persist _tg_no back to email_sync,
+  // so a reply like "1 food 2 sdc out" maps to exactly what the user sees here.
+  for (const arr of Object.values(rowArrays)) for (const it of arr) if (it && typeof it === "object") delete it._tg_no;
+  const SECTION_ORDER = ["pay_cc", "pay_liability", "transfer", "expense", "income"];
+  let noCounter = 0;
+  for (const ty of SECTION_ORDER) for (const t of shown.filter(x => x.ty === ty)) {
+    t._no = ++noCounter;
+    const arr = rowArrays[t.esId as string];
+    if (arr && arr[t.idx as number] && typeof arr[t.idx as number] === "object") arr[t.idx as number]._tg_no = t._no;
+  }
+  for (const [id, arr] of Object.entries(rowArrays)) await sb.from("email_sync").update({ ai_raw_result: arr }).eq("id", id);
+
   // Sections by TRUE transaction type (what will actually be imported)
   const TYPE_META: Record<string, { label: string; icon: string }> = {
     pay_cc: { label: "BAYAR KARTU KREDIT", icon: "💳" },
@@ -113,14 +127,14 @@ Deno.serve(async () => {
     const sub = list.reduce((a, t) => a + t.amount, 0);
     let s = `\n${meta.icon} <b>${meta.label}</b>  ·  ${rp(sub)}\n`;
     if (ty === "pay_cc" || ty === "pay_liability" || ty === "transfer") {
-      for (const t of list) s += `${t.ambiguous ? "❓" : "•"}  ${esc(t.fromN || "?")} → <b>${esc(t.toN || "?")}</b>\n     ${rp(t.amount)}\n`;
+      for (const t of list) s += `<b>${t._no}.</b>${t.ambiguous ? " ❓" : ""}  ${esc(t.fromN || "?")} → <b>${esc(t.toN || "?")}</b>\n     ${rp(t.amount)}\n`;
     } else if (ty === "expense") {
       for (const t of list) {
         const ent = t.entity && t.entity !== "Personal" ? `  [${esc(t.entity)}]` : "";
-        s += `${t.ambiguous ? "❓" : "•"}  ${esc(t.desc)}${ent}\n     ${rp(t.amount)}  ·  <i>${esc(t.cat || "Lainnya")}${t.fromN ? " · " + esc(t.fromN) : ""}</i>\n`;
+        s += `<b>${t._no}.</b>${t.ambiguous ? " ❓" : ""}  ${esc(t.desc)}${ent}\n     ${rp(t.amount)}  ·  <i>${esc(t.cat || "Lainnya")}${t.fromN ? " · " + esc(t.fromN) : ""}</i>\n`;
       }
     } else {
-      for (const t of list) s += `${t.ambiguous ? "❓" : "•"}  ${esc(t.desc)}${t.toN ? ` → ${esc(t.toN)}` : ""}\n     ${rp(t.amount)}  ·  <i>${esc(t.cat || "Income")}</i>\n`;
+      for (const t of list) s += `<b>${t._no}.</b>${t.ambiguous ? " ❓" : ""}  ${esc(t.desc)}${t.toN ? ` → ${esc(t.toN)}` : ""}\n     ${rp(t.amount)}  ·  <i>${esc(t.cat || "Income")}</i>\n`;
     }
     return s;
   };
@@ -131,7 +145,8 @@ Deno.serve(async () => {
     `━━━━━━━━━━━━━━━\n` +
     section("pay_cc") + section("pay_liability") + section("transfer") + section("expense") + section("income") +
     (merged ? `\n🔗 <i>${merged} notifikasi dobel sudah di-merge</i>` : "") +
-    (amb.length ? `\n⚠️ <b>${amb.length} ambigu</b> — tap ❌/🏢/🦷/👤 dulu, baru Import` : `\n✅ Semua jelas — tap <b>Import</b> untuk masukin ke ledger`);
+    (amb.length ? `\n⚠️ <b>${amb.length} ambigu</b> — tap ❌/🏢/🦷/👤 dulu, baru Import` : `\n✅ Semua jelas — tap <b>Import</b> untuk masukin ke ledger`) +
+    `\n\n💡 <i>Salah tipe? Balas nomornya, mis. "1 food 2 sdc out 3 transfer".</i>`;
 
   // Inline buttons: one classify row per ambiguous item (max 8) + import-all + open-app.
   // callback_data "cls:<emailSyncId>:<txIdx>:<H|S|P>" is handled by telegram-webhook (safe: tags entity on pending).

@@ -1413,17 +1413,26 @@ async function handleTextCorrection(text: string, supabase: any, uid: string, bo
   }
   if (!flat.length) { await sendTelegramHTML(botToken, chatId, "📭 Ga ada transaksi pending buat diubah."); return true; }
 
+  // Resolve a user-typed number to a pending item. Prefer _tg_no (the number the
+  // digest showed & persisted) so it matches exactly what the user sees; fall back
+  // to list position.
+  const noMap = new Map<number, { rowId: string; t: any }>();
+  for (const f of flat) { const no = Number(f.t._tg_no); if (no) noMap.set(no, f); }
+  const pick = (n: number) => noMap.get(n) || flat[n - 1];
+  const maxNo = Math.max(flat.length, ...[...noMap.keys(), 0]);
+
   // MULTI-ASSIGN: "1 food 2 transfer 3 sdc out" -> tiap nomor tipe sendiri.
   // Aktif kalau ada >=2 pasangan nomor+tipe yang valid.
-  const assigns = parseAssignments(s, flat.length)
+  const assigns = parseAssignments(s, maxNo)
     .map((p) => ({ n: p.n, cls: classifyText(p.txt) }))
-    .filter((p) => p.cls.valid);
+    .filter((p) => p.cls.valid && pick(p.n));
   if (assigns.length >= 2) {
     const seen = new Map<number, ReturnType<typeof classifyText>>();
     for (const a of assigns) seen.set(a.n, a.cls);   // dedup, last wins
     const lines: string[] = []; const touched = new Set<string>();
     for (const n of [...seen.keys()].sort((x, y) => x - y)) {
-      const { rowId, t } = flat[n - 1];
+      const picked = pick(n); if (!picked) continue;
+      const { rowId, t } = picked;
       const label = applyCls(t, seen.get(n)!);
       lines.push(`${n}. ${esc(String(t.merchant_name || t.description || "tx").slice(0, 28))} · ${idr(t.amount_idr || t.amount)} → <b>${esc(label)}</b>`);
       touched.add(rowId);
@@ -1437,15 +1446,15 @@ async function handleTextCorrection(text: string, supabase: any, uid: string, bo
 
   // numeric selection: "2 sdc out", "1 3 food" -> pick items by their list number
   // (only integers within 1..N; anything bigger is treated as an amount, not an index)
-  const idxSel = Array.from(new Set((s.match(/\b\d{1,2}\b/g) || []).map(Number).filter((n) => n >= 1 && n <= flat.length)));
+  const idxSel = Array.from(new Set((s.match(/\b\d{1,2}\b/g) || []).map(Number).filter((n) => n >= 1 && n <= maxNo)));
 
   const labelOf = (t: any) => nrm(t.merchant_name || t.description);
   const kwHit = (t: any) => { const l = labelOf(t); return wantKW.some((k) => l.includes(k.slice(0, 6)) || (k === "tokopedia" && /tokp/.test(l))); };
-  const numberedList = () => flat.map((f, i) => `${i + 1}. ${esc(f.t.merchant_name || f.t.description || "tx")} — ${esc(idr(f.t.amount_idr || f.t.amount))}`).join("\n");
+  const numberedList = () => flat.map((f, i) => `${f.t._tg_no || i + 1}. ${esc(f.t.merchant_name || f.t.description || "tx")} — ${esc(idr(f.t.amount_idr || f.t.amount))}`).join("\n");
 
   let targets: { rowId: string; t: any }[];
   if (idxSel.length) {
-    targets = idxSel.map((n) => flat[n - 1]);          // pick specific rows by number
+    targets = idxSel.map(pick).filter(Boolean) as { rowId: string; t: any }[];  // pick specific rows by number
   } else if (wantKW.length) {
     targets = flat.filter(({ t }) => kwHit(t));         // pick by merchant name
   } else if (explicitAll || flat.length === 1) {
