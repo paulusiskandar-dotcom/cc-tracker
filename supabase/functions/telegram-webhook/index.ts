@@ -750,6 +750,21 @@ async function sendTelegramHTML(token: string, chatId: number, html: string, rep
   }
 }
 
+// Send a chart image via QuickChart (Chart.js config -> PNG). Only aggregated
+// numbers/labels leave the system.
+async function sendTelegramChart(token: string, chatId: number, cfg: any, caption?: string) {
+  try {
+    const url = "https://quickchart.io/chart?w=600&h=380&bkg=white&c=" + encodeURIComponent(JSON.stringify(cfg));
+    await fetch(`${TELEGRAM_API}/bot${token}/sendPhoto`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, photo: url, caption: caption || "", parse_mode: "HTML" }),
+    });
+  } catch (err) {
+    console.error("[telegram-webhook] sendChart error:", err);
+  }
+}
+
 function esc(s: any): string {
   return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -1919,6 +1934,7 @@ async function cmdCek(supabase: any, uid: string): Promise<string> {
 function looksLikeQuestion(t: string): boolean {
   const s = t.trim();
   if (/\?\s*$/.test(s)) return true;
+  if (/\b(grafik|chart|visualisasi|diagram|trend|tren)\b/i.test(s)) return true;
   return /^(berapa|brp|apa|apakah|kapan|gimana|gmn|bagaimana|kenapa|napa|mengapa|list|tampilkan|show|lihat|liat|total|sisa|siapa|mana|dimana|di ?mana|ada berapa|hitung|jelas|cek|status|net ?worth|worth|abis|abisin|habis|pengeluaran|pemasukan|income|expense|saldo|hutang|piutang|udah|sudah|kenapa)\b/i.test(s);
 }
 
@@ -2006,6 +2022,20 @@ const QA_TOOLS = [
     description: "Ringkasan: net worth, saldo bank, kartu kredit + jatuh tempo, investasi, hutang, P&L bulan ini, reimburse per entity. Pakai untuk saldo/net worth/hutang/investasi.",
     input_schema: { type: "object", properties: {} },
   },
+  {
+    name: "render_chart",
+    description: "Kirim GRAFIK ke user. Pakai kalau user minta 'grafik/chart/visualisasi/diagram'. Agregasi datanya dulu (aggregate_transactions), lalu panggil ini dengan labels + values yang sudah jadi. bar=perbandingan, line=trend waktu, pie/doughnut=proporsi.",
+    input_schema: {
+      type: "object",
+      properties: {
+        chart_type: { type: "string", enum: ["bar", "line", "pie", "doughnut"] },
+        title: { type: "string", description: "judul grafik" },
+        labels: { type: "array", items: { type: "string" }, description: "label sumbu-x / kategori" },
+        values: { type: "array", items: { type: "number" }, description: "nilai (Rupiah), urut sama dengan labels" },
+      },
+      required: ["chart_type", "labels", "values"],
+    },
+  },
 ];
 
 async function agentFetchLedger(supabase: any, uid: string, f: any): Promise<any[]> {
@@ -2069,7 +2099,7 @@ async function callClaudeTools(apiKey: string, system: string, messages: any[], 
   return data;
 }
 
-async function runAgentQA(text: string, apiKey: string, supabase: any, uid: string): Promise<{ answer: string; trace: any[] }> {
+async function runAgentQA(text: string, apiKey: string, supabase: any, uid: string, botToken?: string, chatId?: number): Promise<{ answer: string; trace: any[] }> {
   const trace: any[] = [];
   const d = jakartaNow();
   const system = `Kamu asisten keuangan pribadi Paulus. Jawab bahasa Indonesia santai & ringkas, pakai format Rupiah (mis. Rp1.234.567). Hari ini ${d.getUTCDate()} ${ID_MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()} (tahun default 2026).
@@ -2083,6 +2113,8 @@ PENTING soal WAKTU: kata seperti "kemarin", "waktu itu", "tempo hari", "kmrn" se
 
 Untuk pertanyaan TRIP/PERJALANAN (mis. Jepang): panggil aggregate_transactions dengan category='Travel' TANPA batas tanggal sempit (atau 4 bulan terakhir, group_by='month') untuk lihat bulan mana ada Travel besar — itu tripnya. Boleh juga search 'tokyo'/'osaka'/'japan'/'jpn'. Jangan menyerah setelah 1 pencarian sempit.
 
+Kalau user minta GRAFIK/chart/visualisasi: agregasi datanya (aggregate_transactions, mis. group_by month/category) lalu panggil render_chart dengan labels+values. Setelah grafik terkirim, kasih 1 kalimat ringkasan.
+
 Setelah dapat data, jawab singkat & to-the-point (sebut periodenya, mis. "sekitar Juni"). Boleh <b>tebal</b> HTML (JANGAN markdown, JANGAN * atau #). Kalau benar-benar tidak ada data, baru bilang terus terang.`;
 
   const messages: any[] = [{ role: "user", content: text }];
@@ -2095,7 +2127,30 @@ Setelah dapat data, jawab singkat & to-the-point (sebut periodenya, mis. "sekita
       for (const block of resp.content || []) {
         if (block.type === "tool_use") {
           let out: any;
-          try { out = await runAgentTool(block.name, block.input || {}, supabase, uid); }
+          try {
+            if (block.name === "render_chart" && botToken && chatId) {
+              const inp: any = block.input || {};
+              const palette = ["#3b5bdb", "#0891b2", "#059669", "#d97706", "#7c3aed", "#e03131", "#0f766e", "#c026d3"];
+              const isPie = ["pie", "doughnut"].includes(inp.chart_type);
+              const cfg = {
+                type: inp.chart_type || "bar",
+                data: {
+                  labels: inp.labels || [],
+                  datasets: [{
+                    label: inp.title || "",
+                    data: inp.values || [],
+                    backgroundColor: (inp.chart_type === "line") ? "rgba(59,91,219,0.15)" : (inp.labels || []).map((_: any, i: number) => palette[i % palette.length]),
+                    borderColor: "#3b5bdb", borderWidth: 2, fill: inp.chart_type === "line", tension: 0.3,
+                  }],
+                },
+                options: { plugins: { title: { display: !!inp.title, text: inp.title }, legend: { display: isPie } } },
+              };
+              await sendTelegramChart(botToken, chatId, cfg, inp.title ? `📊 <b>${esc(inp.title)}</b>` : "");
+              out = { ok: true, note: "Grafik sudah dikirim ke user sebagai gambar. Beri 1 kalimat ringkasan." };
+            } else {
+              out = await runAgentTool(block.name, block.input || {}, supabase, uid);
+            }
+          }
           catch (e: any) { out = { error: String(e?.message || e) }; }
           results.push({ type: "tool_result", tool_use_id: block.id, content: JSON.stringify(out) });
         }
@@ -2111,7 +2166,7 @@ Setelah dapat data, jawab singkat & to-the-point (sebut periodenya, mis. "sekita
 async function handleQuestion(text: string, apiKey: string, supabase: any, uid: string, botToken: string, chatId: number) {
   await sendTelegramHTML(botToken, chatId, "💭 <i>Sebentar...</i>");
   try {
-    const { answer } = await runAgentQA(text, apiKey, supabase, uid);
+    const { answer } = await runAgentQA(text, apiKey, supabase, uid, botToken, chatId);
     await sendTelegramHTML(botToken, chatId, answer);
   } catch (err: any) {
     console.error("[telegram-webhook] handleQuestion error:", err);
