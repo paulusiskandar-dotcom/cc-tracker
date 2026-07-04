@@ -359,7 +359,13 @@ Deno.serve(async (req: Request) => {
         return new Response("ok", { status: 200 });
       }
 
-      // Settle reimburse: "settle hamasa" / "settle sdc"
+      // Settle selection: "hamasa out 2 in 1" / "settle sdc out 1,3 in 2"
+      const selM = text.match(/^(?:settle\s+)?(hamasa|sdc|travelio)\s+out\s+((?:\d[\d,\s]*|semua|all))(?:\s+in\s+((?:\d[\d,\s]*|semua|all)))?\s*$/i);
+      if (selM) {
+        const ent = REIMBURSE_ENTITY(selM[1]);
+        if (ent) { await handlePartialSettle(ent, selM[2], selM[3] || "", supabase, AUTHORIZED_USER_ID, TELEGRAM_BOT_TOKEN, chatId); return new Response("ok", { status: 200 }); }
+      }
+      // Settle preview (numbered list): "settle hamasa" / "settle sdc"
       const settleM = text.match(/^settle\s+(\w+)/i);
       if (settleM) {
         const ent = REIMBURSE_ENTITY(settleM[1]);
@@ -1041,36 +1047,60 @@ async function unsettledFor(supabase: any, uid: string, entity: string) {
     .select("id, amount_idr, amount, tx_type, tx_date, description, merchant_name")
     .eq("user_id", uid).eq("entity", entity)
     .in("tx_type", ["reimburse_out", "reimburse_in"]).is("reimburse_settlement_id", null)
-    .order("tx_date", { ascending: false });
+    .order("tx_date", { ascending: false }).order("id", { ascending: true });   // deterministic numbering
   const rows = data || [];
   const outR = rows.filter((r: any) => r.tx_type === "reimburse_out");
   const inR = rows.filter((r: any) => r.tx_type === "reimburse_in");
-  const amt = (r: any) => Number(r.amount_idr || r.amount || 0);
-  return { outR, inR, totalOut: outR.reduce((s: number, r: any) => s + amt(r), 0), totalIn: inR.reduce((s: number, r: any) => s + amt(r), 0) };
+  return { outR, inR };
+}
+const settleAmt = (r: any) => Number(r?.amount_idr || r?.amount || 0);
+const settleName = (r: any) => String(r?.merchant_name || r?.description || "tx").slice(0, 22);
+const d2date = (s: string) => { const p = String(s || "").split("-"); return p.length === 3 ? `${p[2]}/${p[1]}` : s; };
+function parseSel(str: string, max: number): number[] {
+  if (!str) return [];
+  if (/semua|all/i.test(str)) return Array.from({ length: max }, (_, i) => i + 1);
+  return [...new Set((str.match(/\d+/g) || []).map(Number).filter((n) => n >= 1 && n <= max))];
 }
 
+// Numbered list — user picks which out/in to match.
 async function handleSettlePreview(entity: string, supabase: any, uid: string, token: string, chatId: number) {
-  const { outR, inR, totalOut, totalIn } = await unsettledFor(supabase, uid, entity);
+  const { outR, inR } = await unsettledFor(supabase, uid, entity);
   if (!outR.length && !inR.length) { await sendTelegramHTML(token, chatId, `✅ <b>${esc(entity)}</b> — ga ada reimburse yang belum di-settle.`); return; }
-  const net = totalOut - totalIn;
-  let out = `🧾 <b>SETTLE ${esc(entity)}?</b>\n\n`;
-  out += `Talangin (out): <b>${idr(totalOut)}</b> · ${outR.length} tx\n`;
-  out += `Dibalikin (in): <b>${idr(totalIn)}</b> · ${inR.length} tx\n`;
-  out += net > 0 ? `\n⚠️ <b>Reimbursable LOSS: ${idr(net)}</b>\n<i>(sisa ${idr(net)} dianggap kamu tanggung / belum dibalikin)</i>`
-    : net < 0 ? `\n💰 <b>Reimbursable SURPLUS: ${idr(-net)}</b>\n<i>(dibalikin lebih → dicatat income)</i>`
-    : `\n✅ <b>Pas (balance)</b>`;
-  out += `\n\nLanjut settle semua yang belum di-settle?`;
-  await sendTelegramHTML(token, chatId, out, { inline_keyboard: [[{ text: "✅ Settle sekarang", callback_data: `dosettle:${entity}` }, { text: "❌ Batal", callback_data: "noop:x" }]] });
+  let out = `🧾 <b>SETTLE ${esc(entity)}</b>\n\n<b>OUT (talangin):</b>\n`;
+  out += outR.length ? outR.map((r: any, i: number) => `${i + 1}. ${d2date(r.tx_date)} ${esc(settleName(r))} — <b>${idr(settleAmt(r))}</b>`).join("\n") : "(belum ada)";
+  out += `\n\n<b>IN (dibalikin):</b>\n`;
+  out += inR.length ? inR.map((r: any, i: number) => `${i + 1}. ${d2date(r.tx_date)} ${esc(settleName(r))} — <b>${idr(settleAmt(r))}</b>`).join("\n") : "(belum ada)";
+  const e = entity.toLowerCase();
+  out += `\n\nPilih yang mau dicocokin, balas mis:\n<code>${e} out 2 in 1</code>  (bisa banyak: <code>out 1,3 in 2</code>)\nAtau tap <b>Settle semua</b>.`;
+  await sendTelegramHTML(token, chatId, out, { inline_keyboard: [[{ text: "✅ Settle semua", callback_data: `psettle:${entity}:all:all` }, { text: "❌ Batal", callback_data: "noop:x" }]] });
 }
 
-async function doSettle(entity: string, supabase: any, uid: string, token: string, chatId: number) {
+// User replied "hamasa out 2 in 1" → preview the selected match + confirm.
+async function handlePartialSettle(entity: string, outStr: string, inStr: string, supabase: any, uid: string, token: string, chatId: number) {
+  const { outR, inR } = await unsettledFor(supabase, uid, entity);
+  const outSel = parseSel(outStr, outR.length), inSel = parseSel(inStr, inR.length);
+  if (!outSel.length && !inSel.length) { await sendTelegramHTML(token, chatId, `Pilih minimal satu, mis. <code>${entity.toLowerCase()} out 2 in 1</code>.`); return; }
+  const selOut = outSel.map((n) => outR[n - 1]).filter(Boolean);
+  const selIn = inSel.map((n) => inR[n - 1]).filter(Boolean);
+  const to = selOut.reduce((s: number, r: any) => s + settleAmt(r), 0);
+  const ti = selIn.reduce((s: number, r: any) => s + settleAmt(r), 0);
+  const net = to - ti;
+  let out = `🧾 <b>SETTLE ${esc(entity)} — pilihan</b>\n\n`;
+  out += `OUT (${selOut.length}): ${selOut.map((r: any) => idr(settleAmt(r))).join(" + ") || "-"} = <b>${idr(to)}</b>\n`;
+  out += `IN (${selIn.length}): ${selIn.map((r: any) => idr(settleAmt(r))).join(" + ") || "-"} = <b>${idr(ti)}</b>\n`;
+  out += net > 0 ? `\n⚠️ <b>Reimbursable LOSS: ${idr(net)}</b>` : net < 0 ? `\n💰 <b>Reimbursable SURPLUS: ${idr(-net)}</b>` : `\n✅ <b>Pas (balance)</b>`;
+  await sendTelegramHTML(token, chatId, out, { inline_keyboard: [[{ text: "✅ Settle ini", callback_data: `psettle:${entity}:${outSel.join(",") || "0"}:${inSel.join(",") || "0"}` }, { text: "❌ Batal", callback_data: "noop:x" }]] });
+}
+
+// Execute a settlement over the selected out/in rows (replicates app handleSettleEntity).
+async function executeSettle(entity: string, selOut: any[], selIn: any[], supabase: any, uid: string, token: string, chatId: number) {
   const LOSS_CAT = "e054e34e-9251-461b-a118-718077cf3293";
   const SURPLUS_SRC = "0afb406d-fc3d-49af-a002-c40d3d865c4d";
-  const { outR, inR, totalOut, totalIn } = await unsettledFor(supabase, uid, entity);
-  if (!outR.length && !inR.length) { await sendTelegramHTML(token, chatId, `✅ ${esc(entity)} — ga ada yang perlu di-settle.`); return; }
-  const outIds = outR.map((r: any) => r.id), inIds = inR.map((r: any) => r.id);
-  const reimbursable = Math.max(0, totalOut - totalIn);
-  const surplus = Math.max(0, totalIn - totalOut);
+  if (!selOut.length && !selIn.length) { await sendTelegramHTML(token, chatId, `⚠️ Ga ada yang dipilih buat settle.`); return; }
+  const outIds = selOut.map((r) => r.id), inIds = selIn.map((r) => r.id);
+  const totalOut = selOut.reduce((s: number, r: any) => s + settleAmt(r), 0);
+  const totalIn = selIn.reduce((s: number, r: any) => s + settleAmt(r), 0);
+  const reimbursable = Math.max(0, totalOut - totalIn), surplus = Math.max(0, totalIn - totalOut);
   const today = ymd(jakartaNow());
   const { data: settlement, error } = await supabase.from("reimburse_settlements").insert([{
     user_id: uid, entity, settled_at: today, out_ledger_ids: outIds, in_ledger_ids: inIds,
@@ -1093,10 +1123,17 @@ async function doSettle(entity: string, supabase: any, uid: string, token: strin
     notes: `Settlement: ${entity}`, reimburse_settlement_id: settlement.id,
   }]);
   await supabase.from("ledger").update({ reimburse_settlement_id: settlement.id }).in("id", [...outIds, ...inIds]);
-  let msg = `✅ <b>${esc(entity)} settled</b>\nOut ${idr(totalOut)} · In ${idr(totalIn)}`;
-  if (reimbursable > 0) msg += `\n⚠️ Reimbursable Loss dicatat: <b>${idr(reimbursable)}</b>`;
-  if (surplus > 0) msg += `\n💰 Reimbursable Surplus dicatat: <b>${idr(surplus)}</b>`;
+  let msg = `✅ <b>${esc(entity)} settled</b>\nOut ${idr(totalOut)} (${outIds.length}) · In ${idr(totalIn)} (${inIds.length})`;
+  if (reimbursable > 0) msg += `\n⚠️ Reimbursable Loss: <b>${idr(reimbursable)}</b>`;
+  if (surplus > 0) msg += `\n💰 Reimbursable Surplus: <b>${idr(surplus)}</b>`;
   await sendTelegramHTML(token, chatId, msg);
+}
+
+// callback psettle:<entity>:<outCsv>:<inCsv>  (csv of 1-based numbers, or "all")
+async function doSettleByIndex(entity: string, outCsv: string, inCsv: string, supabase: any, uid: string, token: string, chatId: number) {
+  const { outR, inR } = await unsettledFor(supabase, uid, entity);
+  const outSel = parseSel(outCsv, outR.length), inSel = parseSel(inCsv, inR.length);
+  await executeSettle(entity, outSel.map((n) => outR[n - 1]).filter(Boolean), inSel.map((n) => inR[n - 1]).filter(Boolean), supabase, uid, token, chatId);
 }
 
 // ── #2 EDIT / DELETE ledger transactions from chat ──
@@ -1401,10 +1438,10 @@ async function handleCallback(cb: any, token: string, supabase: any, uid: string
   const data: string = cb.data || "";
   const parts = data.split(":");
 
-  // #1 settle reimburse
-  if (parts[0] === "dosettle" && parts[1]) {
+  // #1 settle reimburse — psettle:<entity>:<outCsv>:<inCsv>
+  if (parts[0] === "psettle" && parts[1]) {
     await answerCallback(token, cb.id, "⏳ Settle...");
-    await doSettle(parts[1], supabase, uid, token, cb.message.chat.id);
+    await doSettleByIndex(parts[1], parts[2] || "0", parts[3] || "0", supabase, uid, token, cb.message.chat.id);
     return;
   }
   // #2 delete ledger tx
