@@ -251,6 +251,14 @@ Deno.serve(async (req: Request) => {
         await cmdReport(sb2, uid2, ym, token, chatId2);
         return new Response(JSON.stringify({ ok: true, month: ym }), { headers: { "Content-Type": "application/json" } });
       }
+      if (wh === "weekly") {
+        // pg_cron (Senin pagi): kirim insight mingguan ke chat Paulus
+        const chatId2 = Number(Deno.env.get("TELEGRAM_AUTHORIZED_CHAT_ID"));
+        const uid2 = Deno.env.get("TELEGRAM_AUTHORIZED_USER_ID") || "";
+        const sb2 = createClient(Deno.env.get("SUPABASE_URL") || "", Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "");
+        await sendTelegramHTML(token, chatId2, await cmdWeekly(sb2, uid2));
+        return new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } });
+      }
       if (wh === "fix") {
         const self = (Deno.env.get("SUPABASE_URL") || "") + "/functions/v1/telegram-webhook";
         const r = await fetch(`${TELEGRAM_API}/bot${token}/setWebhook`, {
@@ -832,6 +840,7 @@ async function handleCommand(cmd: string, arg: string, supabase: any, uid: strin
         return;
       }
       case "/hutang": return sendTelegramHTML(token, chatId, await cmdHutang(supabase, uid));
+      case "/weekly": return sendTelegramHTML(token, chatId, await cmdWeekly(supabase, uid));
       case "/piutang": return sendTelegramHTML(token, chatId, await cmdPiutang(supabase, uid));
       case "/investasi": return sendTelegramHTML(token, chatId, await cmdInvestasi(supabase, uid));
       case "/hari": return sendTelegramHTML(token, chatId, await cmdHari(supabase, uid));
@@ -1141,6 +1150,52 @@ async function handleEditCategory(query: string, target: string, supabase: any, 
     await supabase.from("ledger").update({ entity: ent }).eq("id", t.id).eq("user_id", uid);
     await sendTelegramHTML(token, chatId, `✅ <b>${esc(t.merchant_name || t.description || "tx")}</b> → entity <b>${esc(ent)}</b>`);
   }
+}
+
+// ── #6 + #3 WEEKLY INSIGHT (spending vs last week, top cats, budget alerts, income) ──
+async function cmdWeekly(supabase: any, uid: string): Promise<string> {
+  const now = jakartaNow();
+  const today = ymd(now);
+  const w1 = ymd(new Date(now.getTime() - 7 * 86400000));
+  const w2 = ymd(new Date(now.getTime() - 14 * 86400000));
+  const monthStart = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-01`;
+
+  const { data: led } = await supabase.from("ledger")
+    .select("tx_date, tx_type, amount_idr, category_name, category_id, description")
+    .eq("user_id", uid).gte("tx_date", w2).lte("tx_date", today).in("tx_type", ["expense", "income"]);
+  let thisExp = 0, prevExp = 0, thisInc = 0; const cats: Record<string, number> = {}; const bigInc: string[] = [];
+  for (const t of led || []) {
+    const amt = Number(t.amount_idr || 0);
+    const inThis = t.tx_date > w1;
+    if (t.tx_type === "expense") { if (inThis) { thisExp += amt; const c = t.category_name || "Lainnya"; cats[c] = (cats[c] || 0) + amt; } else prevExp += amt; }
+    else if (t.tx_type === "income" && inThis) { thisInc += amt; if (amt >= 1000000) bigInc.push(`${esc(String(t.description || "income").slice(0, 20))} ${idr(amt)}`); }
+  }
+  const delta = prevExp > 0 ? Math.round((thisExp - prevExp) / prevExp * 100) : 0;
+  const topCats = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 3);
+
+  // budget alerts (this month spend vs budget)
+  const y = now.getUTCFullYear(), m = now.getUTCMonth() + 1;
+  const { data: budgets } = await supabase.from("budgets").select("category_name, amount").eq("user_id", uid).eq("period_year", y).eq("period_month", m);
+  let monthSpend: Record<string, number> = {};
+  if ((budgets || []).length) {
+    const { data: mLed } = await supabase.from("ledger").select("amount_idr, category_name").eq("user_id", uid).eq("tx_type", "expense").gte("tx_date", monthStart).lte("tx_date", today);
+    for (const t of mLed || []) { const c = t.category_name || "Lainnya"; monthSpend[c] = (monthSpend[c] || 0) + Number(t.amount_idr || 0); }
+  }
+  const alerts: string[] = [];
+  for (const b of budgets || []) {
+    const spent = monthSpend[b.category_name] || 0; const bud = Number(b.amount || 0);
+    if (bud > 0 && spent / bud >= 0.8) alerts.push(`${spent >= bud ? "🔴" : "🟠"} ${esc(b.category_name)}: ${idr(spent)} / ${idr(bud)} (${Math.round(spent / bud * 100)}%)`);
+  }
+
+  let out = `📅 <b>INSIGHT MINGGUAN</b>\n\n`;
+  out += `💸 Pengeluaran 7 hari: <b>${idr(thisExp)}</b>`;
+  out += prevExp > 0 ? ` (${delta >= 0 ? "🔺+" : "🔻"}${Math.abs(delta)}% vs minggu lalu)\n` : `\n`;
+  if (topCats.length) out += `Top: ${topCats.map(([c, v]) => `${esc(c)} ${idr(v)}`).join(" · ")}\n`;
+  if (thisInc > 0) out += `\n💰 Pemasukan 7 hari: <b>${idr(thisInc)}</b>\n`;
+  if (bigInc.length) out += bigInc.slice(0, 3).map((s) => `  • ${s}`).join("\n") + "\n";
+  if (alerts.length) out += `\n⚠️ <b>Budget bulan ini</b>\n` + alerts.join("\n") + "\n";
+  out += `\n<i>Tanya "grafik pengeluaran 6 bulan" buat lihat trend.</i>`;
+  return out;
 }
 
 async function cmdHutang(supabase: any, uid: string): Promise<string> {
