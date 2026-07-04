@@ -964,26 +964,27 @@ async function cmdDue(supabase: any, uid: string): Promise<string> {
 }
 
 async function cmdReimburse(supabase: any, uid: string): Promise<string> {
+  // Show only the REMAINING (unsettled) reimburse_out transactions — the ones
+  // still owed to Paulus — with date + amount. No recap/total.
   const { data: led, error } = await supabase
-    .from("ledger").select("tx_type, amount_idr, entity")
-    .eq("user_id", uid).in("tx_type", ["reimburse_out", "reimburse_in"]);
+    .from("ledger").select("tx_date, amount_idr, entity, description, merchant_name")
+    .eq("user_id", uid).eq("tx_type", "reimburse_out")
+    .is("reimburse_settlement_id", null)
+    .order("tx_date", { ascending: false });
   if (error) throw error;
-  const ent: Record<string, { out: number; in: number }> = {};
-  for (const e of led || []) {
-    const k = e.entity || "?";
-    ent[k] = ent[k] || { out: 0, in: 0 };
-    if (e.tx_type === "reimburse_out") ent[k].out += Number(e.amount_idr) || 0;
-    else ent[k].in += Number(e.amount_idr) || 0;
-  }
-  let out = "🔄 <b>REIMBURSE</b>\n";
-  for (const [k, v] of Object.entries(ent)) {
-    const net = v.out - v.in;
-    out += `\n<b>${esc(k)}</b>\n`;
-    out += `•  Talangin:  ${idr(v.out)}\n`;
-    out += `•  Dibalikin:  ${idr(v.in)}\n`;
-    out += net >= 0
-      ? `•  <b>Sisa piutang:  ${idr(net)}</b>\n`
-      : `•  <b>Kelebihan bayar:  ${idr(-net)}</b>\n`;
+  const rows = led || [];
+  if (!rows.length) return "🔄 <b>REIMBURSE</b>\n\n✅ Ga ada sisa piutang reimburse.";
+  const d2 = (s: string) => { const p = String(s || "").split("-"); return p.length === 3 ? `${p[2]}/${p[1]}` : s; };
+  // group by entity (header only, no totals)
+  const byEnt: Record<string, any[]> = {};
+  for (const r of rows) { const e = r.entity || "?"; (byEnt[e] = byEnt[e] || []).push(r); }
+  let out = "🔄 <b>REIMBURSE — sisa belum ditagih</b>\n";
+  for (const [e, list] of Object.entries(byEnt)) {
+    out += `\n<b>${esc(e)}</b>\n`;
+    for (const r of list) {
+      const nm = String(r.merchant_name || r.description || "-").slice(0, 26);
+      out += `${d2(r.tx_date)} · ${esc(nm)}\n<b>${idr(r.amount_idr)}</b>\n`;
+    }
   }
   return out;
 }
