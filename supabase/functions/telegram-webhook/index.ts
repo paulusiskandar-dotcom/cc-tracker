@@ -1325,9 +1325,49 @@ function matchCategory(s: string): string | null {
   return null;
 }
 
+// Classify a short type phrase (e.g. "sdc out", "food", "transfer") into a
+// suggested tx_type/entity/category. Shared by single- and multi-assign.
+function classifyText(s: string) {
+  s = s.toLowerCase();
+  const entity =
+    /\bsdc\b/.test(s) ? "SDC" :
+    /hamasa/.test(s) ? "Hamasa" :
+    /travelio/.test(s) ? "Travelio" :
+    (/pribadi|personal|expense|income|pengeluaran|pemasukan/.test(s) ? "Personal" : null);
+  const category = matchCategory(s);
+  const forceIn = /\b(in|masuk|pemasukan|income)\b/.test(s);
+  const forceOut = /\b(out|keluar|pengeluaran|expense)\b/.test(s);
+  const wantTransfer = /\b(transfer|tf|pindah)\b/.test(s);
+  return { entity, category, forceIn, forceOut, wantTransfer, valid: !!(entity || category || wantTransfer) };
+}
+
+// Apply a classification onto a pending item; returns a human label of the result.
+function applyCls(t: any, c: ReturnType<typeof classifyText>): string {
+  const isIn = c.forceIn ? true : c.forceOut ? false : (t.type === "in");
+  if (c.wantTransfer) { t.suggested_tx_type = "transfer"; t.suggested_entity = null; t.is_reimburse = false; }
+  else if (c.entity && c.entity !== "Personal") { t.suggested_tx_type = isIn ? "reimburse_in" : "reimburse_out"; t.suggested_entity = c.entity; t.is_reimburse = true; }
+  else { t.suggested_tx_type = isIn ? "income" : "expense"; t.suggested_entity = "Personal"; if (c.category) t.suggested_category = c.category; t.is_reimburse = false; }
+  t._tg_classified = true;
+  return c.wantTransfer ? "transfer"
+    : (c.entity && c.entity !== "Personal") ? `reimburse_${isIn ? "in" : "out"} ${c.entity}`
+    : `${isIn ? "income" : "expense"} (pribadi)${c.category ? " · " + c.category : ""}`;
+}
+
+// Parse per-item assignments: "1 food 2 transfer 3 sdc out" -> [{n:1,txt:"food"},...]
+function parseAssignments(s: string, maxN: number): { n: number; txt: string }[] {
+  const out: { n: number; txt: string }[] = [];
+  const re = /(\d{1,2})\s*([^\d]*)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s)) !== null) {
+    const n = Number(m[1]); const txt = (m[2] || "").replace(/[.:)\-=]/g, " ").trim();
+    if (n >= 1 && n <= maxN && txt) out.push({ n, txt });
+  }
+  return out;
+}
+
 function looksLikeCorrection(t: string): boolean {
   const s = t.toLowerCase();
-  if (s.length > 90) return false;
+  if (s.length > 160) return false;
   const hasEntity = /\b(hamasa|sdc|travelio|pribadi|personal|reimburse|expense|income|pengeluaran|pemasukan|transfer|bayar|masuk|keluar)\b/.test(s);
   const hasCat = matchCategory(s) !== null;
   const isNotif = /(rp\s*[\d.,]{4,}|\botp\b|kode|debet|kredit|saldo|va |virtual|berhasil)/.test(s);
@@ -1372,6 +1412,28 @@ async function handleTextCorrection(text: string, supabase: any, uid: string, bo
     arr.forEach((t: any) => { if (!t._imported && !t._skipped) flat.push({ rowId: r.id, t }); });
   }
   if (!flat.length) { await sendTelegramHTML(botToken, chatId, "📭 Ga ada transaksi pending buat diubah."); return true; }
+
+  // MULTI-ASSIGN: "1 food 2 transfer 3 sdc out" -> tiap nomor tipe sendiri.
+  // Aktif kalau ada >=2 pasangan nomor+tipe yang valid.
+  const assigns = parseAssignments(s, flat.length)
+    .map((p) => ({ n: p.n, cls: classifyText(p.txt) }))
+    .filter((p) => p.cls.valid);
+  if (assigns.length >= 2) {
+    const seen = new Map<number, ReturnType<typeof classifyText>>();
+    for (const a of assigns) seen.set(a.n, a.cls);   // dedup, last wins
+    const lines: string[] = []; const touched = new Set<string>();
+    for (const n of [...seen.keys()].sort((x, y) => x - y)) {
+      const { rowId, t } = flat[n - 1];
+      const label = applyCls(t, seen.get(n)!);
+      lines.push(`${n}. ${esc(String(t.merchant_name || t.description || "tx").slice(0, 28))} · ${idr(t.amount_idr || t.amount)} → <b>${esc(label)}</b>`);
+      touched.add(rowId);
+    }
+    for (const id of touched) await supabase.from("email_sync").update({ ai_raw_result: rowArr.get(id) }).eq("id", id);
+    await sendTelegramHTML(botToken, chatId,
+      `✅ <b>${seen.size} transaksi diubah</b>\n${lines.join("\n")}`,
+      { inline_keyboard: [[{ text: "✅ Import Semua", callback_data: "dg:importall" }]] });
+    return true;
+  }
 
   // numeric selection: "2 sdc out", "1 3 food" -> pick items by their list number
   // (only integers within 1..N; anything bigger is treated as an amount, not an index)
