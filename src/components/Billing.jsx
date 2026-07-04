@@ -29,11 +29,28 @@ function computePendingDue(cc, ledger, today) {
   return Math.max(0, outstanding - chargesAfter);
 }
 
-// Due date (this calendar month) for a monthly obligation.
+// Due date (this calendar month) for a simple monthly obligation (cicilan, bills).
 function dueDateInMonth(dayOfMonth, base) {
   const d = Number(dayOfMonth);
   const last = new Date(base.getFullYear(), base.getMonth() + 1, 0).getDate();
   return new Date(base.getFullYear(), base.getMonth(), Math.min(d, last));
+}
+
+// Due date of a CC's CURRENT (last-closed) statement. When due_day falls BEFORE
+// the statement cut-off day, the payment is due the month AFTER the cut-off.
+// e.g. stmt 18 / due 4 → statement closed on the 18th is due on the 4th NEXT month.
+function ccDueDate(cc, today) {
+  const dd = Number(cc.due_day);
+  const sd = cc.statement_day ? Number(cc.statement_day) : null;
+  if (!sd) {
+    const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    let d = new Date(today.getFullYear(), today.getMonth(), dd);
+    if (d < start) d = new Date(today.getFullYear(), today.getMonth() + 1, dd);
+    return d;
+  }
+  const ls = getLastStatementDate(sd, today);          // most recent cut-off ≤ today
+  const offset = dd < sd ? 1 : 0;                       // due before cut-off → next month
+  return new Date(ls.getFullYear(), ls.getMonth() + offset, dd);
 }
 
 const MONTHS_ID = ["Januari","Februari","Maret","April","Mei","Juni","Juli","Agustus","September","Oktober","November","Desember"];
@@ -69,7 +86,7 @@ export default function Billing({
       .filter(c => c.is_active !== false && c.due_day)
       .map(c => {
         const pending = computePendingDue(c, ledger, today);
-        const when = dueDateInMonth(c.due_day, today);
+        const when = ccDueDate(c, today);
         return { id: c.id, name: c.name, when, dayLeft: dayLeft(when), amount: pending, known: true };
       })
       .filter(c => c.amount >= 25000)                  // hide already-paid + ignore trivial (< Rp 25rb)

@@ -479,11 +479,26 @@ export default function Dashboard({
       return next.toISOString().slice(0, 10);
     };
 
+    // Due date of a CC's current statement (statement-aware: due before cut-off → next month)
+    const ccDueStr = (cc) => {
+      const dd = Number(cc.due_day);
+      const sd = cc.statement_day ? Number(cc.statement_day) : null;
+      let dueDate;
+      if (!sd) {
+        dueDate = new Date(todayDate.getFullYear(), todayDate.getMonth(), dd);
+        if (dueDate < todayDate) dueDate = new Date(todayDate.getFullYear(), todayDate.getMonth() + 1, dd);
+      } else {
+        const ls = getLastStatementDate(sd, todayDate);
+        dueDate = new Date(ls.getFullYear(), ls.getMonth() + (dd < sd ? 1 : 0), dd);
+      }
+      return dueDate.toISOString().slice(0, 10);
+    };
+
     // G) CC payment due dates within next 14 days
     creditCards.filter(cc => cc.due_day).forEach(cc => {
       const pendingDue = computePendingDue(cc, ledger, todayDate);
       if (pendingDue <= 0) return;
-      const dueDateStr = nextDueDateStr(cc.due_day);
+      const dueDateStr = ccDueStr(cc);
       if (dueDateStr > cutoffDate.toISOString().slice(0, 10)) return;
       all.push({
         id: `cc-${cc.id}`, type: "cc_due", raw: cc,

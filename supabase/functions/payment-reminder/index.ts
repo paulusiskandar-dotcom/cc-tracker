@@ -81,9 +81,18 @@ Deno.serve(async (_req) => {
     const after = (charges || []).filter((e: any) => e.from_id === c.id && e.from_type === "account" && e.tx_date > lsStr).reduce((s: number, e: any) => s + Number(e.amount_idr || 0), 0);
     return Math.max(0, outstanding - after);
   };
+  // Due date of the current statement: if due_day is before the cut-off, it's next month.
+  const ccDue = (c: any): Date => {
+    const dd = Number(c.due_day);
+    const sd = c.statement_day ? Number(c.statement_day) : null;
+    if (!sd) return nextDue(today, dd);
+    const ls = lastStmt(sd, today);
+    if (!ls) return nextDue(today, dd);
+    return new Date(ls.getFullYear(), ls.getMonth() + (dd < sd ? 1 : 0), dd);
+  };
   const due = (ccs || [])
     .filter((c: any) => c.is_active !== false)
-    .map((c: any) => ({ name: c.name, amt: pendingDue(c), when: nextDue(today, c.due_day) }))
+    .map((c: any) => ({ name: c.name, amt: pendingDue(c), when: ccDue(c) }))
     .filter((c: any) => c.amt >= 25000 && c.when <= horizon);
   // liability cicilan (BYD dll) with due_day
   let liabQ = sb.from("accounts").select("name,monthly_installment,due_day,type,user_id,is_active").eq("type", "liability").not("due_day", "is", null);
