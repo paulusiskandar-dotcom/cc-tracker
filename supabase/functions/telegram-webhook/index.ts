@@ -357,6 +357,12 @@ Deno.serve(async (req: Request) => {
         const ent = REIMBURSE_ENTITY(settleM[1]);
         if (ent) { await handleSettlePreview(ent, supabase, AUTHORIZED_USER_ID, TELEGRAM_BOT_TOKEN, chatId); return new Response("ok", { status: 200 }); }
       }
+      // Edit: "ubah <kata> jadi <kategori/entity>"
+      const editM = text.match(/^(?:ubah|edit|ganti)\s+(.+?)\s+(?:jadi|ke|=)\s+(.+)$/i);
+      if (editM) { await handleEditCategory(editM[1], editM[2], supabase, AUTHORIZED_USER_ID, TELEGRAM_BOT_TOKEN, chatId); return new Response("ok", { status: 200 }); }
+      // Delete: "hapus <kata>" / "delete <kata>"
+      const delM = text.match(/^(?:hapus|delete|del)\s+(.+)$/i);
+      if (delM) { await handleDeleteSearch(delM[1], supabase, AUTHORIZED_USER_ID, TELEGRAM_BOT_TOKEN, chatId); return new Response("ok", { status: 200 }); }
 
       // Free-text router: question -> AI Q&A; classify-reply -> tag pending; quick-add; else -> notification parse.
       if (looksLikeQuestion(text)) {
@@ -1084,6 +1090,59 @@ async function doSettle(entity: string, supabase: any, uid: string, token: strin
   await sendTelegramHTML(token, chatId, msg);
 }
 
+// ── #2 EDIT / DELETE ledger transactions from chat ──
+async function findLedger(supabase: any, uid: string, query: string) {
+  const since = ymd(new Date(jakartaNow().getTime() - 150 * 86400000));
+  const { data } = await supabase.from("ledger")
+    .select("id, tx_date, amount_idr, tx_type, description, merchant_name, from_id, to_id, from_type, to_type, entity, category_name")
+    .eq("user_id", uid).neq("tx_type", "opening_balance").gte("tx_date", since)
+    .order("tx_date", { ascending: false });
+  const q = query.toLowerCase().trim();
+  return (data || []).filter((t: any) => `${t.description || ""} ${t.merchant_name || ""} ${t.category_name || ""} ${t.entity || ""}`.toLowerCase().includes(q));
+}
+
+async function recalcTouched(supabase: any, uid: string, ids: string[]) {
+  const uniq = [...new Set(ids.filter(Boolean))];
+  if (!uniq.length) return;
+  const { data: accs } = await supabase.from("accounts").select("id, type, initial_balance, currency").in("id", uniq).eq("user_id", uid);
+  for (const a of accs || []) await recalcAccountEdge(supabase, uid, a);
+}
+
+async function handleDeleteSearch(query: string, supabase: any, uid: string, token: string, chatId: number) {
+  const rows = (await findLedger(supabase, uid, query)).slice(0, 6);
+  if (!rows.length) { await sendTelegramHTML(token, chatId, `🔍 Ga nemu transaksi dengan "<b>${esc(query)}</b>" (150 hari terakhir).`); return; }
+  const d2 = (s: string) => { const p = String(s).split("-"); return p.length === 3 ? `${p[2]}/${p[1]}` : s; };
+  const kb = rows.map((t: any) => [{ text: `🗑 ${d2(t.tx_date)} ${String(t.merchant_name || t.description || "tx").slice(0, 16)} ${idr(t.amount_idr)}`, callback_data: `del:${t.id}` }]);
+  await sendTelegramHTML(token, chatId, `🗑 <b>Hapus yang mana?</b> (tap buat hapus)`, { inline_keyboard: kb });
+}
+
+async function doDelete(id: string, supabase: any, uid: string, token: string, chatId: number) {
+  const { data: t } = await supabase.from("ledger").select("id, description, merchant_name, amount_idr, from_id, to_id, from_type, to_type").eq("id", id).eq("user_id", uid).single();
+  if (!t) { await sendTelegramHTML(token, chatId, "⚠️ Transaksi ga ketemu (mungkin udah dihapus)."); return; }
+  const { error } = await supabase.from("ledger").delete().eq("id", id).eq("user_id", uid);
+  if (error) { await sendTelegramHTML(token, chatId, "❌ Gagal hapus: " + esc(error.message)); return; }
+  await recalcTouched(supabase, uid, [t.from_type === "account" ? t.from_id : null, t.to_type === "account" ? t.to_id : null]);
+  await sendTelegramHTML(token, chatId, `✅ Dihapus: <b>${esc(t.merchant_name || t.description || "tx")}</b> ${idr(t.amount_idr)}\nSaldo akun sudah di-recalc.`);
+}
+
+async function handleEditCategory(query: string, target: string, supabase: any, uid: string, token: string, chatId: number) {
+  const cat = matchCategory(target);
+  const ent = REIMBURSE_ENTITY(target);
+  if (!cat && !ent) { await sendTelegramHTML(token, chatId, `Kategori/entity "<b>${esc(target)}</b>" ga dikenali. Contoh: <code>ubah grab jadi transport</code>.`); return; }
+  const rows = await findLedger(supabase, uid, query);
+  if (!rows.length) { await sendTelegramHTML(token, chatId, `🔍 Ga nemu transaksi "<b>${esc(query)}</b>".`); return; }
+  const t = rows[0];   // most recent match
+  if (cat) {
+    const { data: c } = await supabase.from("expense_categories").select("id,name").ilike("name", `%${cat}%`).limit(1);
+    const catId = c?.[0]?.id || null;
+    await supabase.from("ledger").update({ category_id: catId, category_name: cat }).eq("id", t.id).eq("user_id", uid);
+    await sendTelegramHTML(token, chatId, `✅ <b>${esc(t.merchant_name || t.description || "tx")}</b> ${idr(t.amount_idr)}\n→ kategori <b>${esc(cat)}</b>`);
+  } else if (ent) {
+    await supabase.from("ledger").update({ entity: ent }).eq("id", t.id).eq("user_id", uid);
+    await sendTelegramHTML(token, chatId, `✅ <b>${esc(t.merchant_name || t.description || "tx")}</b> → entity <b>${esc(ent)}</b>`);
+  }
+}
+
 async function cmdHutang(supabase: any, uid: string): Promise<string> {
   const acc = await getActiveAccounts(supabase, uid);
   const liab = acc.filter((a) => a.type === "liability");
@@ -1291,6 +1350,12 @@ async function handleCallback(cb: any, token: string, supabase: any, uid: string
   if (parts[0] === "dosettle" && parts[1]) {
     await answerCallback(token, cb.id, "⏳ Settle...");
     await doSettle(parts[1], supabase, uid, token, cb.message.chat.id);
+    return;
+  }
+  // #2 delete ledger tx
+  if (parts[0] === "del" && parts[1]) {
+    await answerCallback(token, cb.id, "🗑 Menghapus...");
+    await doDelete(parts.slice(1).join(":"), supabase, uid, token, cb.message.chat.id);
     return;
   }
 
