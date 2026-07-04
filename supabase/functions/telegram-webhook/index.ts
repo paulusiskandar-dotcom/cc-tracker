@@ -2322,9 +2322,27 @@ Untuk pertanyaan TRIP/PERJALANAN (mis. Jepang): panggil aggregate_transactions d
 
 Kalau user minta GRAFIK/chart/visualisasi: agregasi datanya (aggregate_transactions, mis. group_by month/category) lalu panggil render_chart dengan labels+values. Setelah grafik terkirim, kasih 1 kalimat ringkasan.
 
+Kalau ada riwayat percakapan sebelumnya, pakai konteksnya (mis. "kalo bulan lalu?" = pertanyaan yang sama tapi bulan sebelumnya).
+
 Setelah dapat data, jawab singkat & to-the-point (sebut periodenya, mis. "sekitar Juni"). Boleh <b>tebal</b> HTML (JANGAN markdown, JANGAN * atau #). Kalau benar-benar tidak ada data, baru bilang terus terang.`;
 
-  const messages: any[] = [{ role: "user", content: text }];
+  // #5 multi-turn memory: load recent conversation (last ~25 min) for this chat
+  let history: any[] = [];
+  if (chatId) {
+    try {
+      const { data: mem } = await supabase.from("tg_chat_memory").select("turns, updated_at").eq("chat_id", chatId).maybeSingle();
+      if (mem && mem.updated_at && (Date.now() - new Date(mem.updated_at).getTime() < 25 * 60 * 1000) && Array.isArray(mem.turns)) history = mem.turns;
+    } catch { /* table may not exist yet — memory disabled gracefully */ }
+  }
+  const saveMemory = async (answer: string) => {
+    if (!chatId) return;
+    try {
+      const turns = [...history, { role: "user", content: text }, { role: "assistant", content: answer }].slice(-6);
+      await supabase.from("tg_chat_memory").upsert({ chat_id: chatId, turns, updated_at: new Date().toISOString() });
+    } catch { /* noop */ }
+  };
+
+  const messages: any[] = [...history, { role: "user", content: text }];
   for (let i = 0; i < 6; i++) {
     const resp = await callClaudeTools(apiKey, system, messages, QA_TOOLS);
     trace.push({ iter: i, stop: resp.stop_reason, blocks: (resp.content || []).map((b: any) => b.type + (b.name ? ":" + b.name : "")) });
@@ -2365,7 +2383,9 @@ Setelah dapat data, jawab singkat & to-the-point (sebut periodenya, mis. "sekita
       messages.push({ role: "user", content: results });
       continue;
     }
-    return { answer: (((resp.content || []).find((b: any) => b.type === "text")?.text) || "(kosong)").trim(), trace };
+    const answer = (((resp.content || []).find((b: any) => b.type === "text")?.text) || "(kosong)").trim();
+    await saveMemory(answer);
+    return { answer, trace };
   }
   return { answer: "⚠️ Kebanyakan langkah — coba pertanyaan lebih spesifik.", trace };
 }
