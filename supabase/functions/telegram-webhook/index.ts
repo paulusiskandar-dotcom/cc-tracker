@@ -351,6 +351,13 @@ Deno.serve(async (req: Request) => {
         return new Response("ok", { status: 200 });
       }
 
+      // Settle reimburse: "settle hamasa" / "settle sdc"
+      const settleM = text.match(/^settle\s+(\w+)/i);
+      if (settleM) {
+        const ent = REIMBURSE_ENTITY(settleM[1]);
+        if (ent) { await handleSettlePreview(ent, supabase, AUTHORIZED_USER_ID, TELEGRAM_BOT_TOKEN, chatId); return new Response("ok", { status: 200 }); }
+      }
+
       // Free-text router: question -> AI Q&A; classify-reply -> tag pending; quick-add; else -> notification parse.
       if (looksLikeQuestion(text)) {
         await handleQuestion(text, ANTHROPIC_API_KEY, supabase, AUTHORIZED_USER_ID, TELEGRAM_BOT_TOKEN, chatId);
@@ -812,6 +819,12 @@ async function handleCommand(cmd: string, arg: string, supabase: any, uid: strin
       case "/saldo": return sendTelegramHTML(token, chatId, await cmdSaldo(supabase, uid));
       case "/cc": return sendTelegramHTML(token, chatId, await cmdCC(supabase, uid));
       case "/reimburse": return sendTelegramHTML(token, chatId, await cmdReimburse(supabase, uid));
+      case "/settle": {
+        const ent = REIMBURSE_ENTITY(arg);
+        if (!ent) return sendTelegramHTML(token, chatId, "Pakai: <code>/settle hamasa</code> atau <code>/settle sdc</code>");
+        await handleSettlePreview(ent, supabase, uid, token, chatId);
+        return;
+      }
       case "/hutang": return sendTelegramHTML(token, chatId, await cmdHutang(supabase, uid));
       case "/piutang": return sendTelegramHTML(token, chatId, await cmdPiutang(supabase, uid));
       case "/investasi": return sendTelegramHTML(token, chatId, await cmdInvestasi(supabase, uid));
@@ -1002,6 +1015,73 @@ async function cmdReimburse(supabase: any, uid: string): Promise<string> {
     }
   }
   return out;
+}
+
+// ── #1 SETTLE REIMBURSE from Telegram (preview + confirm) ──
+const REIMBURSE_ENTITY = (s: string): string | null =>
+  /\bsdc\b/i.test(s) ? "SDC" : /hamasa/i.test(s) ? "Hamasa" : /travelio/i.test(s) ? "Travelio" : null;
+
+async function unsettledFor(supabase: any, uid: string, entity: string) {
+  const { data } = await supabase.from("ledger")
+    .select("id, amount_idr, amount, tx_type, tx_date, description, merchant_name")
+    .eq("user_id", uid).eq("entity", entity)
+    .in("tx_type", ["reimburse_out", "reimburse_in"]).is("reimburse_settlement_id", null)
+    .order("tx_date", { ascending: false });
+  const rows = data || [];
+  const outR = rows.filter((r: any) => r.tx_type === "reimburse_out");
+  const inR = rows.filter((r: any) => r.tx_type === "reimburse_in");
+  const amt = (r: any) => Number(r.amount_idr || r.amount || 0);
+  return { outR, inR, totalOut: outR.reduce((s: number, r: any) => s + amt(r), 0), totalIn: inR.reduce((s: number, r: any) => s + amt(r), 0) };
+}
+
+async function handleSettlePreview(entity: string, supabase: any, uid: string, token: string, chatId: number) {
+  const { outR, inR, totalOut, totalIn } = await unsettledFor(supabase, uid, entity);
+  if (!outR.length && !inR.length) { await sendTelegramHTML(token, chatId, `✅ <b>${esc(entity)}</b> — ga ada reimburse yang belum di-settle.`); return; }
+  const net = totalOut - totalIn;
+  let out = `🧾 <b>SETTLE ${esc(entity)}?</b>\n\n`;
+  out += `Talangin (out): <b>${idr(totalOut)}</b> · ${outR.length} tx\n`;
+  out += `Dibalikin (in): <b>${idr(totalIn)}</b> · ${inR.length} tx\n`;
+  out += net > 0 ? `\n⚠️ <b>Reimbursable LOSS: ${idr(net)}</b>\n<i>(sisa ${idr(net)} dianggap kamu tanggung / belum dibalikin)</i>`
+    : net < 0 ? `\n💰 <b>Reimbursable SURPLUS: ${idr(-net)}</b>\n<i>(dibalikin lebih → dicatat income)</i>`
+    : `\n✅ <b>Pas (balance)</b>`;
+  out += `\n\nLanjut settle semua yang belum di-settle?`;
+  await sendTelegramHTML(token, chatId, out, { inline_keyboard: [[{ text: "✅ Settle sekarang", callback_data: `dosettle:${entity}` }, { text: "❌ Batal", callback_data: "noop:x" }]] });
+}
+
+async function doSettle(entity: string, supabase: any, uid: string, token: string, chatId: number) {
+  const LOSS_CAT = "e054e34e-9251-461b-a118-718077cf3293";
+  const SURPLUS_SRC = "0afb406d-fc3d-49af-a002-c40d3d865c4d";
+  const { outR, inR, totalOut, totalIn } = await unsettledFor(supabase, uid, entity);
+  if (!outR.length && !inR.length) { await sendTelegramHTML(token, chatId, `✅ ${esc(entity)} — ga ada yang perlu di-settle.`); return; }
+  const outIds = outR.map((r: any) => r.id), inIds = inR.map((r: any) => r.id);
+  const reimbursable = Math.max(0, totalOut - totalIn);
+  const surplus = Math.max(0, totalIn - totalOut);
+  const today = ymd(jakartaNow());
+  const { data: settlement, error } = await supabase.from("reimburse_settlements").insert([{
+    user_id: uid, entity, settled_at: today, out_ledger_ids: outIds, in_ledger_ids: inIds,
+    total_out: totalOut, total_in: totalIn, reimbursable_expense: reimbursable,
+    re_category_id: LOSS_CAT, status: "settled", notes: "via Telegram",
+  }]).select().single();
+  if (error) { await sendTelegramHTML(token, chatId, "❌ Gagal settle: " + esc(error.message)); return; }
+  if (reimbursable > 0) await supabase.from("ledger").insert([{
+    user_id: uid, tx_date: today, description: `${entity} Reimbursable Loss`,
+    amount: reimbursable, amount_idr: reimbursable, currency: "IDR",
+    tx_type: "expense", from_type: null, to_type: "expense", from_id: null, to_id: null,
+    category_id: LOSS_CAT, category_name: "Reimbursable Loss", entity, is_reimburse: false,
+    notes: `Settlement: ${entity}`, reimburse_settlement_id: settlement.id,
+  }]);
+  if (surplus > 0) await supabase.from("ledger").insert([{
+    user_id: uid, tx_date: today, description: `${entity} Reimbursable Surplus`,
+    amount: surplus, amount_idr: surplus, currency: "IDR",
+    tx_type: "income", from_type: "income_source", from_id: SURPLUS_SRC, to_type: null, to_id: null,
+    category_id: null, category_name: null, entity, is_reimburse: false,
+    notes: `Settlement: ${entity}`, reimburse_settlement_id: settlement.id,
+  }]);
+  await supabase.from("ledger").update({ reimburse_settlement_id: settlement.id }).in("id", [...outIds, ...inIds]);
+  let msg = `✅ <b>${esc(entity)} settled</b>\nOut ${idr(totalOut)} · In ${idr(totalIn)}`;
+  if (reimbursable > 0) msg += `\n⚠️ Reimbursable Loss dicatat: <b>${idr(reimbursable)}</b>`;
+  if (surplus > 0) msg += `\n💰 Reimbursable Surplus dicatat: <b>${idr(surplus)}</b>`;
+  await sendTelegramHTML(token, chatId, msg);
 }
 
 async function cmdHutang(supabase: any, uid: string): Promise<string> {
@@ -1206,6 +1286,13 @@ const ENT_MAP: Record<string, string> = { H: "Hamasa", S: "SDC", P: "Personal" }
 async function handleCallback(cb: any, token: string, supabase: any, uid: string) {
   const data: string = cb.data || "";
   const parts = data.split(":");
+
+  // #1 settle reimburse
+  if (parts[0] === "dosettle" && parts[1]) {
+    await answerCallback(token, cb.id, "⏳ Settle...");
+    await doSettle(parts[1], supabase, uid, token, cb.message.chat.id);
+    return;
+  }
 
   // classify/reject: cls:<emailSyncId>:<txIdx>:<H|S|P|X>  → tag entity, or X = tolak (won't be imported)
   if (parts[0] === "cls" && parts.length === 4) {
