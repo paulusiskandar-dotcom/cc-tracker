@@ -49,7 +49,7 @@ Deno.serve(async (_req) => {
   const sb = createClient(SUPABASE_URL, SERVICE_KEY);
 
   // ── CC due dates (statement-aware: only the PENDING bill, not post-cutoff usage) ──
-  let accQ = sb.from("accounts").select("id,name,card_last4,due_day,statement_day,outstanding_amount,type,user_id,is_active")
+  let accQ = sb.from("accounts").select("id,name,card_last4,due_day,statement_day,outstanding_amount,last_statement_amount,last_statement_date,type,user_id,is_active")
     .eq("type", "credit_card").not("due_day", "is", null);
   if (USER_ID) accQ = accQ.eq("user_id", USER_ID);
   const { data: ccs } = await accQ;
@@ -63,7 +63,7 @@ Deno.serve(async (_req) => {
   // subtract them from outstanding to get the amount actually due now. If the
   // statement is already paid, pending = 0 and the card is skipped. (< Rp25rb ignored.)
   const sinceStr = dstr(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 62));
-  let chQ = sb.from("ledger").select("from_id,from_type,amount_idr,tx_date").eq("from_type", "account").gte("tx_date", sinceStr);
+  let chQ = sb.from("ledger").select("from_id,from_type,to_id,to_type,amount_idr,tx_date").gte("tx_date", sinceStr);
   if (USER_ID) chQ = chQ.eq("user_id", USER_ID);
   const { data: charges } = await chQ;
   const lastStmt = (statementDay: any, ref: Date): Date | null => {
@@ -72,6 +72,13 @@ Deno.serve(async (_req) => {
     return cand < ref ? cand : new Date(ref.getFullYear(), ref.getMonth() - 1, Number(statementDay));
   };
   const pendingDue = (c: any): number => {
+    // Statement-based (accurate): pending = last statement bill − payments since.
+    if (c.last_statement_amount != null && c.last_statement_date) {
+      const paidSince = (charges || [])
+        .filter((e: any) => e.to_id === c.id && e.to_type === "account" && e.tx_date >= c.last_statement_date)
+        .reduce((s: number, e: any) => s + Number(e.amount_idr || 0), 0);
+      return Math.max(0, Number(c.last_statement_amount) - paidSince);
+    }
     const outstanding = Number(c.outstanding_amount || 0);
     if (outstanding <= 0) return 0;
     if (!c.statement_day) return outstanding;

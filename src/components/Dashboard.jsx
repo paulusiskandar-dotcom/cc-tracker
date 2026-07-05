@@ -122,6 +122,13 @@ function getLastStatementDate(statementDay, today) {
 }
 
 function computePendingDue(cc, ledger, today) {
+  // Statement-based (accurate): pending = last statement bill − payments since.
+  if (cc.last_statement_amount != null && cc.last_statement_date) {
+    const paidSince = (ledger || [])
+      .filter(e => e.to_id === cc.id && e.to_type === "account" && e.tx_date && e.tx_date >= cc.last_statement_date)
+      .reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+    return Math.max(0, Number(cc.last_statement_amount) - paidSince);
+  }
   const outstanding = Number(cc.outstanding_amount || 0);
   if (outstanding <= 0) return 0;
   if (!cc.statement_day) return outstanding;

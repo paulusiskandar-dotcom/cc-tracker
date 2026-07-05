@@ -11,8 +11,18 @@ function getLastStatementDate(statementDay, today) {
   return new Date(today.getFullYear(), today.getMonth() - 1, day);
 }
 
-// Pending (not-yet-billed-out) amount for a CC — same logic as Dashboard.
+// Pending (amount actually due now) for a CC.
 function computePendingDue(cc, ledger, today) {
+  // STATEMENT-BASED (accurate): if we know the last statement's amount + date,
+  // pending = statement bill − payments/credits to the card since that date.
+  // Charges after the statement belong to the NEXT bill and are ignored here.
+  if (cc.last_statement_amount != null && cc.last_statement_date) {
+    const paidSince = (ledger || [])
+      .filter(e => e.to_id === cc.id && e.to_type === "account" && e.tx_date && e.tx_date >= cc.last_statement_date)
+      .reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+    return Math.max(0, Number(cc.last_statement_amount) - paidSince);
+  }
+  // FALLBACK (estimate): outstanding − charges booked after the cutoff.
   const outstanding = Number(cc.outstanding_amount || 0);
   if (outstanding <= 0) return 0;
   if (!cc.statement_day) return outstanding;

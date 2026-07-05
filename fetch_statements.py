@@ -47,9 +47,11 @@ def load_passwords(cfg):
 
 def unlock(src, dst, passwords):
     """Decrypt PDF with qpdf, trying each candidate password. True on first success."""
+    import shutil
+    qpdf = shutil.which("qpdf") or next((p for p in ("/opt/homebrew/bin/qpdf", "/usr/local/bin/qpdf") if os.path.exists(p)), "qpdf")
     for pw in passwords:
         try:
-            cmd = ["qpdf", "--decrypt"] + ([f"--password={pw}"] if pw else []) + [src, dst]
+            cmd = [qpdf, "--decrypt"] + ([f"--password={pw}"] if pw else []) + [src, dst]
             r = subprocess.run(cmd, capture_output=True, text=True)
             if r.returncode in (0, 3) and os.path.exists(dst) and os.path.getsize(dst) > 0:
                 return True
