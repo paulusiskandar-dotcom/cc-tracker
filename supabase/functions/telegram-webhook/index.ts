@@ -309,6 +309,19 @@ Deno.serve(async (req: Request) => {
     return new Response(JSON.stringify(out), { headers: { "Content-Type": "application/json" } });
   }
 
+  // ── statement download notif from the Mac fetch script ──
+  if (update?.type === "stmt_notify" && Array.isArray(update?.files)) {
+    const files: string[] = update.files;
+    if (files.length) {
+      const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+      let msg = `📥 <b>${files.length} statement baru kedownload</b>\n`;
+      msg += files.slice(0, 25).map((f) => `• ${esc(String(f).slice(0, 44))}`).join("\n");
+      msg += `\n\n` + await cmdStatements(sb, AUTHORIZED_USER_ID);
+      await sendTelegramHTML(TELEGRAM_BOT_TOKEN, AUTHORIZED_CHAT_ID, msg);
+    }
+    return new Response(JSON.stringify({ ok: true, notified: files.length }), { headers: { "Content-Type": "application/json" } });
+  }
+
   // ── 2-way callbacks (inline button taps from the daily digest) ──
   if (update?.callback_query) {
     const cb = update.callback_query;
@@ -847,6 +860,8 @@ async function handleCommand(cmd: string, arg: string, supabase: any, uid: strin
       }
       case "/hutang": return sendTelegramHTML(token, chatId, await cmdHutang(supabase, uid));
       case "/weekly": return sendTelegramHTML(token, chatId, await cmdWeekly(supabase, uid));
+      case "/statements": case "/statement": case "/tagihan":
+        return sendTelegramHTML(token, chatId, await cmdStatements(supabase, uid));
       case "/piutang": return sendTelegramHTML(token, chatId, await cmdPiutang(supabase, uid));
       case "/investasi": return sendTelegramHTML(token, chatId, await cmdInvestasi(supabase, uid));
       case "/hari": return sendTelegramHTML(token, chatId, await cmdHari(supabase, uid));
@@ -1035,6 +1050,36 @@ async function cmdReimburse(supabase: any, uid: string): Promise<string> {
       out += `${d2(r.tx_date)} · ${esc(nm)}\n<b>${idr(r.amount_idr)}</b>\n`;
     }
   }
+  return out;
+}
+
+// ── STATEMENT STATUS REPORT: mana yang udah masuk/lunas/belum ──
+async function cmdStatements(supabase: any, uid: string): Promise<string> {
+  const { data: cc } = await supabase.from("accounts")
+    .select("id, name, last_statement_amount, last_statement_date, due_day, is_active")
+    .eq("user_id", uid).eq("type", "credit_card");
+  const cards = (cc || []).filter((c: any) => c.is_active !== false);
+  const ids = cards.map((c: any) => c.id);
+  const { data: pays } = await supabase.from("ledger")
+    .select("to_id, amount_idr, tx_date").in("to_id", ids).eq("to_type", "account").gte("tx_date", "2026-05-01");
+  const paidSince = (c: any) => (pays || [])
+    .filter((p: any) => p.to_id === c.id && p.tx_date >= c.last_statement_date)
+    .reduce((s: number, p: any) => s + Number(p.amount_idr || 0), 0);
+  const d2 = (s: string) => { const p = String(s || "").split("-"); return p.length === 3 ? `${p[2]}/${p[1]}` : s; };
+  const lunas: any[] = [], belum: any[] = [], noStmt: any[] = [];
+  for (const c of cards) {
+    if (c.last_statement_amount == null || !c.last_statement_date) { noStmt.push(c); continue; }
+    const pending = Math.max(0, Number(c.last_statement_amount) - paidSince(c));
+    if (pending <= 25000) lunas.push(c); else belum.push({ c, pending });
+  }
+  belum.sort((a, b) => b.pending - a.pending);
+  let out = `📄 <b>STATUS STATEMENT & TAGIHAN</b>\n`;
+  if (belum.length) {
+    out += `\n🔴 <b>Belum dibayar (${belum.length})</b>\n`;
+    out += belum.map((x) => `${esc(x.c.name)} · stmt ${d2(x.c.last_statement_date)}\n<b>${idr(x.pending)}</b>${x.c.due_day ? ` — JT tgl ${x.c.due_day}` : ""}`).join("\n") + "\n";
+  }
+  if (lunas.length) out += `\n✅ <b>Lunas (${lunas.length})</b>\n${lunas.map((c) => esc(c.name)).join(" · ")}\n`;
+  if (noStmt.length) out += `\n⚪ <b>Statement belum masuk (${noStmt.length})</b>\n${noStmt.map((c) => esc(c.name)).join(" · ")}\n`;
   return out;
 }
 

@@ -13,7 +13,7 @@ Setup (once):
 
 Nothing is deleted from Gmail; already-downloaded files are skipped.
 """
-import imaplib, email, json, os, re, subprocess, sys, tempfile
+import imaplib, email, json, os, re, subprocess, sys, tempfile, urllib.request
 from email.header import decode_header
 from datetime import datetime, timedelta
 
@@ -74,6 +74,7 @@ def main():
     M.login(cfg["gmail_user"], cfg["app_password"])
     M.select("INBOX")
     got = 0
+    saved_files = []
     for src in cfg["sources"]:
         crit = ['FROM', f'"{src["from"]}"']
         if since: crit += ['SINCE', since.strftime("%d-%b-%Y")]
@@ -102,9 +103,21 @@ def main():
                 os.unlink(tmp)
                 if ok:
                     got += 1
+                    saved_files.append(safe)
                     log(f'  saved {os.path.relpath(out_path, base)}')
     M.logout()
     log(f"done. {got} new statement PDF(s) downloaded + unlocked.")
+
+    # Notify Telegram (via the webhook, which holds the bot token) when new statements arrive.
+    if saved_files:
+        try:
+            url = cfg.get("notify_webhook", "https://zxkxfaoxzldxojwepnca.supabase.co/functions/v1/telegram-webhook")
+            body = json.dumps({"type": "stmt_notify", "files": saved_files}).encode()
+            req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
+            urllib.request.urlopen(req, timeout=30)
+            log(f"notified Telegram: {len(saved_files)} new file(s)")
+        except Exception as e:
+            log("notify error:", e)
 
 if __name__ == "__main__":
     main()
