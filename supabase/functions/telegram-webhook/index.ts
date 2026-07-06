@@ -871,7 +871,7 @@ async function handleCommand(cmd: string, arg: string, supabase: any, uid: strin
         fetch(url, { method: "POST", headers: { "Content-Type": "application/json" } }).catch(() => {});
         return sendTelegramHTML(token, chatId, "📬 Digest dikirim...");
       }
-      case "/import": return sendTelegramHTML(token, chatId, await importPending(supabase, uid));
+      case "/import": return sendTelegramHTML(token, chatId, await importPending(supabase, uid, token, chatId));
       case "/cek":
       case "/health": return sendTelegramHTML(token, chatId, await cmdCek(supabase, uid));
       case "/trend": return sendTelegramHTML(token, chatId, await cmdTrend(supabase, uid));
@@ -1495,6 +1495,22 @@ async function handleCallback(cb: any, token: string, supabase: any, uid: string
     await doDelete(parts.slice(1).join(":"), supabase, uid, token, cb.message.chat.id);
     return;
   }
+  // ask-back: assign held item to a card → setacc:<esId>:<idx>:<last4>
+  if (parts[0] === "setacc" && parts.length >= 4) {
+    const esId = parts[1], idx = Number(parts[2]), last4 = parts[3];
+    await answerCallback(token, cb.id, "⏳ Assign...");
+    const { data: accs } = await supabase.from("accounts").select("id, name, card_last4").eq("user_id", uid);
+    const a = (accs || []).find((x: any) => x.card_last4 === last4);
+    if (!a) { await sendTelegramHTML(token, cb.message.chat.id, "⚠️ Kartu ga ketemu."); return; }
+    const { data: row } = await supabase.from("email_sync").select("ai_raw_result").eq("id", esId).eq("user_id", uid).single();
+    let arr: any = row?.ai_raw_result; try { if (typeof arr === "string") arr = JSON.parse(arr); } catch { arr = null; }
+    if (!Array.isArray(arr) || !arr[idx]) { await sendTelegramHTML(token, cb.message.chat.id, "⚠️ Item ga ketemu (mungkin udah diproses)."); return; }
+    arr[idx].from_account_id = a.id;
+    await supabase.from("email_sync").update({ ai_raw_result: arr }).eq("id", esId);
+    const summary = await importPending(supabase, uid, token, cb.message.chat.id);
+    await sendTelegramHTML(token, cb.message.chat.id, `✅ Diassign ke <b>${esc(a.name)}</b>\n\n` + summary);
+    return;
+  }
 
   // classify/reject: cls:<emailSyncId>:<txIdx>:<H|S|P|X>  → tag entity, or X = tolak (won't be imported)
   if (parts[0] === "cls" && parts.length === 4) {
@@ -1590,7 +1606,7 @@ async function handleCallback(cb: any, token: string, supabase: any, uid: string
   // import-all: run the real importer (reclassify -> merge -> dedup -> insert -> recalc -> mark imported)
   if (data === "dg:importall") {
     await answerCallback(token, cb.id, "⏳ Importing...");
-    const summary = await importPending(supabase, uid);
+    const summary = await importPending(supabase, uid, token, cb.message.chat.id);
     await sendTelegramHTML(token, cb.message.chat.id, summary);
     return;
   }
@@ -1952,7 +1968,7 @@ async function recalcAccountEdge(supabase: any, uid: string, acc: any) {
   await supabase.from("accounts").update({ [field]: bal }).eq("id", acc.id);
 }
 
-async function importPending(supabase: any, uid: string): Promise<string> {
+async function importPending(supabase: any, uid: string, token?: string, chatId?: number): Promise<string> {
   const { data: accountsRaw } = await supabase.from("accounts").select("*").eq("user_id", uid);
   const accounts = (accountsRaw || []).filter((a: any) => a.is_active !== false);
   const byId: Record<string, any> = Object.fromEntries(accounts.map((a: any) => [a.id, a]));
@@ -2102,6 +2118,27 @@ async function importPending(supabase: any, uid: string): Promise<string> {
     }
   }
 
+  // ── ASK-BACK: for items held on unknown account, ask which card (buttons) ──
+  const heldNoAcc = items.filter((i) => i.drop === "no-account");
+  if (token && chatId && heldNoAcc.length) {
+    const BRANDS = ["cimb", "maybank", "mandiri", "bca", "bri", "ocbc", "danamon", "mega", "uob", "bni", "jenius", "mayapada", "skorcard", "hsbc", "sinarmas"];
+    for (const it of heldNoAcc) {
+      const t = it.t;
+      const bank = String(t.from_bank_name || t.to_bank_name || "").toLowerCase();
+      const brand = BRANDS.find((b) => bank.includes(b));
+      const brandKey = brand === "mayapada" ? "skor" : brand;
+      const cands = accounts.filter((a: any) => a.card_last4 && a.type === "credit_card" && brandKey && a.name.toLowerCase().includes(brandKey));
+      const nm = String(t.merchant_name || t.description || "tx").slice(0, 24);
+      const amt = Number(t.amount_idr || t.amount || 0);
+      if (cands.length) {
+        const kb = cands.slice(0, 8).map((a: any) => [{ text: `${a.name} (…${a.card_last4})`, callback_data: `setacc:${it.esId}:${it.idx}:${a.card_last4}` }]);
+        await sendTelegramHTML(token, chatId, `❓ <b>${esc(nm)} · ${idr(amt)}</b>\nDari <b>${esc(t.from_bank_name || "?")}</b> — kartu yang mana? (tap)`, { inline_keyboard: kb });
+      } else {
+        await sendTelegramHTML(token, chatId, `❓ <b>${esc(nm)} · ${idr(amt)}</b> — akun/kartu ga kekenali${t.from_bank_name ? ` (bank: ${esc(t.from_bank_name)})` : ""}. Assign di app dulu ya.`);
+      }
+    }
+  }
+
   const parts = Object.entries(counts).map(([k, v]) => `${v}× ${k}`).join(" · ") || "-";
   const dupList = items.filter((i) => i.drop === "dup-ledger");
   const left = items.filter((i) => i.drop === "no-account" || i.drop === "valas").length;
@@ -2112,7 +2149,7 @@ async function importPending(supabase: any, uid: string): Promise<string> {
     if (dupList.length > 8) dupTxt += `… +${dupList.length - 8} lagi\n`;
   }
   return `✅ <b>Imported ${ins.length} transaksi ke ledger</b>\n${parts}\nTotal ${idr(totalAmt)}\n` + dupTxt +
-    (left ? `⚠️ ${left} tertahan (akun tak dikenal / valas) — cek di app\n` : "") +
+    (left ? `⚠️ ${left} tertahan — ${heldNoAcc.length ? "jawab pertanyaan kartu di atas 👆" : "cek di app (valas)"}\n` : "") +
     `🧹 Pending di app sudah dibersihkan. Cek /saldo & /cc.`;
 }
 
