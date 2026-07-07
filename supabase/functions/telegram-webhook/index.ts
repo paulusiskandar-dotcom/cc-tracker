@@ -2014,6 +2014,7 @@ async function importPending(supabase: any, uid: string, token?: string, chatId?
     else if (toA?.type === "liability") ty = "pay_liability";
     else if (t.suggested_tx_type === "collect_loan" && (toA || fromA)) ty = "collect_loan";
     else if (fromA && toA) ty = "transfer";
+    else if (t.suggested_tx_type === "reimburse_in" && toA) ty = "reimburse_in";
     else if ((t.suggested_tx_type === "income" || t.type === "in") && (toA || fromA)) ty = "income";
     else if (t.suggested_tx_type === "reimburse_out" && fromA) ty = "reimburse_out";
     else if (fromA) ty = "expense";
@@ -2078,6 +2079,8 @@ async function importPending(supabase: any, uid: string, token?: string, chatId?
       ins.push({ ...base, tx_type: r.ty, from_type: "account", from_id: r.fromA.id, to_type: "account", to_id: r.toA.id, description: r.ty === "pay_cc" ? "Bayar CC " + r.toA.name : r.ty === "pay_liability" ? "Bayar " + r.toA.name : r.desc });
     } else if (r.ty === "income") {
       ins.push({ ...base, tx_type: "income", from_type: "income_source", from_id: srcId(INCOME_SRC.includes(r.cat) ? r.cat : "Other Income"), to_type: "account", to_id: (r.toA || r.fromA).id });
+    } else if (r.ty === "reimburse_in") {
+      ins.push({ ...base, tx_type: "reimburse_in", from_type: "expense", from_id: null, to_type: "account", to_id: (r.toA || r.fromA).id, entity: r.entity, is_reimburse: true });
     } else if (r.ty === "reimburse_out" && PIU[r.entity]) {
       ins.push({ ...base, tx_type: "reimburse_out", from_type: "account", from_id: r.fromA.id, to_type: "account", to_id: PIU[r.entity], entity: r.entity, is_reimburse: true });
     } else {
@@ -2124,6 +2127,8 @@ async function importPending(supabase: any, uid: string, token?: string, chatId?
     const BRANDS = ["cimb", "maybank", "mandiri", "bca", "bri", "ocbc", "danamon", "mega", "uob", "bni", "jenius", "mayapada", "skorcard", "hsbc", "sinarmas"];
     for (const it of heldNoAcc) {
       const t = it.t;
+      // only ask "which CARD" for genuine card charges — not bank deposits/transfers/income
+      if (t.to_account_id || ["reimburse_in", "income", "transfer", "pay_cc"].includes(String(t.suggested_tx_type))) continue;
       const bank = String(t.from_bank_name || t.to_bank_name || "").toLowerCase();
       const brand = BRANDS.find((b) => bank.includes(b));
       const brandKey = brand === "mayapada" ? "skor" : brand;
