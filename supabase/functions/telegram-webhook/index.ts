@@ -384,13 +384,15 @@ Deno.serve(async (req: Request) => {
       // Settle selection WITHOUT entity: "out 2 in 1" — resolve entity from recent /settle
       const selNoEnt = text.match(/^out\s+((?:\d[\d,\s]*|semua|all))(?:\s+in\s+((?:\d[\d,\s]*|semua|all)))?\s*$/i);
       if (selNoEnt) {
+        let ent: string | null = null;
         try {
-          const { data: mem } = await supabase.from("tg_chat_memory").select("settle_entity, settle_at").eq("chat_id", chatId).maybeSingle();
-          if (mem?.settle_entity && mem.settle_at && (Date.now() - new Date(mem.settle_at).getTime() < 15 * 60 * 1000)) {
-            await handlePartialSettle(mem.settle_entity, selNoEnt[1], selNoEnt[2] || "", supabase, AUTHORIZED_USER_ID, TELEGRAM_BOT_TOKEN, chatId);
-            return new Response("ok", { status: 200 });
-          }
-        } catch { /* tg_chat_memory column not present yet */ }
+          const { data: mem } = await supabase.from("tg_chat_memory").select("turns").eq("chat_id", chatId).maybeSingle();
+          const marker = (Array.isArray(mem?.turns) ? mem.turns : []).filter((t: any) => t?._settle).pop();
+          if (marker && (Date.now() - Number(marker.at) < 15 * 60 * 1000)) ent = marker._settle;
+        } catch { /* noop */ }
+        if (ent) { await handlePartialSettle(ent, selNoEnt[1], selNoEnt[2] || "", supabase, AUTHORIZED_USER_ID, TELEGRAM_BOT_TOKEN, chatId); return new Response("ok", { status: 200 }); }
+        await sendTelegramHTML(TELEGRAM_BOT_TOKEN, chatId, "Sebutin entity-nya, mis. <code>sdc out 1 in 1</code> / <code>hamasa out 2 in 1</code>. (Ketik <code>/settle sdc</code> dulu → habis itu bisa balas tanpa entity.)");
+        return new Response("ok", { status: 200 });
       }
       // Settle preview (numbered list): "settle hamasa" / "settle sdc"
       const settleM = text.match(/^settle\s+(\w+)/i);
@@ -1140,7 +1142,13 @@ async function handleSettlePreview(entity: string, supabase: any, uid: string, t
   out += `\n\nPilih yang mau dicocokin, balas mis:\n<code>${e} out 2 in 1</code>  (bisa banyak: <code>out 1,3 in 2</code>)\nAtau tap <b>Settle semua</b>.`;
   await sendTelegramHTML(token, chatId, out, { inline_keyboard: [[{ text: "✅ Settle semua", callback_data: `psettle:${entity}:all:all` }, { text: "❌ Batal", callback_data: "noop:x" }]] });
   // remember which entity is being settled so a bare "out 2 in 1" reply resolves
-  try { await supabase.from("tg_chat_memory").upsert({ chat_id: chatId, settle_entity: entity, settle_at: new Date().toISOString() }); } catch { /* column may not exist yet */ }
+  // (stored in the existing tg_chat_memory.turns — no extra column needed)
+  try {
+    const { data: mem } = await supabase.from("tg_chat_memory").select("turns").eq("chat_id", chatId).maybeSingle();
+    const turns = (Array.isArray(mem?.turns) ? mem.turns : []).filter((t: any) => t?.role === "user" || t?.role === "assistant");
+    turns.push({ _settle: entity, at: Date.now() });
+    await supabase.from("tg_chat_memory").upsert({ chat_id: chatId, turns, updated_at: new Date().toISOString() });
+  } catch { /* no memory table */ }
 }
 
 // User replied "hamasa out 2 in 1" → preview the selected match + confirm.
@@ -2478,7 +2486,7 @@ Setelah dapat data, jawab singkat & to-the-point (sebut periodenya, mis. "sekita
   if (chatId) {
     try {
       const { data: mem } = await supabase.from("tg_chat_memory").select("turns, updated_at").eq("chat_id", chatId).maybeSingle();
-      if (mem && mem.updated_at && (Date.now() - new Date(mem.updated_at).getTime() < 25 * 60 * 1000) && Array.isArray(mem.turns)) history = mem.turns;
+      if (mem && mem.updated_at && (Date.now() - new Date(mem.updated_at).getTime() < 25 * 60 * 1000) && Array.isArray(mem.turns)) history = mem.turns.filter((t: any) => t?.role === "user" || t?.role === "assistant");
     } catch { /* table may not exist yet — memory disabled gracefully */ }
   }
   const saveMemory = async (answer: string) => {
