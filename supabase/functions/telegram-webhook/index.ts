@@ -378,6 +378,17 @@ Deno.serve(async (req: Request) => {
         const ent = REIMBURSE_ENTITY(selM[1]);
         if (ent) { await handlePartialSettle(ent, selM[2], selM[3] || "", supabase, AUTHORIZED_USER_ID, TELEGRAM_BOT_TOKEN, chatId); return new Response("ok", { status: 200 }); }
       }
+      // Settle selection WITHOUT entity: "out 2 in 1" — resolve entity from recent /settle
+      const selNoEnt = text.match(/^out\s+((?:\d[\d,\s]*|semua|all))(?:\s+in\s+((?:\d[\d,\s]*|semua|all)))?\s*$/i);
+      if (selNoEnt) {
+        try {
+          const { data: mem } = await supabase.from("tg_chat_memory").select("settle_entity, settle_at").eq("chat_id", chatId).maybeSingle();
+          if (mem?.settle_entity && mem.settle_at && (Date.now() - new Date(mem.settle_at).getTime() < 15 * 60 * 1000)) {
+            await handlePartialSettle(mem.settle_entity, selNoEnt[1], selNoEnt[2] || "", supabase, AUTHORIZED_USER_ID, TELEGRAM_BOT_TOKEN, chatId);
+            return new Response("ok", { status: 200 });
+          }
+        } catch { /* tg_chat_memory column not present yet */ }
+      }
       // Settle preview (numbered list): "settle hamasa" / "settle sdc"
       const settleM = text.match(/^settle\s+(\w+)/i);
       if (settleM) {
@@ -606,7 +617,7 @@ async function handleText(
   await sendTelegramMessage(
     botToken,
     chatId,
-    `✅ Saved ${transactions.length} transaksi pending review:\n\n${summary}\n\nBuka Paulus Finance untuk confirm\\.`,
+    `✅ Saved ${transactions.length} transaksi pending review:\n\n${summary}\n\nBuka Ryusei untuk confirm\\.`,
   );
 }
 
@@ -661,7 +672,7 @@ async function handlePhoto(
   await sendTelegramMessage(
     botToken,
     chatId,
-    `✅ Saved ${transactions.length} transaksi pending review:\n\n${summary}\n\nBuka Paulus Finance untuk confirm\\.`,
+    `✅ Saved ${transactions.length} transaksi pending review:\n\n${summary}\n\nBuka Ryusei untuk confirm\\.`,
   );
 }
 
@@ -745,7 +756,7 @@ async function handleDocument(
   await sendTelegramMessage(
     botToken,
     chatId,
-    `✅ Saved ${transactions.length} transaksi pending review:\n\n${summary}\n\nBuka Paulus Finance untuk confirm\\.`,
+    `✅ Saved ${transactions.length} transaksi pending review:\n\n${summary}\n\nBuka Ryusei untuk confirm\\.`,
   );
 }
 
@@ -1118,6 +1129,8 @@ async function handleSettlePreview(entity: string, supabase: any, uid: string, t
   const e = entity.toLowerCase();
   out += `\n\nPilih yang mau dicocokin, balas mis:\n<code>${e} out 2 in 1</code>  (bisa banyak: <code>out 1,3 in 2</code>)\nAtau tap <b>Settle semua</b>.`;
   await sendTelegramHTML(token, chatId, out, { inline_keyboard: [[{ text: "✅ Settle semua", callback_data: `psettle:${entity}:all:all` }, { text: "❌ Batal", callback_data: "noop:x" }]] });
+  // remember which entity is being settled so a bare "out 2 in 1" reply resolves
+  try { await supabase.from("tg_chat_memory").upsert({ chat_id: chatId, settle_entity: entity, settle_at: new Date().toISOString() }); } catch { /* column may not exist yet */ }
 }
 
 // User replied "hamasa out 2 in 1" → preview the selected match + confirm.
