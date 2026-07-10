@@ -479,6 +479,9 @@ function TxHorizontalCard({
   const color   = amtColor(r.tx_type);
   const sign    = amtSign(r.tx_type);
   const isFX    = r.currency && r.currency !== "IDR";
+  // Gmail-sync valas: rate is only an estimate → held "waiting for statement",
+  // not importable here. The exact IDR comes from the monthly statement.
+  const fxWaiting = isFX && source === "gmail";
   const showCat = !NO_CAT_TYPES.has(r.tx_type);
   const cats    = r.tx_type === "income" ? incomeSrcs : categories;
   const typeColor = TX_HORIZONTAL_TYPES.find(t => t.value === r.tx_type)?.color || T.text;
@@ -542,6 +545,9 @@ function TxHorizontalCard({
         {r._transferPair && (
           <span style={BADGE("#dbeafe","#1d4ed8")}>🔄 Transfer</span>
         )}
+        {fxWaiting && (
+          <span style={BADGE("#dbeafe","#1e40af")} title="Kurs belum pasti — nilai IDR asli diambil dari statement bulanan">⏳ Nunggu statement</span>
+        )}
         {r._autoDetect?.confidence && (
           <span
             title={`Auto-detected · Matched by: ${(r._autoDetect.matchedBy || []).join(', ')}`}
@@ -556,10 +562,12 @@ function TxHorizontalCard({
           {amtStr}
         </span>
 
-        <button onClick={handleConfirm} disabled={isSkipped || isConfirming || r._invalidAmount}
-          style={ACT_BTN({ background: "#dcfce7", color: "#059669", border: "1px solid #bbf7d0" })}
-          title="Import">
-          {isConfirming ? "…" : "✓"}
+        <button onClick={handleConfirm} disabled={isSkipped || isConfirming || r._invalidAmount || fxWaiting}
+          style={ACT_BTN(fxWaiting
+            ? { background: T.sur2, color: T.text3, border: `1px solid ${T.border}`, cursor: "not-allowed" }
+            : { background: "#dcfce7", color: "#059669", border: "1px solid #bbf7d0" })}
+          title={fxWaiting ? "Valas — nunggu statement (belum bisa diimport)" : "Import"}>
+          {isConfirming ? "…" : fxWaiting ? "⏳" : "✓"}
         </button>
 
         <button onClick={() => onSkip(r._id)}

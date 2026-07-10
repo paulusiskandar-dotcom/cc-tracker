@@ -575,6 +575,17 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
   };
 
   const confirm = async (r) => {
+    // Foreign-currency (valas) tx have no exact IDR yet (rate unknown) — never
+    // push them to the ledger. Park as "waiting for statement" instead; the
+    // monthly statement reconcile brings the bank's exact settled IDR later.
+    if (r.currency && r.currency !== "IDR") {
+      try {
+        await gmailApi.markTxWaiting(r.email_sync_id, r.tx_index ?? 0);
+        updateRow(r._id, { _waiting_statement: true });
+      } catch (e) { console.warn("[markTxWaiting]", e?.message); }
+      showToast("⏳ Valas ditahan — tunggu statement (nilai asli IDR)", "info");
+      return;
+    }
     try {
       const entry = buildEntry(r);
       const created = await ledgerApi.create(user.id, entry, accounts);
@@ -659,8 +670,13 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     const matchedNames = [];
     for (const r of selectedRows) {
       // Foreign-currency (valas) email-sync tx are unreliable (est. rate, no exact IDR) —
-      // leave them pending and take the accurate figures from the monthly statement instead.
-      if (r.currency && r.currency !== "IDR") { skippedFx++; continue; }
+      // park as "waiting for statement" and take the accurate figures from the monthly statement.
+      if (r.currency && r.currency !== "IDR") {
+        skippedFx++;
+        try { await gmailApi.markTxWaiting(r.email_sync_id, r.tx_index ?? 0); updateRow(r._id, { _waiting_statement: true }); }
+        catch (e) { console.warn("[markTxWaiting]", e?.message); }
+        continue;
+      }
       try {
         const builtEntry = buildEntry(r);
         const created = await ledgerApi.create(user.id, builtEntry, accounts);
@@ -775,9 +791,9 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
           ⚠️ {rows.filter(r => r._dup).length} kemungkinan duplikat (nominal &amp; tanggal sudah ada di ledger) — tidak dicentang otomatis. Cek dulu sebelum approve.
         </div>
       )}
-      {rows.some(r => r._fxEst) && (
+      {rows.some(r => r.currency && r.currency !== "IDR") && (
         <div style={{ fontSize: 12, color: "#1e40af", background: "#dbeafe", border: "1px solid #bfdbfe", borderRadius: 8, padding: "8px 12px", fontFamily: "Figtree, sans-serif" }}>
-          💱 {rows.filter(r => r._fxEst).length} transaksi mata uang asing dikonversi pakai kurs estimasi — nilai pasti (IDR) menyusul dari statement.
+          ⏳ {rows.filter(r => r.currency && r.currency !== "IDR").length} transaksi valas <b>ditahan — nunggu statement</b>. Kurs belum pasti, jadi nggak masuk ledger dulu; nilai IDR sebenarnya diambil dari statement bulanan.
         </div>
       )}
       {rows.length > 0 && (

@@ -225,6 +225,7 @@ Deno.serve(async (req: Request) => {
           { command: "digest", description: "📬 Kirim digest transaksi pending" },
           { command: "import", description: "📥 Import semua pending ke ledger" },
           { command: "pending", description: "👀 Lihat antrian pending" },
+          { command: "valas", description: "💱 Valas nunggu statement" },
           { command: "undo", description: "↩️ Batalkan import terakhir" },
           { command: "cek", description: "🩺 Health check (anomali)" },
           { command: "trend", description: "📈 Trend 4 bulan + net worth" },
@@ -892,6 +893,7 @@ async function handleCommand(cmd: string, arg: string, supabase: any, uid: strin
       case "/health": return sendTelegramHTML(token, chatId, await cmdCek(supabase, uid));
       case "/trend": return sendTelegramHTML(token, chatId, await cmdTrend(supabase, uid));
       case "/pending": return sendTelegramHTML(token, chatId, await cmdPending(supabase, uid));
+      case "/valas": return sendTelegramHTML(token, chatId, await cmdValas(supabase, uid));
       case "/due":
       case "/jatuhtempo": return sendTelegramHTML(token, chatId, await cmdDue(supabase, uid));
       case "/undo": return sendTelegramHTML(token, chatId, await cmdUndo(supabase, uid));
@@ -927,6 +929,7 @@ function cmdMenu(): string {
     "/digest — review transaksi pending",
     "/import — import semua ke ledger",
     "/pending — antrian pending · /undo — batalkan",
+    "/valas — transaksi valas nunggu statement",
     "",
     "<b>🛠 Aksi</b>",
     "/settle hamasa — cocokin & settle reimburse",
@@ -1400,6 +1403,26 @@ async function cmdPending(supabase: any, uid: string): Promise<string> {
   }
   if (!n) return "📭 <b>PENDING</b>\n\nKosong — semua sudah diimport. ✅";
   return `📥 <b>PENDING (${n})</b>\n${lines.join("\n")}${n > 15 ? `\n<i>… +${n - 15} lagi</i>` : ""}\n\nKetik /digest untuk review + import.`;
+}
+
+// ── VALAS queue: foreign-currency tx parked waiting for the monthly statement ──
+async function cmdValas(supabase: any, uid: string): Promise<string> {
+  const { data: rows } = await supabase.from("email_sync").select("id, ai_raw_result").eq("user_id", uid).eq("status", "waiting_statement");
+  let n = 0; const lines: string[] = [];
+  for (const r of rows || []) {
+    let arr: any = r.ai_raw_result; try { if (typeof arr === "string") arr = JSON.parse(arr); } catch { arr = null; }
+    for (const t of (Array.isArray(arr) ? arr : [])) {
+      if (t._imported || t._skipped || !t._waiting_statement) continue;
+      n++;
+      const cur = t.currency || "?";
+      const amt = Number(t.amount || 0);
+      const nm = esc(t.merchant_name || t.description || "-");
+      const dt = t.date ? ` · ${esc(String(t.date))}` : "";
+      if (n <= 20) lines.push(`💱 ${nm} — <b>${cur} ${amt.toLocaleString("en-US")}</b>${dt}`);
+    }
+  }
+  if (!n) return "💱 <b>VALAS — nunggu statement</b>\n\nKosong. ✅";
+  return `💱 <b>VALAS nunggu statement (${n})</b>\n${lines.join("\n")}${n > 20 ? `\n<i>… +${n - 20} lagi</i>` : ""}\n\n<i>Kurs belum pasti → ga masuk ledger. Nilai IDR asli diambil dari statement bulanan; nanti auto-clear pas statement masuk (atau ketik /import).</i>`;
 }
 
 async function cmdUndo(supabase: any, uid: string): Promise<string> {
@@ -1999,7 +2022,57 @@ async function recalcAccountEdge(supabase: any, uid: string, acc: any) {
   await supabase.from("accounts").update({ [field]: bal }).eq("id", acc.id);
 }
 
+// ── Auto-clear parked valas once the monthly statement lands in the ledger ──
+// A held valas tx is "cleared" when a matching charge (same card + matching
+// merchant/desc, within a generous date window since statements lag) now
+// exists in the ledger — that ledger row carries the bank's exact settled IDR,
+// so the parked estimate is no longer needed. Non-destructive: only flips the
+// email_sync item to done; never touches the ledger. Returns count cleared.
+async function sweepWaitingStatement(supabase: any, uid: string): Promise<number> {
+  const { data: rows } = await supabase.from("email_sync").select("id, ai_raw_result").eq("user_id", uid).eq("status", "waiting_statement");
+  if (!rows || !rows.length) return 0;
+  const { data: accountsRaw } = await supabase.from("accounts").select("id, name, card_last4, type").eq("user_id", uid);
+  const accounts = accountsRaw || [];
+  const byL4: Record<string, any> = Object.fromEntries(accounts.filter((a: any) => a.card_last4).map((a: any) => [a.card_last4, a]));
+  const norm = (s: any) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const descMatch = (a: any, b: any) => { const x = norm(a), y = norm(b); if (x.length < 4 || y.length < 4) return false; return x.includes(y.slice(0, 6)) || y.includes(x.slice(0, 6)); };
+  const { data: led } = await supabase.from("ledger").select("id, tx_date, description, merchant_name, from_id, from_type").eq("user_id", uid).eq("from_type", "account").gte("tx_date", "2026-04-01");
+  const resolveCard = (t: any): string | null => {
+    if (t.from_account_id && accounts.find((a: any) => a.id === t.from_account_id)) return t.from_account_id;
+    const hay = `${t.to_bank_name || ""} ${t.from_bank_name || ""} ${t.merchant_name || ""} ${t.description || ""}`;
+    for (const [re, l4] of ISSUER_CARD) if (re.test(hay) && byL4[l4]) return byL4[l4].id;
+    return null;
+  };
+  let cleared = 0;
+  for (const r of rows) {
+    let arr: any = r.ai_raw_result; try { if (typeof arr === "string") arr = JSON.parse(arr); } catch { continue; }
+    if (!Array.isArray(arr)) continue;
+    let changed = false;
+    for (const t of arr) {
+      if (!t || !t._waiting_statement || t._imported || t._skipped) continue;
+      const cardId = resolveCard(t);
+      if (!cardId) continue;
+      const nm = t.merchant_name || t.description || "";
+      const idate = dnum(t.date);
+      // Match on tx_DATE, tight (±3d): the statement row carries the same
+      // transaction date as the charge (it's just INSERTED weeks later). A wide
+      // window would false-match the PRIOR month's recurring charge (Anthropic,
+      // Google, subscriptions) and clear the new item before its statement lands.
+      if (isNaN(idate)) continue;  // no date → can't safely match, leave parked
+      const hit = (led || []).find((L: any) => L.from_id === cardId && descMatch(L.merchant_name || L.description, nm) && Math.abs(dnum(L.tx_date) - idate) <= 3 * DAYMS);
+      if (hit) { t._imported = true; t._clearedByStatement = true; changed = true; cleared++; }
+    }
+    if (changed) {
+      const allDone = arr.every((t: any) => t?._imported || t?._skipped);
+      const stillWaiting = arr.some((t: any) => t?._waiting_statement && !t?._imported && !t?._skipped);
+      await supabase.from("email_sync").update({ ai_raw_result: arr, status: allDone ? "imported" : (stillWaiting ? "waiting_statement" : "pending") }).eq("id", r.id);
+    }
+  }
+  return cleared;
+}
+
 async function importPending(supabase: any, uid: string, token?: string, chatId?: number): Promise<string> {
+  const swept = await sweepWaitingStatement(supabase, uid);  // clear parked valas that statements have since covered
   const { data: accountsRaw } = await supabase.from("accounts").select("*").eq("user_id", uid);
   const accounts = (accountsRaw || []).filter((a: any) => a.is_active !== false);
   const byId: Record<string, any> = Object.fromEntries(accounts.map((a: any) => [a.id, a]));
@@ -2024,7 +2097,7 @@ async function importPending(supabase: any, uid: string, token?: string, chatId?
     let arr: any = r.ai_raw_result; try { if (typeof arr === "string") arr = JSON.parse(arr); } catch { arr = null; }
     (Array.isArray(arr) ? arr : []).forEach((t: any, idx: number) => { if (!t._imported && !t._skipped) items.push({ esId: r.id, idx, t, skippedByUser: false }); });
   }
-  if (!items.length) return "📭 Tidak ada transaksi pending.";
+  if (!items.length) return swept ? `✅ ${swept} valas auto-clear (statement udah masuk).\n📭 Nggak ada transaksi pending lain.` : "📭 Tidak ada transaksi pending.";
 
   const today = ymd(jakartaNow());
   // 1) resolve + reclassify
@@ -2134,12 +2207,16 @@ async function importPending(supabase: any, uid: string, token?: string, chatId?
     const row = (rows || []).find((r: any) => r.id === esId); if (!row) continue;
     let arr: any = row.ai_raw_result; try { if (typeof arr === "string") arr = JSON.parse(arr); } catch { continue; }
     if (!Array.isArray(arr)) continue;
-    let all = true, impCount = 0;
+    let impCount = 0, actionablePending = false, waitingCount = 0;
     for (const it of list) {
       const done = handled.has(it) || it.drop === "dup-ledger";
-      if (done) { arr[it.idx]._imported = true; impCount++; } else all = false;
+      if (done) { arr[it.idx]._imported = true; impCount++; }
+      else if (it.drop === "valas") { arr[it.idx]._waiting_statement = true; waitingCount++; }  // park valas — rate unknown, wait for statement
+      else actionablePending = true;                                                             // e.g. no-account: still needs a normal action
     }
-    await supabase.from("email_sync").update({ ai_raw_result: arr, status: all ? "imported" : "pending", imported_count: impCount }).eq("id", esId);
+    // pending  = something still needs action; waiting_statement = only valas left; imported = all done
+    const status = actionablePending ? "pending" : (waitingCount ? "waiting_statement" : "imported");
+    await supabase.from("email_sync").update({ ai_raw_result: arr, status, imported_count: impCount }).eq("id", esId);
   }
 
   // rows whose every item is already imported/skipped (none made it into `items`) → clear from app too
@@ -2177,15 +2254,18 @@ async function importPending(supabase: any, uid: string, token?: string, chatId?
 
   const parts = Object.entries(counts).map(([k, v]) => `${v}× ${k}`).join(" · ") || "-";
   const dupList = items.filter((i) => i.drop === "dup-ledger");
-  const left = items.filter((i) => i.drop === "no-account" || i.drop === "valas").length;
+  const valasCount = items.filter((i) => i.drop === "valas").length;
   let dupTxt = "";
   if (dupList.length) {
     dupTxt = `\n↩️ <b>${dupList.length} DITOLAK — duplikat, sudah ada di ledger:</b>\n`;
     for (const d of dupList.slice(0, 8)) dupTxt += `• ${esc(d.dupInfo || "")}\n`;
     if (dupList.length > 8) dupTxt += `… +${dupList.length - 8} lagi\n`;
   }
-  return `✅ <b>Imported ${ins.length} transaksi ke ledger</b>\n${parts}\nTotal ${idr(totalAmt)}\n` + dupTxt +
-    (left ? `⚠️ ${left} tertahan — ${heldNoAcc.length ? "jawab pertanyaan kartu di atas 👆" : "cek di app (valas)"}\n` : "") +
+  let tail = "";
+  if (swept) tail += `♻️ ${swept} valas lama auto-clear (statement udah masuk)\n`;
+  if (valasCount) tail += `⏳ ${valasCount} valas → <b>nunggu statement</b> (kurs belum pasti, ga masuk ledger). Lihat /valas\n`;
+  if (heldNoAcc.length) tail += `❓ ${heldNoAcc.length} tertahan — jawab pertanyaan kartu di atas 👆\n`;
+  return `✅ <b>Imported ${ins.length} transaksi ke ledger</b>\n${parts}\nTotal ${idr(totalAmt)}\n` + dupTxt + tail +
     `🧹 Pending di app sudah dibersihkan. Cek /saldo & /cc.`;
 }
 

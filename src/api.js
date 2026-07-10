@@ -1564,8 +1564,10 @@ export const gmailApi = {
     const { data, error } = await supabase
       .from("email_sync")
       .select("*")
+      // include valas rows parked as "waiting_statement" so they stay visible
+      // (with a ⏳ badge, non-approvable) instead of vanishing from the queue.
+      .in("status", ["pending", "waiting_statement"])
       .eq("user_id", userId)
-      .eq("status", "pending")
       .not("ai_raw_result", "is", null)
       .gt("extracted_count", 0)
       .order("received_at", { ascending: false })
@@ -1604,6 +1606,36 @@ export const gmailApi = {
     const allDone = txs.every(t => t?.confirmed || t?.skipped);
     const updates = { ai_raw_result: txs, imported_count: importedCount };
     if (allDone) updates.status = importedCount > 0 ? "confirmed" : "skipped";
+    const { error } = await supabase.from("email_sync").update(updates).eq("id", id);
+    if (error) throw new Error(error.message);
+  },
+
+  // Park a single foreign-currency (valas) tx as "waiting for statement":
+  // sets ai_raw_result[txIndex]._waiting_statement=true and flips the parent
+  // row status to 'waiting_statement' only when every not-yet-done sibling is
+  // also waiting (mixed rows with still-actionable IDR items stay 'pending').
+  // Never writes to the ledger — the exact IDR comes from the monthly statement.
+  markTxWaiting: async (id, txIndex) => {
+    const { data, error: fetchErr } = await supabase
+      .from("email_sync")
+      .select("ai_raw_result")
+      .eq("id", id)
+      .single();
+    if (fetchErr) throw new Error(fetchErr.message);
+    const txs = Array.isArray(data?.ai_raw_result)
+      ? data.ai_raw_result.map(t => ({ ...(t || {}) }))
+      : [];
+    if (!txs.length || txIndex < 0 || txIndex >= txs.length) {
+      const { error } = await supabase.from("email_sync").update({ status: "waiting_statement" }).eq("id", id);
+      if (error) throw new Error(error.message);
+      return;
+    }
+    txs[txIndex] = { ...txs[txIndex], _waiting_statement: true };
+    // A row is fully waiting when no sibling still needs a normal action
+    // (i.e. every tx is confirmed | skipped | waiting).
+    const allParked = txs.every(t => t?.confirmed || t?.skipped || t?._waiting_statement);
+    const updates = { ai_raw_result: txs };
+    if (allParked) updates.status = "waiting_statement";
     const { error } = await supabase.from("email_sync").update(updates).eq("id", id);
     if (error) throw new Error(error.message);
   },
