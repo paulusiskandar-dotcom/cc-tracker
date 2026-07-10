@@ -330,7 +330,9 @@ Deno.serve(async (req: Request) => {
             const missTxt = s.missing ? `<b>${s.missing} belum masuk</b>` : "semua sudah masuk ✓";
             msg += `• <b>${esc(p.account_name || "?")}</b> ${esc(p.period || "")} — ${s.match ?? 0}✓ · ${missTxt}${gapTxt}\n`;
           } else {
-            msg += `• ⚠️ ${esc(String(p.file || "?").slice(0, 40))} — ${esc(p.reason === "account_not_matched" ? "akun tak dikenali" : p.reason === "encrypted" ? "PDF terkunci" : "gagal parse")}\n`;
+            msg += p.reason === "empty_statement"
+              ? `• ${esc(p.account_name || String(p.file || "?").slice(0, 40))} — statement kosong (tidak ada transaksi) ✓\n`
+              : `• ⚠️ ${esc(String(p.file || "?").slice(0, 40))} — ${esc(p.reason === "account_not_matched" ? "akun tak dikenali" : p.reason === "encrypted" ? "PDF terkunci" : "gagal parse")}\n`;
           }
         }
         const needReview = prepared.filter((p) => p.prepared && (p.stats?.missing || (p.gap != null && Math.abs(p.gap) >= 1))).length;

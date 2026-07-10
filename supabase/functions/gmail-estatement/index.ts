@@ -999,6 +999,10 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
       closing_balance: extraction.closing_balance ?? null,
     };
   }
+  // Empty statement (e.g. dormant HSBC card) — nothing to review, don't leave a draft
+  if (!txs.length) {
+    return { prepared: false, reason: "empty_statement", account_name: acc.name };
+  }
 
   // Period from statement tx dates
   const dates = txs.map((t) => String(t.date || "")).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
