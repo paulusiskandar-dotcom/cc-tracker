@@ -403,12 +403,12 @@ function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeri
             : catBreak.map(c => (
                 <HBar
                   key={c.id}
-                  label={`${c.icon} ${c.name}`}
+                  label={c.name}
                   value={c.total}
                   max={catTotal}
                   color={c.color}
                   pct={(catTotal > 0 ? (c.total / catTotal) * 100 : 0).toFixed(1)}
-                  onClick={() => setDrill({ title: `${c.icon} ${c.name}`, transactions: c.txs })}
+                  onClick={() => setDrill({ title: c.name, transactions: c.txs })}
                 />
               ))
           }
@@ -501,13 +501,13 @@ function ExpenseTab({ ledger, categories = [], period, dark }) {
             : cats.map((c, i) => (
                 <div
                   key={c.id}
-                  onClick={() => setDrill({ title: `${c.icon} ${c.name}`, transactions: c.txs })}
+                  onClick={() => setDrill({ title: c.name, transactions: c.txs })}
                   style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, cursor: "pointer", padding: "4px 0" }}
                 >
                   <div style={{ width: 8, height: 8, borderRadius: "50%", background: PIE_COLORS[i % PIE_COLORS.length], flexShrink: 0 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ fontSize: 12, color: "#374151" }}>{c.icon} {c.name}</span>
+                      <span style={{ fontSize: 12, color: "#374151" }}>{c.name}</span>
                       <span style={{ fontSize: 11, fontWeight: 700 }}>{fmtIDR(c.total, true)}</span>
                     </div>
                     <div style={{ background: "#f3f4f6", borderRadius: 3, height: 3, marginTop: 3 }}>
@@ -615,7 +615,7 @@ function IncomeTab({ ledger, incomeSrcs, period, dark }) {
                   <div style={{ width: 8, height: 8, borderRadius: "50%", background: INC_COLORS[i % INC_COLORS.length], flexShrink: 0 }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ fontSize: 12, color: "#374151" }}>{s.icon} {s.name}</span>
+                      <span style={{ fontSize: 12, color: "#374151" }}>{s.name}</span>
                       <span style={{ fontSize: 11, fontWeight: 700 }}>{fmtIDR(s.total, true)}</span>
                     </div>
                     <div style={{ background: "#f3f4f6", borderRadius: 3, height: 3, marginTop: 3 }}>
@@ -762,7 +762,7 @@ function ComparisonTab({ ledger, categories = [], period, dark }) {
                 const diffColor = diff < 0 ? "#059669" : diff > 0 ? "#dc2626" : "#9ca3af";
                 return (
                   <div key={name} style={{ display: "grid", gridTemplateColumns: "1fr 100px 100px 70px", gap: 8, fontSize: 12, padding: "8px 0", borderBottom: "1px solid #f3f4f6", alignItems: "center" }}>
-                    <span style={{ color: "#374151" }}>{tc?.icon || pc?.icon || "❓"} {name}</span>
+                    <span style={{ color: "#374151" }}>{name}</span>
                     <span style={{ textAlign: "right", fontWeight: 600 }}>{fmtIDR(tv, true)}</span>
                     <span style={{ textAlign: "right", color: "#9ca3af" }}>{fmtIDR(pv, true)}</span>
                     <span style={{ textAlign: "right", color: diffColor, fontSize: 11 }}>

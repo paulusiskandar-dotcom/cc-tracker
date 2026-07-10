@@ -12,6 +12,7 @@ import Select from "./shared/Select";
 import { EmptyState, showToast } from "./shared/Card";
 import SortDropdown from "./shared/SortDropdown";
 import ReconcileDraftBanner from "./shared/ReconcileDraftBanner";
+import { getCategoryVisual } from "../lib/categoryIcons";
 
 const SUBTABS = [
   { id: "overview",     label: "Overview" },
@@ -759,13 +760,20 @@ export default function CreditCards({
                     display: "flex", alignItems: "center", gap: 12,
                     padding: "10px 0", borderBottom: "1px solid #f3f4f6",
                   }}>
-                    <div style={{
-                      width: 36, height: 36, borderRadius: 10,
-                      background: isPayment ? "#dcfce7" : "#fee2e2",
-                      display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0,
-                    }}>
-                      {isPayment ? "✓" : cat?.icon || "💳"}
-                    </div>
+                    {(() => {
+                      const v = isPayment ? null : getCategoryVisual(cat?.name);
+                      const Ic = v?.Icon;
+                      return (
+                        <div style={{
+                          width: 36, height: 36, borderRadius: 10,
+                          background: isPayment ? "#dcfce7" : (v?.bg || "#fee2e2"),
+                          color: isPayment ? "#059669" : (v?.fg || "#dc2626"),
+                          display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0,
+                        }}>
+                          {isPayment ? "✓" : (Ic ? <Ic size={18} strokeWidth={2} /> : null)}
+                        </div>
+                      );
+                    })()}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                         {e.description}

@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect, useCallback } from "react";
 import { Bell, Mail, Camera, Scale, Plus } from "lucide-react";
+import { CategoryIcon } from "../lib/categoryIcons";
 import { ledgerApi, recurringApi, reimburseSettlementsApi, loanPaymentsApi, employeeLoanApi } from "../api";
 import { fmtIDR, ym, mlShort, getGreeting, todayStr, groupByDate, checkDuplicateTransaction } from "../utils";
 import { showToast, EmptyState, Modal, Button, AmountInput, Field, Input, FormRow } from "./shared/index";
@@ -1182,13 +1183,7 @@ export default function Dashboard({
           ) : (
             <>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-                <div style={{
-                  width: 44, height: 44, borderRadius: 12, flexShrink: 0,
-                  background: (topCategories[0]?.color || "#9ca3af") + "22",
-                  display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22,
-                }}>
-                  {topCategories[0]?.icon || "💸"}
-                </div>
+                <CategoryIcon name={topCategories[0]?.name} size={44} radius={12} />
                 <div>
                   <div style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>{topCategories[0]?.name || "Other"}</div>
                   <div style={{ fontSize: 22, fontWeight: 900, color: topCategories[0]?.color || "#dc2626", fontFamily: "Figtree, sans-serif" }}>
@@ -1201,7 +1196,7 @@ export default function Dashboard({
                 return (
                   <div key={cat.name + i} style={{ marginBottom: 7 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
-                      <span style={{ fontSize: 11, color: "#374151", fontFamily: "Figtree, sans-serif" }}>{cat.icon} {cat.name}</span>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "#374151", fontFamily: "Figtree, sans-serif" }}><CategoryIcon name={cat.name} size={18} /> {cat.name}</span>
                       <span style={{ fontSize: 11, fontWeight: 600, color: "#374151", fontFamily: "Figtree, sans-serif" }}>{fmtIDR(cat.total, true)}</span>
                     </div>
                     <div style={{ height: 3, borderRadius: 2, background: "#f3f4f6" }}>
@@ -1461,7 +1456,7 @@ export default function Dashboard({
                   <div key={cat.name + i}>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
-                        <span style={{ fontSize: 14, flexShrink: 0 }}>{cat.icon}</span>
+                        <CategoryIcon name={cat.name} size={20} />
                         <span style={{ fontSize: 11, color: "#374151", fontFamily: "Figtree, sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {cat.name}
                         </span>
@@ -1701,7 +1696,7 @@ export default function Dashboard({
                 background: "#f9fafb", borderRadius: 10, padding: "10px 14px",
                 display: "flex", flexDirection: "column", gap: 4,
               }}>
-                {cat && <div style={{ fontSize: 11, color: "#6b7280" }}>{cat.icon} {cat.name || cat.label}</div>}
+                {cat && <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#6b7280" }}><CategoryIcon name={cat.name || cat.label} size={16} /> {cat.name || cat.label}</div>}
                 {fromAcc && <div style={{ fontSize: 11, color: "#6b7280" }}>From: {fromAcc.name}</div>}
                 {toAcc && tmpl.tx_type !== "income" && <div style={{ fontSize: 11, color: "#6b7280" }}>To: {toAcc.name}</div>}
               </div>

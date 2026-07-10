@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { TrendingUp, TrendingDown } from "lucide-react";
+import { CategoryIcon } from "../lib/categoryIcons";
 import { ledgerApi, incomeSrcApi, recurringApi } from "../api";
 import { fmtIDR, todayStr, ym, mlShort } from "../utils";
 import { LIGHT, DARK } from "../theme";
@@ -40,7 +41,7 @@ function SourceCard({ src, onEdit, onAddIncome }) {
 
       {/* Header row */}
       <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-        <span style={{ fontSize: 22, lineHeight: 1 }}>{src.icon || "💰"}</span>
+        <CategoryIcon name={src.name} size={32} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: FF }}>{src.name}</div>
           {src.recurrence !== "ad_hoc" && (
@@ -262,7 +263,7 @@ function AddIncomeModal({ incomeSrcs, bankAccounts, onSave, onClose, saving }) {
         <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <span style={{ fontSize: 11, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: FF }}>Source</span>
           <select value={form.income_source_id} onChange={e => set("income_source_id", e.target.value)} style={INP}>
-            {incomeSrcs.map(s => <option key={s.id} value={s.id}>{s.icon} {s.name}</option>)}
+            {incomeSrcs.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </label>
 

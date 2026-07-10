@@ -427,7 +427,7 @@ export default function TxVerticalBig({
   if (isIncome) {
     catOptions = incomeSrcs.map(s => ({ value: s.id, label: `${s.icon || ""} ${s.name}`.trim() }));
   } else {
-    catOptions = categories.filter(c => c.is_active !== false).map(c => ({ value: c.id, label: `${c.icon || ""} ${c.name || c.label}` }));
+    catOptions = categories.filter(c => c.is_active !== false).map(c => ({ value: c.id, label: c.name || c.label }));
   }
 
   // ── UUID sanitizer ────────────────────────────────────────────

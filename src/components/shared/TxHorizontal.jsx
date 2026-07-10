@@ -622,7 +622,7 @@ function TxHorizontalCard({
               onUpdate({ category_id: e.target.value, category_name: cat?.label || cat?.name || "" });
             }}>
             <option value="">Category…</option>
-            {cats.map(c => <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.label || c.name}` : (c.label || c.name)}</option>)}
+            {cats.map(c => <option key={c.id} value={c.id}>{c.label || c.name}</option>)}
           </select>
         )}
 
@@ -1099,7 +1099,7 @@ export default function TxHorizontal({
                 >
                   <option value="">— {bBT_type === "income" ? "Source" : "Category"} —</option>
                   {(bBT_type === "income" ? (incomeSrcs || []) : (categories || [])).map(c => (
-                    <option key={c.id} value={c.id}>{c.icon ? `${c.icon} ${c.name}` : c.name}</option>
+                    <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
                 </select>
               </BulkField>

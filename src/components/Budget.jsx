@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { ChevronLeft, ChevronRight, PiggyBank, AlertTriangle } from "lucide-react";
+import { CategoryIcon } from "../lib/categoryIcons";
 import { budgetsApi } from "../api";
 import { fmtIDR } from "../utils";
 
@@ -192,7 +193,7 @@ export default function Budget({
               {/* Top: icon + name + spent / budget */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: row.amount > 0 ? 8 : 4 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 17 }}>{row.cat.icon}</span>
+                  <CategoryIcon name={row.cat.name} size={24} />
                   <span style={{ fontSize: 13, fontWeight: 500, color: "#111827" }}>{row.cat.name}</span>
                 </div>
 

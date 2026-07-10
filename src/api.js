@@ -620,7 +620,7 @@ export const categoriesApi = {
       .from("expense_categories")
       .select("*")
       .or(`user_id.is.null,user_id.eq.${userId}`)
-      .order("sort_order");
+      .order("name"); // alphabetical everywhere — easier to find (Paulus 2026-07-10)
     if (error) throw new Error(error.message);
     return data || [];
   },

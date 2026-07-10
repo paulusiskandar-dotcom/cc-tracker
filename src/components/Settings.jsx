@@ -1348,7 +1348,7 @@ export default function Settings({
               onChange={e => setMerchantCat(e.target.value)}
               options={[
                 { value: "", label: "— expense categories —", disabled: true },
-                ...categories.map(c => ({ value: c.id, label: `${c.icon || ""} ${c.name}`.trim() })),
+                ...categories.map(c => ({ value: c.id, label: c.name })),
                 { value: "", label: "— income categories —", disabled: true },
                 ...incomeSrcs.map(s => ({ value: s.id, label: s.name })),
               ]}
