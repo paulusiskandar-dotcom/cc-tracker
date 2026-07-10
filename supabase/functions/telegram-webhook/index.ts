@@ -316,11 +316,31 @@ Deno.serve(async (req: Request) => {
   // ── statement download notif from the Mac fetch script ──
   if (update?.type === "stmt_notify" && Array.isArray(update?.files)) {
     const files: string[] = update.files;
+    const prepared: any[] = Array.isArray(update?.prepared) ? update.prepared : [];
     if (files.length) {
       const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
       let msg = `📥 <b>${files.length} statement baru kedownload</b>\n`;
-      msg += files.slice(0, 25).map((f) => `• ${esc(String(f).slice(0, 44))}`).join("\n");
-      msg += `\n\n` + await cmdStatements(sb, AUTHORIZED_USER_ID);
+      if (prepared.length) {
+        // Per-account reconcile summary (server already parsed + diffed vs ledger)
+        msg += `\n📋 <b>RECONCILE DISIAPKAN:</b>\n`;
+        for (const p of prepared.slice(0, 25)) {
+          if (p.prepared) {
+            const s = p.stats || {};
+            const gapTxt = p.gap == null ? "" : (Math.abs(p.gap) < 1 ? " · closing COCOK ✓" : ` · ⚠️ gap ${idr(Math.abs(p.gap))}`);
+            const missTxt = s.missing ? `<b>${s.missing} belum masuk</b>` : "semua sudah masuk ✓";
+            msg += `• <b>${esc(p.account_name || "?")}</b> ${esc(p.period || "")} — ${s.match ?? 0}✓ · ${missTxt}${gapTxt}\n`;
+          } else {
+            msg += `• ⚠️ ${esc(String(p.file || "?").slice(0, 40))} — ${esc(p.reason === "account_not_matched" ? "akun tak dikenali" : p.reason === "encrypted" ? "PDF terkunci" : "gagal parse")}\n`;
+          }
+        }
+        const needReview = prepared.filter((p) => p.prepared && (p.stats?.missing || (p.gap != null && Math.abs(p.gap) >= 1))).length;
+        msg += needReview
+          ? `\n👀 ${needReview} akun perlu review → buka <b>Reconcile</b> di app (draft sudah siap, tinggal Continue).\n`
+          : `\n✅ Semua cocok — tidak ada yang perlu direview.\n`;
+      } else {
+        msg += files.slice(0, 25).map((f) => `• ${esc(String(f).slice(0, 44))}`).join("\n") + "\n";
+      }
+      msg += `\n` + await cmdStatements(sb, AUTHORIZED_USER_ID);
       await sendTelegramHTML(TELEGRAM_BOT_TOKEN, AUTHORIZED_CHAT_ID, msg);
     }
     return new Response(JSON.stringify({ ok: true, notified: files.length }), { headers: { "Content-Type": "application/json" } });

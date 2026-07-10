@@ -300,12 +300,29 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
         if (error) throw error;
       } catch (e) { console.error("[reconcile] update reconciled_at error:", e); }
     }
+    // CC: anchor statement-based pending-due to this statement's closing.
+    // pending = last_statement_amount − payments since last_statement_date
+    // (computePendingDue in Billing/Dashboard + payment-reminder read these).
+    const recAcc = accounts.find(a => a.id === accountId);
+    if (recAcc?.type === "credit_card" && stmtClosingBalance != null) {
+      try {
+        const stmtDates = stmtRows.map(s => s.date).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d || "")).sort();
+        const stmtEnd = stmtDates[stmtDates.length - 1] || todayStr();
+        const { error } = await supabase
+          .from("accounts")
+          .update({ last_statement_amount: stmtClosingBalance, last_statement_date: stmtEnd })
+          .eq("id", recAcc.id)
+          .eq("user_id", user.id);
+        if (error) throw error;
+        showToast(`Statement anchored: ${recAcc.name} = ${fmtIDR(stmtClosingBalance)}`);
+      } catch (e) { console.error("[reconcile] anchor last_statement error:", e); }
+    }
     if (pdfBlobUrl) { URL.revokeObjectURL(pdfBlobUrl); setPdfBlobUrl(null); }
     setActive(false); setStmtRows([]); setKeptIds(new Set()); setIgnoredIds(new Set()); setPdfSource("");
     setExpandedIds(new Set()); setPendingRows({}); setStmtClosingBalance(null); setStmtOpeningBalance(null);
     setManuallyUnmatched(new Set());
     showToast("Reconcile completed");
-  }, [user, accountId, fromDate, stmtRows, stats, pdfSource, matched]);
+  }, [user, accountId, fromDate, stmtRows, stats, pdfSource, matched, accounts, stmtClosingBalance]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
     active, stmtRows, processing, stats, pdfSource, pdfBlobUrl,

@@ -1,2 +1,17 @@
 [functions.gmail-oauth]
 verify_jwt = false
+
+[functions.telegram-webhook]
+verify_jwt = false
+
+[functions.gmail-estatement]
+verify_jwt = false
+
+[functions.daily-digest]
+verify_jwt = false
+
+[functions.payment-reminder]
+verify_jwt = false
+
+[functions.gmail-sync]
+verify_jwt = false

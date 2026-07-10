@@ -822,6 +822,250 @@ async function loadPasswordsAndVars(
 }
 
 // ── MAIN HANDLER ──────────────────────────────────────────────
+// ── HELPER: extract transactions from an uploaded PDF (shared by process_upload + prepare) ──
+async function extractUploadedPDF(serviceSupabase: any, userId: string, body: any, ANTHROPIC_KEY: string): Promise<any> {
+  const pdf_base64: string = body.pdf_base64;
+  const base64Len   = pdf_base64.length;
+  const approxBytes = Math.round(base64Len * 0.75);
+  console.log(`[gmail-estatement] extractUploadedPDF: base64_len=${base64Len} approx_bytes=${approxBytes}`);
+
+  if (approxBytes > 10 * 1024 * 1024) {
+    return {
+      success: false, needs_password: false,
+      error: "PDF too large to process automatically (>10MB). Please use AI Import / Scan instead.",
+    };
+  }
+  const { pwdList, vars } = await loadPasswordsAndVars(serviceSupabase, userId, body);
+
+  // Step 1: try Claude with raw PDF (with chunking + fallback)
+  let claudeResult: ClaudeResult;
+  try {
+    claudeResult = await chunkAndProcessPDF(pdf_base64, ANTHROPIC_KEY);
+  } catch (e: any) {
+    const errMsg = (e.message || String(e)).toLowerCase();
+    if (errMsg.includes("password protected") || errMsg.includes("password-protected")) {
+      claudeResult = { ok: false, is_encrypted: true };
+    } else {
+      throw e;
+    }
+  }
+
+  if (claudeResult.ok) {
+    const cleaned = cleanTransactions(claudeResult.transactions);
+    const metaInferred = inferMetadata(cleaned);
+    return {
+      success: true,
+      transactions:     cleaned,
+      detected_account: claudeResult.detected_account ?? metaInferred.detected_account,
+      detected_period:  claudeResult.detected_period  ?? metaInferred.detected_period,
+      closing_balance:  claudeResult.closing_balance  ?? null,
+      opening_balance:  claudeResult.opening_balance  ?? null,
+    };
+  }
+  if (!claudeResult.is_encrypted) {
+    return { success: false, needs_password: false, error: claudeResult.error };
+  }
+
+  // Step 2: try pdf-lib with passwords
+  const passwords: string[] = body.only_password !== undefined
+    ? (body.only_password ? [body.only_password] : [])
+    : pwdList.map((p: any) => resolvePassword(p.pattern || "", vars)).filter(Boolean);
+
+  console.log(`[gmail-estatement] extractUploadedPDF: trying ${passwords.length} password(s)`);
+  let lastDecryptError: "wrong_password" | "unsupported" = "wrong_password";
+
+  for (let i = 0; i < passwords.length; i++) {
+    const decResult = await tryDecryptPDF(pdf_base64, passwords[i]);
+    if ("base64" in decResult) {
+      claudeResult = await chunkAndProcessPDF(decResult.base64, ANTHROPIC_KEY);
+      if (claudeResult.ok) {
+        const cleaned = cleanTransactions(claudeResult.transactions);
+        const metaInferred = inferMetadata(cleaned);
+        return {
+          success: true,
+          transactions:     cleaned,
+          detected_account: claudeResult.detected_account ?? metaInferred.detected_account,
+          detected_period:  claudeResult.detected_period  ?? metaInferred.detected_period,
+          closing_balance:  claudeResult.closing_balance  ?? null,
+          opening_balance:  claudeResult.opening_balance  ?? null,
+        };
+      }
+      return { success: false, needs_password: false, error: "PDF decrypted but no transactions could be extracted. It may be a scanned image." };
+    }
+    lastDecryptError = decResult.error;
+  }
+
+  if (lastDecryptError === "unsupported") {
+    return {
+      success: false, needs_password: true, encrypted: true, encryption_unsupported: true,
+      error: "This PDF uses advanced encryption (AES-256) that cannot be decrypted automatically. Please download and decrypt it manually, then upload via AI Import / Scan instead.",
+    };
+  }
+  return {
+    success: false, needs_password: true, encrypted: true, encryption_unsupported: false,
+    error: passwords.length > 0
+      ? "None of the saved passwords worked. Enter the PDF password below."
+      : "This PDF is password-protected. Enter the password below.",
+  };
+}
+
+// ── RECONCILE PREPARE ──────────────────────────────────────────
+// Ports of the app's matching logic (src/lib/reconcilePdfUpload.js matchDetectedAccount
+// + src/components/shared/ReconcileOverlay.jsx matchRows). Keep in sync — the app
+// recomputes the same diff when the draft loads; these only produce the summary.
+function matchDetectedAccountSrv(detected: any, accounts: any[]): any {
+  if (!detected || !accounts?.length) return null;
+  if (detected.last4) {
+    const byLast4 = accounts.find((a) => String(a.card_last4 || "") === String(detected.last4));
+    if (byLast4) return byLast4;
+  }
+  if (detected.account_no) {
+    const byAccNo = accounts.find((a) =>
+      String(a.account_no || "").includes(detected.account_no) ||
+      String(detected.account_no).includes(String(a.account_no || "").slice(-6)));
+    if (byAccNo) return byAccNo;
+  }
+  if (detected.bank_name) {
+    const byBankName = accounts.find((a) => a.bank_name?.toLowerCase() === detected.bank_name.toLowerCase());
+    if (byBankName) return byBankName;
+  }
+  return null;
+}
+
+function wordSimilaritySrv(a: string, b: string): number {
+  if (!a || !b) return 0;
+  const wa = a.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(Boolean);
+  const wb = b.toLowerCase().replace(/[^a-z0-9\s]/g, "").split(/\s+/).filter(Boolean);
+  if (!wa.length || !wb.length) return 0;
+  const setB = new Set(wb);
+  return wa.filter((w) => setB.has(w)).length / Math.max(wa.length, wb.length);
+}
+
+function matchRowsSrv(stmtRows: any[], ledgerRows: any[]): { match: number; missing: any[]; extra: number } {
+  const usedL = new Set<number>();
+  let match = 0;
+  const matchedStmtIds = new Set<string>();
+  for (const s of stmtRows) {
+    let bestIdx = -1, bestScore = 0;
+    for (let li = 0; li < ledgerRows.length; li++) {
+      if (usedL.has(li)) continue;
+      const l = ledgerRows[li];
+      const amtDiff = Math.abs(Math.abs(Number(s.amount || 0)) - Math.abs(Number(l.amount_idr || l.amount || 0)));
+      if (amtDiff > 100) continue;
+      const dayDiff = Math.abs((new Date((s.date || "") + "T00:00:00").getTime() - new Date((l.tx_date || "") + "T00:00:00").getTime()) / 86400000);
+      const sim = wordSimilaritySrv(s.description || s.merchant || "", l.description || "");
+      let score = 0;
+      if (dayDiff <= 3 && sim >= 0.6) score = 3 + sim + (amtDiff < 1 ? 1 : 0);
+      else if (sim >= 0.8 && dayDiff <= 7) score = 2 + sim;
+      else if (dayDiff <= 3 && amtDiff < 1) score = 2;
+      if (score > bestScore) { bestScore = score; bestIdx = li; }
+    }
+    if (bestIdx >= 0 && bestScore >= 2) { match++; matchedStmtIds.add(s._id); usedL.add(bestIdx); }
+  }
+  const missing = stmtRows.filter((s) => !matchedStmtIds.has(s._id));
+  const extra = ledgerRows.length - usedL.size;
+  return { match, missing, extra };
+}
+
+// Ledger-side balance at end of period (same conventions as recalcAccountEdge).
+function ledgerClosingAt(acc: any, rows: any[], cutoff: string): number {
+  const isForeign = acc.currency && acc.currency !== "IDR";
+  const amtOf = (tx: any) => isForeign ? Number(tx.amount || tx.amount_idr || 0) : Number(tx.amount_idr || tx.amount || 0);
+  let inn = 0, out = 0;
+  for (const tx of rows) {
+    if (tx.tx_date > cutoff) continue;
+    const a = amtOf(tx);
+    if (tx.to_id === acc.id) inn += a;
+    if (tx.from_id === acc.id) out += a;
+  }
+  if (acc.type === "credit_card") {
+    // outstanding = initial + charges(from) − payments(to)
+    const net = Number(acc.initial_balance || 0) + out - inn;
+    return net > 0 ? net : 0;
+  }
+  return Number(acc.initial_balance || 0) + inn - out;
+}
+
+async function prepareReconcile(serviceSupabase: any, userId: string, extraction: any, filename: string): Promise<any> {
+  const txs: any[] = extraction.transactions || [];
+  const { data: accounts } = await serviceSupabase.from("accounts")
+    .select("id, name, type, bank_name, account_no, card_last4, currency, initial_balance, is_active")
+    .eq("user_id", userId);
+  const acc = matchDetectedAccountSrv(extraction.detected_account, (accounts || []).filter((a: any) => a.is_active !== false));
+  if (!acc) {
+    return {
+      prepared: false, reason: "account_not_matched",
+      detected_account: extraction.detected_account, tx_count: txs.length,
+      closing_balance: extraction.closing_balance ?? null,
+    };
+  }
+
+  // Period from statement tx dates
+  const dates = txs.map((t) => String(t.date || "")).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
+  const periodStart = dates[0] || null;
+  const periodEnd = dates[dates.length - 1] || null;
+  const [pY, pM] = (periodEnd || "").split("-").map(Number);
+
+  // stmtRows in the exact shape the app's draft loader expects
+  const stmtRows = txs.map((t: any, i: number) => ({ ...t, _id: t._id || `stmt-prep-${i}`, _sourceFile: filename }));
+
+  // Ledger rows touching this account (all-time: needed for closing calc; window slice for diff)
+  const { data: ledAll } = await serviceSupabase.from("ledger")
+    .select("id, tx_date, description, merchant_name, amount, amount_idr, from_id, to_id")
+    .eq("user_id", userId)
+    .or(`from_id.eq.${acc.id},to_id.eq.${acc.id}`);
+  const pad = (d: string, days: number) => { const t = new Date(d + "T00:00:00"); t.setDate(t.getDate() + days); return t.toISOString().slice(0, 10); };
+  const winStart = periodStart ? pad(periodStart, -7) : null;
+  const winEnd = periodEnd ? pad(periodEnd, 7) : null;
+  const ledgerWindow = (ledAll || []).filter((l: any) => (!winStart || l.tx_date >= winStart) && (!winEnd || l.tx_date <= winEnd));
+
+  const { match, missing, extra } = matchRowsSrv(stmtRows, ledgerWindow);
+
+  const stmtClosing = extraction.closing_balance != null ? Number(extraction.closing_balance) : null;
+  const ledgerClosing = periodEnd ? ledgerClosingAt(acc, ledAll || [], periodEnd) : null;
+  const gap = (stmtClosing != null && ledgerClosing != null) ? Math.round(stmtClosing - ledgerClosing) : null;
+
+  // Don't clobber a draft the user is actively working on (has edits)
+  const { data: existing } = await serviceSupabase.from("import_drafts")
+    .select("id, state_json").eq("user_id", userId).eq("source", "reconcile").eq("account_id", acc.id).maybeSingle();
+  const hasUserWork = existing && (Object.keys(existing.state_json?.pendingRows || {}).length > 0 || (existing.state_json?.ignoredIds || []).length > 0);
+  let draftSaved = false;
+  if (!hasUserWork) {
+    const state_json = {
+      stmtRows, ignoredIds: [], pendingRows: {}, pdfSource: filename,
+      stmtClosingBalance: stmtClosing, stmtOpeningBalance: extraction.opening_balance != null ? Number(extraction.opening_balance) : null,
+    };
+    const { error } = await serviceSupabase.from("import_drafts").upsert(
+      { user_id: userId, source: "reconcile", account_id: acc.id, state_json, updated_at: new Date().toISOString() },
+      { onConflict: "user_id,source,account_id" });
+    if (error) console.error("[prepare] draft upsert:", error.message);
+    else draftSaved = true;
+  }
+
+  // Track as a "prepared" session (replace any earlier prepared row for the same account+period)
+  if (pY && pM) {
+    await serviceSupabase.from("reconcile_sessions").delete()
+      .eq("user_id", userId).eq("account_id", acc.id).eq("period_year", pY).eq("period_month", pM).eq("status", "prepared");
+    const { error: sesErr } = await serviceSupabase.from("reconcile_sessions").insert({
+      user_id: userId, account_id: acc.id,
+      period_year: pY, period_month: pM, period_start: periodStart, period_end: periodEnd,
+      opening_balance: extraction.opening_balance ?? null, closing_balance: stmtClosing,
+      calculated_balance: ledgerClosing, status: "prepared", pdf_filename: filename,
+      total_statement: stmtRows.length, total_match: match, total_missing: missing.length, total_extra: extra,
+    });
+    if (sesErr) console.error("[prepare] session insert:", sesErr.message);
+  }
+
+  return {
+    prepared: true,
+    account_id: acc.id, account_name: acc.name, account_type: acc.type,
+    period: periodEnd ? `${pY}-${String(pM).padStart(2, "0")}` : null,
+    stats: { statement: stmtRows.length, match, missing: missing.length, extra },
+    closing_statement: stmtClosing, closing_ledger: ledgerClosing, gap,
+    draft_saved: draftSaved, draft_skipped_user_work: !!hasUserWork,
+  };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
@@ -849,7 +1093,8 @@ Deno.serve(async (req: Request) => {
 
   try {
     const accessToken = await getAccessToken(serviceSupabase, userId, GOOGLE_SECRET);
-    if (!accessToken && action !== "mark_done") {
+    // mark_done + prepare don't touch Gmail (prepare receives the PDF directly)
+    if (!accessToken && action !== "mark_done" && action !== "prepare") {
       return new Response(JSON.stringify({ error: "Gmail not connected" }), {
         status: 400, headers: { ...CORS, "Content-Type": "application/json" },
       });
@@ -882,95 +1127,19 @@ Deno.serve(async (req: Request) => {
       // Direct PDF upload — no Gmail download needed
       const { pdf_base64 } = body;
       if (!pdf_base64) throw new Error("pdf_base64 required");
+      result = await extractUploadedPDF(serviceSupabase, userId, body, ANTHROPIC_KEY);
 
-      const base64Len   = pdf_base64.length;
-      const approxBytes = Math.round(base64Len * 0.75);
-      console.log(`[gmail-estatement] process_upload: base64_len=${base64Len} approx_bytes=${approxBytes}`);
-
-      if (approxBytes > 10 * 1024 * 1024) {
-        result = {
-          success: false, needs_password: false,
-          error: "PDF too large to process automatically (>10MB). Please use AI Import / Scan instead.",
-        };
+    } else if (action === "prepare") {
+      // Auto-prepare reconcile from a downloaded statement PDF (Mac fetch script):
+      // extract → detect account → diff vs ledger → save import_draft + prepared session.
+      // READ-ONLY wrt the ledger — never writes transactions.
+      const { pdf_base64 } = body;
+      if (!pdf_base64) throw new Error("pdf_base64 required");
+      const extraction = await extractUploadedPDF(serviceSupabase, userId, body, ANTHROPIC_KEY);
+      if (!extraction.success) {
+        result = { prepared: false, reason: extraction.encrypted ? "encrypted" : "extract_failed", ...extraction };
       } else {
-        const { pwdList, vars } = await loadPasswordsAndVars(serviceSupabase, userId, body);
-
-        // Step 1: try Claude with raw PDF (with chunking + fallback)
-        let claudeResult: ClaudeResult;
-        try {
-          claudeResult = await chunkAndProcessPDF(pdf_base64, ANTHROPIC_KEY);
-        } catch (e: any) {
-          const errMsg = (e.message || String(e)).toLowerCase();
-          if (errMsg.includes("password protected") || errMsg.includes("password-protected")) {
-            claudeResult = { ok: false, is_encrypted: true };
-          } else {
-            throw e;
-          }
-        }
-
-        if (claudeResult.ok) {
-          const cleaned = cleanTransactions(claudeResult.transactions);
-          const metaInferred = inferMetadata(cleaned);
-          result = {
-            success: true,
-            transactions:     cleaned,
-            detected_account: claudeResult.detected_account ?? metaInferred.detected_account,
-            detected_period:  claudeResult.detected_period  ?? metaInferred.detected_period,
-            closing_balance:  claudeResult.closing_balance  ?? null,
-            opening_balance:  claudeResult.opening_balance  ?? null,
-          };
-        } else if (!claudeResult.is_encrypted) {
-          result = { success: false, needs_password: false, error: claudeResult.error };
-        } else {
-          // Step 2: try pdf-lib with passwords
-          const passwords: string[] = body.only_password !== undefined
-            ? (body.only_password ? [body.only_password] : [])
-            : pwdList.map((p: any) => resolvePassword(p.pattern || "", vars)).filter(Boolean);
-
-          console.log(`[gmail-estatement] process_upload: trying ${passwords.length} password(s)`);
-          let lastDecryptError: "wrong_password" | "unsupported" = "wrong_password";
-          let found = false;
-
-          for (let i = 0; i < passwords.length; i++) {
-            const decResult = await tryDecryptPDF(pdf_base64, passwords[i]);
-            if ("base64" in decResult) {
-              claudeResult = await chunkAndProcessPDF(decResult.base64, ANTHROPIC_KEY);
-              if (claudeResult.ok) {
-                const cleaned = cleanTransactions(claudeResult.transactions);
-                const metaInferred = inferMetadata(cleaned);
-                result = {
-                  success: true,
-                  transactions:     cleaned,
-                  detected_account: claudeResult.detected_account ?? metaInferred.detected_account,
-                  detected_period:  claudeResult.detected_period  ?? metaInferred.detected_period,
-                  closing_balance:  claudeResult.closing_balance  ?? null,
-                  opening_balance:  claudeResult.opening_balance  ?? null,
-                };
-              } else {
-                result = { success: false, needs_password: false, error: "PDF decrypted but no transactions could be extracted. It may be a scanned image." };
-              }
-              found = true;
-              break;
-            }
-            lastDecryptError = decResult.error;
-          }
-
-          if (!found) {
-            if (lastDecryptError === "unsupported") {
-              result = {
-                success: false, needs_password: true, encrypted: true, encryption_unsupported: true,
-                error: "This PDF uses advanced encryption (AES-256) that cannot be decrypted automatically. Please download and decrypt it manually, then upload via AI Import / Scan instead.",
-              };
-            } else {
-              result = {
-                success: false, needs_password: true, encrypted: true, encryption_unsupported: false,
-                error: passwords.length > 0
-                  ? "None of the saved passwords worked. Enter the PDF password below."
-                  : "This PDF is password-protected. Enter the password below.",
-              };
-            }
-          }
-        }
+        result = await prepareReconcile(serviceSupabase, userId, extraction, String(body.filename || "statement.pdf"));
       }
 
     } else {

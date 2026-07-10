@@ -103,16 +103,47 @@ def main():
                 os.unlink(tmp)
                 if ok:
                     got += 1
-                    saved_files.append(safe)
+                    saved_files.append({"name": safe, "path": out_path})
                     log(f'  saved {os.path.relpath(out_path, base)}')
     M.logout()
     log(f"done. {got} new statement PDF(s) downloaded + unlocked.")
+
+    # Auto-prepare reconcile for each new PDF: server parses it, detects the account,
+    # diffs vs the ledger and saves a reconcile draft (read-only wrt the ledger).
+    prepared = []
+    if saved_files and cfg.get("user_id") and cfg.get("supabase_anon_key"):
+        import base64
+        prep_url = cfg.get("prepare_url", "https://zxkxfaoxzldxojwepnca.supabase.co/functions/v1/gmail-estatement")
+        for sf in saved_files:
+            try:
+                with open(sf["path"], "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode()
+                body = json.dumps({"action": "prepare", "user_id": cfg["user_id"],
+                                   "pdf_base64": b64, "filename": sf["name"]}).encode()
+                req = urllib.request.Request(prep_url, data=body, method="POST", headers={
+                    "Content-Type": "application/json",
+                    "apikey": cfg["supabase_anon_key"],
+                    "Authorization": "Bearer " + cfg["supabase_anon_key"],
+                })
+                with urllib.request.urlopen(req, timeout=240) as resp:
+                    res = json.loads(resp.read().decode())
+                res["file"] = sf["name"]
+                prepared.append(res)
+                if res.get("prepared"):
+                    s = res.get("stats", {})
+                    log(f'  prepared {res.get("account_name")}: {s.get("match")}✓ {s.get("missing")}! gap={res.get("gap")}')
+                else:
+                    log(f'  prepare skipped ({res.get("reason") or res.get("error", "?")}): {sf["name"]}')
+            except Exception as e:
+                log("  prepare error:", sf["name"], e)
+                prepared.append({"file": sf["name"], "prepared": False, "reason": "request_error"})
 
     # Notify Telegram (via the webhook, which holds the bot token) when new statements arrive.
     if saved_files:
         try:
             url = cfg.get("notify_webhook", "https://zxkxfaoxzldxojwepnca.supabase.co/functions/v1/telegram-webhook")
-            body = json.dumps({"type": "stmt_notify", "files": saved_files}).encode()
+            body = json.dumps({"type": "stmt_notify", "files": [sf["name"] for sf in saved_files],
+                               "prepared": prepared}).encode()
             req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"}, method="POST")
             urllib.request.urlopen(req, timeout=30)
             log(f"notified Telegram: {len(saved_files)} new file(s)")
