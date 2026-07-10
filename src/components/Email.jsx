@@ -173,8 +173,10 @@ export default function Email({
     borderRadius: 16, padding: "16px 18px",
   };
 
+  const waitingCount = (pendingSyncs || []).filter(s => s.currency && s.currency !== "IDR").length;
   const TABS_LIST = [
     { id: "pending", label: "✉️ Email Pending" },
+    { id: "waiting", label: `⏳ Nunggu Statement${waitingCount ? ` (${waitingCount})` : ""}` },
     { id: "sync",    label: "🔄 Email Sync"    },
   ];
 
@@ -199,8 +201,10 @@ export default function Email({
       </div>
 
       {/* ══ EMAIL PENDING TAB ══ */}
-      {tab === "pending" && (
+      {(tab === "pending" || tab === "waiting") && (
         <EmailPendingTab
+          key={tab}
+          waitingMode={tab === "waiting"}
           pendingSyncs={pendingSyncs}
           setPendingSyncs={setPendingSyncs}
           accounts={accounts}
@@ -376,11 +380,14 @@ export default function Email({
 // ─── EMAIL PENDING TAB ────────────────────────────────────────────
 const GMAIL_NO_CAT = new Set(["transfer","pay_cc","give_loan","collect_loan","fx_exchange","reimburse_in","reimburse_out","buy_asset","sell_asset","pay_liability"]);
 
-function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, incomeSrcs = [], user, ledger, setLedger, onRefresh, setReminders, dark, T: theme, employeeLoans = [], merchantMaps = [], recurTemplates = [], fxRates = {} }) {
+function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, incomeSrcs = [], user, ledger, setLedger, onRefresh, setReminders, dark, T: theme, employeeLoans = [], merchantMaps = [], recurTemplates = [], fxRates = {}, waitingMode = false }) {
   const T = theme || LIGHT;
 
   // Local editable rows (mirrors pendingSyncs but editable)
   const [rows,         setRows]         = useState(() => (pendingSyncs || []).map(syncToRow));
+  // Valas (foreign-currency) rows live in the "⏳ Nunggu Statement" tab; IDR rows in "Email Pending".
+  const isFXRow = (r) => r.currency && r.currency !== "IDR";
+  const visibleRows = rows.filter(r => waitingMode ? isFXRow(r) : !isFXRow(r));
   const [selected,     setSelected]     = useState(() => Object.fromEntries((pendingSyncs || []).map(s => [s.id, true])));
   const [importing,    setImporting]    = useState(false);
   const [processedCount, setProcessedCount] = useState(0);
@@ -388,8 +395,10 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
   const draft = useImportDraft({
     user,
     source: "gmail",
-    state: rows.length > 0 ? { rows, selected } : null,
+    // waiting tab is read-only — don't let it fight the pending tab over the gmail draft
+    state: !waitingMode && rows.length > 0 ? { rows, selected } : null,
     onRestore: (s) => {
+      if (waitingMode) return;
       if (s.rows) setRows(s.rows);
       if (s.selected) setSelected(s.selected);
     },
@@ -759,7 +768,11 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     } catch (e) { showToast(e.message, "error"); }
   };
 
-  if (!rows.length && failedRows === null) return (
+  if (waitingMode && !visibleRows.length) return (
+    <EmptyState icon="⏳" title="Tidak ada valas menunggu" message="Transaksi mata uang asing akan parkir di sini sampai statement bulanannya masuk (bawa nilai IDR pasti), lalu hilang otomatis." />
+  );
+
+  if (!waitingMode && !visibleRows.length && failedRows === null) return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <EmptyState icon="📧" title="No pending emails" message="Gmail sync will surface transactions here for review." />
       <button onClick={loadFailed} disabled={loadingFailed}
@@ -773,32 +786,32 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
 
       {/* Draft resume banner */}
-      {draft.showBanner && rows.length === 0 && (
+      {!waitingMode && draft.showBanner && rows.length === 0 && (
         <DraftBanner draftInfo={draft.draftInfo} onResume={draft.resume} onDiscard={draft.discard} />
       )}
 
       {/* ── Pending rows via shared component ── */}
-      {(rows.length > 0 || processedCount > 0) && (
+      {!waitingMode && (visibleRows.length > 0 || processedCount > 0) && (
         <ProgressIndicator
           label="Email Sync"
-          total={rows.length + processedCount}
+          total={visibleRows.length + processedCount}
           processed={processedCount}
-          pending={rows.length}
+          pending={visibleRows.length}
         />
       )}
-      {rows.some(r => r._dup) && (
+      {!waitingMode && visibleRows.some(r => r._dup) && (
         <div style={{ fontSize: 12, color: "#92400e", background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 8, padding: "8px 12px", fontFamily: "Figtree, sans-serif" }}>
-          ⚠️ {rows.filter(r => r._dup).length} kemungkinan duplikat (nominal &amp; tanggal sudah ada di ledger) — tidak dicentang otomatis. Cek dulu sebelum approve.
+          ⚠️ {visibleRows.filter(r => r._dup).length} kemungkinan duplikat (nominal &amp; tanggal sudah ada di ledger) — tidak dicentang otomatis. Cek dulu sebelum approve.
         </div>
       )}
-      {rows.some(r => r.currency && r.currency !== "IDR") && (
+      {waitingMode && (
         <div style={{ fontSize: 12, color: "#1e40af", background: "#dbeafe", border: "1px solid #bfdbfe", borderRadius: 8, padding: "8px 12px", fontFamily: "Figtree, sans-serif" }}>
-          ⏳ {rows.filter(r => r.currency && r.currency !== "IDR").length} transaksi valas <b>ditahan — nunggu statement</b>. Kurs belum pasti, jadi nggak masuk ledger dulu; nilai IDR sebenarnya diambil dari statement bulanan.
+          ⏳ Transaksi valas <b>nunggu statement</b> — kurs belum pasti, jadi tidak masuk ledger dulu. Nilai IDR asli diambil dari statement bulanan; begitu statement masuk &amp; di-reconcile, item di sini hilang otomatis. Tombol ✕ = buang kalau bukan transaksi.
         </div>
       )}
-      {rows.length > 0 && (
+      {visibleRows.length > 0 && (
         <TxHorizontal
-          rows={rows}
+          rows={visibleRows}
           selected={selected}
           onUpdateRow={updateRow}
           onConfirmRow={confirm}
@@ -806,9 +819,9 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
           onConfirmAll={importAll}
           onToggleSelect={(id) => setSelected(s => ({ ...s, [id]: !s[id] }))}
           onToggleAll={() => setSelected(
-            rows.length > 0 && rows.every(r => selected[r._id])
+            visibleRows.length > 0 && visibleRows.every(r => selected[r._id])
               ? {}
-              : Object.fromEntries(rows.map(r => [r._id, true]))
+              : Object.fromEntries(visibleRows.map(r => [r._id, true]))
           )}
           source="gmail"
           accounts={accounts}
@@ -823,7 +836,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       )}
 
       {/* ── Failed extractions section ── */}
-      <div style={{ marginTop: 4 }}>
+      <div style={{ marginTop: 4, display: waitingMode ? "none" : undefined }}>
         {failedRows === null ? (
           <button onClick={loadFailed} disabled={loadingFailed}
             style={{ fontSize: 11, color: "#9ca3af", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "Figtree, sans-serif" }}>
