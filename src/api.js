@@ -1538,6 +1538,11 @@ export function flattenEmailSync(rows) {
         matched_account_id:      tx.from_account_id,
         to_account_id:           tx.to_account_id,
         suggested_category_label: tx.suggested_category,
+        // Keep the AI's original type + destination bank so the UI can still
+        // suggest "transfer to own bank" when the server couldn't resolve to_account_id
+        // (e.g. "BANK SMBC INDONESIA" = Jenius).
+        suggested_tx_type:       tx.suggested_tx_type,
+        to_bank_name:            tx.to_bank_name,
         entity:                  tx.suggested_entity || "Personal",
         from_bank_name:          tx.from_bank_name,
         card_last4:              tx.card_last4,

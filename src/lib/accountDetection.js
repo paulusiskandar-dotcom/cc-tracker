@@ -2,7 +2,7 @@
 // Returns: { accountId, accountName, confidence, matchedBy, alternatives }
 // confidence: 'high' | 'medium' | 'low' | null
 
-const BANK_KEYWORDS = {
+export const BANK_KEYWORDS = {
   bca:          ['bca', 'bank central asia', 'klikbca', '@bca.co.id'],
   maybank:      ['maybank', 'maybank2u', '@maybank.'],
   cimb:         ['cimb', 'cimb niaga', '@cimbniaga.', 'octo'],

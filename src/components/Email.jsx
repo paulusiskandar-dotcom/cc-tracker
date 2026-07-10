@@ -3,7 +3,7 @@ import { gmailApi, settingsApi, ledgerApi, merchantApi, getTxFromToTypes, flatte
 import { supabase } from "../lib/supabase";
 import { undoManager } from "../lib/undoManager";
 import { merchantRules } from "../lib/merchantRules";
-import { detectAccount } from "../lib/accountDetection";
+import { detectAccount, BANK_KEYWORDS } from "../lib/accountDetection";
 import { todayStr, autoCategorize, toIDR } from "../utils";
 import { CURRENCIES } from "../constants";
 import { LIGHT, DARK } from "../theme";
@@ -176,7 +176,7 @@ export default function Email({
   const waitingCount = (pendingSyncs || []).filter(s => s.currency && s.currency !== "IDR").length;
   const TABS_LIST = [
     { id: "pending", label: "✉️ Email Pending" },
-    { id: "waiting", label: `⏳ Nunggu Statement${waitingCount ? ` (${waitingCount})` : ""}` },
+    { id: "waiting", label: `⏳ Waiting for Statement${waitingCount ? ` (${waitingCount})` : ""}` },
     { id: "sync",    label: "🔄 Email Sync"    },
   ];
 
@@ -385,7 +385,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
 
   // Local editable rows (mirrors pendingSyncs but editable)
   const [rows,         setRows]         = useState(() => (pendingSyncs || []).map(syncToRow));
-  // Valas (foreign-currency) rows live in the "⏳ Nunggu Statement" tab; IDR rows in "Email Pending".
+  // Valas (foreign-currency) rows live in the "⏳ Waiting for Statement" tab; IDR rows in "Email Pending".
   const isFXRow = (r) => r.currency && r.currency !== "IDR";
   const visibleRows = rows.filter(r => waitingMode ? isFXRow(r) : !isFXRow(r));
   const [selected,     setSelected]     = useState(() => Object.fromEntries((pendingSyncs || []).map(s => [s.id, true])));
@@ -469,7 +469,37 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
             accounts:  spendAccounts,
           });
           if (detected && detected.accountId) {
-            return { ...row, from_id: detected.accountId, _autoDetect: detected };
+            row = { ...row, from_id: detected.accountId, _autoDetect: detected };
+          }
+        }
+        // AI said "transfer" but the server couldn't resolve the destination →
+        // resolve to_bank_name against the user's OWN bank accounts (alias-aware,
+        // e.g. "BANK SMBC INDONESIA" = Jenius) and SUGGEST it as a transfer.
+        // Still a suggestion — the same bank name can also be someone else's account.
+        if (row.tx_type === "expense" && !row.to_id && s.to_bank_name &&
+            (s.suggested_tx_type === "transfer" || s.is_transfer)) {
+          const toBank = String(s.to_bank_name).toLowerCase();
+          const bankKey = Object.keys(BANK_KEYWORDS).find(k => BANK_KEYWORDS[k].some(kw => toBank.includes(kw)));
+          if (bankKey) {
+            const ownAcc = (a) => `${a.bank_name || ""} ${a.name || ""}`.toLowerCase();
+            const cands = accounts.filter(a => a.type === "bank" && a.is_active !== false &&
+              a.id !== row.from_id && BANK_KEYWORDS[bankKey].some(kw => ownAcc(a).includes(kw)));
+            const dest = cands.find(a => (a.currency || "IDR") === "IDR") || cands[0];
+            if (dest) row = { ...row, tx_type: "transfer", to_id: dest.id, category_id: null, category_name: null, _transferSuggest: dest.name };
+          }
+        }
+        // Prefill the category dropdown from the AI's suggestion (was only applied
+        // invisibly at import time via buildEntry — user couldn't see/correct it).
+        if (!row.category_id && !row._transferSuggest && !GMAIL_NO_CAT.has(row.tx_type) && row.suggested_category_label) {
+          const lookup = autoCategorize({
+            merchantName:     row.description,
+            txType:           row.tx_type,
+            aiSuggestedName:  row.suggested_category_label,
+            merchantMappings: merchantMaps,
+            userCategories:   row.tx_type === "income" ? incomeSrcs : categories,
+          });
+          if (lookup?.id && lookup?.name && lookup.name !== "Other") {
+            row = { ...row, category_id: lookup.id, category_name: lookup.name, _aiCat: true };
           }
         }
         return row;
@@ -592,7 +622,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
         await gmailApi.markTxWaiting(r.email_sync_id, r.tx_index ?? 0);
         updateRow(r._id, { _waiting_statement: true });
       } catch (e) { console.warn("[markTxWaiting]", e?.message); }
-      showToast("⏳ Valas ditahan — tunggu statement (nilai asli IDR)", "info");
+      showToast("⏳ Waiting for statement — kurs belum pasti (lihat tab Waiting)", "info");
       return;
     }
     try {
@@ -730,7 +760,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     setImporting(false);
     setProcessedCount(n => n + count);
     showToast(`${count} transaction${count !== 1 ? "s" : ""} imported`);
-    if (skippedFx > 0) showToast(`${skippedFx} transaksi valas ditahan — tunggu statement (nilai asli valas)`, "info");
+    if (skippedFx > 0) showToast(`${skippedFx} transaksi valas → Waiting for statement (kurs belum pasti)`, "info");
     if (matchedNames.length === 1) showToast(`✓ "${matchedNames[0]}" recurring linked and reminder confirmed`);
     else if (matchedNames.length > 1) showToast(`${matchedNames.length} recurring expenses linked`);
     if (newLedgerIds.length) undoManager.register({ type: "save_batch", ids: newLedgerIds, label: `Saved ${newLedgerIds.length} transaction${newLedgerIds.length !== 1 ? "s" : ""}` });
@@ -769,7 +799,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
   };
 
   if (waitingMode && !visibleRows.length) return (
-    <EmptyState icon="⏳" title="Tidak ada valas menunggu" message="Transaksi mata uang asing akan parkir di sini sampai statement bulanannya masuk (bawa nilai IDR pasti), lalu hilang otomatis." />
+    <EmptyState icon="⏳" title="No transactions waiting" message="Transaksi mata uang asing akan parkir di sini sampai statement bulanannya masuk (bawa nilai IDR pasti), lalu hilang otomatis." />
   );
 
   if (!waitingMode && !visibleRows.length && failedRows === null) return (
@@ -806,7 +836,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       )}
       {waitingMode && (
         <div style={{ fontSize: 12, color: "#1e40af", background: "#dbeafe", border: "1px solid #bfdbfe", borderRadius: 8, padding: "8px 12px", fontFamily: "Figtree, sans-serif" }}>
-          ⏳ Transaksi valas <b>nunggu statement</b> — kurs belum pasti, jadi tidak masuk ledger dulu. Nilai IDR asli diambil dari statement bulanan; begitu statement masuk &amp; di-reconcile, item di sini hilang otomatis. Tombol ✕ = buang kalau bukan transaksi.
+          ⏳ Transaksi valas <b>waiting for statement</b> — kurs belum pasti, jadi tidak masuk ledger dulu. Nilai IDR asli diambil dari statement bulanan; begitu statement masuk &amp; di-reconcile, item di sini hilang otomatis. Tombol ✕ = buang kalau bukan transaksi.
         </div>
       )}
       {visibleRows.length > 0 && (

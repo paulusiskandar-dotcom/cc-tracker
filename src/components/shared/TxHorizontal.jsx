@@ -546,8 +546,17 @@ function TxHorizontalCard({
         {r._transferPair && (
           <span style={BADGE("#dbeafe","#1d4ed8")}>🔄 Transfer</span>
         )}
+        {r._transferSuggest && !r._transferPair && (
+          <span style={BADGE("#ede9fe","#6d28d9")}
+            title={`AI mendeteksi transfer ke bank sendiri (${r._transferSuggest}). Cek dulu — nama bank sama bisa juga rekening orang lain.`}>
+            Transfer?
+          </span>
+        )}
+        {r._aiCat && (
+          <span style={BADGE("#fef9c3","#a16207")} title="Kategori disarankan AI — ganti kalau salah">AI</span>
+        )}
         {fxWaiting && (
-          <span style={BADGE("#dbeafe","#1e40af")} title="Kurs belum pasti — nilai IDR asli diambil dari statement bulanan">⏳ Nunggu statement</span>
+          <span style={BADGE("#dbeafe","#1e40af")} title="Kurs belum pasti — nilai IDR asli diambil dari statement bulanan">⏳ Waiting for statement</span>
         )}
         {r._autoDetect?.confidence && (
           <span
@@ -567,7 +576,7 @@ function TxHorizontalCard({
           style={ACT_BTN(fxWaiting
             ? { background: T.sur2, color: T.text3, border: `1px solid ${T.border}`, cursor: "not-allowed" }
             : { background: "#dcfce7", color: "#059669", border: "1px solid #bbf7d0" })}
-          title={fxWaiting ? "Valas — nunggu statement (belum bisa diimport)" : "Import"}>
+          title={fxWaiting ? "Waiting for statement — belum bisa diimport" : "Import"}>
           {isConfirming ? "…" : fxWaiting ? "⏳" : "✓"}
         </button>
 
