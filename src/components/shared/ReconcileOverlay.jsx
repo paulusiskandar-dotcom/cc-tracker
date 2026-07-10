@@ -25,7 +25,7 @@ function wordSimilarity(a, b) {
   return wa.filter(w => setB.has(w)).length / Math.max(wa.length, wb.length);
 }
 
-function matchRows(stmtRows, ledgerRows) {
+export function matchRows(stmtRows, ledgerRows) {
   const usedL = new Set();
   const matched = new Map(); // ledgerId → stmtRow
 
@@ -286,6 +286,13 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
           total_extra: stats.extra,
           completed_at: new Date().toISOString(),
         });
+        // Remove the auto-"prepared" session for this account+period, if any —
+        // the completed one above supersedes it (keeps the Reconcile inbox clean).
+        await supabase.from("reconcile_sessions").delete()
+          .eq("user_id", user.id).eq("account_id", accountId)
+          .eq("period_year", y || new Date().getFullYear())
+          .eq("period_month", m || new Date().getMonth() + 1)
+          .eq("status", "prepared");
       } catch (e) { console.error("[reconcile] save session error:", e); }
     }
     if (matched.size > 0) {
