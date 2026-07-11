@@ -57,7 +57,7 @@ Deno.serve(async () => {
     if (Array.isArray(arr)) rowArrays[r.id as string] = arr;
     (Array.isArray(list) ? list : []).forEach((t, idx) => {
       const tx = t as Record<string, unknown>;
-      if (tx._imported || tx._skipped) return; // already imported or rejected via Telegram
+      if (tx._imported || tx._skipped || tx._waiting_statement) return; // imported, rejected, or valas parked for statement
       const amt = Number(tx.amount_idr ?? tx.amount ?? 0);
       const dir = (tx.type === "in" || tx.type === "income") ? "in" : "out";
       const entity = (tx.suggested_entity as string) || "Personal";

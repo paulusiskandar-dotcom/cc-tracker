@@ -252,6 +252,21 @@ function extractVisibleSuffix(masked: string): string | null {
   return digits ? digits[0] : null;
 }
 
+// Foreign-currency tx have no reliable IDR rate until the monthly statement,
+// so they must NOT land in the daily pending queue. Flag each valas item with
+// `_waiting_statement` and return the row status: `waiting_statement` when every
+// extracted item is valas, else `pending` (mixed row keeps its IDR items pending).
+// Keep in sync with importPending's valas handling in telegram-webhook.
+function parkValasResult(aiResult: any): string {
+  if (!Array.isArray(aiResult) || aiResult.length === 0) return "review";
+  let anyNonValas = false;
+  for (const t of aiResult) {
+    if (t && t.currency && t.currency !== "IDR") t._waiting_statement = true;
+    else anyNonValas = true;
+  }
+  return anyNonValas ? "pending" : "waiting_statement";
+}
+
 // Match a masked account string against the user's accounts list.
 // Returns the best matching account id, or null if no confident match.
 function matchAccount(
@@ -618,7 +633,7 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
       raw_body:         plainBody.slice(0, 5000),
       ai_raw_result:    aiResult,
       extracted_count:  extractedCount,
-      status:           aiResult && extractedCount > 0 ? "pending" : "review",
+      status:           aiResult && extractedCount > 0 ? parkValasResult(aiResult) : "review",
     });
 
     if (!insertErr) {
@@ -765,10 +780,11 @@ async function reprocessEmails(supabase: any, userId: string, ids: string[], ant
               ? { ...tx, category_id: mapping.category_id ?? tx.category_id, from_account_id: tx.from_account_id ?? mapping.account_id ?? null }
               : tx;
           });
+          const rerunStatus = parkValasResult(aiResult);
           await supabase.from("email_sync").update({
             ai_raw_result:   aiResult,
             extracted_count: aiResult.length,
-            status:          "pending",
+            status:          rerunStatus,
             error_message:   null,
           }).eq("id", row.id).eq("user_id", userId);
           reprocessed++;

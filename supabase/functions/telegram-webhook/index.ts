@@ -1418,7 +1418,7 @@ async function cmdPending(supabase: any, uid: string): Promise<string> {
   for (const r of rows || []) {
     let arr: any = r.ai_raw_result; try { if (typeof arr === "string") arr = JSON.parse(arr); } catch { arr = null; }
     for (const t of (Array.isArray(arr) ? arr : [])) {
-      if (t._imported || t._skipped) continue;
+      if (t._imported || t._skipped || t._waiting_statement) continue;  // valas parked in /valas queue, not here
       n++; const amt = Number(t.amount_idr || t.amount || 0); tot += amt;
       if (n <= 15) lines.push(`${t.type === "in" ? "🟢" : "🔴"} ${esc(t.merchant_name || t.description || "-")} — ${idr(amt)}`);
     }
