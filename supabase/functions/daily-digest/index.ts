@@ -145,23 +145,13 @@ Deno.serve(async () => {
     `━━━━━━━━━━━━━━━\n` +
     section("pay_cc") + section("pay_liability") + section("transfer") + section("expense") + section("income") +
     (merged ? `\n🔗 <i>${merged} notifikasi dobel sudah di-merge</i>` : "") +
-    (amb.length ? `\n⚠️ <b>${amb.length} ambigu</b> — tap ❌/🏢/🦷/👤 dulu, baru Import` : `\n✅ Semua jelas — tap <b>Import</b> untuk masukin ke ledger`) +
-    `\n\n💡 <i>Salah tipe? Balas nomornya, mis. "1 food 2 sdc out 3 transfer".</i>`;
+    (amb.length ? `\n⚠️ <b>${amb.length} ambigu</b> — balas nomornya buat benerin dulu (mis. "1 hamasa", "2 sdc", "3 skip"), baru Import` : `\n✅ Semua jelas — tap <b>Import</b> untuk masukin ke ledger`) +
+    `\n\n💡 <i>Salah tipe/entity? Balas aja, mis. "1 food", "2 sdc out", "3 transfer", "4 skip".</i>`;
 
-  // Inline buttons: one classify row per ambiguous item (max 8) + import-all + open-app.
-  // callback_data "cls:<emailSyncId>:<txIdx>:<H|S|P>" is handled by telegram-webhook (safe: tags entity on pending).
-  const classifyRows = amb.slice(0, 8).map((t) => {
-    const tag = `${t.esId}:${t.idx}`;
-    return [
-      { text: `❓ ${t.desc.slice(0, 10)}`, callback_data: `noop:${t.idx}` },
-      { text: "❌", callback_data: `cls:${tag}:X` },
-      { text: "🏢", callback_data: `cls:${tag}:H` },
-      { text: "🦷", callback_data: `cls:${tag}:S` },
-      { text: "👤", callback_data: `cls:${tag}:P` },
-    ];
-  });
+  // Inline buttons: just the actions. Per-item classify buttons were removed —
+  // ambiguous items are corrected by replying with text (e.g. "1 hamasa"), which
+  // the telegram-webhook text-correction / AI handler resolves.
   const keyboard = [
-    ...classifyRows,
     [{ text: "✅ Import Semua", callback_data: "dg:importall" }, { text: "✏️ Review semua", callback_data: "dg:reviewall" }],
     [{ text: "🌐 Buka App", url: "https://ryusei.paulusiskandar.com" }],
   ];

@@ -1735,11 +1735,13 @@ function classifyText(s: string) {
   const forceIn = /\b(in|masuk|pemasukan|income)\b/.test(s);
   const forceOut = /\b(out|keluar|pengeluaran|expense)\b/.test(s);
   const wantTransfer = /\b(transfer|tf|pindah)\b/.test(s);
-  return { entity, category, forceIn, forceOut, wantTransfer, valid: !!(entity || category || wantTransfer) };
+  const wantSkip = /\b(skip|lewati|lewat|abaikan|tolak|reject|buang)\b/.test(s);
+  return { entity, category, forceIn, forceOut, wantTransfer, wantSkip, valid: !!(entity || category || wantTransfer || wantSkip) };
 }
 
 // Apply a classification onto a pending item; returns a human label of the result.
 function applyCls(t: any, c: ReturnType<typeof classifyText>): string {
+  if (c.wantSkip) { t._skipped = true; t._tg_classified = true; return "❌ dilewati"; }
   const isIn = c.forceIn ? true : c.forceOut ? false : (t.type === "in");
   if (c.wantTransfer) { t.suggested_tx_type = "transfer"; t.suggested_entity = null; t.is_reimburse = false; }
   else if (c.entity && c.entity !== "Personal") { t.suggested_tx_type = isIn ? "reimburse_in" : "reimburse_out"; t.suggested_entity = c.entity; t.is_reimburse = true; }
@@ -1765,7 +1767,7 @@ function parseAssignments(s: string, maxN: number): { n: number; txt: string }[]
 function looksLikeCorrection(t: string): boolean {
   const s = t.toLowerCase();
   if (s.length > 160) return false;
-  const hasEntity = /\b(hamasa|sdc|travelio|pribadi|personal|reimburse|expense|income|pengeluaran|pemasukan|transfer|bayar|masuk|keluar)\b/.test(s);
+  const hasEntity = /\b(hamasa|sdc|travelio|pribadi|personal|reimburse|expense|income|pengeluaran|pemasukan|transfer|bayar|masuk|keluar|skip|lewati|lewat|abaikan|tolak|reject|buang)\b/.test(s);
   const hasCat = matchCategory(s) !== null;
   const isNotif = /(rp\s*[\d.,]{4,}|\botp\b|kode|debet|kredit|saldo|va |virtual|berhasil)/.test(s);
   return (hasEntity || hasCat) && !isNotif;
@@ -1786,12 +1788,13 @@ async function handleTextCorrection(text: string, supabase: any, uid: string, bo
     /travelio/.test(s) ? "Travelio" :
     (/pribadi|personal|expense|income|pengeluaran|pemasukan/.test(s) ? "Personal" : null);
   const category = matchCategory(s);
-  if (!entity && !category) return false;
   const nrm = (x: any) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   // direction: explicit override, else fall back to the item's own in/out
   const forceIn = /\b(in|masuk|pemasukan|income)\b/.test(s);
   const forceOut = /\b(out|keluar|pengeluaran|expense)\b/.test(s);
   const wantTransfer = /\b(transfer|tf|pindah)\b/.test(s);
+  const wantSkip = /\b(skip|lewati|lewat|abaikan|tolak|reject|buang)\b/.test(s);
+  if (!entity && !category && !wantTransfer && !wantSkip) return false;
   // merchant keyword mentioned? (tokped/tokopedia, grab, lazada, blibli, gojek, shopee, dst)
   const KW: Record<string, RegExp> = { tokopedia: /tokped|tokopedia/, grab: /\bgrab\b/, gojek: /gojek|gopay/, lazada: /lazada/, blibli: /blibli/, shopee: /shopee/, allianz: /allianz/, digitalocean: /digitalocean|ocean/, auto2000: /auto\s*2000/ };
   const wantKW = Object.entries(KW).filter(([, re]) => re.test(s)).map(([k]) => k);
@@ -1858,7 +1861,7 @@ async function handleTextCorrection(text: string, supabase: any, uid: string, bo
     targets = flat;                                     // "semua", or the single-item case
   } else {
     // multiple pending, no hint — don't guess: show numbered list and ask
-    await sendTelegramHTML(botToken, chatId, `❓ Ada <b>${flat.length}</b> transaksi pending. Yang mana mau diubah jadi <b>${esc(entity || category || "")}</b>?\n${numberedList()}\n\nBalas pakai <b>nomor</b> (mis. <code>2 ${esc(text)}</code> atau <code>1 3 ${esc(text)}</code>), atau <b>semua</b>.`);
+    await sendTelegramHTML(botToken, chatId, `❓ Ada <b>${flat.length}</b> transaksi pending. Yang mana mau ${wantSkip ? "dilewati" : "diubah"} jadi <b>${esc(entity || category || (wantTransfer ? "transfer" : "") || (wantSkip ? "skip ❌" : ""))}</b>?\n${numberedList()}\n\nBalas pakai <b>nomor</b> (mis. <code>2 ${esc(text)}</code> atau <code>1 3 ${esc(text)}</code>), atau <b>semua</b>.`);
     return true;
   }
   if (!targets.length) { await sendTelegramHTML(botToken, chatId, `⚠️ Ga nemu transaksi pending yang cocok.\n${numberedList()}\n\nCoba balas pakai nomornya.`); return true; }
@@ -1870,6 +1873,11 @@ async function handleTextCorrection(text: string, supabase: any, uid: string, bo
 
   const changed: string[] = []; const touched = new Set<string>();
   for (const { rowId, t } of targets) {
+    if (wantSkip) {
+      t._skipped = true; t._tg_classified = true;
+      changed.push(`❌ <s>${esc(String(t.merchant_name || t.description || "tx").slice(0, 28))}</s> · ${idr(t.amount_idr || t.amount)} dilewati`);
+      touched.add(rowId); continue;
+    }
     const isIn = forceIn ? true : forceOut ? false : (t.type === "in");
     if (wantTransfer) {
       t.suggested_tx_type = "transfer"; t.suggested_entity = null; t.is_reimburse = false;
@@ -1887,12 +1895,13 @@ async function handleTextCorrection(text: string, supabase: any, uid: string, bo
 
   const t0 = targets[0].t;
   const dir0 = forceIn ? true : forceOut ? false : (t0.type === "in");
-  const tt = wantTransfer ? "transfer"
+  const tt = wantSkip ? "dilewati ❌"
+    : wantTransfer ? "transfer"
     : (entity && entity !== "Personal") ? `reimburse_${dir0 ? "in" : "out"} ${entity}`
     : `${dir0 ? "income" : "expense"} (pribadi)${category ? " · " + category : ""}`;
   await sendTelegramHTML(botToken, chatId,
     `✅ <b>${changed.length} transaksi → ${esc(tt)}</b>\n${changed.slice(0, 8).map((c) => "• " + c).join("\n")}`,
-    { inline_keyboard: [[{ text: "✅ Import Semua", callback_data: "dg:importall" }]] });
+    wantSkip ? undefined : { inline_keyboard: [[{ text: "✅ Import Semua", callback_data: "dg:importall" }]] });
   return true;
 }
 
