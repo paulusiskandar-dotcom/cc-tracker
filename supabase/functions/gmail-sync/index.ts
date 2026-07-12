@@ -252,6 +252,23 @@ function extractVisibleSuffix(masked: string): string | null {
   return digits ? digits[0] : null;
 }
 
+// Real-time notification emails carry a tx at ~receipt time. Some (e.g. Jenius
+// "You Just Paid Your Credit Card Bills") have NO date in the body, so the model
+// hallucinates one (seen: 2026-01-14) — which lands the tx in the wrong (pre-
+// genesis) statement cycle and hides it from payment reminders. Clamp an absent
+// or implausible parsed date to the email's received date (Jakarta).
+function normalizeTxDate(tx: any, receivedAt: string | null): any {
+  if (!receivedAt) return tx;
+  const recvMs = Date.parse(receivedAt);
+  if (isNaN(recvMs)) return tx;
+  const recvYmd = new Date(recvMs + 7 * 3600 * 1000).toISOString().slice(0, 10); // WIB
+  const d = typeof tx?.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(tx.date) ? tx.date : null;
+  if (!d) return { ...tx, date: recvYmd };
+  const dMs = Date.parse(d + "T00:00:00Z"), rMs = Date.parse(recvYmd + "T00:00:00Z");
+  if (dMs < rMs - 40 * 86400000 || dMs > rMs + 2 * 86400000) return { ...tx, date: recvYmd }; // >40d stale or future
+  return tx;
+}
+
 // Foreign-currency tx have no reliable IDR rate until the monthly statement,
 // so they must NOT land in the daily pending queue. Flag each valas item with
 // `_waiting_statement` and return the row status: `waiting_statement` when every
@@ -600,7 +617,8 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
           if (Array.isArray(parsed)) {
             const resolved = resolveAccountIds(parsed, userAccounts);
             // Apply merchant mapping overrides (category_id, account_id)
-            aiResult = resolved.map((tx: any) => {
+            aiResult = resolved.map((tx0: any) => {
+              const tx = normalizeTxDate(tx0, receivedAt);
               const key = (tx.merchant_name || "").toLowerCase();
               const mapping = mappingsMap.get(key);
               if (mapping) {
@@ -743,7 +761,7 @@ async function reprocessEmails(supabase: any, userId: string, ids: string[], ant
 
   // Fetch the rows to reprocess
   const { data: rows } = await supabase.from("email_sync")
-    .select("id,raw_body,subject,sender_email").eq("user_id", userId).in("id", ids);
+    .select("id,raw_body,subject,sender_email,received_at").eq("user_id", userId).in("id", ids);
 
   let reprocessed = 0;
 
@@ -773,7 +791,8 @@ async function reprocessEmails(supabase: any, userId: string, ids: string[], ant
         if (!Array.isArray(parsed) && parsed) parsed = [parsed];
         if (Array.isArray(parsed) && parsed.length > 0) {
           const resolved = resolveAccountIds(parsed, userAccounts);
-          const aiResult = resolved.map((tx: any) => {
+          const aiResult = resolved.map((tx0: any) => {
+            const tx = normalizeTxDate(tx0, row.received_at);
             const key = (tx.merchant_name || "").toLowerCase();
             const mapping = mappingsMap.get(key);
             return mapping
