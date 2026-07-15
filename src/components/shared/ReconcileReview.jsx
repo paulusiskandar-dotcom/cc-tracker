@@ -133,6 +133,12 @@ export default function ReconcileReview({
   }, [extraIds, keptIds, ledgerRows, stmtStart, stmtEnd]);
 
   const nAction = (missing?.length || 0);
+  // Save-all counts only drafts whose statement row is STILL missing — a
+  // restored draft can carry entries for rows that have since matched.
+  const pendingCount = useMemo(() => {
+    const ids = new Set((missing || []).map(r => r._id));
+    return Object.keys(pendingRows || {}).filter(k => ids.has(k)).length;
+  }, [missing, pendingRows]);
   const total   = stmtRows?.length || 1;
   const pctGood = ((stats?.match || 0) / total) * 100;
   const pctWarn = (nAction / total) * 100;
@@ -428,9 +434,9 @@ export default function ReconcileReview({
               Ignore remaining ({nAction})
             </button>
           )}
-          {Object.keys(pendingRows || {}).length > 0 && onSaveAll && (
+          {pendingCount > 0 && onSaveAll && (
             <button onClick={onSaveAll} disabled={savingAll} style={BTN("#3b5bdb", "#fff")}>
-              {savingAll ? "Saving…" : `Save all (${Object.keys(pendingRows).length})`}
+              {savingAll ? "Saving…" : `Save all (${pendingCount})`}
             </button>
           )}
           <button
