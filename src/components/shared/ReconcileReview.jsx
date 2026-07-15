@@ -47,10 +47,13 @@ export default function ReconcileReview({
   const isCC = account?.type === "credit_card";
 
   // Period from the statement's own rows (the review is locked to it)
-  const period = useMemo(() => {
+  const { period, stmtStart, stmtEnd } = useMemo(() => {
     const ds = (stmtRows || []).map(r => r.date).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d || "")).sort();
-    if (!ds.length) return "—";
-    return `${fmtD(ds[0])} – ${fmtD(ds[ds.length - 1])} ${ds[ds.length - 1].slice(0, 4)}`;
+    if (!ds.length) return { period: "—", stmtStart: null, stmtEnd: null };
+    return {
+      period: `${fmtD(ds[0])} – ${fmtD(ds[ds.length - 1])} ${ds[ds.length - 1].slice(0, 4)}`,
+      stmtStart: ds[0], stmtEnd: ds[ds.length - 1],
+    };
   }, [stmtRows]);
 
   // Statement-side totals (statement = final source; never the ledger window)
@@ -65,8 +68,25 @@ export default function ReconcileReview({
 
   const stmtClosing  = reconcile.stmtClosingBalance;
   const stmtOpening  = reconcile.stmtOpeningBalance;
-  const gap = (stmtClosing != null && ledgerClosingBalance != null)
-    ? Math.round(stmtClosing - ledgerClosingBalance) : null;
+
+  // Ledger balance AT THE STATEMENT'S CLOSING DATE. The page's closing balance
+  // is at the padded match-window end (+7d) — money moving after the statement
+  // closed would otherwise show up as a fake gap. Roll those movements back.
+  // Bank balance: credit adds, debit subtracts. CC outstanding: the reverse.
+  const ledgerAtEnd = useMemo(() => {
+    if (ledgerClosingBalance == null || !stmtEnd) return ledgerClosingBalance;
+    let after = 0;
+    for (const l of ledgerRows || []) {
+      if (!l.tx_date || l.tx_date <= stmtEnd || !l._dir) continue;
+      const a = Math.abs(Number(l.amount_idr || 0));
+      const effect = l._dir === "credit" ? a : -a;      // effect on a bank balance
+      after += isCC ? -effect : effect;                  // CC outstanding moves opposite
+    }
+    return Number(ledgerClosingBalance) - after;
+  }, [ledgerClosingBalance, ledgerRows, stmtEnd, isCC]);
+
+  const gap = (stmtClosing != null && ledgerAtEnd != null)
+    ? Math.round(stmtClosing - ledgerAtEnd) : null;
   const missingSum = useMemo(
     () => (missing || []).reduce((s, r) => s + Math.abs(Number(r.amount || 0)), 0),
     [missing]);
@@ -102,12 +122,15 @@ export default function ReconcileReview({
     return list;
   }, [matched, ledgerRows]);
 
-  // Extra: in ledger, not on the statement (excluding rows the user chose to keep)
+  // Extra: in ledger, not on the statement — only WITHIN the statement period.
+  // The ledger is loaded with a ±7d pad so boundary rows can still match; rows
+  // outside the period that didn't match are just neighbours, not discrepancies.
   const extraList = useMemo(() => {
     const byId = new Map((ledgerRows || []).map(l => [l.id, l]));
-    return [...(extraIds || [])].filter(id => !keptIds?.has(id)).map(id => byId.get(id)).filter(Boolean)
+    return [...(extraIds || [])].filter(id => !keptIds?.has(id)).map(id => byId.get(id))
+      .filter(l => l && (!stmtStart || (l.tx_date >= stmtStart && l.tx_date <= stmtEnd)))
       .sort((a, b) => (a.tx_date || "") < (b.tx_date || "") ? -1 : 1);
-  }, [extraIds, keptIds, ledgerRows]);
+  }, [extraIds, keptIds, ledgerRows, stmtStart, stmtEnd]);
 
   const nAction = (missing?.length || 0);
   const total   = stmtRows?.length || 1;
@@ -200,7 +223,7 @@ export default function ReconcileReview({
         <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
           <span style={CHIP("#e7f6ef", "#059669")}><Check size={11} strokeWidth={3} />{stats?.match || 0} matched</span>
           {nAction > 0 && <span style={CHIP("#fdf3d7", "#b45309")}>{nAction} not in ledger</span>}
-          <span style={CHIP("#f3f4f6", "#6b7280")}>{stats?.extra || 0} extra in ledger</span>
+          <span style={CHIP("#f3f4f6", "#6b7280")}>{extraList.length} extra in ledger</span>
           {fxWaiting > 0 && <span style={CHIP("#efeafb", "#6d28d9")}>{fxWaiting} FX waiting resolves here</span>}
         </div>
         {gap != null && Math.abs(gap) >= 1 && (
@@ -231,8 +254,8 @@ export default function ReconcileReview({
         <Tile label={isCC ? "Payments & credits" : "Money in"} value={fmtIDR(sums.inn)} sub={`${sums.nIn} transaction${sums.nIn !== 1 ? "s" : ""}`} good />
         <Tile label="Statement closing" highlight
           value={stmtClosing != null ? fmtIDR(stmtClosing) : "—"}
-          sub={stmtClosing != null && ledgerClosingBalance != null
-            ? (Math.abs(gap) < 1 ? "Ledger matches" : `Ledger: ${fmtIDR(ledgerClosingBalance)} · gap ${fmtIDR(Math.abs(gap))}`)
+          sub={stmtClosing != null && ledgerAtEnd != null
+            ? (Math.abs(gap) < 1 ? "Ledger matches" : `Ledger: ${fmtIDR(ledgerAtEnd)} · gap ${fmtIDR(Math.abs(gap))}`)
             : null} />
       </div>
 
@@ -423,7 +446,7 @@ export default function ReconcileReview({
         account={account}
         period={period}
         stmtClosingBalance={stmtClosing}
-        ledgerClosingBalance={ledgerClosingBalance}
+        ledgerClosingBalance={ledgerAtEnd}
         addedCount={0}
       />
     </div>
