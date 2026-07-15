@@ -113,15 +113,73 @@ Deno.serve(async (_req) => {
   due.sort((a: any, b: any) => a.when - b.when);
 
   // ── Recurring monthly bills (subscriptions, rent, insurance…) ──
-  let rtQ = sb.from("recurring_templates").select("name,amount,currency,tx_type,day_of_month,is_active,user_id")
+  let rtQ = sb.from("recurring_templates").select("id,name,amount,currency,tx_type,day_of_month,is_active,user_id,match_rule")
     .eq("is_active", true).not("tx_type", "in", "(income)");
   if (USER_ID) rtQ = rtQ.eq("user_id", USER_ID);
   const { data: rts } = await rtQ;
+
+  // ── Suppress bills already paid this cycle ────────────────────
+  // A bill is "paid" when its current-cycle reminder is confirmed/skipped, OR
+  // (for bills with a match_rule) a matching ledger row exists this cycle — in
+  // which case we also auto-link it and confirm the reminder so the Upcoming
+  // page agrees. Bills with no reliable identifier (e.g. Telkomsel bought via
+  // Lazada) have no match_rule and stay manual: confirm them in Upcoming.
+  const cycleFrom = dstr(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 33));
+  let remQ = sb.from("recurring_reminders").select("id, template_id, due_date, status").gte("due_date", cycleFrom);
+  if (USER_ID) remQ = remQ.eq("user_id", USER_ID);
+  const { data: cycleReminders } = await remQ;
+  const remByTpl = new Map<string, any>();
+  for (const r of cycleReminders || []) {
+    const cur = remByTpl.get(r.template_id);
+    if (!cur || r.due_date > cur.due_date) remByTpl.set(r.template_id, r);
+  }
+  let cledQ = sb.from("ledger").select("id, tx_date, description, merchant_name, amount_idr, tx_type, recurring_template_id").gte("tx_date", cycleFrom);
+  if (USER_ID) cledQ = cledQ.eq("user_id", USER_ID);
+  const { data: cycleLed } = await cledQ;
+  const normM = (s: any) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const claimed = new Set<string>();
+  const findMatch = (rule: any, dueIso: string) => {
+    if (!rule) return null;
+    const due = new Date(dueIso + "T00:00:00").getTime();
+    const txTypes: string[] = rule.tx_types || ["expense"];
+    const needles: string[] = [...(rule.keywords || []), ...(rule.account_nos || [])].map(normM).filter((n: string) => n.length >= 3);
+    for (const L of cycleLed || []) {
+      if (claimed.has(L.id) || L.recurring_template_id) continue;
+      if (!txTypes.includes(L.tx_type)) continue;
+      // Window skewed to the due date so last month's payment (e.g. rent paid
+      // ~3 weeks before the next due) isn't claimed for this cycle.
+      const diff = (new Date(L.tx_date + "T00:00:00").getTime() - due) / 86400000;
+      if (diff < -20 || diff > 12) continue;
+      const hay = normM(`${L.description} ${L.merchant_name}`);
+      if (needles.length && !needles.some((n) => hay.includes(n))) continue;
+      if (rule.amount) { const tol = Number(rule.amount) * (rule.amount_tol ?? 0.01); if (Math.abs(Number(L.amount_idr) - Number(rule.amount)) > tol) continue; }
+      return L;
+    }
+    return null;
+  };
+  const paidTpl = new Set<string>();
+  for (const t of (rts || []) as any[]) {
+    if (t.is_active === false) continue;
+    const rem = remByTpl.get(t.id);
+    if (rem && (rem.status === "confirmed" || rem.status === "skipped")) { paidTpl.add(t.id); continue; }
+    if (t.match_rule) {
+      const dueIso = rem?.due_date || dstr(nextDue(today, t.day_of_month));
+      const hit = findMatch(t.match_rule, dueIso);
+      if (hit) {
+        paidTpl.add(t.id); claimed.add(hit.id);
+        await sb.from("ledger").update({ recurring_template_id: t.id }).eq("id", hit.id);
+        if (rem && rem.status === "pending") {
+          await sb.from("recurring_reminders").update({ status: "confirmed", confirmed_at: new Date().toISOString(), generated_ledger_id: hit.id }).eq("id", rem.id);
+        }
+      }
+    }
+  }
+
   // Only MANUAL bills (utilities/property/tax/telco) need reminders. Subscriptions
   // that auto-charge on a card don't — they already show up in the CC bill.
   const MANUAL_RE = /listrik|metro|apart|internet|wifi|indihome|\bpph\b|pajak|telkomsel|\bipl\b|pdam|bpjs|iuran|residence|riverside|circleone/i;
   const bills = (rts || [])
-    .filter((t: any) => t.day_of_month && MANUAL_RE.test(t.name || ""))
+    .filter((t: any) => t.day_of_month && MANUAL_RE.test(t.name || "") && !paidTpl.has(t.id))
     .map((t: any) => ({ ...t, when: nextDue(today, t.day_of_month) }))
     .filter((t: any) => t.when <= horizon)
     .sort((a: any, b: any) => a.when - b.when);
