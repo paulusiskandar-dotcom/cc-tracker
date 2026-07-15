@@ -183,13 +183,26 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [missingFiltered, allLedger, currentAccountId]);
 
-  const stats = useMemo(() => ({
-    match: matched.size,
-    missing: missingFiltered.length,
-    extra: [...extraIds].filter(id => !keptIds.has(id)).length,
-    ignored: ignoredIds.size,
-    kept: keptIds.size,
-  }), [matched, missingFiltered, extraIds, keptIds, ignoredIds]);
+  const stats = useMemo(() => {
+    // Extra counts only rows WITHIN the statement period. The ledger window is
+    // padded ±7d for matching, so the pad zones contain the previous cycle's
+    // closing fees etc. — neighbours, not discrepancies (they showed up as
+    // "Extra 3" in the summary while the review screen correctly hid them).
+    const ds = stmtRows.map(r => r.date).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d || "")).sort();
+    const s0 = ds[0], s1 = ds[ds.length - 1];
+    const inPeriod = (id) => {
+      if (!s0) return true;
+      const l = mergedLedgerRows.find(r => r.id === id);
+      return !!l && l.tx_date >= s0 && l.tx_date <= s1;
+    };
+    return {
+      match: matched.size,
+      missing: missingFiltered.length,
+      extra: [...extraIds].filter(id => !keptIds.has(id) && inPeriod(id)).length,
+      ignored: ignoredIds.size,
+      kept: keptIds.size,
+    };
+  }, [matched, missingFiltered, extraIds, keptIds, ignoredIds, stmtRows, mergedLedgerRows]);
 
   // Upload handler
   const stageAndProcess = useCallback(async (file, { append = false } = {}) => {
