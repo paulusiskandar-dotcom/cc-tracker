@@ -83,18 +83,22 @@ export function matchDetectedAccount(detected, accounts) {
   }
 
   if (detected.account_no) {
-    const byAccNo = accounts.find(a =>
-      String(a.account_no || "").includes(detected.account_no) ||
-      String(detected.account_no).includes(String(a.account_no || "").slice(-6))
-    );
+    const dno = String(detected.account_no);
+    // account must have a real number — guarding length stops the
+    // `dno.includes("")`-always-true trap that matched blank-account_no accounts.
+    const byAccNo = accounts.find(a => {
+      const ano = String(a.account_no || "");
+      if (ano.length < 4) return false;
+      return ano.includes(dno) || dno.includes(ano.slice(-6));
+    });
     if (byAccNo) return byAccNo;
   }
 
   if (detected.bank_name) {
-    const byBankName = accounts.find(a =>
-      a.bank_name?.toLowerCase() === detected.bank_name.toLowerCase()
-    );
-    if (byBankName) return byBankName;
+    // only trust bank_name when exactly one account has it (else ambiguous)
+    const bn = detected.bank_name.toLowerCase();
+    const byBankName = accounts.filter(a => a.bank_name?.toLowerCase() === bn);
+    if (byBankName.length === 1) return byBankName[0];
   }
 
   return null;

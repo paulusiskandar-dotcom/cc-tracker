@@ -920,16 +920,40 @@ function matchDetectedAccountSrv(detected: any, accounts: any[]): any {
     if (byLast4) return byLast4;
   }
   if (detected.account_no) {
-    const byAccNo = accounts.find((a) =>
-      String(a.account_no || "").includes(detected.account_no) ||
-      String(detected.account_no).includes(String(a.account_no || "").slice(-6)));
+    const dno = String(detected.account_no);
+    // Require a REAL account number on the account. Guarding length>=4 stops the
+    // `dno.includes("")`-is-always-true trap that funneled every no-account_no
+    // statement onto the first blank-account_no account (the "USD Cash" bug).
+    const byAccNo = accounts.find((a) => {
+      const ano = String(a.account_no || "");
+      if (ano.length < 4) return false;
+      return ano.includes(dno) || dno.includes(ano.slice(-6));
+    });
     if (byAccNo) return byAccNo;
   }
   if (detected.bank_name) {
-    const byBankName = accounts.find((a) => a.bank_name?.toLowerCase() === detected.bank_name.toLowerCase());
-    if (byBankName) return byBankName;
+    // Only trust bank_name when it's unambiguous (one account for that bank).
+    // Multiple same-bank accounts (e.g. OCBC 90N/IDR/USD/SGD) → don't guess.
+    const bn = detected.bank_name.toLowerCase();
+    const byBankName = accounts.filter((a) => a.bank_name?.toLowerCase() === bn);
+    if (byBankName.length === 1) return byBankName[0];
   }
   return null;
+}
+
+// Resolve which tracked account a statement belongs to. Strongest signal first:
+// any card_last4 PRINTED in the statement rows that maps to exactly one tracked
+// card (deterministic — e.g. OCBC 90N's 3411 appears in its statement even when
+// the "most common" last4 belongs to an untracked supplementary card). Falls
+// back to the header-detected last4/account_no/bank_name.
+function resolveStatementAccount(detected: any, txs: any[], accounts: any[]): any {
+  const active = (accounts || []).filter((a: any) => a.is_active !== false);
+  const last4s = [...new Set((txs || []).map((t: any) => t.card_last4 ? String(t.card_last4) : null).filter(Boolean))];
+  const byCard = [...new Set(
+    last4s.map((l4) => active.find((a: any) => a.card_last4 && String(a.card_last4) === l4)).filter(Boolean),
+  )];
+  if (byCard.length === 1) return byCard[0];
+  return matchDetectedAccountSrv(detected, active);
 }
 
 function wordSimilaritySrv(a: string, b: string): number {
@@ -991,7 +1015,7 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
   const { data: accounts } = await serviceSupabase.from("accounts")
     .select("id, name, type, bank_name, account_no, card_last4, currency, initial_balance, is_active")
     .eq("user_id", userId);
-  const acc = matchDetectedAccountSrv(extraction.detected_account, (accounts || []).filter((a: any) => a.is_active !== false));
+  const acc = resolveStatementAccount(extraction.detected_account, txs, accounts || []);
   if (!acc) {
     return {
       prepared: false, reason: "account_not_matched",
