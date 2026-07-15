@@ -83,11 +83,12 @@ export function matchDetectedAccount(detected, accounts) {
   }
 
   if (detected.account_no) {
-    const dno = String(detected.account_no);
-    // account must have a real number — guarding length stops the
-    // `dno.includes("")`-always-true trap that matched blank-account_no accounts.
-    const byAccNo = accounts.find(a => {
-      const ano = String(a.account_no || "");
+    // digits-only: statements print "121-00-0016886-8", DB stores "1210000168868".
+    // require a real number too — guarding length stops the `dno.includes("")`-
+    // always-true trap that matched blank-account_no accounts.
+    const dno = String(detected.account_no).replace(/\D/g, "");
+    const byAccNo = dno.length >= 4 && accounts.find(a => {
+      const ano = String(a.account_no || "").replace(/\D/g, "");
       if (ano.length < 4) return false;
       return ano.includes(dno) || dno.includes(ano.slice(-6));
     });

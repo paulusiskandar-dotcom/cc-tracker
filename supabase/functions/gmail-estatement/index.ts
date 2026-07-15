@@ -920,12 +920,13 @@ function matchDetectedAccountSrv(detected: any, accounts: any[]): any {
     if (byLast4) return byLast4;
   }
   if (detected.account_no) {
-    const dno = String(detected.account_no);
-    // Require a REAL account number on the account. Guarding length>=4 stops the
-    // `dno.includes("")`-is-always-true trap that funneled every no-account_no
-    // statement onto the first blank-account_no account (the "USD Cash" bug).
-    const byAccNo = accounts.find((a) => {
-      const ano = String(a.account_no || "");
+    // Normalise to digits only — statements print "121-00-0016886-8" while the DB
+    // stores "1210000168868". Require a REAL account number too: guarding length>=4
+    // stops the `dno.includes("")`-always-true trap that funneled every
+    // no-account_no statement onto the first blank-account_no account ("USD Cash").
+    const dno = String(detected.account_no).replace(/\D/g, "");
+    const byAccNo = dno.length >= 4 && accounts.find((a) => {
+      const ano = String(a.account_no || "").replace(/\D/g, "");
       if (ano.length < 4) return false;
       return ano.includes(dno) || dno.includes(ano.slice(-6));
     });
