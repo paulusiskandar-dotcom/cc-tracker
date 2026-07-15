@@ -328,20 +328,32 @@ export default function ReconcileReview({
           <div style={{ display: "flex", alignItems: "center", gap: 9, margin: "24px 2px 10px" }}>
             <span style={{ fontSize: 13, fontWeight: 800, color: "#111827" }}>In ledger, not on statement</span>
             <span style={{ fontSize: 11, fontWeight: 800, background: "#fdecec", color: "#dc2626", padding: "2px 9px", borderRadius: 99, ...NUM }}>{extraList.length}</span>
-            <span style={{ fontSize: 11.5, color: "#9ca3af", marginLeft: "auto" }}>Booked next cycle, or a duplicate to fix</span>
+            <span style={{ fontSize: 11.5, color: "#9ca3af", marginLeft: "auto" }}>Already recorded — Keep confirms it's fine (missed by the parser, or booked next cycle)</span>
           </div>
           <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 13, overflow: "hidden" }}>
-            {extraList.map((l, i) => (
-              <div key={l.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8.5px 16px", borderBottom: i < extraList.length - 1 ? "1px solid #f3f4f6" : "none", fontSize: 12.5, ...NUM }}>
-                <span style={{ fontSize: 11, color: "#9ca3af", width: 52, flexShrink: 0 }}>{fmtD(l.tx_date)}</span>
-                <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#111827" }}>{l.description || l.merchant_name || "—"}</span>
-                <span style={{ fontWeight: 650, color: "#111827" }}>{fmtIDR(Math.abs(Number(l.amount_idr || 0)))}</span>
-                <button onClick={() => reconcile.markKept(l.id)} title="Legitimate — booked on another statement cycle"
-                  style={{ fontSize: 11, fontWeight: 700, padding: "4px 12px", borderRadius: 7, border: "1px solid #e5e7eb", background: "#fff", color: "#6b7280", cursor: "pointer", fontFamily: FF }}>
-                  Keep
-                </button>
-              </div>
-            ))}
+            {extraList.map((l, i) => {
+              // Already-recorded ledger rows — show what they already are so it's
+              // clear Keep doesn't need to ask for a type/category again.
+              const ctx = [TX_TYPE_MAP[l.tx_type]?.label || l.tx_type, l.category_name].filter(Boolean).join(" · ");
+              return (
+                <div key={l.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8.5px 16px", borderBottom: i < extraList.length - 1 ? "1px solid #f3f4f6" : "none", fontSize: 12.5, ...NUM }}>
+                  <span style={{ fontSize: 11, color: "#9ca3af", width: 52, flexShrink: 0 }}>{fmtD(l.tx_date)}</span>
+                  <span style={{ minWidth: 0, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#111827" }}>
+                    {l.description || l.merchant_name || "—"}
+                    {ctx && (
+                      <span style={{ fontSize: 9.5, fontWeight: 700, color: "#6b7280", background: "#f3f4f6", borderRadius: 5, padding: "1px 6px", marginLeft: 7 }}>{ctx}</span>
+                    )}
+                  </span>
+                  <span style={{ fontWeight: 650, color: l._dir === "credit" ? "#059669" : "#111827" }}>
+                    {l._dir === "credit" ? "+ " : ""}{fmtIDR(Math.abs(Number(l.amount_idr || 0)))}
+                  </span>
+                  <button onClick={() => reconcile.markKept(l.id)} title="Already recorded with the type shown — Keep just confirms it's not a discrepancy"
+                    style={{ fontSize: 11, fontWeight: 700, padding: "4px 12px", borderRadius: 7, border: "1px solid #e5e7eb", background: "#fff", color: "#6b7280", cursor: "pointer", fontFamily: FF }}>
+                    Keep
+                  </button>
+                </div>
+              );
+            })}
           </div>
         </>
       )}
