@@ -273,7 +273,13 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
   const exitReconcile = useCallback(async () => {
     if (user && accountId && stmtRows.length) {
       try {
-        const [y, m] = (fromDate || "").split("-").map(Number);
+        // Period = the statement's LAST row date (same as server prepare's
+        // periodEnd) — NOT fromDate, which is the ±7d-padded match window and
+        // can fall in the previous month (a June statement filed under May
+        // left the prepared June session alive in the Reconcile inbox).
+        const stmtDates = stmtRows.map(s => s.date).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d || "")).sort();
+        const periodSrc = stmtDates[stmtDates.length - 1] || fromDate;
+        const [y, m] = (periodSrc || "").split("-").map(Number);
         await reconcileApi.create(user.id, {
           account_id: accountId,
           period_year: y || new Date().getFullYear(),
