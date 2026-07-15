@@ -69,6 +69,20 @@ export async function processReconcilePDF(file, userId) {
 }
 
 /**
+ * Ledger window that covers a statement's rows (min/max tx date ± pad).
+ * Reconcile must compare the statement against ledger rows from the SAME
+ * period — reviewing a draft with the page's default month window makes
+ * every out-of-window row a false "missing" and breaks the closing check.
+ * Same ±7d pad as the server's prepareReconcile.
+ */
+export function statementWindow(stmtRows, padDays = 7) {
+  const dates = (stmtRows || []).map(r => r.date).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d || "")).sort();
+  if (!dates.length) return null;
+  const pad = (d, n) => { const t = new Date(d + "T00:00:00"); t.setDate(t.getDate() + n); return t.toISOString().slice(0, 10); };
+  return { from: pad(dates[0], -padDays), to: pad(dates[dates.length - 1], padDays) };
+}
+
+/**
  * Match a detected_account object (from PDF extraction) to an account in the user's list.
  * Tries card last4 first, then bank_name + account_no, then bank_name alone.
  */

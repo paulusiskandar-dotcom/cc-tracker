@@ -5,6 +5,7 @@ import CCStatement         from "../components/CCStatement";
 import AssetTimeline       from "../components/AssetTimeline";
 import EmployeeLoanStatement from "../components/EmployeeLoanStatement";
 import { supabase }        from "../lib/supabase";
+import { statementWindow }  from "../lib/reconcilePdfUpload";
 
 const FF = "Figtree, sans-serif";
 
@@ -19,7 +20,14 @@ export default function StatementPage({
   const navigate     = useNavigate();
 
   const account = accounts.find(a => a.id === id);
-  const seeds   = location.state?.reconcileSeeds || null;
+  let seeds     = location.state?.reconcileSeeds || null;
+  // Draft-continue paths pass only fullState — derive the ledger window from the
+  // statement rows so the diff runs over the statement's own period (a default
+  // current-month window turns every earlier row into a false "missing").
+  if (seeds?.fullState?.stmtRows?.length && !seeds.from) {
+    const win = statementWindow(seeds.fullState.stmtRows);
+    if (win) seeds = { ...seeds, from: win.from, to: win.to };
+  }
   const onBack  = () => navigate(-1);
 
   // Fallback: fetch archived (inactive) asset directly if not in active accounts

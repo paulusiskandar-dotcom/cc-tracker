@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import { fmtIDR } from "../utils";
 import { detectAccount } from "../lib/accountDetection";
+import { statementWindow } from "../lib/reconcilePdfUpload";
 import AutoDetectBadge from "./shared/AutoDetectBadge";
 import { TX_TYPE_MAP } from "../constants";
 import { showToast } from "./shared/Card";
@@ -149,7 +150,15 @@ export default function BankStatement({
       stmtClosingBalance: reconcile.stmtClosingBalance,
       stmtOpeningBalance: reconcile.stmtOpeningBalance,
     } : null,
-    onRestore: (s) => reconcile.seedFullState(s),
+    onRestore: (s) => {
+      reconcile.seedFullState(s);
+      // Re-window the ledger to the draft's statement period (a stale default
+      // month window makes out-of-window rows false "missing")
+      if (!hasInitialDates.current) {
+        const win = statementWindow(s?.stmtRows);
+        if (win) { setFromDate(win.from); setToDate(win.to); load(win.from, win.to); }
+      }
+    },
   });
 
   // Seed reconcile state from props (GlobalReconcileButton or draft-continue flow)
@@ -254,8 +263,9 @@ export default function BankStatement({
   }, [reconcile.stmtRows]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Load raw transaction data ───────────────────────────────
-  const load = async () => {
+  const load = async (fromOverride, toOverride) => {
     if (!accountId) return;
+    const f = fromOverride || fromDate, t = toOverride || toDate;
     setLoading(true);
     try {
       const [{ data: inRange, error: e1 }, { data: beforeRange, error: e2 }] = await Promise.all([
@@ -263,15 +273,15 @@ export default function BankStatement({
           .select("*")
           .eq("user_id", user.id)
           .or(`from_id.eq.${accountId},to_id.eq.${accountId}`)
-          .gte("tx_date", fromDate)
-          .lte("tx_date", toDate)
+          .gte("tx_date", f)
+          .lte("tx_date", t)
           .order("tx_date",    { ascending: true })
           .order("created_at", { ascending: true }),
         supabase.from("ledger")
           .select("amount_idr, amount, currency, from_id, from_type, to_id, to_type")
           .eq("user_id", user.id)
           .or(`from_id.eq.${accountId},to_id.eq.${accountId}`)
-          .lt("tx_date", fromDate),
+          .lt("tx_date", f),
       ]);
       if (e1) throw e1;
       if (e2) throw e2;
