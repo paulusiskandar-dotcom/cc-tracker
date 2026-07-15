@@ -9,10 +9,10 @@ import { showToast } from "./shared/Card";
 import { undoManager } from "../lib/undoManager";
 import TxVerticalBig from "./shared/TxVerticalBig";
 import { useReconcile, ReconcileBar, ReconcileStatusBadge, ReconcileMissingRowInline, ReconcileMissingBar, getMissingRowsMap } from "./shared/ReconcileOverlay";
-import ProgressIndicator from "./shared/ProgressIndicator";
 import { useImportDraft } from "../lib/useImportDraft";
 import DraftBanner from "./shared/DraftBanner";
 import PDFViewer from "./shared/PDFViewer";
+import ReconcileReview from "./shared/ReconcileReview";
 import { ledgerApi, recurringApi } from "../api";
 import * as XLSX from "xlsx";
 
@@ -417,33 +417,62 @@ export default function BankStatement({
     fontFamily: FF, cursor: "pointer", fontWeight: 600, ...extra,
   });
 
+  const inReview = reconcile.active && (reconcile.stmtRows?.length || 0) > 0;
+
   return (
     <div ref={printRef} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
       {/* ── Header row ── */}
       <div className="no-print" style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <button onClick={onBack} style={BTN()}>← Back</button>
-        <span style={{ fontSize: 16, fontWeight: 800, color: "#111827", fontFamily: FF }}>
-          Bank Statement{selectedAccount ? ` — ${selectedAccount.name}` : ""}
-        </span>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
-          {rawData && !reconcile.active && (
-            <button onClick={reconcile.startReconcile} style={BTN()}>☑ Reconcile</button>
-          )}
-          <button onClick={exportPDF} style={BTN()}>🖨 PDF</button>
-          <button onClick={exportExcel} disabled={!rawData} style={BTN({ opacity: rawData ? 1 : 0.4, cursor: rawData ? "pointer" : "default" })}>
-            📊 Excel
-          </button>
-        </div>
+        {!inReview && (
+          <>
+            <span style={{ fontSize: 16, fontWeight: 800, color: "#111827", fontFamily: FF }}>
+              Bank Statement{selectedAccount ? ` — ${selectedAccount.name}` : ""}
+            </span>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+              {rawData && !reconcile.active && (
+                <button onClick={reconcile.startReconcile} style={BTN()}>☑ Reconcile</button>
+              )}
+              <button onClick={exportPDF} style={BTN()}>🖨 PDF</button>
+              <button onClick={exportExcel} disabled={!rawData} style={BTN({ opacity: rawData ? 1 : 0.4, cursor: rawData ? "pointer" : "default" })}>
+                📊 Excel
+              </button>
+            </div>
+          </>
+        )}
       </div>
+
+      {/* ── Reconcile Review (statement-centric redesign) ── */}
+      {inReview && (
+        <ReconcileReview
+          reconcile={reconcile}
+          account={selectedAccount}
+          accounts={accounts}
+          accountChoices={bankAccs}
+          categories={categories}
+          incomeSrcs={incomeSrcs}
+          employeeLoans={[]}
+          user={user}
+          ledgerRows={(rawData?.allTxs || []).map(tx => ({ ...tx, _dir: txDirection(tx, accountId) }))}
+          ledgerClosingBalance={data?.closingBal ?? null}
+          onRefresh={() => { load(); onRefresh?.(); }}
+          onClearDraft={reconcileDraft.clearDraft}
+          onSaveAll={saveAll}
+          savingAll={savingAll}
+          showPdfPanel={showPdfPanel}
+          onTogglePdfPanel={() => setShowPdfPanel(p => !p)}
+          onChangeAccount={(id) => { setAccountId(id); setAutoDetect(null); }}
+        />
+      )}
 
       {/* Reconcile draft banner */}
       {reconcileDraft.showBanner && !reconcile.active && (
         <DraftBanner draftInfo={reconcileDraft.draftInfo} onResume={reconcileDraft.resume} onDiscard={reconcileDraft.discard} />
       )}
 
-      {/* Reconcile bar */}
-      <ReconcileBar
+      {/* Reconcile bar (upload flow only — review has its own screen) */}
+      {!inReview && <ReconcileBar
         reconcile={reconcile}
         onRefresh={() => { load(); onRefresh?.(); }}
         onClearDraft={reconcileDraft.clearDraft}
@@ -452,19 +481,10 @@ export default function BankStatement({
         ledgerClosingBalance={data?.closingBal ?? null}
         showPdfPanel={showPdfPanel}
         onTogglePdfPanel={() => setShowPdfPanel(p => !p)}
-      />
-      {reconcile.active && reconcile.stmtRows?.length > 0 && (
-        <ProgressIndicator
-          label="Reconcile"
-          total={reconcile.stmtRows.length}
-          processed={reconcile.stats.match + reconcile.stats.ignored}
-          pending={reconcile.stats.missing}
-          matched={reconcile.stats.match}
-        />
-      )}
+      />}
 
-      {/* Split view wrapper — flex row when PDF panel is open */}
-      <div style={showPdfPanel && reconcile.pdfBlobUrl ? { display: "grid", gridTemplateColumns: "2fr 3fr", gap: 12, alignItems: "flex-start" } : {}}>
+      {/* Split view wrapper — flex row when PDF panel is open (classic mode only) */}
+      {!inReview && <div style={showPdfPanel && reconcile.pdfBlobUrl ? { display: "grid", gridTemplateColumns: "2fr 3fr", gap: 12, alignItems: "flex-start" } : {}}>
         {showPdfPanel && reconcile.pdfBlobUrl && (
           <PDFViewer fileUrl={reconcile.pdfBlobUrl} filename={reconcile.pdfSource} />
         )}
@@ -785,7 +805,7 @@ export default function BankStatement({
       )}
 
         </div>{/* end split right column */}
-      </div>{/* end split view wrapper */}
+      </div>}{/* end split view wrapper */}
 
       {/* ── Edit Transaction Modal ── */}
       <TxVerticalBig
