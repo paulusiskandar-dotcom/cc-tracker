@@ -95,7 +95,21 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
   const [pendingRows,        setPendingRows]        = useState({});
   const [allLedger,          setAllLedger]          = useState([]);
   const [manuallyUnmatched,  setManuallyUnmatched]  = useState(() => new Set());
+  // Rows created from THIS reconcile session (Add to ledger). Merged into the
+  // match input immediately so a confirmed row moves to Matched without waiting
+  // for the page's ledger reload — no manual refresh needed.
+  const [localAdded,         setLocalAdded]         = useState([]);
   const fileRef = useRef(null);
+
+  const noteAdded = useCallback((row) => {
+    if (row?.id) setLocalAdded(p => (p.some(r => r.id === row.id) ? p : [...p, row]));
+  }, []);
+
+  const mergedLedgerRows = useMemo(() => {
+    if (!localAdded.length) return ledgerRows;
+    const seen = new Set(ledgerRows.map(r => r.id));
+    return [...ledgerRows, ...localAdded.filter(r => !seen.has(r.id))];
+  }, [ledgerRows, localAdded]);
 
   useEffect(() => () => { if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl); }, [pdfBlobUrl]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -112,7 +126,7 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
 
   const { matched, missing, extraIds } = useMemo(() => {
     if (!active || !stmtRows.length) return { matched: new Map(), missing: [], extraIds: new Set() };
-    const raw = matchRows(stmtRows, ledgerRows);
+    const raw = matchRows(stmtRows, mergedLedgerRows);
     if (!manuallyUnmatched.size) return raw;
 
     const adjustedMatched = new Map(raw.matched);
@@ -128,7 +142,7 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
       missing:  [...raw.missing, ...releasedStmtRows],
       extraIds: new Set([...raw.extraIds, ...manuallyUnmatched]),
     };
-  }, [active, stmtRows, ledgerRows, manuallyUnmatched]);
+  }, [active, stmtRows, mergedLedgerRows, manuallyUnmatched]);
 
   // Status for a ledger row
   const getStatus = useCallback((ledgerId) => {
@@ -333,7 +347,7 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
     if (pdfBlobUrl) { URL.revokeObjectURL(pdfBlobUrl); setPdfBlobUrl(null); }
     setActive(false); setStmtRows([]); setKeptIds(new Set()); setIgnoredIds(new Set()); setPdfSource("");
     setExpandedIds(new Set()); setPendingRows({}); setStmtClosingBalance(null); setStmtOpeningBalance(null);
-    setManuallyUnmatched(new Set());
+    setManuallyUnmatched(new Set()); setLocalAdded([]);
     showToast("Reconcile completed");
   }, [user, accountId, fromDate, stmtRows, stats, pdfSource, matched, accounts, stmtClosingBalance]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -341,7 +355,7 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
     active, stmtRows, processing, stats, pdfSource, pdfBlobUrl,
     stmtClosingBalance, stmtOpeningBalance, fileRef,
     matched, missing: missingEnriched, extraIds, keptIds, ignoredIds,
-    getStatus, markKept, markIgnored, unmatchLedgerRow, rematchLedgerRow,
+    getStatus, markKept, markIgnored, unmatchLedgerRow, rematchLedgerRow, noteAdded,
     seedStmtRows, seedFullState,
     stageAndProcess, startReconcile, exitReconcile,
     currentAccountId,
@@ -683,6 +697,7 @@ export function ReconcileAddPanel({ stmtRow, reconcile, accounts, employeeLoans,
       };
       const created = await ledgerApi.create(user.id, entry, accounts);
       if (created?.id) {
+        reconcile.noteAdded?.(created);   // instant: statement row re-matches without a page reload
         try {
           const match = await recurringApi.tryAutoMatch(user.id, created);
           if (match.matched) showToast(`✓ "${match.templateName}" auto-matched (recurring bill confirmed)`);

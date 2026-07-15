@@ -215,7 +215,7 @@ export default function BankStatement({
           notes: r.notes || null,
         };
         const created = await ledgerApi.create(user.id, entry, accounts);
-        if (created?.id) newLedgerIds.push(created.id);
+        if (created?.id) { newLedgerIds.push(created.id); reconcile.noteAdded?.(created); }
         successCount++;
         if (created?.id) {
           try {
