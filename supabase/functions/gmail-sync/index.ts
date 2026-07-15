@@ -1,3 +1,4 @@
+import { sweepLedgerGhosts } from "../_shared/sweep.ts";
 // ─────────────────────────────────────────────────────────────────
 // gmail-sync/index.ts
 // Fetches new bank emails → AI extraction → saves to email_sync (pending)
@@ -693,6 +694,15 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
     { user_id: userId, key: "gmail_last_sync_at", value: JSON.stringify(syncNow) },
     { onConflict: "user_id,key" }
   );
+
+  // Auto-skip freshly-synced items that already exist in the ledger (the same
+  // money arrived through another door: Telegram photo import, statement, web).
+  try {
+    const ghosts = await sweepLedgerGhosts(supabase, userId);
+    if (ghosts) console.log(`[gmail-sync] ghost sweep: ${ghosts} duplicate item(s) auto-skipped`);
+  } catch (e) {
+    console.warn("[gmail-sync] ghost sweep failed:", e);
+  }
 
   // Save sync log entry to app_settings (max 50 entries, newest first)
   try {

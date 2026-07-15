@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
+import { isDoneTx, sweepLedgerGhosts } from "../_shared/sweep.ts";
 
 const TELEGRAM_API = "https://api.telegram.org";
 
@@ -1413,18 +1414,20 @@ async function cmdInvestasi(supabase: any, uid: string): Promise<string> {
 }
 
 async function cmdPending(supabase: any, uid: string): Promise<string> {
+  const ghosts = await sweepLedgerGhosts(supabase, uid);  // auto-skip items already in the ledger
   const { data: rows } = await supabase.from("email_sync").select("id, ai_raw_result").eq("user_id", uid).eq("status", "pending");
   let n = 0, tot = 0; const lines: string[] = [];
   for (const r of rows || []) {
     let arr: any = r.ai_raw_result; try { if (typeof arr === "string") arr = JSON.parse(arr); } catch { arr = null; }
     for (const t of (Array.isArray(arr) ? arr : [])) {
-      if (t._imported || t._skipped || t._waiting_statement) continue;  // valas parked in /valas queue, not here
+      if (isDoneTx(t)) continue;  // handled anywhere (web/bot/valas queue) = not pending
       n++; const amt = Number(t.amount_idr || t.amount || 0); tot += amt;
       if (n <= 15) lines.push(`${t.type === "in" ? "🟢" : "🔴"} ${esc(t.merchant_name || t.description || "-")} — ${idr(amt)}`);
     }
   }
-  if (!n) return "📭 <b>PENDING</b>\n\nKosong — semua sudah diimport. ✅";
-  return `📥 <b>PENDING (${n})</b>\n${lines.join("\n")}${n > 15 ? `\n<i>… +${n - 15} lagi</i>` : ""}\n\nKetik /digest untuk review + import.`;
+  const ghostNote = ghosts ? `\n🧹 <i>${ghosts} duplikat (sudah ada di ledger) di-skip otomatis.</i>` : "";
+  if (!n) return `📭 <b>PENDING</b>\n\nKosong — semua sudah diimport. ✅${ghostNote}`;
+  return `📥 <b>PENDING (${n})</b>\n${lines.join("\n")}${n > 15 ? `\n<i>… +${n - 15} lagi</i>` : ""}${ghostNote}\n\nKetik /digest untuk review + import.`;
 }
 
 // ── VALAS queue: foreign-currency tx parked waiting for the monthly statement ──
@@ -1809,7 +1812,7 @@ async function handleTextCorrection(text: string, supabase: any, uid: string, bo
     let arr: any = r.ai_raw_result; try { if (typeof arr === "string") arr = JSON.parse(arr); } catch { arr = null; }
     if (!Array.isArray(arr)) continue;
     rowArr.set(r.id, arr);
-    arr.forEach((t: any) => { if (!t._imported && !t._skipped) flat.push({ rowId: r.id, t }); });
+    arr.forEach((t: any) => { if (!isDoneTx(t)) flat.push({ rowId: r.id, t }); });
   }
   if (!flat.length) { await sendTelegramHTML(botToken, chatId, "📭 Ga ada transaksi pending buat diubah."); return true; }
 
@@ -2104,6 +2107,7 @@ async function sweepWaitingStatement(supabase: any, uid: string): Promise<number
 
 async function importPending(supabase: any, uid: string, token?: string, chatId?: number): Promise<string> {
   const swept = await sweepWaitingStatement(supabase, uid);  // clear parked valas that statements have since covered
+  const ghosts = await sweepLedgerGhosts(supabase, uid);     // auto-skip items already in the ledger (other-door dups)
   const { data: accountsRaw } = await supabase.from("accounts").select("*").eq("user_id", uid);
   const accounts = (accountsRaw || []).filter((a: any) => a.is_active !== false);
   const byId: Record<string, any> = Object.fromEntries(accounts.map((a: any) => [a.id, a]));
@@ -2126,9 +2130,16 @@ async function importPending(supabase: any, uid: string, token?: string, chatId?
   const items: Item[] = [];
   for (const r of rows || []) {
     let arr: any = r.ai_raw_result; try { if (typeof arr === "string") arr = JSON.parse(arr); } catch { arr = null; }
-    (Array.isArray(arr) ? arr : []).forEach((t: any, idx: number) => { if (!t._imported && !t._skipped) items.push({ esId: r.id, idx, t, skippedByUser: false }); });
+    // web-handled (confirmed/skipped) items are done too; parked valas still flows through (re-parks itself)
+    (Array.isArray(arr) ? arr : []).forEach((t: any, idx: number) => { if (!t._imported && !t._skipped && !t.confirmed && !t.skipped) items.push({ esId: r.id, idx, t, skippedByUser: false }); });
   }
-  if (!items.length) return swept ? `✅ ${swept} valas auto-clear (statement udah masuk).\n📭 Nggak ada transaksi pending lain.` : "📭 Tidak ada transaksi pending.";
+  if (!items.length) {
+    const notes = [
+      swept ? `✅ ${swept} valas auto-clear (statement udah masuk).` : "",
+      ghosts ? `🧹 ${ghosts} duplikat (sudah ada di ledger) di-skip otomatis.` : "",
+    ].filter(Boolean);
+    return notes.length ? `${notes.join("\n")}\n📭 Nggak ada transaksi pending lain.` : "📭 Tidak ada transaksi pending.";
+  }
 
   const today = ymd(jakartaNow());
   // 1) resolve + reclassify
@@ -2294,6 +2305,7 @@ async function importPending(supabase: any, uid: string, token?: string, chatId?
   }
   let tail = "";
   if (swept) tail += `♻️ ${swept} valas lama auto-clear (statement udah masuk)\n`;
+  if (ghosts) tail += `🧹 ${ghosts} duplikat (sudah ada di ledger) di-skip otomatis\n`;
   if (valasCount) tail += `⏳ ${valasCount} valas → <b>nunggu statement</b> (kurs belum pasti, ga masuk ledger). Lihat /valas\n`;
   if (heldNoAcc.length) tail += `❓ ${heldNoAcc.length} tertahan — jawab pertanyaan kartu di atas 👆\n`;
   return `✅ <b>Imported ${ins.length} transaksi ke ledger</b>\n${parts}\nTotal ${idr(totalAmt)}\n` + dupTxt + tail +

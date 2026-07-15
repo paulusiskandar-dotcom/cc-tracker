@@ -5,6 +5,7 @@
 // Secrets: TELEGRAM_BOT_TOKEN, TELEGRAM_AUTHORIZED_CHAT_ID, AUTHORIZED_USER_ID,
 //          SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { isDoneTx, sweepLedgerGhosts } from "../_shared/sweep.ts";
 
 const TG = "https://api.telegram.org";
 const rp = (n: number) => "Rp" + Math.round(n).toLocaleString("id-ID");
@@ -30,6 +31,8 @@ Deno.serve(async () => {
     return new Response(JSON.stringify({ error: "missing telegram/user secrets" }), { status: 500 });
   }
   const sb = createClient(SUPABASE_URL, SERVICE_KEY);
+
+  await sweepLedgerGhosts(sb, USER_ID); // auto-skip items already in the ledger before digesting
 
   // Day window = last 24h (WIB ~ UTC+7; use 24h back for simplicity)
   const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
@@ -57,7 +60,7 @@ Deno.serve(async () => {
     if (Array.isArray(arr)) rowArrays[r.id as string] = arr;
     (Array.isArray(list) ? list : []).forEach((t, idx) => {
       const tx = t as Record<string, unknown>;
-      if (tx._imported || tx._skipped || tx._waiting_statement) return; // imported, rejected, or valas parked for statement
+      if (isDoneTx(tx)) return; // handled anywhere (web/bot) or valas parked for statement
       const amt = Number(tx.amount_idr ?? tx.amount ?? 0);
       const dir = (tx.type === "in" || tx.type === "income") ? "in" : "out";
       const entity = (tx.suggested_entity as string) || "Personal";
