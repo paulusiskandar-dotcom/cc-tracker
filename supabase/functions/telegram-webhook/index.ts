@@ -599,6 +599,24 @@ function parseJsonArray(raw: string): any[] {
   }
 }
 
+// Photos/text forwarded to the bot are same-time notifications; some parses
+// hallucinate a tx date (seen: a July Paper.ID charge tagged 7 April), which
+// lands pre-genesis and duplicates a correctly-dated entry. Clamp an absent or
+// implausible date (>40d before the message, or in the future) to the message
+// time in WIB. Mirrors gmail-sync's normalizeTxDate.
+function clampTgDates(txs: any[], msgUnix?: number): void {
+  const refMs = msgUnix ? msgUnix * 1000 : Date.now();
+  const refYmd = new Date(refMs + 7 * 3600 * 1000).toISOString().slice(0, 10);
+  const rMs = Date.parse(refYmd + "T00:00:00Z");
+  for (const t of (Array.isArray(txs) ? txs : [])) {
+    if (!t) continue;
+    const d = typeof t.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(t.date) ? t.date : null;
+    if (!d) { t.date = refYmd; continue; }
+    const dMs = Date.parse(d + "T00:00:00Z");
+    if (dMs < rMs - 40 * 86400000 || dMs > rMs + 2 * 86400000) t.date = refYmd;
+  }
+}
+
 // ─── Message handlers ────────────────────────────────────────────────────────
 
 async function handleText(
@@ -618,6 +636,7 @@ async function handleText(
     return;
   }
 
+  clampTgDates(transactions, message?.date);
   await resolveAccountIds(supabase, userId, transactions);
 
   const { error } = await supabase.from("email_sync").insert({
@@ -673,6 +692,7 @@ async function handlePhoto(
     return;
   }
 
+  clampTgDates(transactions, message?.date);
   await resolveAccountIds(supabase, userId, transactions);
 
   const { error } = await supabase.from("email_sync").insert({
@@ -724,6 +744,7 @@ async function handleDocument(
     const p = TG_PARSE_PROMPT(caption0 || "(no caption)", "image");
     const txs = await callClaudeVision(apiKey, imgBytes, p, doc.mime_type);
     if (!txs.length) { await sendTelegramMessage(botToken, chatId, "⚠️ Tidak bisa extract transaksi dari gambar ini\\."); return; }
+    clampTgDates(txs, message?.date);
     await resolveAccountIds(supabase, userId, txs);
     const { error: e0 } = await supabase.from("email_sync").insert({
       user_id: userId, gmail_message_id: `tg-img-${message.message_id}-${Date.now()}`, sender_email: "telegram@paulus",
