@@ -146,8 +146,11 @@ function getAcctCfg(txType, accounts) {
   const liab    = accounts.filter(a => a.type === "liability");
   const all     = accounts;
   switch (txType) {
-    case "income":        return { mode: "to",       to: bc };
-    case "reimburse_in":  return { mode: "to",       to: bc };
+    // include CC: a card credit/refund/fee-reversal (e.g. "KOR BIAYA IURAN
+    // TAHUNAN") is recorded as income/reimburse_in landing ON the card, which
+    // reduces its outstanding (recalc counts to_id=card as a credit).
+    case "income":        return { mode: "to",       to: bccc };
+    case "reimburse_in":  return { mode: "to",       to: bccc };
     case "sell_asset":    return { mode: "from_to",  from: asset, to: bc };
     case "collect_loan":  return { mode: "from_to",  from: loanRecvWithBal.length ? loanRecvWithBal : loanRecv, to: bc };
     case "transfer":      return { mode: "from_to",  from: all,   to: all };

@@ -603,6 +603,10 @@ function buildRow(stmtRow, currentAccountId, merchantMapsArg = []) {
     ? merchantRules.apply(desc, desc, merchantMapsArg)
     : null;
   const dupLevel = stmtRow._dupLevel || 0;
+  // A credit line on the statement (direction "in" — refund, fee reversal like
+  // "KOR BIAYA IURAN TAHUNAN", cashback) lands ON the reconciled account, so
+  // default it to income → this account instead of expense → out.
+  const isCredit = stmtRow.direction === "in";
   return {
     _id: `reconcile-${stmtRow._id}`,
     tx_date: stmtRow.date || todayStr(),
@@ -610,13 +614,13 @@ function buildRow(stmtRow, currentAccountId, merchantMapsArg = []) {
     amount: Math.abs(Number(stmtRow.amount || 0)),
     amount_idr: Math.abs(Number(stmtRow.amount || 0)),
     currency: stmtRow.currency || "IDR",
-    tx_type: "expense",
-    from_id: currentAccountId || "",
-    from_type: "account",
-    to_id: null,
-    to_type: "expense_category",
-    category_id: suggestion?.confidence >= 2 ? suggestion.category_id : null,
-    category_name: suggestion?.confidence >= 2 ? (suggestion.category_name || null) : null,
+    tx_type: isCredit ? "income" : "expense",
+    from_id: isCredit ? null : (currentAccountId || ""),
+    from_type: isCredit ? "income_source" : "account",
+    to_id: isCredit ? (currentAccountId || "") : null,
+    to_type: isCredit ? "account" : "expense_category",
+    category_id: (isCredit || suggestion?.confidence >= 2) ? (isCredit ? null : suggestion.category_id) : null,
+    category_name: (!isCredit && suggestion?.confidence >= 2) ? (suggestion.category_name || null) : null,
     entity: "",
     notes: "",
     status: dupLevel === 3 ? "duplicate" : dupLevel === 2 ? "possible_duplicate" : dupLevel === 1 ? "review" : "pending",
