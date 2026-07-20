@@ -85,9 +85,11 @@ export default function ReconcileReview({
   const ledgerAtEnd = useMemo(() => {
     const nowBal = isCC ? Number(account?.outstanding_amount || 0) : Number(account?.current_balance || 0);
     if (acctLedger == null || !stmtEnd || !account?.id) return ledgerClosingBalance;
-    let adj = 0; // net effect of post-statement rows, to remove from "now"
+    let adj = 0; // net effect to remove from "now": post-statement rows + rows the user Kept
     for (const l of acctLedger) {
-      if (!l.tx_date || l.tx_date <= stmtEnd) continue;
+      const isAfter = l.tx_date && l.tx_date > stmtEnd;
+      const isKept  = keptIds?.has?.(l.id);   // "Keep" = legit but not part of THIS statement (next cycle) → exclude
+      if (!isAfter && !isKept) continue;
       const a = Math.abs(Number(l.amount_idr || 0));
       const isOut = l.from_id === account.id && l.from_type === "account"; // charge (CC) / debit (bank)
       const isIn  = l.to_id   === account.id && l.to_type   === "account"; // payment (CC) / credit (bank)
@@ -95,7 +97,7 @@ export default function ReconcileReview({
       else      { if (isIn)  adj += a; if (isOut) adj -= a; }
     }
     return nowBal - adj;
-  }, [isCC, account?.id, account?.outstanding_amount, account?.current_balance, acctLedger, stmtEnd, ledgerClosingBalance]);
+  }, [isCC, account?.id, account?.outstanding_amount, account?.current_balance, acctLedger, stmtEnd, keptIds, ledgerClosingBalance]);
 
   const gap = (stmtClosing != null && ledgerAtEnd != null)
     ? Math.round(stmtClosing - ledgerAtEnd) : null;
