@@ -85,14 +85,18 @@ export default function ReconcileReview({
   const ledgerAtEnd = useMemo(() => {
     const nowBal = isCC ? Number(account?.outstanding_amount || 0) : Number(account?.current_balance || 0);
     if (acctLedger == null || !stmtEnd || !account?.id) return ledgerClosingBalance;
-    let adj = 0; // net effect to remove from "now": post-statement rows + rows the user Kept
+    let adj = 0; // net effect to remove from "now": post-statement rows + Kept charges
     for (const l of acctLedger) {
       const isAfter = l.tx_date && l.tx_date > stmtEnd;
-      const isKept  = keptIds?.has?.(l.id);   // "Keep" = legit but not part of THIS statement (next cycle) → exclude
+      const isKept  = keptIds?.has?.(l.id);   // "Keep" = legit charge but not on THIS statement (next cycle)
       if (!isAfter && !isKept) continue;
       const a = Math.abs(Number(l.amount_idr || 0));
       const isOut = l.from_id === account.id && l.from_type === "account"; // charge (CC) / debit (bank)
       const isIn  = l.to_id   === account.id && l.to_type   === "account"; // payment (CC) / credit (bank)
+      // A Kept row only excludes a CHARGE/spend (next-cycle purchase). A payment
+      // or credit is a legit balance reduction that belongs to this cycle and
+      // must NOT be rolled back — only post-statement rows roll back in full.
+      if (isKept && !isAfter && !isOut) continue;
       if (isCC) { if (isOut) adj += a; if (isIn) adj -= a; }
       else      { if (isIn)  adj += a; if (isOut) adj -= a; }
     }
@@ -175,8 +179,12 @@ export default function ReconcileReview({
     const byId = new Map((ledgerRows || []).map(l => [l.id, l]));
     return [...(extraIds || [])].filter(id => !keptIds?.has(id)).map(id => byId.get(id))
       .filter(l => l && (!stmtStart || (l.tx_date >= stmtStart && l.tx_date <= stmtEnd)))
+      // Only unmatched CHARGES are true anomalies (unbilled/next-cycle purchases).
+      // A payment/credit not tied to a statement line is a normal balance
+      // reduction — showing it here (with a Keep that skews the gap) is wrong.
+      .filter(l => l.from_id === account?.id && l.from_type === "account")
       .sort((a, b) => (a.tx_date || "") < (b.tx_date || "") ? -1 : 1);
-  }, [extraIds, keptIds, ledgerRows, stmtStart, stmtEnd]);
+  }, [extraIds, keptIds, ledgerRows, stmtStart, stmtEnd, account?.id]);
 
   const nAction = (missing?.length || 0);
   // Save-all counts only drafts whose statement row is STILL missing — a
