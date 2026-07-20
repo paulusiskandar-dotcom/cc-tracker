@@ -430,6 +430,7 @@ export default function CCStatement({
           showPdfPanel={showPdfPanel}
           onTogglePdfPanel={() => setShowPdfPanel(p => !p)}
           onChangeAccount={(id) => { setAccountId(id); }}
+          onEditRow={openEdit}
         />
       )}
 

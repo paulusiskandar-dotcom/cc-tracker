@@ -3,15 +3,18 @@
 // one status strip, statement-side tiles, a "Needs action" work queue, a dense
 // matched list, and a sticky footer whose Finalize unlocks at 0 pending rows.
 // Mockup (approved 2026-07-15): claude.ai/code/artifact/900e6ccb-c823-4b32-9d66-e910c82bc744
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "../../lib/supabase";
+import { ledgerApi } from "../../api";
 import { fmtIDR } from "../../utils";
 import { TX_TYPE_MAP } from "../../constants";
 import { ReconcileAddPanel } from "./ReconcileOverlay";
+import { showToast } from "./index";
 import ReconcileSummaryModal from "./ReconcileSummaryModal";
 import PDFViewer from "./PDFViewer";
 import {
   CreditCard, Landmark, FileText, Check, Info, AlertTriangle, Undo2,
+  Pencil, Trash2, ChevronDown, ChevronRight,
 } from "lucide-react";
 
 const FF = "Figtree, sans-serif";
@@ -37,11 +40,14 @@ export default function ReconcileReview({
   categories = [], incomeSrcs = [], employeeLoans = [],
   user, ledgerRows = [], ledgerClosingBalance = null,
   onRefresh, onClearDraft, onSaveAll, savingAll = false,
-  showPdfPanel = false, onTogglePdfPanel, onChangeAccount,
+  showPdfPanel = false, onTogglePdfPanel, onChangeAccount, onEditRow,
 }) {
   const [showSummary, setShowSummary] = useState(false);
   const [pickAccount, setPickAccount] = useState(false);
   const [fxWaiting, setFxWaiting]     = useState(0);
+  const [acctLedger, setAcctLedger]   = useState(null); // full recent ledger for THIS account
+  const [showAllLedger, setShowAllLedger] = useState(false);
+  const [deletingId, setDeletingId]   = useState(null);
 
   const { stmtRows, stats, matched, missing, extraIds, keptIds, pendingRows } = reconcile;
   const isCC = account?.type === "credit_card";
@@ -109,6 +115,38 @@ export default function ReconcileReview({
         setFxWaiting(n);
       });
   }, [user?.id, account?.id]);
+
+  // Full recent ledger for THIS account — independent of the reconcile match
+  // window, so activity outside the statement's dates (e.g. a charge weeks
+  // before a 1-row "previous balance" statement) is always visible & editable.
+  const fetchAcctLedger = useCallback(() => {
+    if (!user?.id || !account?.id) return;
+    const anchor = stmtStart || new Date().toISOString().slice(0, 10);
+    const from = (() => { const t = new Date(anchor + "T00:00:00"); t.setDate(t.getDate() - 75); return t.toISOString().slice(0, 10); })();
+    supabase.from("ledger")
+      .select("id, tx_date, tx_type, description, merchant_name, amount, amount_idr, currency, category_name, entity, from_id, from_type, to_id, to_type, reconciled_at, fx_rate_used")
+      .eq("user_id", user.id)
+      .or(`from_id.eq.${account.id},to_id.eq.${account.id}`)
+      .gte("tx_date", from)
+      .order("tx_date", { ascending: false })
+      .then(({ data }) => setAcctLedger(data || []));
+  // ledgerClosingBalance shifts whenever the account's ledger changes (edit via
+  // modal, add, delete) → refetch so this panel stays in sync.
+  }, [user?.id, account?.id, stmtStart, ledgerClosingBalance]);
+  useEffect(() => { fetchAcctLedger(); }, [fetchAcctLedger]);
+
+  const deleteRow = async (row) => {
+    if (deletingId) return;
+    if (!window.confirm(`Hapus transaksi ini dari ledger?\n\n${row.description || row.merchant_name || "—"} · ${fmtIDR(Math.abs(Number(row.amount_idr || 0)))}\n\nSaldo akun akan dihitung ulang. Tidak bisa di-undo dari sini.`)) return;
+    setDeletingId(row.id);
+    try {
+      await ledgerApi.delete(row.id, row, accounts);
+      showToast("Transaksi dihapus");
+      fetchAcctLedger();
+      onRefresh?.();
+    } catch (e) { showToast("Gagal hapus: " + e.message, "error"); }
+    setDeletingId(null);
+  };
 
   // Matched list: ledgerId → { ledger row, stmt row }
   const matchedList = useMemo(() => {
@@ -404,6 +442,65 @@ export default function ReconcileReview({
           );
         })}
       </div>
+
+      {/* ── All transactions on this account (manage: edit / delete) ── */}
+      {(() => {
+        const rows = acctLedger || [];
+        const inStmt = (d) => stmtStart && d >= stmtStart && d <= stmtEnd;
+        const matchedIds = new Set([...(matched?.keys?.() || [])]);
+        return (
+          <div style={{ marginTop: 24 }}>
+            <button onClick={() => setShowAllLedger(v => !v)}
+              style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", background: "none", border: "none", padding: "0 2px 10px", cursor: "pointer", fontFamily: FF }}>
+              {showAllLedger ? <ChevronDown size={15} color="#6b7280" /> : <ChevronRight size={15} color="#6b7280" />}
+              <span style={{ fontSize: 13, fontWeight: 800, color: "#111827" }}>All transactions on {account?.name}</span>
+              <span style={{ fontSize: 11, fontWeight: 800, background: "#f3f4f6", color: "#6b7280", padding: "2px 9px", borderRadius: 99, ...NUM }}>{rows.length}</span>
+              <span style={{ fontSize: 11.5, color: "#9ca3af", marginLeft: "auto" }}>
+                {acctLedger == null ? "loading…" : "see & remove anything already in the ledger"}
+              </span>
+            </button>
+            {showAllLedger && (
+              <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 13, overflow: "hidden" }}>
+                {rows.length === 0 && (
+                  <div style={{ padding: "18px 16px", fontSize: 12, color: "#9ca3af", textAlign: "center" }}>No transactions on this account.</div>
+                )}
+                {rows.map((l, i) => {
+                  const dirIn = l.to_id === account?.id && l.to_type === "account";
+                  const ctx = l.category_name || TX_TYPE_MAP[l.tx_type]?.label || l.tx_type;
+                  return (
+                    <div key={l.id}
+                      style={{ display: "flex", alignItems: "center", gap: 10, padding: "8.5px 16px", borderBottom: i < rows.length - 1 ? "1px solid #f3f4f6" : "none", fontSize: 12.5, background: inStmt(l.tx_date) ? "#fbfdff" : "#fff", ...NUM }}>
+                      <span style={{ fontSize: 11, color: "#9ca3af", width: 52, flexShrink: 0 }}>{fmtD(l.tx_date)}</span>
+                      <span style={{ minWidth: 0, flex: 1, overflow: "hidden" }}>
+                        <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#111827" }}>{l.description || l.merchant_name || "—"}</span>
+                        <span style={{ fontSize: 10, color: "#9ca3af" }}>
+                          {ctx}
+                          {matchedIds.has(l.id) && <span style={{ color: "#059669", fontWeight: 700 }}> · ✓ matched</span>}
+                          {l.reconciled_at && <span style={{ color: "#6b7280" }}> · reconciled</span>}
+                          {!inStmt(l.tx_date) && <span style={{ color: "#b45309" }}> · outside statement period</span>}
+                        </span>
+                      </span>
+                      <span style={{ fontWeight: 650, color: dirIn ? "#059669" : "#111827", whiteSpace: "nowrap" }}>
+                        {dirIn ? "+ " : ""}{fmtIDR(Math.abs(Number(l.amount_idr || 0)))}
+                      </span>
+                      {onEditRow && (
+                        <button onClick={() => onEditRow(l)} title="Edit transaction"
+                          style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid #e5e7eb", background: "#fff", color: "#6b7280", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          <Pencil size={12} />
+                        </button>
+                      )}
+                      <button onClick={() => deleteRow(l)} disabled={deletingId === l.id} title="Delete transaction"
+                        style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid #fbd5d5", background: "#fff", color: "#dc2626", cursor: deletingId === l.id ? "default" : "pointer", opacity: deletingId === l.id ? 0.5 : 1, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ── Sticky footer ── */}
       <div style={{

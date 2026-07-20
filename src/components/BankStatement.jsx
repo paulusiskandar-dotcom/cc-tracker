@@ -463,6 +463,7 @@ export default function BankStatement({
           showPdfPanel={showPdfPanel}
           onTogglePdfPanel={() => setShowPdfPanel(p => !p)}
           onChangeAccount={(id) => { setAccountId(id); setAutoDetect(null); }}
+          onEditRow={openEdit}
         />
       )}
 
