@@ -75,21 +75,27 @@ export default function ReconcileReview({
   const stmtClosing  = reconcile.stmtClosingBalance;
   const stmtOpening  = reconcile.stmtOpeningBalance;
 
-  // Ledger balance AT THE STATEMENT'S CLOSING DATE. The page's closing balance
-  // is at the padded match-window end (+7d) — money moving after the statement
-  // closed would otherwise show up as a fake gap. Roll those movements back.
-  // Bank balance: credit adds, debit subtracts. CC outstanding: the reverse.
+  // Ledger balance AT THE STATEMENT'S CLOSING DATE. Derived from the account's
+  // AUTHORITATIVE stored balance (outstanding for CC, current_balance for bank —
+  // both kept accurate by recalculateBalance), then rolled back over any rows
+  // dated after the statement closed. This is window-independent: it doesn't
+  // matter whether the page loaded a wide or narrow ledger window, so a fee on
+  // the exact closing day (e.g. materai on the 17th) can't produce a phantom gap.
+  // Falls back to the page's window-based closing until acctLedger has loaded.
   const ledgerAtEnd = useMemo(() => {
-    if (ledgerClosingBalance == null || !stmtEnd) return ledgerClosingBalance;
-    let after = 0;
-    for (const l of ledgerRows || []) {
-      if (!l.tx_date || l.tx_date <= stmtEnd || !l._dir) continue;
+    const nowBal = isCC ? Number(account?.outstanding_amount || 0) : Number(account?.current_balance || 0);
+    if (acctLedger == null || !stmtEnd || !account?.id) return ledgerClosingBalance;
+    let adj = 0; // net effect of post-statement rows, to remove from "now"
+    for (const l of acctLedger) {
+      if (!l.tx_date || l.tx_date <= stmtEnd) continue;
       const a = Math.abs(Number(l.amount_idr || 0));
-      const effect = l._dir === "credit" ? a : -a;      // effect on a bank balance
-      after += isCC ? -effect : effect;                  // CC outstanding moves opposite
+      const isOut = l.from_id === account.id && l.from_type === "account"; // charge (CC) / debit (bank)
+      const isIn  = l.to_id   === account.id && l.to_type   === "account"; // payment (CC) / credit (bank)
+      if (isCC) { if (isOut) adj += a; if (isIn) adj -= a; }
+      else      { if (isIn)  adj += a; if (isOut) adj -= a; }
     }
-    return Number(ledgerClosingBalance) - after;
-  }, [ledgerClosingBalance, ledgerRows, stmtEnd, isCC]);
+    return nowBal - adj;
+  }, [isCC, account?.id, account?.outstanding_amount, account?.current_balance, acctLedger, stmtEnd, ledgerClosingBalance]);
 
   const gap = (stmtClosing != null && ledgerAtEnd != null)
     ? Math.round(stmtClosing - ledgerAtEnd) : null;
