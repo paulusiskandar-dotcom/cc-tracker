@@ -270,11 +270,20 @@ INCLUDE these transaction types:
 - Foreign currency transactions (extract both IDR amount and original currency/amount if shown)
 - Transfers OUT (DEBIT column / direction "out")
 
-SKIP these completely:
+SKIP these completely (they are SUMMARY/BALANCE lines, NOT transactions):
 - BALANCE OF LAST MONTH / Saldo awal bulan lalu / SALDO BULAN LALU
+- TAGIHAN BULAN LALU (previous balance carried over) — NEVER emit this as a transaction; it is the opening balance
+- TAGIHAN BULAN INI / TOTAL TAGIHAN BULAN INI / TOTAL TAGIHAN (this is the closing balance, not a transaction)
+- PEMBELANJAAN / PENARIKAN TUNAI / PEMBAYARAN / BIAYA ADM & BUNGA when they appear as SUMMARY TOTALS (a lone labelled amount with no date), BATAS KREDIT / SISA KREDIT / PEMBAYARAN MINIMUM / TANGGAL JATUH TEMPO / KOLEKTIBILITAS / JUMLAH POIN
 - Payment received / Pembayaran diterima / (-) Pembayaran
 - Summary sections: RINGKASAN TAGIHAN, RINGKASAN TREATS, BUNGA DAN TOTAL TRANSAKSI
 - TOTAL rows and END OF STATEMENT
+
+CRITICAL — dormant / no-activity statements: some credit-card e-bills (e.g. BNI JCB)
+have NO transaction detail table this cycle — only a summary where PEMBELANJAAN=0,
+PEMBAYARAN=0. In that case return an EMPTY transactions array. A row must have an
+actual transaction DATE and a merchant/description to be emitted; a bare
+"LABEL amount" summary line (no date) is never a transaction.
 - Promotional text, advertisements, discount offers
 - Credit limit info, minimum payment info
 - Header/footer info (name, address, card number)
@@ -347,8 +356,8 @@ Return ONLY a valid JSON object (no markdown, no explanation) with this exact sc
 }
 - detected_account: extracted from statement header (card last 4, bank name, account number). Set fields to null if not found. Set entire value to null if no account info present.
 - detected_period: statement month/year from header (e.g. March 2025 → year:2025, month:3). null if not found.
-- closing_balance: the closing/ending balance shown in the statement summary (Saldo Akhir / Total Tagihan / Closing Balance) as a plain number without formatting. null if not shown.
-- opening_balance: the opening/previous balance (Saldo Awal / Saldo Bulan Lalu / Opening Balance / Previous Balance) as a plain number. null if not shown.
+- closing_balance: the closing/ending balance shown in the statement summary (Saldo Akhir / Total Tagihan / TAGIHAN BULAN INI / Closing Balance) as a plain number without formatting. null if not shown.
+- opening_balance: the opening/previous balance (Saldo Awal / Saldo Bulan Lalu / TAGIHAN BULAN LALU / Opening Balance / Previous Balance) as a plain number. null if not shown.
 If no transactions found, return the object with an empty transactions array.`;
 
 const FALLBACK_PROMPT = `This is a bank statement PDF. Extract every single transaction row from the transaction table.
