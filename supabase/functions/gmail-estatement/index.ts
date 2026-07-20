@@ -295,6 +295,16 @@ DEBIT/KREDIT column format (Danamon consolidated statement style):
 - DEBIT column = money OUT → direction "out"
 - KREDIT column = money IN (transfers received, reversals) → direction "in" — SKIP these
 - SALDO column = running balance, ignore entirely
+- A "CR" suffix after an amount (BRI style: "1.787.800CR") = CREDIT → direction "in".
+  No suffix = debit → direction "out".
+
+BRI-style installment conversions (TOKOPEDIA_CYBS_CCL / any "Retail" + "X/N" pattern):
+- "Retail ... NAME" (debit) + "NAME : 0/N ...CR" (credit, same amount) = a purchase
+  CONVERTED to installment. These two CANCEL OUT — they are a wash, not real spend.
+  Emit BOTH (so they net to zero) OR skip BOTH; never emit only one side.
+- "NAME : X/N" where X>=1 (debit) = the actual monthly installment billed → emit as a normal charge.
+- The real amount billed this cycle = the monthly installments (X/N, X>=1) + fees, NOT
+  the full purchase principals (the 0/N and Retail rows wash out).
 - Section headers like "DANAMON LEBIH PRO (IDR) - IDR - 903691853372"
   → extract account number (last segment) and set account_hint for all rows in that section
 - Section headers like "KARTU KREDIT JCB - 3567XXXXXX459551"
@@ -356,7 +366,13 @@ Return ONLY a valid JSON object (no markdown, no explanation) with this exact sc
 }
 - detected_account: extracted from statement header (card last 4, bank name, account number). Set fields to null if not found. Set entire value to null if no account info present.
 - detected_period: statement month/year from header (e.g. March 2025 → year:2025, month:3). null if not found.
-- closing_balance: the closing/ending balance shown in the statement summary (Saldo Akhir / Total Tagihan / TAGIHAN BULAN INI / Closing Balance) as a plain number without formatting. null if not shown.
+- closing_balance: the amount BILLED this cycle — "Total Tagihan" / "TAGIHAN BULAN INI" / "Total Payment Due" / "Saldo Akhir" / "Closing Balance". This is what the cardholder must pay by the due date.
+  ⚠️ NEVER use a credit-limit or remaining-limit figure. On BRI the summary row is
+  "<total transaksi> <?> <TAGIHAN BULAN INI> <PEMBAYARAN MINIMUM> <SISA LIMIT>" e.g.
+  "14.301.073 0 5.414.773 270.739 46.473.484" → closing_balance = 5.414.773 (the bill),
+  NOT 46.473.484 (Sisa Limit Gabungan / remaining limit) and NOT 270.739 (minimum payment).
+  Labels to EXCLUDE as closing: Sisa Limit / Kredit Limit / Limit Gabungan / Sisa Penarikan /
+  Pembayaran Minimum / Minimum Payment / BATAS KREDIT / SISA KREDIT.
 - opening_balance: the opening/previous balance (Saldo Awal / Saldo Bulan Lalu / TAGIHAN BULAN LALU / Opening Balance / Previous Balance) as a plain number. null if not shown.
 If no transactions found, return the object with an empty transactions array.`;
 
