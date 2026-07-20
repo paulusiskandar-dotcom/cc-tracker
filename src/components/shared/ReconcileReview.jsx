@@ -46,7 +46,7 @@ export default function ReconcileReview({
   const [pickAccount, setPickAccount] = useState(false);
   const [fxWaiting, setFxWaiting]     = useState(0);
   const [acctLedger, setAcctLedger]   = useState(null); // full recent ledger for THIS account
-  const [showAllLedger, setShowAllLedger] = useState(false);
+  const [showAllLedger, setShowAllLedger] = useState(true);
   const [deletingId, setDeletingId]   = useState(null);
 
   const { stmtRows, stats, matched, missing, extraIds, keptIds, pendingRows } = reconcile;
