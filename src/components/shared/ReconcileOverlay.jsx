@@ -357,6 +357,36 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
         showToast(`Statement anchored: ${recAcc.name} = ${fmtIDR(stmtClosingBalance)}`);
       } catch (e) { console.error("[reconcile] anchor last_statement error:", e); }
     }
+    // CC installments: advance paid_months for each monthly-installment row on the
+    // statement ("… : X/N" with X>=1) to its current position X, matched to an
+    // existing installment record by monthly amount (± a few rupiah). Keeps the
+    // schedule in sync every cycle instead of drifting or duplicating.
+    if (recAcc?.type === "credit_card") {
+      try {
+        const insts = await installmentsApi.getAll(user.id);
+        const active = insts.filter(i => i.account_id === accountId && i.status === "active");
+        const used = new Set();
+        let synced = 0;
+        for (const s of stmtRows) {
+          const cur = Number(s.installment_current);
+          if (!s.is_installment || !(cur >= 1)) continue;
+          const amt = Math.abs(Number(s.amount || 0));
+          const m = active.find(i => !used.has(i.id) && Math.abs(Number(i.monthly_amount) - amt) <= 50);
+          if (!m) continue;
+          used.add(m.id);
+          const total = Number(m.total_months) || Number(s.installment_total) || cur;
+          if (cur > (m.paid_months || 0)) {
+            await installmentsApi.update(m.id, {
+              paid_months: cur,
+              total_paid: Number(m.monthly_amount) * cur,
+              ...(cur >= total ? { status: "settled" } : {}),
+            });
+            synced++;
+          }
+        }
+        if (synced) showToast(`${synced} cicilan disinkron dari statement`);
+      } catch (e) { console.error("[reconcile] installment sync error:", e); }
+    }
     if (pdfBlobUrl) { URL.revokeObjectURL(pdfBlobUrl); setPdfBlobUrl(null); }
     setActive(false); setStmtRows([]); setKeptIds(new Set()); setIgnoredIds(new Set()); setPdfSource("");
     setExpandedIds(new Set()); setPendingRows({}); setStmtClosingBalance(null); setStmtOpeningBalance(null);
