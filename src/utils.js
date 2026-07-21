@@ -113,7 +113,7 @@ export const agingLabel = (dateStr) => {
 };
 
 // ─── NET WORTH CALCULATION ───────────────────────────────────
-export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], fxRates = {}, ledger = [] } = {}) => {
+export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], fxRates = {}, ledger = [], installments = [] } = {}) => {
   let bank = 0, cash = 0, assets = 0, liabilities = 0, ccBalance = 0;
 
   const toIDRValue = (amount, currency) => {
@@ -146,6 +146,18 @@ export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], 
   // ccDebt = total outstanding (positive)
   const ccDebt = ccBalance;
 
+  // Installment remaining principal = future (not-yet-billed) months. The card's
+  // outstanding_amount only carries the CURRENT statement bill (which includes
+  // the month already billed), so the future installments are a separate debt
+  // and don't double-count. Active plans only.
+  const installmentDebt = (installments || [])
+    .filter(i => i.status === "active")
+    .reduce((sum, i) => {
+      const left = Math.max(0, Number(i.total_months || 0) - Number(i.paid_months || 0));
+      return sum + toIDRValue(left * Number(i.monthly_amount || 0), i.currency);
+    }, 0);
+  liabilities += installmentDebt;
+
   const employeeLoanTotal = employeeLoans
     .filter(l => l.status !== "settled")
     .reduce((sum, l) => {
@@ -169,7 +181,7 @@ export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], 
   const receivables = reimburseOutstanding;
 
   const total = bank + cash + assets + receivables + employeeLoanTotal - ccBalance - liabilities;
-  return { total, bank, cash, assets, receivables, ccDebt, liabilities, employeeLoanTotal, reimburseOutstanding };
+  return { total, bank, cash, assets, receivables, ccDebt, liabilities, installmentDebt, employeeLoanTotal, reimburseOutstanding };
 };
 
 // ─── GROUP BY DATE ────────────────────────────────────────────

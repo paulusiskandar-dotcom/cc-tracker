@@ -1065,7 +1065,10 @@ export default function Dashboard({
               { label: "ASSETS",       value: nw.assets || 0,    color: "#047857", prefix: "" },
               { label: "RECEIVABLES",  value: totalRecv,          color: "#047857", prefix: "" },
               { label: "CC DEBT",      value: nw.ccDebt || 0,    color: "#b91c1c", prefix: (nw.ccDebt || 0) > 0 ? "−" : "" },
-              { label: "LIABILITIES",  value: nw.liabilities || 0, color: "#9ca3af", prefix: "" },
+              { label: "CICILAN",      value: nw.installmentDebt || 0, color: "#b91c1c", prefix: (nw.installmentDebt || 0) > 0 ? "−" : "" },
+              // LIABILITIES excludes installments (shown separately as CICILAN) so
+              // nothing is double-shown; the total still subtracts both.
+              { label: "LIABILITIES",  value: Math.max(0, (nw.liabilities || 0) - (nw.installmentDebt || 0)), color: "#9ca3af", prefix: "" },
             ].map(s => (
               <div key={s.label}>
                 <div style={{ fontSize: 9, fontWeight: 500, color: "#16a34a", letterSpacing: "0.6px", fontFamily: "Figtree, sans-serif", marginBottom: 3, whiteSpace: "nowrap" }}>

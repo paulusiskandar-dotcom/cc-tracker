@@ -360,7 +360,7 @@ function Finance({ user, signOut }) {
   const assets        = useMemo(() => accounts.filter(a => a.type === "asset"), [accounts]);
   const liabilities   = useMemo(() => accounts.filter(a => a.type === "liability"), [accounts]);
   const receivables   = useMemo(() => accounts.filter(a => a.type === "receivable"), [accounts]);
-  const netWorth      = useMemo(() => calcNetWorth(accounts, { employeeLoans, loanPayments, fxRates, ledger }), [accounts, employeeLoans, loanPayments, fxRates, ledger]);
+  const netWorth      = useMemo(() => calcNetWorth(accounts, { employeeLoans, loanPayments, fxRates, ledger, installments }), [accounts, employeeLoans, loanPayments, fxRates, ledger, installments]);
   const thisMonthLedger = useMemo(
     () => ledger.filter(e => ym(e.tx_date) === curMonth),
     [ledger, curMonth]
