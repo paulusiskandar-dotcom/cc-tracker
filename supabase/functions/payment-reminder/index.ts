@@ -102,13 +102,21 @@ Deno.serve(async (_req) => {
     .map((c: any) => ({ name: c.name, amt: pendingDue(c), when: ccDue(c) }))
     .filter((c: any) => c.amt >= 25000 && c.when <= horizon);
   // liability cicilan (BYD dll) with due_day
-  let liabQ = sb.from("accounts").select("name,monthly_installment,due_day,type,user_id,is_active").eq("type", "liability").not("due_day", "is", null);
+  let liabQ = sb.from("accounts").select("id,name,monthly_installment,due_day,type,user_id,is_active").eq("type", "liability").not("due_day", "is", null);
   if (USER_ID) liabQ = liabQ.eq("user_id", USER_ID);
   const { data: liabs } = await liabQ;
   for (const l of (liabs || []) as any[]) {
     if (l.is_active === false || !Number(l.monthly_installment)) continue;
     const when = nextDue(today, l.due_day);
-    if (when <= horizon) due.push({ name: l.name + " (cicilan)", amt: Number(l.monthly_installment), when });
+    if (when > horizon) continue;
+    // Skip if THIS cycle's installment is already paid — a payment to this
+    // liability (to_id=account) dated within ~25d before the due date. Prevents
+    // a paid cicilan (e.g. BYD paid 24 Jul, due 27 Jul) from still nagging.
+    const cycleStart = dstr(new Date(when.getFullYear(), when.getMonth(), when.getDate() - 25));
+    const paid = (charges || []).some((e: any) =>
+      e.to_id === l.id && e.to_type === "account" && e.tx_date >= cycleStart && e.tx_date <= dstr(horizon));
+    if (paid) continue;
+    due.push({ name: l.name + " (cicilan)", amt: Number(l.monthly_installment), when });
   }
   due.sort((a: any, b: any) => a.when - b.when);
 
