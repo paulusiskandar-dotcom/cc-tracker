@@ -268,6 +268,18 @@ Deno.serve(async (req: Request) => {
         });
         return new Response(JSON.stringify(await r.json()), { headers: { "Content-Type": "application/json" } });
       }
+      if (wh === "kb") {
+        // Activate the quick buttons immediately: (1) the ☰ Menu button (shows the
+        // command list, like other bots), and (2) push the ⊞ reply keyboard so it
+        // appears in the chat right away without the user typing anything.
+        const chatIdKb = Number(Deno.env.get("TELEGRAM_AUTHORIZED_CHAT_ID"));
+        const mb = await fetch(`${TELEGRAM_API}/bot${token}/setChatMenuButton`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ menu_button: { type: "commands" } }),
+        });
+        await sendTelegramHTML(token, chatIdKb, "⌨️ <b>Tombol cepat aktif.</b>\nTap ikon <b>⊞</b> di sebelah 📎 buat munculin, atau tombol <b>☰ Menu</b> buat daftar command.", QUICK_KB);
+        return new Response(JSON.stringify({ ok: true, menu_button: (await mb.json())?.ok }), { headers: { "Content-Type": "application/json" } });
+      }
       if (wh === "report") {
         // for pg_cron (tgl 1): kirim laporan bulan LALU ke chat Paulus
         const chatId2 = Number(Deno.env.get("TELEGRAM_AUTHORIZED_CHAT_ID"));
