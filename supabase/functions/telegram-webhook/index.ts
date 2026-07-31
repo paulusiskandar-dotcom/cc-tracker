@@ -8,15 +8,18 @@ const TELEGRAM_API = "https://api.telegram.org";
 const APP_URL = Deno.env.get("APP_URL") || "https://ryusei.paulusiskandar.com";
 const QUICK_KB = {
   keyboard: [
-    [{ text: "Digest" }, { text: "Reimburse" }, { text: "Open App", web_app: { url: APP_URL } }],
+    [{ text: "Digest" }, { text: "Reimburse" }, { text: "Open App" }],
   ],
   resize_keyboard: true,
   is_persistent: true,
 };
 // Map the button labels back to the actual slash-command they run.
+// "Open App" → /app replies with an inline URL button, which opens in the
+// external browser (Safari/Chrome) if Telegram's in-app browser is off.
 const QUICK_KB_LABELS: Record<string, string> = {
   "Digest": "/digest",
   "Reimburse": "/reimburse",
+  "Open App": "/app",
 };
 
 const TG_PARSE_PROMPT = (input: string, type: "text" | "image" | "pdf") =>
@@ -940,6 +943,8 @@ async function handleCommand(cmd: string, arg: string, supabase: any, uid: strin
       case "/menu":
       case "/help":
         return sendTelegramHTML(token, chatId, cmdMenu(), QUICK_KB);
+      case "/app":
+        return sendTelegramHTML(token, chatId, "Buka Ryūsei:", { inline_keyboard: [[{ text: "Ryūsei →", url: APP_URL }]] });
       case "/saldo": return sendTelegramHTML(token, chatId, await cmdSaldo(supabase, uid));
       case "/cc": return sendTelegramHTML(token, chatId, await cmdCC(supabase, uid));
       case "/reimburse": return sendTelegramHTML(token, chatId, await cmdReimburse(supabase, uid));
