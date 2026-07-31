@@ -29,8 +29,16 @@ def decode_str(s):
     parts = decode_header(s)
     return "".join((b.decode(enc or "utf-8", "ignore") if isinstance(b, bytes) else b) for b, enc in parts)
 
-def month_folder(base, dt):
-    d = os.path.join(base, dt.strftime("%Y"), dt.strftime("%m %B"))  # e.g. "2026/05 May"
+# Sources that are NOT credit cards → statements go into the "Bank" sub-folder.
+# Everything else (BCA-CC, Mandiri-CC, CIMB, Maybank, BRI, BNI, Mega, Danamon,
+# UOB, Skorcard, HSBC, Jenius, OCBC) → "CC".
+NON_CC_SOURCES = {"BCA-Bank", "Mandiri-Bank", "Sinarmas", "KSEI", "Mirae"}
+
+def source_kind(src_name):
+    return "Bank" if src_name in NON_CC_SOURCES else "CC"
+
+def month_folder(base, dt, kind="CC"):
+    d = os.path.join(base, dt.strftime("%Y"), dt.strftime("%m %B"), kind)  # e.g. "2026/05 May/CC"
     os.makedirs(d, exist_ok=True)
     return d
 
@@ -90,7 +98,7 @@ def main():
                 if part.get_content_maintype() == "multipart": continue
                 fn = decode_str(part.get_filename())
                 if not fn or not fn.lower().endswith(".pdf"): continue
-                out_dir = month_folder(base, dt)
+                out_dir = month_folder(base, dt, source_kind(src["name"]))
                 safe = re.sub(r"[^A-Za-z0-9._ -]", "_", f'{src["name"]} - {fn}')
                 out_path = os.path.join(out_dir, safe)
                 if os.path.exists(out_path):
