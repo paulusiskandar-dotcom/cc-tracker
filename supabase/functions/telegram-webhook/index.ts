@@ -3,6 +3,29 @@ import { isDoneTx, sweepLedgerGhosts } from "../_shared/sweep.ts";
 
 const TELEGRAM_API = "https://api.telegram.org";
 
+// Quick-access reply keyboard (the ⊞ button next to the paperclip). Buttons send
+// their command text; "Buka App" is a web_app button that opens Ryūsei in-app.
+const APP_URL = Deno.env.get("APP_URL") || "https://ryusei.paulusiskandar.com";
+const QUICK_KB = {
+  keyboard: [
+    [{ text: "📊 Digest" }, { text: "🔄 Reimburse" }],
+    [{ text: "💰 Saldo" }, { text: "💳 CC" }, { text: "⏰ Due" }],
+    [{ text: "📥 Pending" }, { text: "🏛 Hutang" }, { text: "🌐 Buka App", web_app: { url: APP_URL } }],
+  ],
+  resize_keyboard: true,
+  is_persistent: true,
+};
+// Map the pretty button labels back to the actual slash-command they run.
+const QUICK_KB_LABELS: Record<string, string> = {
+  "📊 Digest": "/digest",
+  "🔄 Reimburse": "/reimburse",
+  "💰 Saldo": "/saldo",
+  "💳 CC": "/cc",
+  "⏰ Due": "/due",
+  "📥 Pending": "/pending",
+  "🏛 Hutang": "/hutang",
+};
+
 const TG_PARSE_PROMPT = (input: string, type: "text" | "image" | "pdf") =>
   `You are a financial transaction extractor for Indonesian banking. The user is forwarding ${type === "image" ? "a screenshot or photo of" : type === "pdf" ? "a PDF document of" : ""} a bank notification (SMS, mobile banking notif, e-statement, e-wallet alert, etc).
 
@@ -390,7 +413,9 @@ Deno.serve(async (req: Request) => {
     } else if (message.voice || message.audio) {
       await sendTelegramMessage(TELEGRAM_BOT_TOKEN, chatId, "🎙️ Voice note belum bisa auto\\-transcribe\\. Ketik aja transaksinya \\(mis\\. _makan 50rb bca idr_\\), atau kirim screenshot/PDF\\.");
     } else if (message.text) {
-      const text: string = message.text.trim();
+      let text: string = message.text.trim();
+      // Tap on a quick-keyboard button arrives as its label → run the command.
+      if (QUICK_KB_LABELS[text]) text = QUICK_KB_LABELS[text];
 
       if (text.startsWith("/")) {
         const cmd = text.split(/\s+/)[0].toLowerCase().replace(/@[\w_]+$/, "");
@@ -909,7 +934,7 @@ async function handleCommand(cmd: string, arg: string, supabase: any, uid: strin
       case "/start":
       case "/menu":
       case "/help":
-        return sendTelegramHTML(token, chatId, cmdMenu());
+        return sendTelegramHTML(token, chatId, cmdMenu(), QUICK_KB);
       case "/saldo": return sendTelegramHTML(token, chatId, await cmdSaldo(supabase, uid));
       case "/cc": return sendTelegramHTML(token, chatId, await cmdCC(supabase, uid));
       case "/reimburse": return sendTelegramHTML(token, chatId, await cmdReimburse(supabase, uid));
