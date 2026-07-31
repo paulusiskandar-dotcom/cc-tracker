@@ -29,13 +29,15 @@ def decode_str(s):
     parts = decode_header(s)
     return "".join((b.decode(enc or "utf-8", "ignore") if isinstance(b, bytes) else b) for b, enc in parts)
 
-# Sources that are NOT credit cards → statements go into the "Bank" sub-folder.
-# Everything else (BCA-CC, Mandiri-CC, CIMB, Maybank, BRI, BNI, Mega, Danamon,
-# UOB, Skorcard, HSBC, Jenius, OCBC) → "CC".
-NON_CC_SOURCES = {"BCA-Bank", "Mandiri-Bank", "Sinarmas", "KSEI", "Mirae"}
+# Statement sub-folder per source. Bank = deposit/RDN statements; Investasi =
+# securities/custodian statements; everything else (the cards) = CC.
+BANK_SOURCES   = {"BCA-Bank", "Mandiri-Bank", "Sinarmas"}
+INVEST_SOURCES = {"KSEI", "Mirae"}
 
 def source_kind(src_name):
-    return "Bank" if src_name in NON_CC_SOURCES else "CC"
+    if src_name in BANK_SOURCES:   return "Bank"
+    if src_name in INVEST_SOURCES: return "Investasi"
+    return "CC"
 
 def month_folder(base, dt, kind="CC"):
     d = os.path.join(base, dt.strftime("%Y"), dt.strftime("%m %B"), kind)  # e.g. "2026/05 May/CC"
