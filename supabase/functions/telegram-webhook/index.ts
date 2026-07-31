@@ -8,22 +8,15 @@ const TELEGRAM_API = "https://api.telegram.org";
 const APP_URL = Deno.env.get("APP_URL") || "https://ryusei.paulusiskandar.com";
 const QUICK_KB = {
   keyboard: [
-    [{ text: "📊 Digest" }, { text: "🔄 Reimburse" }],
-    [{ text: "💰 Saldo" }, { text: "💳 CC" }, { text: "⏰ Due" }],
-    [{ text: "📥 Pending" }, { text: "🏛 Hutang" }, { text: "🌐 Buka App", web_app: { url: APP_URL } }],
+    [{ text: "Digest" }, { text: "Reimburse" }, { text: "Open App", web_app: { url: APP_URL } }],
   ],
   resize_keyboard: true,
   is_persistent: true,
 };
-// Map the pretty button labels back to the actual slash-command they run.
+// Map the button labels back to the actual slash-command they run.
 const QUICK_KB_LABELS: Record<string, string> = {
-  "📊 Digest": "/digest",
-  "🔄 Reimburse": "/reimburse",
-  "💰 Saldo": "/saldo",
-  "💳 CC": "/cc",
-  "⏰ Due": "/due",
-  "📥 Pending": "/pending",
-  "🏛 Hutang": "/hutang",
+  "Digest": "/digest",
+  "Reimburse": "/reimburse",
 };
 
 const TG_PARSE_PROMPT = (input: string, type: "text" | "image" | "pdf") =>
@@ -277,7 +270,7 @@ Deno.serve(async (req: Request) => {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ menu_button: { type: "commands" } }),
         });
-        await sendTelegramHTML(token, chatIdKb, "⌨️ <b>Tombol cepat aktif.</b>\nTap ikon <b>⊞</b> di sebelah 📎 buat munculin, atau tombol <b>☰ Menu</b> buat daftar command.", QUICK_KB);
+        await sendTelegramHTML(token, chatIdKb, "<b>Tombol cepat aktif.</b>\nTap ikon di sebelah lampiran buat munculin.", QUICK_KB);
         return new Response(JSON.stringify({ ok: true, menu_button: (await mb.json())?.ok }), { headers: { "Content-Type": "application/json" } });
       }
       if (wh === "report") {
