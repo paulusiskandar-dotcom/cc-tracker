@@ -39,6 +39,19 @@ def source_kind(src_name):
     if src_name in INVEST_SOURCES: return "Investasi"
     return "CC"
 
+def classify_kind(src_name, fn):
+    """Danamon & Maybank e-mail BOTH a CC billing AND a deposit/wealth statement
+    from the same sender, so route those two by the attachment FILENAME:
+      - Danamon deposit statement = the savings account no (starts 0009956175…)
+        vs the CC statement = card number (2013…/3567…).
+      - Maybank consolidated wealth statement = CIF "G0…" vs CC = 16-digit card.
+    Everything else follows source_kind()."""
+    kind = source_kind(src_name)
+    low = (fn or "").lower().replace(" ", "")
+    if src_name == "Danamon" and low.startswith("0009956175"): return "Bank"
+    if src_name == "Maybank" and re.match(r"g0\d", low):       return "Bank"
+    return kind
+
 def month_folder(base, dt, kind="CC"):
     d = os.path.join(base, dt.strftime("%Y"), dt.strftime("%m %B"), kind)  # e.g. "2026/05 May/CC"
     os.makedirs(d, exist_ok=True)
@@ -100,7 +113,7 @@ def main():
                 if part.get_content_maintype() == "multipart": continue
                 fn = decode_str(part.get_filename())
                 if not fn or not fn.lower().endswith(".pdf"): continue
-                out_dir = month_folder(base, dt, source_kind(src["name"]))
+                out_dir = month_folder(base, dt, classify_kind(src["name"], fn))
                 safe = re.sub(r"[^A-Za-z0-9._ -]", "_", f'{src["name"]} - {fn}')
                 out_path = os.path.join(out_dir, safe)
                 if os.path.exists(out_path):
