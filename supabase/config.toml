@@ -15,3 +15,6 @@ verify_jwt = false
 
 [functions.gmail-sync]
 verify_jwt = false
+
+[functions.statement-check]
+verify_jwt = false

@@ -45,3 +45,13 @@ $$);
 -- Lihat 20 run terakhir:
 --   select jobname, status, start_time, return_message
 --   from cron.job_run_details order by start_time desc limit 20;
+
+-- 6) Cek kelengkapan statement — tanggal 30, 08:00 WIB (01:00 UTC)
+select cron.unschedule('ryusei-statement-check') where exists (select 1 from cron.job where jobname = 'ryusei-statement-check');
+select cron.schedule('ryusei-statement-check', '0 1 30 * *', $$
+  select net.http_post(
+    url     := 'https://zxkxfaoxzldxojwepnca.supabase.co/functions/v1/statement-check',
+    headers := '{"Content-Type":"application/json"}'::jsonb,
+    body    := '{}'::jsonb
+  );
+$$);
