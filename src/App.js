@@ -205,6 +205,11 @@ function Finance({ user, signOut }) {
   const openEmail = (emailTab = "pending") => { setEmailInitialTab(emailTab); setTab("email"); };
   const [loading, setLoading]   = useState(true);
   const [isDark, setIsDark]     = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem("ryusei_sidebar") !== "closed");
+  const toggleSidebar = () => setSidebarOpen(o => {
+    localStorage.setItem("ryusei_sidebar", o ? "closed" : "open");
+    return !o;
+  });
 
   // Sync active tab → URL hash so refresh restores current page
   useEffect(() => {
@@ -437,7 +442,14 @@ function Finance({ user, signOut }) {
     <div style={{ display: "flex", minHeight: "100vh", background: "#f8f9fb" }}>
 
       {/* ── SIDEBAR (desktop) ── */}
-      <aside className="sidebar" style={S.sidebar}>
+      <aside
+        className="sidebar"
+        style={{
+          ...S.sidebar,
+          transition: "width .22s ease, padding .22s ease",
+          ...(sidebarOpen ? {} : { width: 0, padding: 0, borderRight: "none", overflow: "hidden" }),
+        }}
+      >
         {/* Logo */}
         <div style={S.sidebarLogo}>
           <div style={S.logoIcon}><PILogo size={18} white /></div>
@@ -494,6 +506,18 @@ function Finance({ user, signOut }) {
         <header style={S.topBar}>
           {/* Left: logo on mobile, title on desktop */}
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button
+              className="desktop-only"
+              onClick={toggleSidebar}
+              title={sidebarOpen ? "Tutup sidebar" : "Buka sidebar"}
+              style={{ ...S.darkToggle, alignItems: "center", justifyContent: "center" }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <line x1="4" y1="6"  x2="20" y2="6" />
+                <line x1="4" y1="12" x2="20" y2="12" />
+                <line x1="4" y1="18" x2="20" y2="18" />
+              </svg>
+            </button>
             <div className="mobile-only" style={{ ...S.logoIcon, width: 28, height: 28 }}><PILogo size={16} white /></div>
             <div style={{ fontSize: 20, fontWeight: 900, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
               {pageLabel}
@@ -518,7 +542,7 @@ function Finance({ user, signOut }) {
         <main
           key={onMainPage ? tab : location.pathname}
           className="fade-up page-content"
-          style={{ flex: 1, padding: "20px 24px", maxWidth: 840, width: "100%", margin: "0 auto", paddingBottom: 88 }}
+          style={{ flex: 1, padding: "20px 24px", maxWidth: sidebarOpen ? 840 : 1080, width: "100%", margin: "0 auto", paddingBottom: 88, transition: "max-width .22s ease" }}
         >
           <Routes>
             <Route path="/accounts/:id/statement"         element={<StatementPage          {...shared} />} />
