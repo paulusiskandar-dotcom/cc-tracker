@@ -772,7 +772,7 @@ export default function Accounts({
 
 // ─── SHARED BUTTON STYLES ────────────────────────────────────
 const ACCT_BTN = {
-  height: 30, padding: "0 12px", borderRadius: 8, border: "1px solid #e5e7eb",
+  height: 32, padding: "0 12px", borderRadius: 8, border: "1px solid #e5e7eb",
   background: "#f9fafb", color: "#374151", fontSize: 12, fontWeight: 600,
   cursor: "pointer", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap",
 };

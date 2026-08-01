@@ -37,7 +37,7 @@ const CARD_PALETTE = [
 ];
 
 const CC_BTN = (bg, color, border = "transparent") => ({
-  height: 30, padding: "0 10px", borderRadius: 8, border: `1px solid ${border}`,
+  height: 32, padding: "0 10px", borderRadius: 8, border: `1px solid ${border}`,
   background: bg, color, fontSize: 11, fontWeight: 700, cursor: "pointer",
   fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap",
 });

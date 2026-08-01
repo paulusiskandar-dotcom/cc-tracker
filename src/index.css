@@ -48,6 +48,23 @@ input, textarea, [contenteditable], .selectable {
 /* CC card hover — edit pencil */
 .cc-card:hover .cc-card-edit { opacity: 1 !important; }
 
+/* Financial app: line up digits everywhere (tables, tiles, statements) */
+body {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Skeleton shimmer (initial load) */
+.skel {
+  background: linear-gradient(90deg, #eef0f3 25%, #f7f8fa 50%, #eef0f3 75%);
+  background-size: 400% 100%;
+  animation: skel-shimmer 1.3s ease infinite;
+  border-radius: 10px;
+}
+@keyframes skel-shimmer {
+  0%   { background-position: 100% 0; }
+  100% { background-position: 0 0; }
+}
+
 /* Sidebar: desktop only */
 .sidebar {
   display: flex;

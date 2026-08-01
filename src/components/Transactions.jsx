@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { ledgerApi, gmailApi, getTxFromToTypes, recalculateBalance, recurringApi } from "../api";
 import { undoManager } from "../lib/undoManager";
 import { ENTITIES } from "../constants";
@@ -101,7 +101,13 @@ export default function Transactions({
     }
   }, [filtered, txSort]);
 
-  const grouped = useMemo(() => groupByDate(sorted), [sorted]);
+  // Windowed render: only the first N rows hit the DOM (ledger is 1000+ rows);
+  // "Load more" reveals the rest. Reset when the filter/sort changes.
+  const [visibleCount, setVisibleCount] = useState(120);
+  useEffect(() => { setVisibleCount(120); }, [subTab, filterMonth, filterEntity, filterAccId, dateFrom, dateTo, search, txSort]);
+  const windowed = useMemo(() => sorted.slice(0, visibleCount), [sorted, visibleCount]);
+  const grouped = useMemo(() => groupByDate(windowed), [windowed]);
+  const hiddenCount = sorted.length - windowed.length;
 
   // ── Totals ──
   const outTotal = useMemo(() =>
@@ -356,6 +362,18 @@ export default function Transactions({
                 </div>
               );
             })
+      )}
+
+      {/* ── LOAD MORE (windowed list) ── */}
+      {subTab !== "pending" && hiddenCount > 0 && (
+        <div style={{ textAlign: "center", padding: "14px 0 4px" }}>
+          <button
+            onClick={() => setVisibleCount(c => c + 200)}
+            style={{ height: 32, padding: "0 18px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", color: "#374151", fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: "Figtree, sans-serif" }}
+          >
+            Load more ({hiddenCount} more)
+          </button>
+        </div>
       )}
 
       {/* ── ADD / EDIT MODAL ── */}

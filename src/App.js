@@ -392,11 +392,23 @@ function Finance({ user, signOut }) {
   };
 
   if (loading) return (
-    <div style={S.loadScreen}>
-      <div style={{ textAlign: "center" }}>
-        <Spinner size={32} color="#3b5bdb" />
-        <div style={{ marginTop: 12, fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
-          Loading…
+    // Skeleton shell: mirrors the real layout (sidebar + header + tiles) so the
+    // app doesn't "jump" when data lands — replaces the centered spinner.
+    <div style={{ display: "flex", minHeight: "100vh", background: "#f8f9fb" }}>
+      <aside className="sidebar" style={{ width: 200, flexShrink: 0, background: "#fff", borderRight: "1px solid #e5e7eb", padding: "16px 12px", flexDirection: "column", gap: 10 }}>
+        <div className="skel" style={{ width: 120, height: 28, marginBottom: 16 }} />
+        {[...Array(9)].map((_, i) => <div key={i} className="skel" style={{ height: 30 }} />)}
+      </aside>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ height: 56, background: "#fff", borderBottom: "1px solid #e5e7eb", display: "flex", alignItems: "center", padding: "0 24px" }}>
+          <div className="skel" style={{ width: 140, height: 22 }} />
+        </div>
+        <div style={{ maxWidth: 840, margin: "0 auto", padding: "20px 24px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 16 }}>
+            {[...Array(4)].map((_, i) => <div key={i} className="skel" style={{ height: 84 }} />)}
+          </div>
+          <div className="skel" style={{ height: 220, marginBottom: 14 }} />
+          <div className="skel" style={{ height: 160 }} />
         </div>
       </div>
     </div>
@@ -532,8 +544,17 @@ function Finance({ user, signOut }) {
                 {fmtIDR(netWorth.total, true)}
               </span>
             </div>
-            <button onClick={() => setIsDark(d => !d)} style={S.darkToggle}>
-              {isDark ? "☀" : "◑"}
+            <button onClick={() => setIsDark(d => !d)} style={S.darkToggle} title="Theme">
+              {isDark ? (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="4" />
+                  <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+                </svg>
+              ) : (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+                </svg>
+              )}
             </button>
           </div>
         </header>
@@ -854,14 +875,18 @@ const S = {
   },
 
   darkToggle: {
-    background:   "none",
-    border:       "1px solid #e5e7eb",
-    borderRadius: 6,
-    padding:      "5px 9px",
-    cursor:       "pointer",
-    fontSize:     13,
-    color:        "#9ca3af",
-    fontFamily:   "Figtree, sans-serif",
+    width:          32,
+    height:         32,
+    padding:        0,
+    display:        "flex",
+    alignItems:     "center",
+    justifyContent: "center",
+    background:     "none",
+    border:         "1px solid #e5e7eb",
+    borderRadius:   8,
+    cursor:         "pointer",
+    color:          "#9ca3af",
+    fontFamily:     "Figtree, sans-serif",
   },
 
   mobileNav: {
