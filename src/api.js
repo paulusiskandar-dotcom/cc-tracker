@@ -211,26 +211,22 @@ export const ledgerApi = {
       return q;
     };
 
-    // Explicit limit → single page (caller opted into a cap).
-    if (filters.limit) {
-      const { data, error } = await build().limit(filters.limit);
-      if (error) throw new Error(error.message);
-      return data || [];
-    }
-
-    // No limit → paginate. PostgREST caps a single response at 1000 rows
-    // (db-max-rows), which silently dropped the oldest entries once the ledger
-    // passed 1000 rows — breaking balances, net worth, and old statements.
-    // Range-paginate until a short page so the FULL ledger always loads.
+    // PostgREST caps EVERY response at 1000 rows (db-max-rows) — even an explicit
+    // .limit(10000) still returns only 1000, which silently dropped the oldest
+    // entries once the ledger passed 1000 rows (broke balances, net worth, and
+    // old statements). Range-paginate until a short page (or filters.limit) so
+    // the full requested window always loads.
     const PAGE = 1000;
+    const cap = filters.limit || Infinity;
     let all = [], offset = 0;
-    for (;;) {
-      const { data, error } = await build().range(offset, offset + PAGE - 1);
+    while (all.length < cap) {
+      const to = Math.min(offset + PAGE, cap) - 1;
+      const { data, error } = await build().range(offset, to);
       if (error) throw new Error(error.message);
       const batch = data || [];
       all = all.concat(batch);
-      if (batch.length < PAGE) break;
-      offset += PAGE;
+      if (batch.length < to - offset + 1) break; // short page = no more rows
+      offset += batch.length;
     }
     return all;
   },
