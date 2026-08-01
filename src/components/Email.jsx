@@ -10,7 +10,7 @@ import { LIGHT, DARK } from "../theme";
 import {
   Button, EmptyState, showToast,
   SectionHeader, Field, Input, FormRow,
-  TxHorizontal,
+  TxHorizontal, ConfirmModal,
 } from "./shared/index";
 import ProgressIndicator from "./shared/ProgressIndicator";
 import { useImportDraft } from "../lib/useImportDraft";
@@ -613,7 +613,33 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     };
   };
 
+  // ── Duplicate guard: same amount (±1), date within ±2 days, overlapping account ──
+  // Real incidents: one transfer imported from BOTH banks' emails (45jt Mandiri+OCBC),
+  // Telegram photo + bank email of the same purchase, etc.
+  const findDupe = (entry) => {
+    const amt = Number(entry.amount_idr || entry.amount || 0);
+    if (!amt) return null;
+    const d = new Date(entry.tx_date);
+    const nids = [entry.from_id, entry.to_id].filter(Boolean);
+    return (ledger || []).find(e => {
+      const ea = Number(e.amount_idr || e.amount || 0);
+      if (Math.abs(ea - amt) > 1) return false;
+      const dd = Math.abs((new Date(e.tx_date) - d) / 86400000);
+      if (dd > 2) return false;
+      const ids = [e.from_id, e.to_id].filter(Boolean);
+      return nids.length === 0 || ids.length === 0 || ids.some(x => nids.includes(x));
+    });
+  };
+  const [dupWarn, setDupWarn] = useState(null); // { row, dupe }
+
   const confirm = async (r) => {
+    // Duplicate guard (skippable via r._dupeOk after user confirms)
+    if (!r._dupeOk && (!r.currency || r.currency === "IDR")) {
+      try {
+        const dupe = findDupe(buildEntry(r));
+        if (dupe) { setDupWarn({ row: r, dupe }); return; }
+      } catch (_) { /* buildEntry throw → let the normal path surface it */ }
+    }
     // Foreign-currency (valas) tx have no exact IDR yet (rate unknown) — never
     // push them to the ledger. Park as "waiting for statement" instead; the
     // monthly statement reconcile brings the bank's exact settled IDR later.
@@ -704,7 +730,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
   const importAll = async (selectedRows) => {
     if (!selectedRows.length) return;
     setImporting(true);
-    let count = 0, skippedFx = 0;
+    let count = 0, skippedFx = 0, skippedDupe = 0;
     const newLedgerIds = [];
     const matchedNames = [];
     for (const r of selectedRows) {
@@ -718,6 +744,8 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       }
       try {
         const builtEntry = buildEntry(r);
+        // Duplicate guard: bulk skips suspects; accept them individually to override
+        if (findDupe(builtEntry)) { skippedDupe++; continue; }
         const created = await ledgerApi.create(user.id, builtEntry, accounts);
         if (created?.id) newLedgerIds.push(created.id);
         setLedger(p => [created, ...p]);
@@ -814,6 +842,14 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <ConfirmModal
+        isOpen={!!dupWarn}
+        onClose={() => setDupWarn(null)}
+        onConfirm={() => { const r = dupWarn.row; setDupWarn(null); confirm({ ...r, _dupeOk: true }); }}
+        title="Possible duplicate"
+        danger
+        message={dupWarn ? `Mirip transaksi yang sudah ada di ledger: "${dupWarn.dupe.description || ""}" pada ${dupWarn.dupe.tx_date} (${Number(dupWarn.dupe.amount_idr || dupWarn.dupe.amount || 0).toLocaleString("id-ID")}). Tetap import?` : ""}
+      />
 
       {/* Draft resume banner */}
       {!waitingMode && draft.showBanner && rows.length === 0 && (

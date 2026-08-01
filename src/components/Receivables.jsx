@@ -1382,6 +1382,13 @@ export default function Receivables({
                         )}
                       </div>
 
+                      {/* Data belum lengkap: tanpa total/tenor, progress & sisa tak bisa dihitung */}
+                      {!(totalMo > 0) && !isSettled && (
+                        <div style={{ fontSize: 10, fontWeight: 600, color: "#d97706", background: "#fef3c7", borderRadius: 6, padding: "4px 8px", fontFamily: "Figtree, sans-serif" }}>
+                          Total / tenor belum diisi — edit loan untuk lihat progress & sisa
+                        </div>
+                      )}
+
                       {/* Progress bar */}
                       {totalMo > 0 && (
                         <div>

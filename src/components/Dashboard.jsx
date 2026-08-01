@@ -1083,6 +1083,45 @@ export default function Dashboard({
         </div>
       </div>
 
+      {/* ── 30-DAY OUTLOOK: kebutuhan vs saldo tersedia ── */}
+      {(() => {
+        const today = new Date();
+        const nextDue = (day) => {
+          if (!day) return null;
+          const d = new Date(today.getFullYear(), today.getMonth(), Math.min(day, 28));
+          if (d < today) d.setMonth(d.getMonth() + 1);
+          return d;
+        };
+        const in30 = (d) => d && (d - today) / 86400000 <= 30;
+        const ccDue = (creditCards || [])
+          .filter(c => c.is_active !== false && Number(c.outstanding_amount) > 0 && in30(nextDue(c.due_day)))
+          .reduce((s, c) => s + Number(c.outstanding_amount || 0), 0);
+        const billsDue = (reminders || [])
+          .filter(r => r.status === "pending" && r.due_date && (new Date(r.due_date) - today) / 86400000 <= 30)
+          .reduce((s, r) => s + Number(r.amount || 0), 0);
+        const need = ccDue + billsDue;
+        const avail = (nw.bank || 0) + (nw.cash || 0);
+        const net = avail - need;
+        if (need === 0) return null;
+        return (
+          <div style={{
+            display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10,
+            background: net >= 0 ? "#f0fdf4" : "#fef2f2",
+            border: `1px solid ${net >= 0 ? "#bbf7d0" : "#fecaca"}`,
+            borderRadius: 14, padding: "12px 16px",
+          }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif" }}>
+              30-Day Outlook
+            </div>
+            <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontFamily: "Figtree, sans-serif" }}>
+              <div><span style={{ fontSize: 10, color: "#9ca3af" }}>Due (CC + bills) </span><span style={{ fontSize: 13, fontWeight: 800, color: "#b91c1c" }}>{fmtIDR(need, true)}</span></div>
+              <div><span style={{ fontSize: 10, color: "#9ca3af" }}>Available </span><span style={{ fontSize: 13, fontWeight: 800, color: "#047857" }}>{fmtIDR(avail, true)}</span></div>
+              <div><span style={{ fontSize: 10, color: "#9ca3af" }}>{net >= 0 ? "Surplus " : "Short "}</span><span style={{ fontSize: 13, fontWeight: 800, color: net >= 0 ? "#047857" : "#b91c1c" }}>{fmtIDR(Math.abs(net), true)}</span></div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ════════════ SECTION 3 — THIS MONTH METRICS ════════════ */}
       <div style={{
         display: "grid",

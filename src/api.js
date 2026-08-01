@@ -30,6 +30,18 @@ const validateLedgerEntry = (entry) => {
   if (!entry.tx_date)   throw new Error("Date is required");
   if (!entry.amount || Number(entry.amount) <= 0) throw new Error("Amount must be greater than 0");
   if (!entry.tx_type)   throw new Error("Transaction type is required");
+  // Direction guardrails — every miscoded shape below has silently corrupted balances
+  // before (telegram-photo imports writing from==to, income recorded outward, etc.)
+  if (entry.from_type === "account" && entry.to_type === "account" &&
+      entry.from_id && entry.to_id && entry.from_id === entry.to_id) {
+    throw new Error("From and To are the same account — check the direction");
+  }
+  if (entry.tx_type === "income" && !entry.to_id) {
+    throw new Error("Income needs a destination account (To)");
+  }
+  if (entry.tx_type === "expense" && !entry.from_id) {
+    throw new Error("Expense needs a source account (From)");
+  }
   return true;
 };
 

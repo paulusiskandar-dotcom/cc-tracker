@@ -770,6 +770,23 @@ export default function Accounts({
   );
 }
 
+
+// "Verified to statement" chip — shown when the account was reconciled/anchored
+// to a bank/CC statement within the last 45 days.
+const StmtChip = ({ date }) => {
+  if (!date) return null;
+  const age = (Date.now() - new Date(date).getTime()) / 86400000;
+  if (age > 45) return null;
+  const label = new Date(date).toLocaleDateString("en-US", { month: "short" });
+  return (
+    <span title={`Reconciled to statement (${date})`} style={{
+      fontSize: 9, fontWeight: 700, background: "#dcfce7", color: "#047857",
+      padding: "1px 6px", borderRadius: 4, fontFamily: "Figtree, sans-serif",
+      display: "inline-flex", alignItems: "center", gap: 3, flexShrink: 0,
+    }}>✓ {label}</span>
+  );
+};
+
 // ─── SHARED BUTTON STYLES ────────────────────────────────────
 const ACCT_BTN = {
   height: 32, padding: "0 12px", borderRadius: 8, border: "1px solid #e5e7eb",
@@ -876,8 +893,9 @@ function BankAccountCard({ account: a, ledger, fxRates = {}, CURRENCIES: C = [],
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <BankLogo bankName={a.bank_name} color={color} size={36} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", gap: 6 }}>
               {a.name}
+              <StmtChip date={a.last_statement_date} />
             </div>
             <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 1 }}>
               {a.bank_name || "Bank"}{a.account_no ? ` · ···${String(a.account_no).slice(-4)}` : ""}

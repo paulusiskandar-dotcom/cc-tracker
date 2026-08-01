@@ -36,6 +36,23 @@ const CARD_PALETTE = [
   "#0e7490", "#16a34a", "#ca8a04", "#c026d3", "#0284c7",
 ];
 
+
+// "Verified to statement" chip — shown when the account was reconciled/anchored
+// to a bank/CC statement within the last 45 days.
+const StmtChip = ({ date }) => {
+  if (!date) return null;
+  const age = (Date.now() - new Date(date).getTime()) / 86400000;
+  if (age > 45) return null;
+  const label = new Date(date).toLocaleDateString("en-US", { month: "short" });
+  return (
+    <span title={`Reconciled to statement (${date})`} style={{
+      fontSize: 9, fontWeight: 700, background: "#dcfce7", color: "#047857",
+      padding: "1px 6px", borderRadius: 4, fontFamily: "Figtree, sans-serif",
+      display: "inline-flex", alignItems: "center", gap: 3, flexShrink: 0,
+    }}>✓ {label}</span>
+  );
+};
+
 const CC_BTN = (bg, color, border = "transparent") => ({
   height: 32, padding: "0 10px", borderRadius: 8, border: `1px solid ${border}`,
   background: bg, color, fontSize: 11, fontWeight: 700, cursor: "pointer",
@@ -1508,9 +1525,10 @@ function CCCard({ cc, color, onPay, onHistory, onInstallments, onBill, onEdit })
 
       <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 11, flex: 1 }}>
         {/* Card name */}
-        <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", gap: 6 }}>
           {cc.name}
-          {isMaster && <span style={{ fontWeight: 400, color: "#9ca3af", fontSize: 11, marginLeft: 6 }}>· Master</span>}
+          {isMaster && <span style={{ fontWeight: 400, color: "#9ca3af", fontSize: 11 }}>· Master</span>}
+          <StmtChip date={cc.last_statement_date} />
         </div>
 
         {/* Debt + Available — 2-column */}

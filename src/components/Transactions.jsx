@@ -210,6 +210,30 @@ export default function Transactions({
 
       {/* ── FILTERS ROW ── */}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {/* Quick ranges — one tap instead of the month dropdown */}
+        {(() => {
+          const now = new Date();
+          const thisM = ym(todayStr());
+          const lastM = ym(new Date(now.getFullYear(), now.getMonth() - 1, 15).toISOString().slice(0, 10));
+          const d7 = new Date(now); d7.setDate(d7.getDate() - 7);
+          const d7s = d7.toISOString().slice(0, 10);
+          const clear = () => { setFilterMonth(""); setDateFrom(""); setDateTo(""); };
+          const chips = [
+            { label: "This month", active: filterMonth === thisM && !dateFrom, on: () => { clear(); setFilterMonth(thisM); } },
+            { label: "Last month", active: filterMonth === lastM && !dateFrom, on: () => { clear(); setFilterMonth(lastM); } },
+            { label: "7 days",     active: dateFrom === d7s && !filterMonth,   on: () => { clear(); setDateFrom(d7s); } },
+            { label: "All",        active: !filterMonth && !dateFrom && !dateTo, on: clear },
+          ];
+          return chips.map(c => (
+            <button key={c.label} onClick={c.on} style={{
+              height: 32, padding: "0 12px", borderRadius: 8, cursor: "pointer",
+              border: c.active ? "1.5px solid #3b5bdb" : "1.5px solid #e5e7eb",
+              background: c.active ? "#eef2ff" : "#fff",
+              color: c.active ? "#3b5bdb" : "#6b7280",
+              fontSize: 12, fontWeight: c.active ? 700 : 500, fontFamily: "Figtree, sans-serif",
+            }}>{c.label}</button>
+          ));
+        })()}
         <select value={filterMonth} onChange={e => setFilterMonth(e.target.value)} style={FILTER_SELECT}>
           <option value="">All months</option>
           {monthOptions.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
