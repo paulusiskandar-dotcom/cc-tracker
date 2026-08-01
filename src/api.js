@@ -194,25 +194,45 @@ export const accountsApi = {
 // ─── LEDGER ───────────────────────────────────────────────────
 export const ledgerApi = {
   getAll: async (userId, filters = {}) => {
-    let q = supabase
-      .from("ledger")
-      .select("*")
-      .eq("user_id", userId)
-      .order("tx_date", { ascending: false })
-      .order("created_at", { ascending: false });
+    // Rebuildable query (supabase builders are single-use, so we reconstruct per page).
+    const build = () => {
+      let q = supabase
+        .from("ledger")
+        .select("*")
+        .eq("user_id", userId)
+        .order("tx_date", { ascending: false })
+        .order("created_at", { ascending: false });
+      if (filters.from)      q = q.gte("tx_date", filters.from);
+      if (filters.to)        q = q.lte("tx_date", filters.to);
+      if (filters.type)      q = q.eq("tx_type", filters.type);
+      if (filters.entity)    q = q.eq("entity", filters.entity);
+      if (filters.accountId) q = q.or(`from_id.eq.${filters.accountId},to_id.eq.${filters.accountId}`);
+      if (filters.search)    q = q.ilike("description", `%${filters.search}%`);
+      return q;
+    };
 
-    if (filters.from)      q = q.gte("tx_date", filters.from);
-    if (filters.to)        q = q.lte("tx_date", filters.to);
-    if (filters.type)      q = q.eq("tx_type", filters.type);
-    if (filters.entity)    q = q.eq("entity", filters.entity);
-    if (filters.accountId) q = q.or(`from_id.eq.${filters.accountId},to_id.eq.${filters.accountId}`);
-    if (filters.search)    q = q.ilike("description", `%${filters.search}%`);
-    // TODO: implement cursor pagination when ledger exceeds 10k entries
-    if (filters.limit)     q = q.limit(filters.limit);
+    // Explicit limit → single page (caller opted into a cap).
+    if (filters.limit) {
+      const { data, error } = await build().limit(filters.limit);
+      if (error) throw new Error(error.message);
+      return data || [];
+    }
 
-    const { data, error } = await q;
-    if (error) throw new Error(error.message);
-    return data || [];
+    // No limit → paginate. PostgREST caps a single response at 1000 rows
+    // (db-max-rows), which silently dropped the oldest entries once the ledger
+    // passed 1000 rows — breaking balances, net worth, and old statements.
+    // Range-paginate until a short page so the FULL ledger always loads.
+    const PAGE = 1000;
+    let all = [], offset = 0;
+    for (;;) {
+      const { data, error } = await build().range(offset, offset + PAGE - 1);
+      if (error) throw new Error(error.message);
+      const batch = data || [];
+      all = all.concat(batch);
+      if (batch.length < PAGE) break;
+      offset += PAGE;
+    }
+    return all;
   },
 
   getByAccount: async (userId, accountId) => {
