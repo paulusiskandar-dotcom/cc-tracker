@@ -269,13 +269,18 @@ INCLUDE these transaction types:
 - Bank fees: biaya admin, biaya layanan notifikasi, bea materai (stamp duty), iuran tahunan, bunga, denda, provisi
 - Foreign currency transactions (extract both IDR amount and original currency/amount if shown)
 - Transfers OUT (DEBIT column / direction "out")
+- CREDIT rows (direction "in") — CRITICAL, NEVER drop these:
+  * Card payments as DATED rows in the transaction table: "PAYMENT-THANK YOU", "Pembayaran Kartu Kredit", "PAYMENT BIFAST ...", "PAYMENT SA ATM ..." → direction "in"
+  * Refunds: "REFUND ...", GLOBALBLUE, merchant reversals → direction "in"
+  * Fee reversals/corrections: "Annual Fee ... CR", "KOR ...", waived fees → direction "in"
+  A statement's math only balances when these are included: closing = opening + charges − credits.
 
 SKIP these completely (they are SUMMARY/BALANCE lines, NOT transactions):
 - BALANCE OF LAST MONTH / Saldo awal bulan lalu / SALDO BULAN LALU
 - TAGIHAN BULAN LALU (previous balance carried over) — NEVER emit this as a transaction; it is the opening balance
 - TAGIHAN BULAN INI / TOTAL TAGIHAN BULAN INI / TOTAL TAGIHAN (this is the closing balance, not a transaction)
 - PEMBELANJAAN / PENARIKAN TUNAI / PEMBAYARAN / BIAYA ADM & BUNGA when they appear as SUMMARY TOTALS (a lone labelled amount with no date), BATAS KREDIT / SISA KREDIT / PEMBAYARAN MINIMUM / TANGGAL JATUH TEMPO / KOLEKTIBILITAS / JUMLAH POIN
-- Payment received / Pembayaran diterima / (-) Pembayaran
+- "Pembayaran Sebelumnya" as a SUMMARY line (no transaction date). But a DATED payment row inside the transaction table is a real transaction → INCLUDE with direction "in" (see INCLUDE list) — do NOT skip it.
 - Summary sections: RINGKASAN TAGIHAN, RINGKASAN TREATS, BUNGA DAN TOTAL TRANSAKSI
 - TOTAL rows and END OF STATEMENT
 
@@ -293,9 +298,11 @@ actual transaction DATE and a merchant/description to be emitted; a bare
 
 DEBIT/KREDIT column format (Danamon consolidated statement style):
 - DEBIT column = money OUT → direction "out"
-- KREDIT column = money IN (transfers received, reversals) → direction "in" — SKIP these
+- KREDIT column = money IN (transfers received, reversals) → direction "in" — INCLUDE these
 - SALDO column = running balance, ignore entirely
-- A "CR" suffix after an amount (BRI style: "1.787.800CR") = CREDIT → direction "in".
+- A "CR" suffix after an amount ("1.787.800CR", "3,000,000.00 CR", "11.245.000 CR") = CREDIT
+  → direction "in" ALWAYS, no exceptions — even if the description looks like a fee or purchase
+  (e.g. "Annual Fee 3,000,000.00 CR" is a fee REVERSAL = direction "in", NOT a charge).
   No suffix = debit → direction "out".
 
 BRI-style installment conversions (TOKOPEDIA_CYBS_CCL / any "Retail" + "X/N" pattern):
