@@ -20,6 +20,7 @@ const SUBTABS = [
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────
 export default function Transactions({
+  txAddSignal,
   user, accounts, ledger, categories, fxRates, CURRENCIES: C,
   bankAccounts, creditCards, assets, liabilities, receivables,
   onRefresh, setLedger, pendingSyncs, setPendingSyncs, incomeSrcs,
@@ -124,6 +125,9 @@ export default function Transactions({
 
   // ── Open add ──
   const openAdd = () => setTxModal({ open: true, mode: "add", entry: null });
+
+  // Mobile FAB: App bumps txAddSignal → open the add modal on arrival
+  useEffect(() => { if (txAddSignal) openAdd(); }, [txAddSignal]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Open edit ──
   const openEdit = (e) => setTxModal({ open: true, mode: "edit", entry: e });
@@ -639,8 +643,8 @@ function TxRow({ entry: e, accounts, categories = [], onEdit, onDelete }) {
 
         {/* Actions */}
         <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-          <button onClick={ev => { ev.stopPropagation(); onEdit(); }} style={ROW_BTN}>✎</button>
-          <button onClick={ev => { ev.stopPropagation(); onDelete(); }} style={{ ...ROW_BTN, color: "#dc2626", borderColor: "#fecaca" }}>✕</button>
+          <button className="row-act" onClick={ev => { ev.stopPropagation(); onEdit(); }} style={ROW_BTN}>✎</button>
+          <button className="row-act" onClick={ev => { ev.stopPropagation(); onDelete(); }} style={{ ...ROW_BTN, color: "#dc2626", borderColor: "#fecaca" }}>✕</button>
         </div>
       </div>
 

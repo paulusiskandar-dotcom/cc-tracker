@@ -151,7 +151,7 @@ export default function LoanStatementPage({
 
       {/* ── Ledger-based grid ── */}
       {useLedger ? (
-        <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden" }}>
+        <div className="stmt-card" style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden" }}>
           <div style={{ display: "grid", gridTemplateColumns: COLS, background: "#f9fafb", borderBottom: "0.5px solid #e5e7eb", padding: RP }}>
             {[
               { label: "Tanggal",     align: "left"  },
@@ -218,7 +218,7 @@ export default function LoanStatementPage({
         </div>
       ) : (
         /* ── Fallback: payment table (no ledger entries) ── */
-        <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden" }}>
+        <div className="stmt-card" style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden" }}>
           <div style={{ display: "grid", gridTemplateColumns: "90px 1fr 120px 120px 130px", background: "#f9fafb", borderBottom: "0.5px solid #e5e7eb", padding: RP }}>
             {[["Tanggal","left"],["Keterangan","left"],["Pinjam","right"],["Bayar","right"],["Sisa Hutang","right"]].map(([l,a]) => (
               <div key={l} style={{ ...TH, textAlign: a }}>{l}</div>

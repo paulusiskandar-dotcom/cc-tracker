@@ -240,7 +240,7 @@ export default function EmployeeLoanStatement({
 
       {/* ── Statement table ── */}
       {rows.length > 0 && (
-        <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden" }}>
+        <div className="stmt-card" style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", overflow: "hidden" }}>
           {/* Header row */}
           <div style={{ display: "grid", gridTemplateColumns: COLS, background: "#f9fafb", borderBottom: "0.5px solid #e5e7eb", padding: ROW_PAD }}>
             {HDR_CELLS.map(({ label, align }) => (

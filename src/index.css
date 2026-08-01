@@ -65,6 +65,28 @@ body {
   100% { background-position: 0 0; }
 }
 
+/* ── Mobile optimizations ── */
+@media (max-width: 768px) {
+  /* Receivables settle: stack OUT/IN columns (side-by-side is unreadable at 390px) */
+  .settle-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  /* Row edit/delete: finger-sized tap targets */
+  .row-act {
+    width: 34px !important;
+    height: 34px !important;
+    font-size: 13px !important;
+  }
+  /* Statement tables (fixed-column grids): scroll inside the card, not the page */
+  .stmt-card {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  .stmt-card > * {
+    min-width: 560px;
+  }
+}
+
 /* Sidebar: desktop only */
 .sidebar {
   display: flex;

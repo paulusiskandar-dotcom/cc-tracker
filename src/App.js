@@ -206,6 +206,7 @@ function Finance({ user, signOut }) {
   const [loading, setLoading]   = useState(true);
   const [isDark, setIsDark]     = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem("ryusei_sidebar") !== "closed");
+  const [txAddSignal, setTxAddSignal] = useState(0);
   const toggleSidebar = () => setSidebarOpen(o => {
     localStorage.setItem("ryusei_sidebar", o ? "closed" : "open");
     return !o;
@@ -373,6 +374,7 @@ function Finance({ user, signOut }) {
 
   // Props passed to every page
   const shared = {
+    txAddSignal,
     user, accounts, ledger, thisMonthLedger, categories, incomeSrcs,
     installments, recurTemplates, reminders, merchantMaps, fxRates,
     CURRENCIES, netWorth, bankAccounts, creditCards, assets, liabilities,
@@ -573,6 +575,25 @@ function Finance({ user, signOut }) {
           </Routes>
         </main>
       </div>
+
+      {/* ── MOBILE FAB: quick add transaction ── */}
+      <button
+        className="mobile-only"
+        onClick={() => { goTab("transactions"); setShowMore(false); setTxAddSignal(s => s + 1); }}
+        title="Add transaction"
+        style={{
+          position: "fixed", right: 16, bottom: "calc(72px + env(safe-area-inset-bottom))", zIndex: 190,
+          width: 52, height: 52, borderRadius: 26, border: "none", cursor: "pointer",
+          background: "#111827", color: "#fff",
+          alignItems: "center", justifyContent: "center",
+          boxShadow: "0 4px 14px rgba(17,24,39,0.35)",
+        }}
+      >
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+      </button>
 
       {/* ── MOBILE BOTTOM NAV ── */}
       <nav className="mobile-nav" style={S.mobileNav}>
