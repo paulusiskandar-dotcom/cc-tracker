@@ -25,6 +25,25 @@ function wordSimilarity(a, b) {
   return wa.filter(w => setB.has(w)).length / Math.max(wa.length, wb.length);
 }
 
+// Anchor date written to accounts.last_statement_date, which drives
+//   pending = last_statement_amount − Σ(payments to card where tx_date >= anchor)
+// Payments PRINTED on the statement are already inside its closing balance, so the
+// anchor must sit strictly after the statement's last row — anchoring ON that row
+// subtracts the printed payment a second time and reports Rp 0 due on a card that
+// still owes money. Prefer the statement's own cut date ("Tgl. Cetak", captured by
+// gmail-estatement as stmtStatementDate); fall back to the day after the last row.
+export function statementAnchorDate(stmtRows, stmtStatementDate) {
+  const dates = (stmtRows || []).map(s => s?.date)
+    .filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d || "")).sort();
+  const lastRow = dates[dates.length - 1] || null;
+  if (stmtStatementDate && /^\d{4}-\d{2}-\d{2}$/.test(stmtStatementDate)
+      && (!lastRow || stmtStatementDate >= lastRow)) return stmtStatementDate;
+  if (!lastRow) return todayStr();
+  const t = new Date(lastRow + "T00:00:00");
+  t.setDate(t.getDate() + 1);
+  return t.toISOString().slice(0, 10);
+}
+
 export function matchRows(stmtRows, ledgerRows) {
   const usedL = new Set();
   const matched = new Map(); // ledgerId → stmtRow
@@ -91,6 +110,7 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
   const [pdfBlobUrl,        setPdfBlobUrl]        = useState(null);
   const [stmtClosingBalance, setStmtClosingBalance] = useState(null);
   const [stmtOpeningBalance, setStmtOpeningBalance] = useState(null);
+  const [stmtStatementDate, setStmtStatementDate] = useState(null);
   const [expandedIds,        setExpandedIds]        = useState(() => new Set());
   const [pendingRows,        setPendingRows]        = useState({});
   const [allLedger,          setAllLedger]          = useState([]);
@@ -294,6 +314,7 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
     if (s.pendingRows) setPendingRows(s.pendingRows);
     if (s.stmtClosingBalance != null) setStmtClosingBalance(s.stmtClosingBalance);
     if (s.stmtOpeningBalance != null) setStmtOpeningBalance(s.stmtOpeningBalance);
+    if (s.stmtStatementDate) setStmtStatementDate(s.stmtStatementDate);
   }, []);
 
   const startReconcile = useCallback(() => setActive(true), []);
@@ -346,8 +367,7 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
     const recAcc = accounts.find(a => a.id === accountId);
     if (recAcc?.type === "credit_card" && stmtClosingBalance != null) {
       try {
-        const stmtDates = stmtRows.map(s => s.date).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d || "")).sort();
-        const stmtEnd = stmtDates[stmtDates.length - 1] || todayStr();
+        const stmtEnd = statementAnchorDate(stmtRows, stmtStatementDate);
         const { error } = await supabase
           .from("accounts")
           .update({ last_statement_amount: stmtClosingBalance, last_statement_date: stmtEnd })
@@ -390,13 +410,14 @@ export function useReconcile({ user, accountId, fromDate, toDate, ledgerRows, cu
     if (pdfBlobUrl) { URL.revokeObjectURL(pdfBlobUrl); setPdfBlobUrl(null); }
     setActive(false); setStmtRows([]); setKeptIds(new Set()); setIgnoredIds(new Set()); setPdfSource("");
     setExpandedIds(new Set()); setPendingRows({}); setStmtClosingBalance(null); setStmtOpeningBalance(null);
+    setStmtStatementDate(null);
     setManuallyUnmatched(new Set()); setLocalAdded([]);
     showToast("Reconcile completed");
-  }, [user, accountId, fromDate, stmtRows, stats, pdfSource, matched, accounts, stmtClosingBalance]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user, accountId, fromDate, stmtRows, stats, pdfSource, matched, accounts, stmtClosingBalance, stmtStatementDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return {
     active, stmtRows, processing, stats, pdfSource, pdfBlobUrl,
-    stmtClosingBalance, stmtOpeningBalance, fileRef,
+    stmtClosingBalance, stmtOpeningBalance, stmtStatementDate, fileRef,
     matched, missing: missingEnriched, extraIds, keptIds, ignoredIds,
     getStatus, markKept, markIgnored, unmatchLedgerRow, rematchLedgerRow, noteAdded,
     seedStmtRows, seedFullState,

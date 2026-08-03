@@ -149,6 +149,7 @@ export default function BankStatement({
       pdfSource: reconcile.pdfSource,
       stmtClosingBalance: reconcile.stmtClosingBalance,
       stmtOpeningBalance: reconcile.stmtOpeningBalance,
+      stmtStatementDate: reconcile.stmtStatementDate,
     } : null,
     onRestore: (s) => {
       reconcile.seedFullState(s);

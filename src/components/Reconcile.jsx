@@ -7,7 +7,7 @@ import { supabase } from "../lib/supabase";
 import { importDrafts } from "../lib/importDrafts";
 import { useReconcileDrafts } from "../lib/useReconcileDrafts";
 import { processReconcilePDF, matchDetectedAccount } from "../lib/reconcilePdfUpload";
-import { matchRows } from "./shared/ReconcileOverlay";
+import { matchRows, statementAnchorDate } from "./shared/ReconcileOverlay";
 import { reconcileApi } from "../api";
 import { fmtIDR } from "../utils";
 import { showToast } from "./shared/index";
@@ -196,7 +196,10 @@ export default function Reconcile({
       }
       if (acc.type === "credit_card" && st.stmtClosingBalance != null) {
         await supabase.from("accounts")
-          .update({ last_statement_amount: st.stmtClosingBalance, last_statement_date: dates[dates.length - 1] })
+          .update({
+            last_statement_amount: st.stmtClosingBalance,
+            last_statement_date: statementAnchorDate(st.stmtRows, st.stmtStatementDate),
+          })
           .eq("id", acc.id).eq("user_id", user.id);
       }
       await supabase.from("reconcile_sessions")

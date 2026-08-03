@@ -369,7 +369,9 @@ Return ONLY a valid JSON object (no markdown, no explanation) with this exact sc
   "detected_account": { "last4": "1234", "bank_name": "BCA", "account_no": "1234567890" },
   "detected_period": { "year": 2025, "month": 3 },
   "closing_balance": 5000000,
-  "opening_balance": 3000000
+  "opening_balance": 3000000,
+  "statement_date": "2025-03-21",
+  "due_date": "2025-04-06"
 }
 - detected_account: extracted from statement header (card last 4, bank name, account number). Set fields to null if not found. Set entire value to null if no account info present.
 - detected_period: statement month/year from header (e.g. March 2025 → year:2025, month:3). null if not found.
@@ -381,6 +383,9 @@ Return ONLY a valid JSON object (no markdown, no explanation) with this exact sc
   Labels to EXCLUDE as closing: Sisa Limit / Kredit Limit / Limit Gabungan / Sisa Penarikan /
   Pembayaran Minimum / Minimum Payment / BATAS KREDIT / SISA KREDIT.
 - opening_balance: the opening/previous balance (Saldo Awal / Saldo Bulan Lalu / TAGIHAN BULAN LALU / Opening Balance / Previous Balance) as a plain number. null if not shown.
+- statement_date: the date the statement was CUT/PRINTED, from the header — "Tgl. Cetak" / "Tanggal Cetak" / "Statement Date" / "Tanggal Tagihan" / "Posting Date" / "Print Date". Format "YYYY-MM-DD". This is NOT a transaction date: it is normally on or after the last transaction row. null if not shown.
+- due_date: the payment due date — "Tgl. Jatuh Tempo" / "Tanggal Jatuh Tempo" / "Payment Due Date" / "Due Date". Format "YYYY-MM-DD". null if not shown.
+  Both dates are often printed as DD-MM-YY (e.g. "21-07-26" = 2026-07-21, "06-08-26" = 2026-08-06) — convert to YYYY-MM-DD. Never swap day and month.
 If no transactions found, return the object with an empty transactions array.`;
 
 const FALLBACK_PROMPT = `This is a bank statement PDF. Extract every single transaction row from the transaction table.
@@ -412,13 +417,18 @@ Return ONLY a valid JSON object (no markdown) with this schema:
   "detected_account": { "last4": null, "bank_name": null, "account_no": null },
   "detected_period": { "year": 2025, "month": 3 },
   "closing_balance": null,
-  "opening_balance": null
+  "opening_balance": null,
+  "statement_date": null,
+  "due_date": null
 }
 currency: document currency ("IDR", "JPY", "USD", etc.) — always set this.
 direction: "out" for debits/expenses, "in" for credits received.
 amount: positive number in document currency (no dots/commas formatting).
 closing_balance: closing/ending balance from statement summary as a plain number, null if not shown.
 opening_balance: opening/previous balance as a plain number, null if not shown.
+statement_date: date the statement was cut/printed ("Tgl. Cetak" / "Statement Date"), "YYYY-MM-DD", null if not shown. Not a transaction date.
+due_date: payment due date ("Tgl. Jatuh Tempo" / "Payment Due Date"), "YYYY-MM-DD", null if not shown.
+Dates printed DD-MM-YY (e.g. "21-07-26") mean 2026-07-21 — convert, never swap day and month.
 IMPORTANT - Year detection rules:
 - If the document clearly shows a year, use that year
 - If no year is visible or it is ambiguous, use the current year (2026)
@@ -453,9 +463,25 @@ async function tryDecryptPDF(
   }
 }
 
+// Statement header dates (Tgl. Cetak / Jatuh Tempo) arrive as YYYY-MM-DD, but the
+// model occasionally echoes the printed DD-MM-YY form. Accept both, reject anything
+// else — a bad anchor date silently mis-reports what is due.
+function normStmtDate(v: any): string | null {
+  const s = String(v ?? "").trim();
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^(\d{2})[-/](\d{2})[-/](\d{2}|\d{4})$/);
+  if (m) {
+    const [, d, mo, y] = m;
+    if (Number(mo) < 1 || Number(mo) > 12 || Number(d) < 1 || Number(d) > 31) return null;
+    return `${y.length === 2 ? "20" + y : y}-${mo}-${d}`;
+  }
+  return null;
+}
+
 // ── HELPER: send PDF bytes to Claude, return extracted transactions ─
 type ClaudeResult =
-  | { ok: true;  transactions: any[]; closing_balance?: number | null; opening_balance?: number | null; detected_account?: any; detected_period?: any; }
+  | { ok: true;  transactions: any[]; closing_balance?: number | null; opening_balance?: number | null; statement_date?: string | null; due_date?: string | null; detected_account?: any; detected_period?: any; }
   | { ok: false; is_encrypted: true }
   | { ok: false; is_encrypted: false; error: string };
 
@@ -529,6 +555,8 @@ async function callClaude(pdfBase64: string, prompt: string, anthropicKey: strin
           transactions:     parsed.transactions,
           closing_balance:  parsed.closing_balance  ?? null,
           opening_balance:  parsed.opening_balance  ?? null,
+          statement_date:   normStmtDate(parsed.statement_date),
+          due_date:         normStmtDate(parsed.due_date),
           detected_account: parsed.detected_account ?? null,
           detected_period:  parsed.detected_period  ?? null,
         };
@@ -637,7 +665,7 @@ async function chunkAndProcessPDF(
   const fullDoc = await PDFDocument.load(bytes);
 
   // Track metadata: detected_account/period from first chunk, balances from last chunk that has them
-  let chunkMeta: { detected_account?: any; detected_period?: any; closing_balance?: number | null; opening_balance?: number | null } = {};
+  let chunkMeta: { detected_account?: any; detected_period?: any; closing_balance?: number | null; opening_balance?: number | null; statement_date?: string | null; due_date?: string | null } = {};
 
   for (let start = 0; start < pageCount; start += CHUNK_SIZE) {
     const end = Math.min(start + CHUNK_SIZE, pageCount);
@@ -661,6 +689,9 @@ async function chunkAndProcessPDF(
       if (!chunkMeta.detected_period  && chunkResult.detected_period)  chunkMeta.detected_period  = chunkResult.detected_period;
       if (chunkResult.closing_balance != null) chunkMeta.closing_balance = chunkResult.closing_balance;
       if (chunkResult.opening_balance != null) chunkMeta.opening_balance = chunkResult.opening_balance;
+      // Header dates live on page 1 — first chunk that reports them wins.
+      if (!chunkMeta.statement_date && chunkResult.statement_date) chunkMeta.statement_date = chunkResult.statement_date;
+      if (!chunkMeta.due_date && chunkResult.due_date) chunkMeta.due_date = chunkResult.due_date;
     } else if (chunkResult.is_encrypted) {
       return chunkResult; // Propagate encrypted signal
     } else {
@@ -892,6 +923,8 @@ async function extractUploadedPDF(serviceSupabase: any, userId: string, body: an
       detected_period:  claudeResult.detected_period  ?? metaInferred.detected_period,
       closing_balance:  claudeResult.closing_balance  ?? null,
       opening_balance:  claudeResult.opening_balance  ?? null,
+      statement_date:   claudeResult.statement_date   ?? null,
+      due_date:         claudeResult.due_date         ?? null,
     };
   }
   if (!claudeResult.is_encrypted) {
@@ -920,6 +953,8 @@ async function extractUploadedPDF(serviceSupabase: any, userId: string, body: an
           detected_period:  claudeResult.detected_period  ?? metaInferred.detected_period,
           closing_balance:  claudeResult.closing_balance  ?? null,
           opening_balance:  claudeResult.opening_balance  ?? null,
+          statement_date:   claudeResult.statement_date   ?? null,
+          due_date:         claudeResult.due_date         ?? null,
         };
       }
       return { success: false, needs_password: false, error: "PDF decrypted but no transactions could be extracted. It may be a scanned image." };
@@ -1078,6 +1113,18 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
   const pad = (d: string, days: number) => { const t = new Date(d + "T00:00:00"); t.setDate(t.getDate() + days); return t.toISOString().slice(0, 10); };
   const winStart = periodStart ? pad(periodStart, -7) : null;
   const winEnd = periodEnd ? pad(periodEnd, 7) : null;
+
+  // Anchor date for statement-based pending-due (accounts.last_statement_date).
+  // Payments printed ON the statement are ALREADY inside closing_balance, so the
+  // anchor must sit strictly after the last statement row; otherwise the app
+  // subtracts those payments a second time and a card with a real balance shows
+  // as paid. Prefer the statement's own cut date ("Tgl. Cetak"); fall back to the
+  // day after the last row when the header date is missing or looks wrong.
+  const stmtDate = normStmtDate(extraction.statement_date);
+  const dueDate = normStmtDate(extraction.due_date);
+  const anchorDate = stmtDate && (!periodEnd || stmtDate >= periodEnd)
+    ? stmtDate
+    : (periodEnd ? pad(periodEnd, 1) : null);
   const ledgerWindow = (ledAll || []).filter((l: any) => (!winStart || l.tx_date >= winStart) && (!winEnd || l.tx_date <= winEnd));
 
   const { match, missing, extra } = matchRowsSrv(stmtRows, ledgerWindow);
@@ -1095,6 +1142,7 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
     const state_json = {
       stmtRows, ignoredIds: [], pendingRows: {}, pdfSource: filename,
       stmtClosingBalance: stmtClosing, stmtOpeningBalance: extraction.opening_balance != null ? Number(extraction.opening_balance) : null,
+      stmtStatementDate: stmtDate, stmtDueDate: dueDate, stmtAnchorDate: anchorDate,
     };
     const { error } = await serviceSupabase.from("import_drafts").upsert(
       { user_id: userId, source: "reconcile", account_id: acc.id, state_json, updated_at: new Date().toISOString() },
@@ -1111,6 +1159,7 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
       user_id: userId, account_id: acc.id,
       period_year: pY, period_month: pM, period_start: periodStart, period_end: periodEnd,
       opening_balance: extraction.opening_balance ?? null, closing_balance: stmtClosing,
+      statement_date: stmtDate, due_date: dueDate,
       calculated_balance: ledgerClosing, status: "prepared", pdf_filename: filename,
       total_statement: stmtRows.length, total_match: match, total_missing: missing.length, total_extra: extra,
     });
