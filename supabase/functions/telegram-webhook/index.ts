@@ -930,7 +930,7 @@ function ymd(d: Date): string {
 async function getActiveAccounts(supabase: any, uid: string): Promise<any[]> {
   const { data, error } = await supabase
     .from("accounts")
-    .select("id, name, type, subtype, currency, current_balance, current_value, outstanding_amount, card_limit, due_day, entity, include_networth, monthly_installment, is_active")
+    .select("id, name, type, subtype, currency, current_balance, current_value, outstanding_amount, card_limit, due_day, statement_day, last_statement_amount, last_statement_date, entity, include_networth, monthly_installment, is_active")
     .eq("user_id", uid);
   if (error) { console.error("[cmd] accounts:", error); return []; }
   return (data || []).filter((a: any) => a.is_active !== false);
@@ -1091,10 +1091,63 @@ async function cmdDue(supabase: any, uid: string): Promise<string> {
   const now = jakartaNow();
   const today = now.getUTCDate();
   const num = (n: number) => Math.round(Number(n) || 0).toLocaleString("id-ID");
-  // cards with outstanding, sorted by days-to-due
-  const items = acc.filter((a) => a.type === "credit_card" && (Number(a.outstanding_amount) || 0) > 0 && a.due_day)
-    .map((a) => ({ name: a.name, amt: Number(a.outstanding_amount) || 0, due: a.due_day, days: (a.due_day - today + 31) % 31 }))
+  const dstr = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
+
+  // What is DUE is the last statement's bill minus payments since it was cut —
+  // NOT outstanding_amount, which also carries post-cutoff spending belonging to
+  // next month's bill. Same rule as payment-reminder; the two must agree.
+  const cards = acc.filter((a) => a.type === "credit_card");
+  const cardIds = cards.map((a) => a.id);
+  const floor = cards.reduce((min: string, a: any) =>
+    a.last_statement_date && a.last_statement_date < min ? a.last_statement_date : min,
+    dstr(new Date(now.getTime() - 62 * 86400000)));
+  let paysToCards: any[] = [], chargesOnCards: any[] = [];
+  if (cardIds.length) {
+    const [p, c] = await Promise.all([
+      supabase.from("ledger").select("to_id,amount_idr,tx_date")
+        .eq("user_id", uid).eq("to_type", "account").in("to_id", cardIds).gte("tx_date", floor),
+      supabase.from("ledger").select("from_id,amount_idr,tx_date")
+        .eq("user_id", uid).eq("from_type", "account").in("from_id", cardIds).gte("tx_date", floor),
+    ]);
+    paysToCards = p.data || []; chargesOnCards = c.data || [];
+  }
+  const lastCut = (statementDay: any): string | null => {
+    if (!statementDay) return null;
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), Number(statementDay)));
+    if (d > now) d.setUTCMonth(d.getUTCMonth() - 1);
+    return dstr(d);
+  };
+  const pendingDue = (a: any): number => {
+    if (a.last_statement_amount != null && a.last_statement_date) {
+      const paid = paysToCards
+        .filter((e) => e.to_id === a.id && e.tx_date >= a.last_statement_date)
+        .reduce((s: number, e: any) => s + Number(e.amount_idr || 0), 0);
+      return Math.max(0, Number(a.last_statement_amount) - paid);
+    }
+    // No statement on file: estimate from outstanding, excluding post-cutoff charges.
+    const os = Number(a.outstanding_amount) || 0;
+    if (os <= 0) return 0;
+    const cut = lastCut(a.statement_day);
+    if (!cut) return os;
+    const after = chargesOnCards
+      .filter((e) => e.from_id === a.id && e.tx_date > cut)
+      .reduce((s: number, e: any) => s + Number(e.amount_idr || 0), 0);
+    return Math.max(0, os - after);
+  };
+
+  // Bills this small carry a Rp0 minimum payment — the bank is not asking for
+  // money, so they only add noise. Same cut-off payment-reminder uses.
+  const DUE_MIN = 25000;
+  const cardState = cards.map((a) => ({ a, pend: pendingDue(a), os: Number(a.outstanding_amount) || 0 }));
+
+  const items = cardState.filter((c) => c.a.due_day && c.pend >= DUE_MIN)
+    .map((c) => ({ name: c.a.name, amt: c.pend, due: c.a.due_day, days: (c.a.due_day - today + 31) % 31 }))
     .sort((x, y) => x.days - y.days);
+  // Cards with nothing to pay this cycle but still carrying a real balance
+  // (post-cutoff spending) — surfaced so the debt is not invisible. Held to the
+  // same DUE_MIN cut-off, or the Rp0-minimum leftovers just come back as noise
+  // in a second list.
+  const carried = cardState.filter((c) => c.os >= DUE_MIN && c.pend < DUE_MIN);
   // liabilities with monthly installment
   for (const a of acc.filter((x) => x.type === "liability" && Number(x.monthly_installment) > 0)) {
     const dd = a.due_day || null;
@@ -1110,8 +1163,9 @@ async function cmdDue(supabase: any, uid: string): Promise<string> {
   const paidSet = (mLed || []).map((r: any) => normB(r.description));
   const isPaid = (name: string) => { const n = normB(name).slice(0, 8); return n.length >= 4 && paidSet.some((d: string) => d.includes(n)); };
 
-  if (!items.length && !bills.length) return "🗓 <b>JATUH TEMPO</b>\n\nTidak ada tagihan aktif. 🎉";
+  if (!items.length && !bills.length && !carried.length) return "🗓 <b>JATUH TEMPO</b>\n\nTidak ada tagihan aktif. 🎉";
   let out = "🗓 <b>JATUH TEMPO BILLING</b>\n\n💳 <b>Kartu & cicilan</b>\n";
+  if (!items.length) out += "\n<i>Tidak ada tagihan kartu yang jatuh tempo.</i>\n";
   let tot7 = 0;
   for (const it of items) {
     const when = it.days === 0 ? "HARI INI ‼️" : it.days === 1 ? "besok ⚠️" : it.days <= 3 ? `${it.days} hari lagi ⚠️` : `${it.days} hari lagi`;
@@ -1127,6 +1181,12 @@ async function cmdDue(supabase: any, uid: string): Promise<string> {
       out += `\n<b>tgl ${b.due}</b> — ${status}\n${esc(b.name)}\n${b.amt > 0 ? `<b>Rp${num(b.amt)}</b>` : "<i>nilai belum pasti</i>"}\n`;
       if (!b.paid && b.days <= 7) tot7 += b.amt;
     }
+  }
+  if (carried.length) {
+    const totCarried = carried.reduce((s, c) => s + c.os, 0);
+    out += `\n💤 <b>Belum ditagih</b> <i>(masuk tagihan berikutnya)</i>\n`;
+    for (const c of carried) out += `\n${esc(c.a.name)}\n<b>Rp${num(c.os)}</b>\n`;
+    out += `\nSubtotal: <b>Rp${num(totCarried)}</b>\n`;
   }
   out += `\n━━━━━━━━━━━━━━━\n💸 Perlu disiapkan ≤7 hari: <b>Rp${num(tot7)}</b>`;
   return out;
