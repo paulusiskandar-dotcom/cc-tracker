@@ -416,18 +416,19 @@ export default function Receivables({
     return map;
   }, [ledger]);
 
-  // Per-loan: outstanding based on paid_months × monthly_installment
+  // Per-loan: outstanding from the LEDGER's tagged collect_loan rows — every one is
+  // a real dated bank transaction. paid_months × monthly_installment was used here
+  // before and drifted: Lieche's Aug-2026 restructure reset paid_months to 0 while
+  // total_amount stayed gross, showing 138.127.083 instead of the contracted
+  // 125.327.083, and four other loans disagreed with the ledger too.
   const loansWithStats = useMemo(() => {
     return employeeLoans.map(loan => {
-      const paidMonths   = Number(loan.paid_months || 0);
-      const monthly      = Number(loan.monthly_installment || 0);
       const total        = Number(loan.total_amount || 0);
-      const paidSoFar    = paidMonths * monthly;
-      const remaining    = Math.max(0, total - paidSoFar);
-      // Ledger-based payment history (employee_loan_id link)
       const ledgerPays   = ledger
         .filter(e => e.employee_loan_id === loan.id && e.tx_type === "collect_loan")
         .sort((a, b) => (a.tx_date || "").localeCompare(b.tx_date || ""));
+      const paidSoFar    = ledgerPays.reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
+      const remaining    = Math.max(0, total - paidSoFar);
       return { ...loan, paidSoFar, remaining, ledgerPays };
     });
   }, [employeeLoans, ledger]);
@@ -1310,7 +1311,11 @@ export default function Receivables({
                 const remaining = loan.remaining;
                 const monthly   = Number(loan.monthly_installment || 0);
                 const isSettled = loan.status === "settled" || remaining <= 0;
-                const totalMo   = total > 0 && monthly > 0 ? Math.ceil(total / monthly) : 0;
+                // Prefer the contracted tenor; total/monthly overstates it whenever
+                // total_amount is gross of an earlier contract (Lieche: 47 vs 42).
+                const totalMo   = Number(loan.tenor_months) > 0
+                  ? Number(loan.tenor_months)
+                  : (total > 0 && monthly > 0 ? Math.ceil(total / monthly) : 0);
                 const paidMo    = monthly > 0 ? Math.floor(paid / monthly) : 0;
                 const pct       = totalMo > 0 ? Math.min(100, (paidMo / totalMo) * 100) : 0;
                 const accentColor = isSettled ? "#059669" : "#d97706";

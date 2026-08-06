@@ -158,12 +158,18 @@ export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], 
     }, 0);
   liabilities += installmentDebt;
 
+  // Repayments come from the LEDGER (collect_loan rows tagged with employee_loan_id),
+  // not employee_loans.paid_months and not the employee_loan_payments table. Those
+  // two are counters that drift — after Lieche's Aug-2026 restructure paid_months was
+  // reset to 0 while total_amount stayed gross, and the three sources disagreed on
+  // four other loans. The ledger is the only record where every repayment is an
+  // actual dated bank transaction, so it is what net worth must follow.
   const employeeLoanTotal = employeeLoans
     .filter(l => l.status !== "settled")
     .reduce((sum, l) => {
-      const paid = loanPayments
-        .filter(p => p.loan_id === l.id)
-        .reduce((s, p) => s + Number(p.amount || 0), 0);
+      const paid = (ledger || [])
+        .filter(e => e.employee_loan_id === l.id && e.tx_type === "collect_loan")
+        .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
       return sum + Math.max(0, Number(l.total_amount || 0) - paid);
     }, 0);
 
