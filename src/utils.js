@@ -405,40 +405,31 @@ export const autoCategorize = ({
     // Layer 1b — same shop, different terminal. QRIS/EDC strings carry outlet and
     // terminal codes ("MOCHI MOCHIO AK-002", "GAGA MKG 3QR", "XXI NSR JAKARTA
     // PUSAT"), so exact equality treats every terminal as an unknown merchant and
-    // the same shop has to be taught over and over. Compare stems with those codes
-    // stripped, accept a whole-word prefix either way, and prefer the longest (most
-    // specific) mapping so "hay thien, mangga besar" wins over "hay thien".
+    // the same shop has to be taught again for each one. Compare stems with those
+    // codes stripped and accept a whole-word prefix either way.
+    //
+    // This is deliberately loose. Both callers (Email.jsx, AIImport.jsx) only use
+    // the result to PREFILL a dropdown the user reviews before approving, so a
+    // wrong guess costs one correction while a missing one costs retyping. The
+    // longest (most specific) mapping wins, then the most-confirmed one; a generic
+    // marketplace stem like "tokopedia" therefore yields to "tokopedia jakarta"
+    // when that exists. Reimburse ENTITY is decided separately and is never
+    // inferred here — that rule is untouched.
     const key = _merchantKey(merchantName);
     if (key.length >= MERCHANT_KEY_MIN) {
       const near = merchantMappings
         .filter(x => x.tx_type === txType && x.category_id)
         .map(x => ({ x, k: _merchantKey(x.merchant_name) }))
-        // A one-word stem is a marketplace or payment rail, not a shop: "tokopedia",
-        // "shopee", "google", "dana qr" cover anything you can buy, and Tokopedia in
-        // particular must never be auto-tagged. Spreading their category to every
-        // variant would be a guess. Two words or more means an actual outlet.
-        .filter(({ k }) => k.length >= MERCHANT_KEY_MIN && k.includes(" ")
-          && (_prefixWord(key, k) || _prefixWord(k, key)))
+        .filter(({ k }) => k.length >= MERCHANT_KEY_MIN && (_prefixWord(key, k) || _prefixWord(k, key)))
         .sort((a, b) => b.k.length - a.k.length
           || (Number(b.x.confidence) || 0) - (Number(a.x.confidence) || 0));
-      // A stem that already fans out into several different taught merchants is a
-      // payment rail or marketplace family ("dana qr <shop>"), not a shop itself,
-      // so generalising from it would guess the shop's category.
-      const allKeys = merchantMappings.map(x => _merchantKey(x.merchant_name));
-      const isFamily = (k) => allKeys.filter(o => o !== k && _prefixWord(o, k)).length >= 2;
-      const usable = near.filter(({ k }) => k.length >= key.length || !isFamily(k));
-      // If the user's own history disagrees about this stem, it is not settled —
-      // leave it to the AI and the review queue rather than picking a side.
-      const cats = new Set(usable.map(({ x }) => x.category_id));
-      if (cats.size === 1) {
-        for (const { x } of usable) {
-          const cat = userCategories.find(c => c.id === x.category_id);
-          if (cat) {
-            return {
-              id: cat.id, name: cat.name, source: "merchant",
-              confidence: Math.max(60, (Number(x.confidence) || 90) - 10),
-            };
-          }
+      for (const { x } of near) {
+        const cat = userCategories.find(c => c.id === x.category_id);
+        if (cat) {
+          return {
+            id: cat.id, name: cat.name, source: "merchant",
+            confidence: Math.max(50, (Number(x.confidence) || 90) - 20),
+          };
         }
       }
     }
