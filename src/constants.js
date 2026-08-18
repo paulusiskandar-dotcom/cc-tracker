@@ -20,8 +20,11 @@ export const CURRENCIES = [
 ];
 
 // ─── ENTITIES ─────────────────────────────────────────────────
-export const ENTITIES = ["Personal", "Hamasa", "SDC", "Travelio"];
-export const REIMBURSE_ENTITIES = ["Hamasa", "SDC", "Travelio"];
+export const ENTITIES = ["Personal", "Hamasa", "SDC"];
+// Personal is a reimburse entity too: money fronted for an individual (a partner's
+// share of a payout, someone else's bill) passes through Paulus's account without
+// being his income or his spending. Travelio was never used and has no ledger rows.
+export const REIMBURSE_ENTITIES = ["Hamasa", "SDC", "Personal"];
 
 // ─── ACCOUNT TYPES ────────────────────────────────────────────
 export const ACC_TYPE_LABEL = {

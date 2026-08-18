@@ -8,7 +8,7 @@ import TxVerticalBig from "../components/shared/TxVerticalBig";
 import * as XLSX from "xlsx";
 
 const FF    = "Figtree, sans-serif";
-const VALID = ["Hamasa", "SDC", "Travelio"];
+const VALID = ["Hamasa", "SDC", "Personal"];
 const COLS  = "90px 1fr 100px 130px 130px 140px";
 const RP    = "0 14px";
 

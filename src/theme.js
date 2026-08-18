@@ -117,12 +117,10 @@ export const ENT_COL = {
   Personal: "#3b5bdb",
   Hamasa:   "#059669",
   SDC:      "#d97706",
-  Travelio: "#0891b2",
 };
 
 export const ENT_BG = {
   Personal: "#dbeafe",
   Hamasa:   "#dcfce7",
   SDC:      "#fef3c7",
-  Travelio: "#cffafe",
 };

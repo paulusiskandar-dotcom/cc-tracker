@@ -282,7 +282,6 @@ function Finance({ user, signOut }) {
       const defaults = [
         { name: "Piutang Hamasa",   entity: "Hamasa"   },
         { name: "Piutang SDC",      entity: "SDC"      },
-        { name: "Piutang Travelio", entity: "Travelio" },
       ];
       try {
         const created = await Promise.all(defaults.map(d =>

@@ -1016,6 +1016,35 @@ function matchDetectedAccountSrv(detected: any, accounts: any[]): any {
 // back to the header-detected last4/account_no/bank_name.
 function resolveStatementAccount(detected: any, txs: any[], accounts: any[]): any {
   const active = (accounts || []).filter((a: any) => a.is_active !== false);
+  const digits = (v: any) => String(v ?? "").replace(/\D/g, "");
+
+  // 1) The account NUMBER is the strongest signal, and it must outrank card_last4.
+  //    A bank statement can print a credit card in its summary — Danamon's "Laporan
+  //    Rekening Gabungan" lists the JCB card next to the savings account — and the
+  //    parser then stamps that last4 onto the transaction rows, routing a savings
+  //    statement onto the card (bill Rp7.500 vs balance Rp5.769.477).
+  const accNo = digits(detected?.account_no);
+  if (accNo.length >= 6) {
+    const byNo = active.filter((a: any) => {
+      const d = digits(a.account_no);
+      return d.length >= 6 && d === accNo;
+    });
+    if (byNo.length === 1) return byNo[0];
+    if (byNo.length > 1) {
+      // One account number, several currency pockets (BCA runs IDR + 6 valas pockets
+      // under 0831361688). Split them by the currency the transactions are in.
+      const tally: Record<string, number> = {};
+      for (const t of (txs || [])) {
+        const c = String(t?.currency || "IDR").toUpperCase();
+        tally[c] = (tally[c] || 0) + 1;
+      }
+      const cur = Object.keys(tally).sort((a, b) => tally[b] - tally[a])[0] || "IDR";
+      const byCur = byNo.filter((a: any) => String(a.currency || "IDR").toUpperCase() === cur);
+      if (byCur.length === 1) return byCur[0];
+    }
+  }
+
+  // 2) Card last4 printed on the transaction rows.
   const last4s = [...new Set((txs || []).map((t: any) => t.card_last4 ? String(t.card_last4) : null).filter(Boolean))];
   const byCard = [...new Set(
     last4s.map((l4) => active.find((a: any) => a.card_last4 && String(a.card_last4) === l4)).filter(Boolean),
@@ -1054,6 +1083,36 @@ function matchRowsSrv(stmtRows: any[], ledgerRows: any[]): { match: number; miss
     }
     if (bestIdx >= 0 && bestScore >= 2) { match++; matchedStmtIds.add(s._id); usedL.add(bestIdx); }
   }
+  // Second pass: one statement line can be several ledger rows (a joint payout booked
+  // as own income + partner's share). Keep in sync with matchRows in ReconcileOverlay.
+  for (const s of stmtRows) {
+    if (matchedStmtIds.has(s._id)) continue;
+    const target = Math.abs(Number(s.amount || 0));
+    if (!target) continue;
+    const cand: { li: number; amt: number }[] = [];
+    for (let li = 0; li < ledgerRows.length; li++) {
+      if (usedL.has(li)) continue;
+      const l = ledgerRows[li];
+      const dayDiff = Math.abs((new Date((s.date || "") + "T00:00:00").getTime() - new Date((l.tx_date || "") + "T00:00:00").getTime()) / 86400000);
+      if (dayDiff <= 3) cand.push({ li, amt: Math.abs(Number(l.amount_idr || l.amount || 0)) });
+    }
+    if (cand.length < 2) continue;
+    let combo: { li: number; amt: number }[] | null = null;
+    for (let i = 0; i < cand.length && !combo; i++) {
+      for (let j = i + 1; j < cand.length && !combo; j++) {
+        if (Math.abs(cand[i].amt + cand[j].amt - target) <= 100) { combo = [cand[i], cand[j]]; break; }
+        for (let k = j + 1; k < cand.length; k++) {
+          if (Math.abs(cand[i].amt + cand[j].amt + cand[k].amt - target) <= 100) { combo = [cand[i], cand[j], cand[k]]; break; }
+        }
+      }
+    }
+    if (combo) {
+      for (const c of combo) usedL.add(c.li);
+      matchedStmtIds.add(s._id);
+      match++;
+    }
+  }
+
   const missing = stmtRows.filter((s) => !matchedStmtIds.has(s._id));
   const extra = ledgerRows.length - usedL.size;
   return { match, missing, extra };

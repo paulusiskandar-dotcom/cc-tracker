@@ -69,6 +69,38 @@ export function matchRows(stmtRows, ledgerRows) {
     }
   }
 
+  // Second pass: one statement line can legitimately be SEVERAL ledger rows. A joint
+  // dividend lands as one bank credit but is booked as the owner's income plus the
+  // partner's share held for them, so no single row carries the statement amount.
+  // Try small combinations of leftover rows dated near the statement line.
+  const matchedStmtIds0 = new Set([...matched.values()].map(s => s._id));
+  for (const s of stmtRows) {
+    if (matchedStmtIds0.has(s._id)) continue;
+    const target = Math.abs(Number(s.amount || 0));
+    if (!target) continue;
+    const cand = [];
+    for (let li = 0; li < ledgerRows.length; li++) {
+      if (usedL.has(li)) continue;
+      const l = ledgerRows[li];
+      const dayDiff = Math.abs((new Date((s.date || "") + "T00:00:00") - new Date((l.tx_date || "") + "T00:00:00")) / 86400000);
+      if (dayDiff <= 3) cand.push({ li, amt: Math.abs(Number(l.amount_idr || l.amount || 0)) });
+    }
+    if (cand.length < 2) continue;
+    let combo = null;
+    for (let i = 0; i < cand.length && !combo; i++) {
+      for (let j = i + 1; j < cand.length && !combo; j++) {
+        if (Math.abs(cand[i].amt + cand[j].amt - target) <= 100) { combo = [cand[i], cand[j]]; break; }
+        for (let k = j + 1; k < cand.length; k++) {
+          if (Math.abs(cand[i].amt + cand[j].amt + cand[k].amt - target) <= 100) { combo = [cand[i], cand[j], cand[k]]; break; }
+        }
+      }
+    }
+    if (combo) {
+      for (const c of combo) { matched.set(ledgerRows[c.li].id, s); usedL.add(c.li); }
+      matchedStmtIds0.add(s._id);
+    }
+  }
+
   // Unmatched stmt rows = missing
   const matchedStmtIds = new Set([...matched.values()].map(s => s._id));
   const missing = stmtRows.filter(s => !matchedStmtIds.has(s._id));

@@ -355,7 +355,7 @@ export default function Dashboard({
     });
   }, [employeeLoans, loanPayments]);
 
-  const RE_CAT_NAMES = { Hamasa: "Hamasa RE", SDC: "SDC RE", Travelio: "Travelio RE" };
+  const RE_CAT_NAMES = { Hamasa: "Hamasa RE", SDC: "SDC RE", Personal: "Personal RE" };
 
   // ── UNIFIED UPCOMING ITEMS (next 14 days, max 10) ─────────────
   const upcomingItems = useMemo(() => {

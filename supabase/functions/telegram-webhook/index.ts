@@ -47,7 +47,7 @@ Return a JSON array of transactions. Most messages contain ONE transaction, but 
   "is_transfer": boolean (true if transfer between accounts),
   "is_cc_payment": boolean (true if credit card bill payment),
   "suggested_category": string (e.g. "Salary" for income, "Food & Drink", "Transport", "Shopping" for expense, "Bank Charges", "Other Income"),
-  "suggested_entity": "Personal" | "Hamasa" | "SDC" | "Travelio" (default "Personal" unless context suggests otherwise),
+  "suggested_entity": "Personal" | "Hamasa" | "SDC" (default "Personal" unless context suggests otherwise),
   "suggested_tx_type": "expense" | "income" | "transfer" | "pay_cc" | "reimburse_in" | "reimburse_out" (default "income" if KREDIT/in, "expense" if DEBET/out),
   "confidence": number 0-1 (0.95 if very clear, 0.7 if some ambiguity),
   "reasoning": string (1 sentence why)
@@ -1250,7 +1250,7 @@ async function cmdStatements(supabase: any, uid: string): Promise<string> {
 
 // ── #1 SETTLE REIMBURSE from Telegram (preview + confirm) ──
 const REIMBURSE_ENTITY = (s: string): string | null =>
-  /\bsdc\b/i.test(s) ? "SDC" : /hamasa/i.test(s) ? "Hamasa" : /travelio/i.test(s) ? "Travelio" : null;
+  /\bsdc\b/i.test(s) ? "SDC" : /hamasa/i.test(s) ? "Hamasa" : /pribadi|personal/i.test(s) ? "Personal" : null;
 
 async function unsettledFor(supabase: any, uid: string, entity: string) {
   const { data } = await supabase.from("ledger")
@@ -1848,7 +1848,6 @@ function classifyText(s: string) {
   const entity =
     /\bsdc\b/.test(s) ? "SDC" :
     /hamasa/.test(s) ? "Hamasa" :
-    /travelio/.test(s) ? "Travelio" :
     (/pribadi|personal|expense|income|pengeluaran|pemasukan/.test(s) ? "Personal" : null);
   const category = matchCategory(s);
   const forceIn = /\b(in|masuk|pemasukan|income)\b/.test(s);
@@ -1904,7 +1903,6 @@ async function handleTextCorrection(text: string, supabase: any, uid: string, bo
   const entity =
     /\bsdc\b/.test(s) ? "SDC" :
     /hamasa/.test(s) ? "Hamasa" :
-    /travelio/.test(s) ? "Travelio" :
     (/pribadi|personal|expense|income|pengeluaran|pemasukan/.test(s) ? "Personal" : null);
   const category = matchCategory(s);
   const nrm = (x: any) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -2597,7 +2595,7 @@ const QA_TOOLS = [
         date_to:   { type: "string", description: "YYYY-MM-DD (opsional)" },
         tx_types:  { type: "array", items: { type: "string" }, description: "mis. ['expense'] / ['reimburse_out']. Kosong = semua." },
         category:  { type: "string", description: "nama kategori partial, mis. 'Travel','Food'" },
-        entity:    { type: "string", description: "'Hamasa','SDC','Travelio','Personal'" },
+        entity:    { type: "string", description: "'Hamasa','SDC','Personal'" },
         search:    { type: "string", description: "kata kunci di deskripsi/merchant, mis. 'grab','tokyo'" },
         group_by:  { type: "string", enum: ["none", "category", "month", "entity", "tx_type"] },
         metric:    { type: "string", enum: ["sum", "count", "avg"] },
