@@ -2,6 +2,10 @@ import { supabase } from "./supabase";
 
 const normalize = s => (s || "").toLowerCase().replace(/[^a-z0-9\s]/g, "").trim();
 
+// How far back to recreate missed reminders. Old cycles are history, not a to-do
+// list — anything older has already been settled or deliberately dismissed.
+const BACKFILL_MONTHS = 2;
+
 /**
  * Generate recurring_reminders rows for any due date that has passed without
  * a confirmed or skipped reminder. Called on app load so the sidebar overdue
@@ -27,9 +31,14 @@ export async function generateMissingReminders(userId, templates, existingRemind
     const freq = (tpl.frequency || "Monthly").toLowerCase();
     if (!["monthly", "weekly", "yearly", "annual"].includes(freq)) continue;
 
-    // Start from the month when the template was created
-    const origin = new Date(tpl.created_at || tpl.start_date || todayIso);
-    let cursor   = new Date(origin.getFullYear(), origin.getMonth(), tpl.day_of_month);
+    // Start from the month the template was created, but never walk back further
+    // than BACKFILL_MONTHS. Without that floor this regenerates every due date since
+    // the template existed, so a reminder that was deleted or dismissed reappears as
+    // pending on the next app load and the Upcoming list only ever grows.
+    const created = new Date(tpl.created_at || tpl.start_date || todayIso);
+    const floor   = new Date(today.getFullYear(), today.getMonth() - BACKFILL_MONTHS, 1);
+    const origin  = created > floor ? created : floor;
+    let cursor    = new Date(origin.getFullYear(), origin.getMonth(), tpl.day_of_month);
 
     // If the first cursor is before the origin date, step forward one period
     if (cursor < origin) {
@@ -52,7 +61,11 @@ export async function generateMissingReminders(userId, templates, existingRemind
   }
 
   if (toInsert.length > 0) {
-    const { error } = await supabase.from("recurring_reminders").insert(toInsert);
+    // The in-memory existingReminders list can be stale (loaded before another tab
+    // or a script touched the table), so the check above is not enough on its own —
+    // let the DB's unique index settle it and drop anything already there.
+    const { error } = await supabase.from("recurring_reminders")
+      .upsert(toInsert, { onConflict: "user_id,template_id,due_date", ignoreDuplicates: true });
     if (error) console.warn("[generateMissingReminders]", error.message);
   }
   return toInsert.length;
