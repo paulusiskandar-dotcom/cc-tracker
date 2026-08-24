@@ -578,8 +578,18 @@ function ReviewInbox({ items, readyCards = [], user, accounts, categories, incom
   // Reimburse whitelist (Paulus rule): these always front Hamasa money, so the
   // entity dropdown starts on Hamasa instead of Personal. The dropdown IS the
   // reimburse control — picking Hamasa/SDC books the row as reimburse_out.
+  // Paulus's model (2026-08-24): every EXPENSE is Personal by definition — an
+  // "expense for Hamasa" does not exist; if someone else ultimately bears it,
+  // it is not an expense at all but a reimbursement, and only THEN does the
+  // entity question arise (Hamasa / SDC / Personal-as-a-person, e.g. fronting
+  // Henny's tax). So the control is expense-vs-reimburse first, entity second.
   const HAMASA_RE = /lazada|blibli|global digital|xendi|digitalocean|allianz/i;
-  const waFor = (it) => HAMASA_RE.test(it.stmt.description || it.stmt.merchant || "") ? "Hamasa" : "Personal";
+  const modeFor = (it) => {
+    const k = keyOf(it);
+    if (edits[k]?.mode !== undefined) return edits[k].mode;
+    return HAMASA_RE.test(it.stmt.description || it.stmt.merchant || "") ? "r-Hamasa" : "expense";
+  };
+  const entityOf = (mode) => mode === "expense" ? "Personal" : mode.slice(2);
 
   // Installment leg counter: "CICILAN BCA KE 2 DARI 3", "TOKOPEDIA_CYBS_CCL12 : 7/12".
   // Two legs of the same plan share an amount by construction, so the counter —
@@ -660,15 +670,15 @@ function ReviewInbox({ items, readyCards = [], user, accounts, categories, incom
       txType: "expense", aiSuggestedName: it.stmt.suggested_category, merchantMappings: merchantMaps, userCategories: categories });
     return guess?.id && guess.name !== "Other" ? guess.id : "";
   };
-  const entFor = (it) => edits[keyOf(it)]?.entity ?? waFor(it);
   const setEdit = (it, field, val) => setEdits(p => ({ ...p, [keyOf(it)]: { ...p[keyOf(it)], [field]: val } }));
 
   const accept = async (it) => {
     const k = keyOf(it); setBusy(k);
     try {
       const isCredit = it.stmt.direction === "in";
-      const entity = entFor(it);
-      const isReimb = !isCredit && entity && entity !== "Personal";
+      const mode = isCredit ? "expense" : modeFor(it);
+      const isReimb = !isCredit && mode !== "expense";
+      const entity = entityOf(mode);
       const amt = Math.abs(Number(it.stmt.amount || 0));
       const entry = {
         tx_date: it.stmt.date, description: it.stmt.description || it.stmt.merchant || "",
@@ -678,7 +688,7 @@ function ReviewInbox({ items, readyCards = [], user, accounts, categories, incom
         from_id: isCredit ? null : it.acc.id,
         to_type: isCredit ? "account" : "expense",
         to_id: isCredit ? it.acc.id : null,
-        category_id: isCredit ? null : (catFor(it) || null),
+        category_id: (isCredit || isReimb) ? null : (catFor(it) || null),
         entity: entity || "Personal",
         notes: "Reconcile review — statement " + (it.stmt._sourceFile || ""),
       };
@@ -754,25 +764,30 @@ function ReviewInbox({ items, readyCards = [], user, accounts, categories, incom
           </div>
           {rows.map((it) => {
             const k = keyOf(it), b = busy === k, credit = it.stmt.direction === "in";
-            const dup = dupOf(it); const reimb = !credit && entFor(it) !== "Personal";
+            const dup = dupOf(it); const mode = credit ? "expense" : modeFor(it); const reimb = mode !== "expense";
             return (
               <div key={k} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid #f3f4f6", flexWrap: "wrap", background: dup ? "#fef2f2" : undefined }}>
                 <span style={{ fontSize: 11, color: "#9ca3af", width: 46 }}>{fmtDate(it.stmt.date)}</span>
                 <div style={{ flex: 1, minWidth: 160, fontSize: 13, color: "#111827", fontWeight: 600 }}>
                   {it.stmt.description || it.stmt.merchant}
                   {dup && <span style={{ ...CHIP("#fee2e2", "#dc2626"), marginLeft: 8 }}>⚠ mungkin sudah ada ({fmtDate(dup.tx_date)})</span>}
-                  {reimb && !dup && <span style={{ ...CHIP("#fef3c7", "#b45309"), marginLeft: 8 }}>reimburse {entFor(it)}</span>}
+                  {reimb && !dup && <span style={{ ...CHIP("#fef3c7", "#b45309"), marginLeft: 8 }}>reimburse {entityOf(mode)}</span>}
                   {!dup && waitingTwin(it) && <span style={{ ...CHIP("#ede9fe", "#7c3aed"), marginLeft: 8 }}>⏳ menutup item waiting</span>}
                 </div>
                 {!credit && (
+                  <select value={mode} onChange={e => setEdit(it, "mode", e.target.value)} style={SEL}>
+                    <option value="expense">Expense</option>
+                    <option value="r-Hamasa">Reimburse · Hamasa</option>
+                    <option value="r-SDC">Reimburse · SDC</option>
+                    <option value="r-Personal">Reimburse · Personal</option>
+                  </select>
+                )}
+                {!credit && !reimb && (
                   <select value={catFor(it)} onChange={e => setEdit(it, "category_id", e.target.value)} style={{ ...SEL, minWidth: 120 }}>
                     <option value="">Category…</option>
                     {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                 )}
-                <select value={entFor(it)} onChange={e => setEdit(it, "entity", e.target.value)} style={SEL}>
-                  {["Personal", "Hamasa", "SDC"].map(x => <option key={x} value={x}>{x}</option>)}
-                </select>
                 <span style={{ fontSize: 13, fontWeight: 800, color: credit ? "#059669" : "#dc2626", width: 110, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
                   {credit ? "+" : "−"}{fmtIDR(Math.abs(Number(it.stmt.amount || 0)))}
                 </span>
