@@ -438,10 +438,32 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     };
     const dupIds = new Set((pendingSyncs || []).filter(isLedgerDup).map(s => s.id));
 
+    // Categories, income sources and merchant maps load independently of
+    // pendingSyncs. Whichever arrives first wins the race, so this must be able to
+    // run again later — otherwise rows built during the gap keep an empty category
+    // dropdown for good, even though the AI did suggest one.
+    const fillCategory = (row) => {
+      if (row.category_id || row._transferSuggest || GMAIL_NO_CAT.has(row.tx_type)) return row;
+      if (!row.suggested_category_label && !row.description) return row;
+      const lookup = autoCategorize({
+        merchantName:     row.description,
+        txType:           row.tx_type,
+        aiSuggestedName:  row.suggested_category_label,
+        merchantMappings: merchantMaps,
+        userCategories:   row.tx_type === "income" ? incomeSrcs : categories,
+      });
+      if (lookup?.id && lookup?.name && lookup.name !== "Other") {
+        return { ...row, category_id: lookup.id, category_name: lookup.name, _aiCat: true };
+      }
+      return row;
+    };
+
     setRows(prev => {
       const prevMap = new Map(prev.map(r => [r._id, r]));
       const built = (pendingSyncs || []).map(s => {
-        if (prevMap.has(s.id)) return prevMap.get(s.id);
+        // Keep the row the user may already have edited, but top up a category
+        // that is still blank now that the lists are loaded.
+        if (prevMap.has(s.id)) return fillCategory(prevMap.get(s.id));
         let row = applyMerchantRule(syncToRow(s));
         if (dupIds.has(s.id)) row = { ...row, _dup: true };
         // FX estimate: foreign-currency tx usually arrive with amount_idr == raw foreign
@@ -488,20 +510,10 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
             if (dest) row = { ...row, tx_type: "transfer", to_id: dest.id, category_id: null, category_name: null, _transferSuggest: dest.name };
           }
         }
-        // Prefill the category dropdown from the AI's suggestion (was only applied
-        // invisibly at import time via buildEntry — user couldn't see/correct it).
-        if (!row.category_id && !row._transferSuggest && !GMAIL_NO_CAT.has(row.tx_type) && row.suggested_category_label) {
-          const lookup = autoCategorize({
-            merchantName:     row.description,
-            txType:           row.tx_type,
-            aiSuggestedName:  row.suggested_category_label,
-            merchantMappings: merchantMaps,
-            userCategories:   row.tx_type === "income" ? incomeSrcs : categories,
-          });
-          if (lookup?.id && lookup?.name && lookup.name !== "Other") {
-            row = { ...row, category_id: lookup.id, category_name: lookup.name, _aiCat: true };
-          }
-        }
+        // Prefill the category dropdown from the merchant mapping / AI suggestion
+        // (was only applied invisibly at import time via buildEntry — user couldn't
+        // see or correct it).
+        row = fillCategory(row);
         return row;
       });
       return enrichTransfers(built);
@@ -512,7 +524,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       (pendingSyncs || []).forEach(s => { next[s.id] = s.id in prev ? prev[s.id] : !dupIds.has(s.id); });
       return next;
     });
-  }, [pendingSyncs]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pendingSyncs, categories, incomeSrcs, merchantMaps]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const enrichTransfers = (items) => {
     const pairs = detectTransferPairs(items, accounts, ledger || []);
