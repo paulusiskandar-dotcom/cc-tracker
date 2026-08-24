@@ -573,6 +573,28 @@ function ReviewInbox({ items, user, accounts, categories, incomeSrcs, merchantMa
   }, [items]);
 
   const keyOf = (it) => `${it.acc.id}|${it.stmt._id}`;
+
+  // Reimburse whitelist (Paulus rule): these always front Hamasa money, so the
+  // entity dropdown starts on Hamasa instead of Personal. The dropdown IS the
+  // reimburse control — picking Hamasa/SDC books the row as reimburse_out.
+  const HAMASA_RE = /lazada|blibli|global digital|xendi|digitalocean|allianz/i;
+  const waFor = (it) => HAMASA_RE.test(it.stmt.description || it.stmt.merchant || "") ? "Hamasa" : "Personal";
+
+  // Duplicate guard: matchRows only looks ±3 days, so a charge already in the
+  // ledger at a shifted date (recurring Blibli lands 2–3 weeks late, sometimes on
+  // another card) still shows as "missing" and could be double-entered. Flag any
+  // leftover whose exact amount already sits in the ledger within ±40 days.
+  const dupOf = (it) => {
+    const amt = Math.abs(Number(it.stmt.amount || 0));
+    if (!amt) return null;
+    const d0 = new Date((it.stmt.date || "") + "T00:00:00");
+    return (ledger || []).find(l => {
+      if (Math.abs(Math.abs(Number(l.amount_idr || 0)) - amt) > 1) return false;
+      const dl = new Date((l.tx_date || "") + "T00:00:00");
+      return Math.abs((d0 - dl) / 86400000) <= 40;
+    }) || null;
+  };
+
   const catFor = (it) => {
     const k = keyOf(it);
     if (edits[k]?.category_id !== undefined) return edits[k].category_id;
@@ -580,7 +602,7 @@ function ReviewInbox({ items, user, accounts, categories, incomeSrcs, merchantMa
       txType: "expense", aiSuggestedName: it.stmt.suggested_category, merchantMappings: merchantMaps, userCategories: categories });
     return guess?.id && guess.name !== "Other" ? guess.id : "";
   };
-  const entFor = (it) => edits[keyOf(it)]?.entity ?? "Personal";
+  const entFor = (it) => edits[keyOf(it)]?.entity ?? waFor(it);
   const setEdit = (it, field, val) => setEdits(p => ({ ...p, [keyOf(it)]: { ...p[keyOf(it)], [field]: val } }));
 
   const accept = async (it) => {
@@ -647,10 +669,15 @@ function ReviewInbox({ items, user, accounts, categories, incomeSrcs, merchantMa
           </div>
           {rows.map((it) => {
             const k = keyOf(it), b = busy === k, credit = it.stmt.direction === "in";
+            const dup = dupOf(it); const reimb = !credit && entFor(it) !== "Personal";
             return (
-              <div key={k} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid #f3f4f6", flexWrap: "wrap" }}>
+              <div key={k} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid #f3f4f6", flexWrap: "wrap", background: dup ? "#fef2f2" : undefined }}>
                 <span style={{ fontSize: 11, color: "#9ca3af", width: 46 }}>{fmtDate(it.stmt.date)}</span>
-                <div style={{ flex: 1, minWidth: 160, fontSize: 13, color: "#111827", fontWeight: 600 }}>{it.stmt.description || it.stmt.merchant}</div>
+                <div style={{ flex: 1, minWidth: 160, fontSize: 13, color: "#111827", fontWeight: 600 }}>
+                  {it.stmt.description || it.stmt.merchant}
+                  {dup && <span style={{ ...CHIP("#fee2e2", "#dc2626"), marginLeft: 8 }}>⚠ mungkin sudah ada ({fmtDate(dup.tx_date)})</span>}
+                  {reimb && !dup && <span style={{ ...CHIP("#fef3c7", "#b45309"), marginLeft: 8 }}>reimburse {entFor(it)}</span>}
+                </div>
                 {!credit && (
                   <select value={catFor(it)} onChange={e => setEdit(it, "category_id", e.target.value)} style={{ ...SEL, minWidth: 120 }}>
                     <option value="">Category…</option>
@@ -663,7 +690,8 @@ function ReviewInbox({ items, user, accounts, categories, incomeSrcs, merchantMa
                 <span style={{ fontSize: 13, fontWeight: 800, color: credit ? "#059669" : "#dc2626", width: 110, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
                   {credit ? "+" : "−"}{fmtIDR(Math.abs(Number(it.stmt.amount || 0)))}
                 </span>
-                <button disabled={b} onClick={() => accept(it)} style={BTN(b ? "#a7f3d0" : "#059669", "#fff")}>✓</button>
+                <button disabled={b} onClick={() => { if (dup && !window.confirm("Nominal ini sudah ada di ledger ("+fmtDate(dup.tx_date)+"). Tetap tambah? (bisa jadi dobel)")) return; accept(it); }}
+                  style={BTN(b ? "#a7f3d0" : (dup ? "#d97706" : "#059669"), "#fff")}>✓</button>
                 <button disabled={b} onClick={() => skip(it)} style={BTN("#fff", "#9ca3af", "1px solid #e5e7eb")}>✕</button>
               </div>
             );
