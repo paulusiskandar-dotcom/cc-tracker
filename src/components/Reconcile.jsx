@@ -8,8 +8,8 @@ import { importDrafts } from "../lib/importDrafts";
 import { useReconcileDrafts } from "../lib/useReconcileDrafts";
 import { processReconcilePDF, matchDetectedAccount } from "../lib/reconcilePdfUpload";
 import { matchRows, statementAnchorDate } from "./shared/ReconcileOverlay";
-import { reconcileApi } from "../api";
-import { fmtIDR } from "../utils";
+import { reconcileApi, ledgerApi } from "../api";
+import { fmtIDR, autoCategorize } from "../utils";
 import { showToast } from "./shared/index";
 import GlobalReconcileButton from "./shared/GlobalReconcileButton";
 import {
@@ -58,7 +58,17 @@ export default function Reconcile({
   reconSessions,
   setTab,
   setPendingReconcileNav,
+  ledger = [],
+  categories = [],
+  incomeSrcs = [],
+  merchantMaps = [],
+  setLedger,
+  onRefresh,
 }) {
+  // "sessions" = the per-card monthly cards; "inbox" = a flat list of only the
+  // leftover statement rows across every prepared card, so a full month can be
+  // cleared without opening each statement.
+  const [view, setView] = useState("sessions");
   const now = new Date();
   const [month, setMonth] = useState({ y: now.getFullYear(), m: now.getMonth() + 1 });
   const [sessions, setSessions] = useState(null);              // local override after actions
@@ -147,6 +157,29 @@ export default function Reconcile({
     days.sort((x, y) => x - y);
     return days[Math.floor(days.length / 2)];
   }, [allSessions, activeAccounts]);
+
+  // Flat list of leftover statement rows across every prepared card in this month,
+  // recomputed against the live ledger so a row drops off the moment it is accepted.
+  const inboxItems = useMemo(() => {
+    const accById = Object.fromEntries((accounts || []).map(a => [a.id, a]));
+    const monthSess = new Set(allSessions
+      .filter(s => s.period_year === month.y && s.period_month === month.m && s.status === "prepared")
+      .map(s => s.account_id));
+    const out = [];
+    for (const d of (drafts || [])) {
+      if (!monthSess.has(d.account_id)) continue;
+      const acc = accById[d.account_id];
+      const st = d.state_json;
+      if (!acc || !st?.stmtRows?.length) continue;
+      const led = (ledger || []).filter(l => l.from_id === acc.id || l.to_id === acc.id);
+      const { missing } = matchRows(st.stmtRows, led);
+      const ignored = new Set(st.ignoredIds || []);
+      for (const m of missing) {
+        if (!ignored.has(m._id)) out.push({ acc, draftId: d.id, stmt: m });
+      }
+    }
+    return out;
+  }, [drafts, ledger, accounts, allSessions, month]);
 
   const isCurrentMonth = month.y === now.getFullYear() && month.m === now.getMonth() + 1;
   const monthLabel = new Date(month.y, month.m - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
@@ -302,6 +335,25 @@ export default function Reconcile({
         </div>
         <GlobalReconcileButton type="all" accounts={activeAccounts} user={user} onNavigate={navigateToAccount} />
       </div>
+
+      {/* VIEW TOGGLE */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 14 }}>
+        {[["sessions", "By statement"], ["inbox", `Review leftovers${inboxItems.length ? ` (${inboxItems.length})` : ""}`]].map(([id, label]) => (
+          <button key={id} onClick={() => setView(id)}
+            style={{ padding: "7px 16px", borderRadius: 99, border: "none", cursor: "pointer",
+              fontSize: 13, fontWeight: 600, fontFamily: FF,
+              background: view === id ? "#111827" : "#f3f4f6", color: view === id ? "#fff" : "#6b7280" }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {view === "inbox" ? (
+        <ReviewInbox items={inboxItems} user={user} accounts={accounts} categories={categories}
+          incomeSrcs={incomeSrcs} merchantMaps={merchantMaps} ledger={ledger} setLedger={setLedger}
+          onChanged={async () => { await reloadDrafts(); await onRefresh?.(); }} finalize={finalize} draftByAcc={draftByAcc} allSessions={allSessions} />
+      ) : (
+      <>
 
       <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", margin: "14px 0 6px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -499,6 +551,130 @@ export default function Reconcile({
         You only review what's flagged — or hit <b style={{ color: "#374151" }}>Finalize</b> when everything already matches.
         Manual upload stays available via the button top-right.
       </div>
+      </>
+      )}
+    </div>
+  );
+}
+
+
+// ── Review Inbox ──────────────────────────────────────────────
+// One flat list of the statement rows still missing from the ledger, across
+// every prepared card this month. Classify + Accept inline (inserts the charge
+// on that card) or Skip (X). A card finalizes itself once its list empties.
+function ReviewInbox({ items, user, accounts, categories, incomeSrcs, merchantMaps, ledger, setLedger, onChanged, finalize, draftByAcc, allSessions }) {
+  const [edits, setEdits] = useState({});   // key → { category_id, entity }
+  const [busy, setBusy] = useState(null);
+
+  const groups = useMemo(() => {
+    const g = {};
+    for (const it of items) (g[it.acc.id] = g[it.acc.id] || { acc: it.acc, rows: [] }).rows.push(it);
+    return Object.values(g).sort((a, b) => a.acc.name.localeCompare(b.acc.name));
+  }, [items]);
+
+  const keyOf = (it) => `${it.acc.id}|${it.stmt._id}`;
+  const catFor = (it) => {
+    const k = keyOf(it);
+    if (edits[k]?.category_id !== undefined) return edits[k].category_id;
+    const guess = autoCategorize({ merchantName: it.stmt.description || it.stmt.merchant,
+      txType: "expense", aiSuggestedName: it.stmt.suggested_category, merchantMappings: merchantMaps, userCategories: categories });
+    return guess?.id && guess.name !== "Other" ? guess.id : "";
+  };
+  const entFor = (it) => edits[keyOf(it)]?.entity ?? "Personal";
+  const setEdit = (it, field, val) => setEdits(p => ({ ...p, [keyOf(it)]: { ...p[keyOf(it)], [field]: val } }));
+
+  const accept = async (it) => {
+    const k = keyOf(it); setBusy(k);
+    try {
+      const isCredit = it.stmt.direction === "in";
+      const entity = entFor(it);
+      const isReimb = !isCredit && entity && entity !== "Personal";
+      const amt = Math.abs(Number(it.stmt.amount || 0));
+      const entry = {
+        tx_date: it.stmt.date, description: it.stmt.description || it.stmt.merchant || "",
+        amount: amt, amount_idr: amt, currency: it.stmt.currency || "IDR",
+        tx_type: isCredit ? "income" : (isReimb ? "reimburse_out" : "expense"),
+        from_type: isCredit ? "income_source" : "account",
+        from_id: isCredit ? null : it.acc.id,
+        to_type: isCredit ? "account" : "expense",
+        to_id: isCredit ? it.acc.id : null,
+        category_id: isCredit ? null : (catFor(it) || null),
+        entity: entity || "Personal",
+        notes: "Reconcile review — statement " + (it.stmt._sourceFile || ""),
+      };
+      const created = await ledgerApi.create(user.id, entry, accounts);
+      if (created && setLedger) setLedger(prev => [created, ...prev]);
+      showToast("Added to ledger");
+      await onChanged?.();
+    } catch (e) { showToast(e.message || "Failed", "error"); }
+    finally { setBusy(null); }
+  };
+
+  const skip = async (it) => {
+    const k = keyOf(it); setBusy(k);
+    try {
+      const d = draftByAcc[it.acc.id];
+      const st = { ...(d?.state_json || {}) };
+      st.ignoredIds = [...new Set([...(st.ignoredIds || []), it.stmt._id])];
+      await importDrafts.save(user.id, "reconcile", st, it.acc.id);
+      showToast("Skipped");
+      await onChanged?.();
+    } catch (e) { showToast(e.message || "Failed", "error"); }
+    finally { setBusy(null); }
+  };
+
+  const finalizeCard = async (acc) => {
+    const s = allSessions.find(x => x.account_id === acc.id && x.status === "prepared");
+    if (s) await finalize({ acc, s });
+    await onChanged?.();
+  };
+
+  if (!items.length) return (
+    <div style={{ textAlign: "center", padding: "48px 0", color: "#9ca3af", fontSize: 14 }}>
+      <Check size={30} style={{ marginBottom: 8 }} /><div>No leftover rows — every prepared statement is fully matched.</div>
+    </div>
+  );
+
+  const SEL = { padding: "6px 8px", borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 12, fontFamily: FF, background: "#fff", color: "#111827" };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      {groups.map(({ acc, rows }) => (
+        <div key={acc.id} style={{ border: "1px solid #eef0f2", borderRadius: 14, overflow: "hidden" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", background: "#fafbfc", borderBottom: "1px solid #eef0f2" }}>
+            <AccountTile type={acc.type} />
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>{acc.name}</div>
+            <span style={CHIP("#fef3c7", "#b45309")}>{rows.length} to review</span>
+          </div>
+          {rows.map((it) => {
+            const k = keyOf(it), b = busy === k, credit = it.stmt.direction === "in";
+            return (
+              <div key={k} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderBottom: "1px solid #f3f4f6", flexWrap: "wrap" }}>
+                <span style={{ fontSize: 11, color: "#9ca3af", width: 46 }}>{fmtDate(it.stmt.date)}</span>
+                <div style={{ flex: 1, minWidth: 160, fontSize: 13, color: "#111827", fontWeight: 600 }}>{it.stmt.description || it.stmt.merchant}</div>
+                {!credit && (
+                  <select value={catFor(it)} onChange={e => setEdit(it, "category_id", e.target.value)} style={{ ...SEL, minWidth: 120 }}>
+                    <option value="">Category…</option>
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                )}
+                <select value={entFor(it)} onChange={e => setEdit(it, "entity", e.target.value)} style={SEL}>
+                  {["Personal", "Hamasa", "SDC"].map(x => <option key={x} value={x}>{x}</option>)}
+                </select>
+                <span style={{ fontSize: 13, fontWeight: 800, color: credit ? "#059669" : "#dc2626", width: 110, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                  {credit ? "+" : "−"}{fmtIDR(Math.abs(Number(it.stmt.amount || 0)))}
+                </span>
+                <button disabled={b} onClick={() => accept(it)} style={BTN(b ? "#a7f3d0" : "#059669", "#fff")}>✓</button>
+                <button disabled={b} onClick={() => skip(it)} style={BTN("#fff", "#9ca3af", "1px solid #e5e7eb")}>✕</button>
+              </div>
+            );
+          })}
+        </div>
+      ))}
+      {groups.length > 0 && (
+        <div style={{ fontSize: 12, color: "#6b7280" }}>
+          Tip: once a card's list is empty, open <b>By statement</b> to Finalize it — or it will show as ready there.
+        </div>
+      )}
     </div>
   );
 }
