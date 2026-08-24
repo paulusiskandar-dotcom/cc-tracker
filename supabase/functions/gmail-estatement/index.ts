@@ -1230,6 +1230,48 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
     if (sesErr) console.error("[prepare] session insert:", sesErr.message);
   }
 
+  // ── Parked valas twins die HERE, at statement arrival (Paulus 2026-08-24:
+  // "reconcile dan waiting for statement, langsung meniadakan aja, ga usah tanya").
+  // A waiting item exists only because the IDR rate was unknown; this statement IS
+  // the rate arriving. Whether its row matched the ledger or is heading to Email
+  // Pending, the parked copy is obsolete — clear it against ALL statement rows,
+  // not just the missing ones.
+  try {
+    const { data: wrows } = await serviceSupabase.from("email_sync")
+      .select("id, ai_raw_result").eq("user_id", userId).eq("status", "waiting_statement");
+    if (wrows?.length) {
+      const normW = (x: any) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+      const stmtKeys = stmtRows.map((m: any) => ({
+        d: new Date((m.date || "") + "T00:00:00").getTime(),
+        n: normW(m.description || m.merchant),
+      }));
+      const dayMs2 = 86400000;
+      for (const wr of wrows) {
+        let arr: any = wr.ai_raw_result; try { if (typeof arr === "string") arr = JSON.parse(arr); } catch { continue; }
+        if (!Array.isArray(arr)) continue;
+        let changed = false;
+        for (const t of arr) {
+          if (!t || !t._waiting_statement || t._imported || t._skipped) continue;
+          if (t.from_account_id && t.from_account_id !== acc.id) continue;
+          const tok = normW(t.merchant_name || t.description);
+          if (tok.length < 5) continue;
+          const td = new Date((t.date || "") + "T00:00:00").getTime();
+          const hit = stmtKeys.some(k => (k.n.includes(tok) || tok.includes(k.n))
+            && (!isFinite(td) || !isFinite(k.d) || Math.abs(k.d - td) <= 3 * dayMs2));
+          if (hit) { t._imported = true; t._clearedByStatement = true; changed = true; }
+        }
+        if (changed) {
+          const allDone = arr.every((t: any) => t?._imported || t?._skipped || t?.confirmed || t?.skipped);
+          const stillWaiting = arr.some((t: any) => t?._waiting_statement && !t?._imported && !t?._skipped);
+          await serviceSupabase.from("email_sync").update({
+            ai_raw_result: arr,
+            status: allDone ? "imported" : (stillWaiting ? "waiting_statement" : "pending"),
+          }).eq("id", wr.id);
+        }
+      }
+    }
+  } catch (e) { console.error("[prepare] waiting twin clear:", (e as any)?.message); }
+
   // ── Paulus's flow (2026-08-24): email masuk → download → matching → yang TIDAK
   // match muncul di EMAIL PENDING. Missing rows become one email_sync row (source
   // "statement") so they flow through the exact same TxHorizontal editor and

@@ -38,6 +38,9 @@ const syncToRow = (s) => ({
   suggested_category_label: s.suggested_category_label || "",
   notes:         "",
   status:        "new",
+  // "statement" rows come from gmail-estatement prepare (unmatched reconcile
+  // lines) — rendered with their own tint + badge so the door is visible.
+  _source:       s._source || null,
 });
 
 const ACT_BTN = (extra = {}) => ({

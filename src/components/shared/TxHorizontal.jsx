@@ -472,11 +472,14 @@ function TxHorizontalCard({
                     : r.status === "review" ? 1 : 0;
   const dupLevel = dupDismissed ? 0 : rawDupLevel;
 
+  const isStmtRow = r._source === "statement";
   const cardBg = isSkipped ? T.sur2
                : dupLevel > 0 ? "#FCEBEB"
+               : isStmtRow ? "#f5f3ff"
                : T.surface;
   const cardBorder = dupLevel > 0 ? "1.5px solid #E24B4A"
                    : r.flagged ? "1.5px solid #f97316"
+                   : isStmtRow ? "1px solid #c7d2fe"
                    : `1px solid ${T.border}`;
 
   const color   = amtColor(r.tx_type);
@@ -528,6 +531,9 @@ function TxHorizontalCard({
         />
 
         {/* Inline badges next to description */}
+        {isStmtRow && (
+          <span style={BADGE("#e0e7ff","#3730a3")} title="Baris dari statement bulanan yang belum ada di ledger (hasil reconcile matching)">📄 STATEMENT</span>
+        )}
         {r._invalidAmount && <span style={BADGE("#fee2e2","#dc2626")}>Amount!</span>}
         {dupLevel > 0 && !dupDismissed && (
           <span style={BADGE("#F7C1C1","#791F1F")}>
