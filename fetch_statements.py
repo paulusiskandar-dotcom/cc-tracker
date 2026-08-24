@@ -13,7 +13,10 @@ Setup (once):
 
 Nothing is deleted from Gmail; already-downloaded files are skipped.
 """
-import imaplib, email, json, os, re, subprocess, sys, tempfile, urllib.request
+import imaplib, email, json, os, re, signal, subprocess, sys, tempfile, urllib.request
+
+IMAP_TIMEOUT = 120   # seconds per Gmail socket operation
+RUN_TIMEOUT  = 1800  # seconds for the whole run before the watchdog kills it
 from email.header import decode_header
 from datetime import datetime, timedelta
 
@@ -93,7 +96,10 @@ def main():
 
     passwords = load_passwords(cfg)
     log(f"{len(passwords)} password candidate(s) loaded")
-    M = imaplib.IMAP4_SSL("imap.gmail.com")
+    # Without a timeout a stalled Gmail socket blocks forever: this run hung for 12
+    # days on a read, and launchd will not start a second copy of a job that is still
+    # alive, so the whole statement pipeline stopped silently from 12 Aug 2026.
+    M = imaplib.IMAP4_SSL("imap.gmail.com", timeout=IMAP_TIMEOUT)
     M.login(cfg["gmail_user"], cfg["app_password"])
     M.select("INBOX")
     got = 0
@@ -173,5 +179,14 @@ def main():
         except Exception as e:
             log("notify error:", e)
 
+def _watchdog(signum, frame):
+    # Belt and braces for anything the socket timeout does not cover (a hung qpdf,
+    # a stuck HTTP call). Dying loudly is better than blocking the next 12 runs.
+    log(f"ABORT: run exceeded {RUN_TIMEOUT}s watchdog")
+    os._exit(1)
+
+
 if __name__ == "__main__":
+    signal.signal(signal.SIGALRM, _watchdog)
+    signal.alarm(RUN_TIMEOUT)
     main()
