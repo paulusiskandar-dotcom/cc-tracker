@@ -472,14 +472,14 @@ function TxHorizontalCard({
                     : r.status === "review" ? 1 : 0;
   const dupLevel = dupDismissed ? 0 : rawDupLevel;
 
+  // Statement-sourced rows keep the normal card colors (a tinted card read as a
+  // warning state, Paulus 2026-08-24) — the "📄 STATEMENT" badge alone marks them.
   const isStmtRow = r._source === "statement";
   const cardBg = isSkipped ? T.sur2
                : dupLevel > 0 ? "#FCEBEB"
-               : isStmtRow ? "#f5f3ff"
                : T.surface;
   const cardBorder = dupLevel > 0 ? "1.5px solid #E24B4A"
                    : r.flagged ? "1.5px solid #f97316"
-                   : isStmtRow ? "1px solid #c7d2fe"
                    : `1px solid ${T.border}`;
 
   const color   = amtColor(r.tx_type);
