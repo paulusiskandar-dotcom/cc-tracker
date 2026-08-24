@@ -1166,9 +1166,14 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
 
   // Ledger rows touching this account (all-time: needed for closing calc; window slice for diff)
   const { data: ledAll } = await serviceSupabase.from("ledger")
-    .select("id, tx_date, description, merchant_name, amount, amount_idr, from_id, to_id")
+    .select("id, tx_date, description, merchant_name, amount, amount_idr, from_id, to_id, reconciled_at")
     .eq("user_id", userId)
     .or(`from_id.eq.${acc.id},to_id.eq.${acc.id}`);
+  // For the dup hint the whole ledger matters, not just this account: photo/email
+  // imports land the same charge on the wrong card at a shifted date.
+  const { data: ledgerAllAccounts } = await serviceSupabase.from("ledger")
+    .select("tx_date, amount_idr, reconciled_at")
+    .eq("user_id", userId);
   const pad = (d: string, days: number) => { const t = new Date(d + "T00:00:00"); t.setDate(t.getDate() + days); return t.toISOString().slice(0, 10); };
   const winStart = periodStart ? pad(periodStart, -7) : null;
   const winEnd = periodEnd ? pad(periodEnd, 7) : null;
@@ -1224,6 +1229,54 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
     });
     if (sesErr) console.error("[prepare] session insert:", sesErr.message);
   }
+
+  // ── Paulus's flow (2026-08-24): email masuk → download → matching → yang TIDAK
+  // match muncul di EMAIL PENDING. Missing rows become one email_sync row (source
+  // "statement") so they flow through the exact same TxHorizontal editor and
+  // approve pipeline as email transactions — no parallel review UI. Idempotent via
+  // UNIQUE(user_id, gmail_message_id) with a synthetic stable id per account+period.
+  try {
+    const ignoredPrev = new Set((existing?.state_json?.ignoredIds) || []);
+    const dayMs = 86400000;
+    const dupHint = (row: any) => {
+      const amt = Math.abs(Number(row.amount || 0));
+      if (!amt) return null;
+      const d0 = new Date((row.date || "") + "T00:00:00").getTime();
+      for (const l of (ledgerAllAccounts || [])) {
+        if (l.reconciled_at) continue; // consumed by an earlier statement
+        if (Math.abs(Math.abs(Number(l.amount_idr || 0)) - amt) > 1) continue;
+        const dl = new Date((l.tx_date || "") + "T00:00:00").getTime();
+        if (Math.abs((d0 - dl) / dayMs) > 40) continue;
+        return { tx_date: l.tx_date };
+      }
+      return null;
+    };
+    // Summary lines are not transactions — "Tagihan Bulan Lalu" accepted as an
+    // expense would double the carried-over balance.
+    const SUMMARY_RE = /tagihan bulan lalu|balance of last month|saldo sebelumnya|last balance|ending balance|^total\b|saldo awal/i;
+    const txs = missing.filter((m: any) => !ignoredPrev.has(m._id) && !SUMMARY_RE.test(m.description || "")).map((m: any) => ({
+      date: m.date, description: m.description || m.merchant || "",
+      merchant_name: m.merchant || m.description || "",
+      amount: Math.abs(Number(m.amount || 0)), amount_idr: Math.abs(Number(m.amount || 0)),
+      currency: "IDR",
+      suggested_tx_type: m.direction === "in" ? "income" : "expense",
+      from_account_id: acc.id, card_last4: m.card_last4 || null,
+      confidence: 1,
+      _source: "statement", _stmt_id: m._id, _dup_hint: dupHint(m),
+    }));
+    if (txs.length && pY && pM) {
+      await serviceSupabase.from("email_sync").upsert({
+        user_id: userId,
+        gmail_message_id: `stmt:${acc.id}:${pY}-${String(pM).padStart(2, "0")}`,
+        sender_email: "statement@reconcile",
+        subject: `Statement ${acc.name} — ${pY}-${String(pM).padStart(2, "0")}`,
+        received_at: new Date().toISOString(),
+        email_type: "statement", source: "statement",
+        ai_raw_result: txs, extracted_count: txs.length, imported_count: 0,
+        status: "pending",
+      }, { onConflict: "user_id,gmail_message_id", ignoreDuplicates: true });
+    }
+  } catch (e) { console.error("[prepare] email_sync feed:", (e as any)?.message); }
 
   return {
     prepared: true,

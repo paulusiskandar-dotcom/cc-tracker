@@ -1,4 +1,4 @@
-import { sweepLedgerGhosts } from "../_shared/sweep.ts";
+import { sweepLedgerGhosts, sweepWaitingStatement } from "../_shared/sweep.ts";
 // ─────────────────────────────────────────────────────────────────
 // gmail-sync/index.ts
 // Fetches new bank emails → AI extraction → saves to email_sync (pending)
@@ -699,6 +699,10 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
   // money arrived through another door: Telegram photo import, statement, web).
   try {
     const ghosts = await sweepLedgerGhosts(supabase, userId);
+    // Statement rows reviewed on the web land in the ledger without a Telegram
+    // /import ever running — sweep parked valas here too so their twins close
+    // within one sync cycle instead of lingering until the next /import.
+    try { await sweepWaitingStatement(supabase, userId); } catch (e) { console.warn("[gmail-sync] waiting sweep:", (e as Error)?.message); }
     if (ghosts) console.log(`[gmail-sync] ghost sweep: ${ghosts} duplicate item(s) auto-skipped`);
   } catch (e) {
     console.warn("[gmail-sync] ghost sweep failed:", e);

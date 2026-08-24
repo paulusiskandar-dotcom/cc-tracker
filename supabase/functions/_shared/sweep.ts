@@ -105,3 +105,48 @@ export async function sweepLedgerGhosts(supabase: any, uid: string): Promise<num
   }
   return swept;
 }
+
+// Clear parked valas ("waiting for statement") items whose charge has since
+// landed in the ledger — the statement arriving IS the IDR rate becoming known.
+// Match on tx_DATE, tight (±3d): the statement row carries the same transaction
+// date as the charge (it is just INSERTED weeks later); a wide window would
+// false-match the PRIOR month's recurring charge (Anthropic, Google, subs).
+// Lives here so BOTH doors run it: telegram /import and the 15-minute
+// gmail-sync — before 2026-08-24 only /import swept, so parked items lingered
+// for days after their statement was reviewed.
+export async function sweepWaitingStatement(supabase: any, uid: string): Promise<number> {
+  const { data: rows } = await supabase.from("email_sync").select("id, ai_raw_result").eq("user_id", uid).eq("status", "waiting_statement");
+  if (!rows || !rows.length) return 0;
+  const { data: accountsRaw } = await supabase.from("accounts").select("id, name, card_last4, type").eq("user_id", uid);
+  const accounts = accountsRaw || [];
+  const byL4: Record<string, any> = Object.fromEntries(accounts.filter((a: any) => a.card_last4).map((a: any) => [a.card_last4, a]));
+  const { data: led } = await supabase.from("ledger").select("id, tx_date, description, merchant_name, from_id, from_type").eq("user_id", uid).eq("from_type", "account").gte("tx_date", "2026-04-01");
+  const resolveCard = (t: any): string | null => {
+    if (t.from_account_id && accounts.find((a: any) => a.id === t.from_account_id)) return t.from_account_id;
+    const hay = `${t.to_bank_name || ""} ${t.from_bank_name || ""} ${t.merchant_name || ""} ${t.description || ""}`;
+    for (const [re, l4] of ISSUER_CARD) if (re.test(hay) && byL4[l4]) return byL4[l4].id;
+    return null;
+  };
+  let cleared = 0;
+  for (const r of rows) {
+    let arr: any = r.ai_raw_result; try { if (typeof arr === "string") arr = JSON.parse(arr); } catch { continue; }
+    if (!Array.isArray(arr)) continue;
+    let changed = false;
+    for (const t of arr) {
+      if (!t || !t._waiting_statement || t._imported || t._skipped) continue;
+      const cardId = resolveCard(t);
+      if (!cardId) continue;
+      const nm = t.merchant_name || t.description || "";
+      const idate = dnum(t.date);
+      if (isNaN(idate)) continue;  // no date → cannot safely match, leave parked
+      const hit = (led || []).find((L: any) => L.from_id === cardId && descMatch(L.merchant_name || L.description, nm) && Math.abs(dnum(L.tx_date) - idate) <= 3 * DAYMS);
+      if (hit) { t._imported = true; t._clearedByStatement = true; changed = true; cleared++; }
+    }
+    if (changed) {
+      const allDone = arr.every((t: any) => t?._imported || t?._skipped);
+      const stillWaiting = arr.some((t: any) => t?._waiting_statement && !t?._imported && !t?._skipped);
+      await supabase.from("email_sync").update({ ai_raw_result: arr, status: allDone ? "imported" : (stillWaiting ? "waiting_statement" : "pending") }).eq("id", r.id);
+    }
+  }
+  return cleared;
+}

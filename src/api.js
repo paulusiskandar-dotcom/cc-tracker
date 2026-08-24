@@ -1565,6 +1565,11 @@ export function flattenEmailSync(rows) {
         })(),
         matched_account_id:      tx.from_account_id,
         to_account_id:           tx.to_account_id,
+        // Statement-sourced rows (gmail-estatement prepare) carry a server-side
+        // duplicate hint: an UNSTAMPED ledger row with the same amount within
+        // ±40 days anywhere — the same charge probably entered via another door.
+        _dup_hint:               tx._dup_hint || null,
+        _source:                 tx._source || row.source || null,
         suggested_category_label: tx.suggested_category,
         // Keep the AI's original type + destination bank so the UI can still
         // suggest "transfer to own bank" when the server couldn't resolve to_account_id

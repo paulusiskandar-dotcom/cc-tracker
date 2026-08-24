@@ -429,6 +429,10 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     // (same amount_idr within ±1, same date within ±2 days) — likely a duplicate
     // parsed from a second email. These are NOT auto-checked so they aren't re-imported.
     const isLedgerDup = (s) => {
+      // Statement-sourced rows carry a server-computed hint (same amount on an
+      // unstamped ledger row within ±40 days, any card) — trust it: the local
+      // check below only looks ±2 days and misses date-shifted twins.
+      if (s._dup_hint) return true;
       const amt = Number(s.amount_idr || s.amount || 0);
       const d   = s.transaction_date || (s.received_at || "").slice(0, 10);
       if (!amt || !d) return false;
