@@ -8,7 +8,7 @@ import { importDrafts } from "../lib/importDrafts";
 import { useReconcileDrafts } from "../lib/useReconcileDrafts";
 import { processReconcilePDF, matchDetectedAccount } from "../lib/reconcilePdfUpload";
 import { matchRows, statementAnchorDate } from "./shared/ReconcileOverlay";
-import { reconcileApi, ledgerApi } from "../api";
+import { reconcileApi, ledgerApi, gmailApi } from "../api";
 import { fmtIDR, autoCategorize } from "../utils";
 import { showToast } from "./shared/index";
 import GlobalReconcileButton from "./shared/GlobalReconcileButton";
@@ -160,25 +160,26 @@ export default function Reconcile({
 
   // Flat list of leftover statement rows across every prepared card in this month,
   // recomputed against the live ledger so a row drops off the moment it is accepted.
-  const inboxItems = useMemo(() => {
+  const { inboxItems, inboxReady } = useMemo(() => {
     const accById = Object.fromEntries((accounts || []).map(a => [a.id, a]));
-    const monthSess = new Set(allSessions
-      .filter(s => s.period_year === month.y && s.period_month === month.m && s.status === "prepared")
-      .map(s => s.account_id));
-    const out = [];
+    const prepared = allSessions
+      .filter(s => s.period_year === month.y && s.period_month === month.m && s.status === "prepared");
+    const sessByAcc = Object.fromEntries(prepared.map(s => [s.account_id, s]));
+    const out = [], ready = [];
     for (const d of (drafts || [])) {
-      if (!monthSess.has(d.account_id)) continue;
+      const sess = sessByAcc[d.account_id];
+      if (!sess) continue;
       const acc = accById[d.account_id];
       const st = d.state_json;
       if (!acc || !st?.stmtRows?.length) continue;
       const led = (ledger || []).filter(l => l.from_id === acc.id || l.to_id === acc.id);
       const { missing } = matchRows(st.stmtRows, led);
       const ignored = new Set(st.ignoredIds || []);
-      for (const m of missing) {
-        if (!ignored.has(m._id)) out.push({ acc, draftId: d.id, stmt: m });
-      }
+      const left = missing.filter(m => !ignored.has(m._id));
+      if (!left.length) { ready.push({ acc, s: sess }); continue; }
+      for (const m of left) out.push({ acc, draftId: d.id, stmt: m });
     }
-    return out;
+    return { inboxItems: out, inboxReady: ready };
   }, [drafts, ledger, accounts, allSessions, month]);
 
   const isCurrentMonth = month.y === now.getFullYear() && month.m === now.getMonth() + 1;
@@ -349,7 +350,7 @@ export default function Reconcile({
       </div>
 
       {view === "inbox" ? (
-        <ReviewInbox items={inboxItems} user={user} accounts={accounts} categories={categories}
+        <ReviewInbox items={inboxItems} readyCards={inboxReady} user={user} accounts={accounts} categories={categories}
           incomeSrcs={incomeSrcs} merchantMaps={merchantMaps} ledger={ledger} setLedger={setLedger}
           onChanged={async () => { await reloadDrafts(); await onRefresh?.(); }} finalize={finalize} draftByAcc={draftByAcc} allSessions={allSessions} />
       ) : (
@@ -562,7 +563,7 @@ export default function Reconcile({
 // One flat list of the statement rows still missing from the ledger, across
 // every prepared card this month. Classify + Accept inline (inserts the charge
 // on that card) or Skip (X). A card finalizes itself once its list empties.
-function ReviewInbox({ items, user, accounts, categories, incomeSrcs, merchantMaps, ledger, setLedger, onChanged, finalize, draftByAcc, allSessions }) {
+function ReviewInbox({ items, readyCards = [], user, accounts, categories, incomeSrcs, merchantMaps, ledger, setLedger, onChanged, finalize, draftByAcc, allSessions }) {
   const [edits, setEdits] = useState({});   // key → { category_id, entity }
   const [busy, setBusy] = useState(null);
 
@@ -580,24 +581,81 @@ function ReviewInbox({ items, user, accounts, categories, incomeSrcs, merchantMa
   const HAMASA_RE = /lazada|blibli|global digital|xendi|digitalocean|allianz/i;
   const waFor = (it) => HAMASA_RE.test(it.stmt.description || it.stmt.merchant || "") ? "Hamasa" : "Personal";
 
-  // Duplicate guard: matchRows only looks ±3 days, so a charge already in the
-  // ledger at a shifted date (recurring Blibli lands 2–3 weeks late, sometimes on
-  // another card) still shows as "missing" and could be double-entered. Flag any
-  // leftover whose exact amount already sits in the ledger within ±40 days.
+  // Installment leg counter: "CICILAN BCA KE 2 DARI 3", "TOKOPEDIA_CYBS_CCL12 : 7/12".
+  // Two legs of the same plan share an amount by construction, so the counter —
+  // not the amount — is what tells them apart.
+  const instOf = (t) => {
+    const m = /(?:KE\s*(\d+)\s*DARI\s*(\d+))|(?::\s*(\d+)\s*\/\s*(\d+))/i.exec(t || "");
+    return m ? { i: Number(m[1] ?? m[3]), n: Number(m[2] ?? m[4]) } : null;
+  };
+
+  // Duplicate suspect, one rule set (audited 2026-08-24):
+  //  · reconciled_at set  → that ledger row is CONSUMED by an earlier statement.
+  //    It can never explain this month's line, so it never triggers a warning —
+  //    which is what lets a recurring same-amount charge (Blibli 47,9jt monthly)
+  //    pass clean once last month is finalized.
+  //  · unstamped row, same amount within ±40 days → suspect: the same charge
+  //    probably entered through another door (email/photo) at a shifted date,
+  //    sometimes on another card, so the scan covers the whole ledger.
+  //  · both sides carry an installment counter and the leg differs → not a dup
+  //    (next month's leg legitimately repeats the amount).
   const dupOf = (it) => {
     const amt = Math.abs(Number(it.stmt.amount || 0));
     if (!amt) return null;
     const d0 = new Date((it.stmt.date || "") + "T00:00:00");
+    const a = instOf(it.stmt.description || "");
     return (ledger || []).find(l => {
+      if (l.reconciled_at) return false;
       if (Math.abs(Math.abs(Number(l.amount_idr || 0)) - amt) > 1) return false;
       const dl = new Date((l.tx_date || "") + "T00:00:00");
-      return Math.abs((d0 - dl) / 86400000) <= 40;
+      if (Math.abs((d0 - dl) / 86400000) > 40) return false;
+      const b = instOf(l.description || "");
+      if (a && b && a.i !== b.i) return false;
+      return true;
+    }) || null;
+  };
+
+  // Parked valas twins ("waiting for statement"): the same purchase, parked at
+  // email time because the IDR rate was unknown. Accepting the statement row IS
+  // the moment the rate becomes known, so the twin is closed here directly —
+  // the server sweep only runs on Telegram /import and could lag for days.
+  const [waiting, setWaiting] = useState([]);
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase.from("email_sync").select("id, ai_raw_result").eq("user_id", user.id).eq("status", "waiting_statement")
+      .then(({ data }) => {
+        const out = [];
+        for (const r of (data || [])) {
+          let arr = r.ai_raw_result; try { if (typeof arr === "string") arr = JSON.parse(arr); } catch { arr = null; }
+          (Array.isArray(arr) ? arr : []).forEach((t, i) => {
+            if (t && t._waiting_statement && !t.confirmed && !t.skipped && !t._imported)
+              out.push({ rowId: r.id, idx: i, merchant: t.merchant_name || t.description || "", date: t.date, accId: t.from_account_id || null });
+          });
+        }
+        setWaiting(out);
+      });
+  }, [user?.id]);
+  const norm = (t) => String(t || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const waitingTwin = (it) => {
+    const stmtN = norm(it.stmt.description || it.stmt.merchant);
+    const d0 = new Date((it.stmt.date || "") + "T00:00:00");
+    return waiting.find(w => {
+      if (w.accId && w.accId !== it.acc.id) return false;
+      const dw = new Date((w.date || "") + "T00:00:00");
+      if (isFinite(dw) && Math.abs((d0 - dw) / 86400000) > 3) return false;
+      const tok = norm(w.merchant);
+      return tok.length >= 5 && (stmtN.includes(tok) || tok.includes(stmtN));
     }) || null;
   };
 
   const catFor = (it) => {
     const k = keyOf(it);
     if (edits[k]?.category_id !== undefined) return edits[k].category_id;
+    // House rule: cicilan rows go to the Installment category.
+    if (instOf(it.stmt.description || "")) {
+      const inst = categories.find(c => c.name === "Installment");
+      if (inst) return inst.id;
+    }
     const guess = autoCategorize({ merchantName: it.stmt.description || it.stmt.merchant,
       txType: "expense", aiSuggestedName: it.stmt.suggested_category, merchantMappings: merchantMaps, userCategories: categories });
     return guess?.id && guess.name !== "Other" ? guess.id : "";
@@ -624,9 +682,20 @@ function ReviewInbox({ items, user, accounts, categories, incomeSrcs, merchantMa
         entity: entity || "Personal",
         notes: "Reconcile review — statement " + (it.stmt._sourceFile || ""),
       };
+      // Born from the statement → stamped immediately, so no later matcher can
+      // reuse this row, and next month's dup scan treats it as consumed.
+      entry.reconciled_at = new Date().toISOString();
       const created = await ledgerApi.create(user.id, entry, accounts);
       if (created && setLedger) setLedger(prev => [created, ...prev]);
-      showToast("Added to ledger");
+      // Close the parked valas twin, if any — this IS its statement arriving.
+      const twin = waitingTwin(it);
+      if (twin) {
+        try {
+          await gmailApi.markTxStatus(twin.rowId, twin.idx, "confirmed");
+          setWaiting(prev => prev.filter(w => !(w.rowId === twin.rowId && w.idx === twin.idx)));
+        } catch (e) { console.warn("[inbox] close waiting twin:", e?.message); }
+      }
+      showToast(twin ? "Added — item waiting ikut ditutup" : "Added to ledger");
       await onChanged?.();
     } catch (e) { showToast(e.message || "Failed", "error"); }
     finally { setBusy(null); }
@@ -651,15 +720,31 @@ function ReviewInbox({ items, user, accounts, categories, incomeSrcs, merchantMa
     await onChanged?.();
   };
 
+  const readyStrip = readyCards.length > 0 && (
+    <div style={{ border: "1px solid #a7f3d0", background: "#ecfdf5", borderRadius: 12, padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+      {readyCards.map(({ acc, s }) => (
+        <div key={acc.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Check size={15} color="#059669" />
+          <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: "#065f46" }}>{acc.name} — semua baris cocok</span>
+          <button onClick={async () => { await finalize({ acc, s }); await onChanged?.(); }} style={BTN("#059669", "#fff")}>Finalize</button>
+        </div>
+      ))}
+    </div>
+  );
+
   if (!items.length) return (
-    <div style={{ textAlign: "center", padding: "48px 0", color: "#9ca3af", fontSize: 14 }}>
-      <Check size={30} style={{ marginBottom: 8 }} /><div>No leftover rows — every prepared statement is fully matched.</div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {readyStrip}
+      <div style={{ textAlign: "center", padding: "40px 0", color: "#9ca3af", fontSize: 14 }}>
+        <Check size={30} style={{ marginBottom: 8 }} /><div>No leftover rows — every prepared statement is fully matched.</div>
+      </div>
     </div>
   );
 
   const SEL = { padding: "6px 8px", borderRadius: 8, border: "1px solid #e5e7eb", fontSize: 12, fontFamily: FF, background: "#fff", color: "#111827" };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      {readyStrip}
       {groups.map(({ acc, rows }) => (
         <div key={acc.id} style={{ border: "1px solid #eef0f2", borderRadius: 14, overflow: "hidden" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", background: "#fafbfc", borderBottom: "1px solid #eef0f2" }}>
@@ -677,6 +762,7 @@ function ReviewInbox({ items, user, accounts, categories, incomeSrcs, merchantMa
                   {it.stmt.description || it.stmt.merchant}
                   {dup && <span style={{ ...CHIP("#fee2e2", "#dc2626"), marginLeft: 8 }}>⚠ mungkin sudah ada ({fmtDate(dup.tx_date)})</span>}
                   {reimb && !dup && <span style={{ ...CHIP("#fef3c7", "#b45309"), marginLeft: 8 }}>reimburse {entFor(it)}</span>}
+                  {!dup && waitingTwin(it) && <span style={{ ...CHIP("#ede9fe", "#7c3aed"), marginLeft: 8 }}>⏳ menutup item waiting</span>}
                 </div>
                 {!credit && (
                   <select value={catFor(it)} onChange={e => setEdit(it, "category_id", e.target.value)} style={{ ...SEL, minWidth: 120 }}>
