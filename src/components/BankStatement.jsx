@@ -531,7 +531,11 @@ export default function BankStatement({
 
         {/* Apply */}
         <button
-          onClick={load}
+          /* () => load() — passing `load` directly hands React's click event in as
+             fromOverride, so `f = fromOverride || fromDate` became the event object,
+             the range query errored, and the table silently kept the previously
+             loaded range while the date labels showed the new one. */
+          onClick={() => load()}
           disabled={!accountId || loading}
           style={BTN({
             background: accountId ? "#111827" : "#f3f4f6",

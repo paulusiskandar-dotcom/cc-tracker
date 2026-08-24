@@ -750,6 +750,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     if (!selectedRows.length) return;
     setImporting(true);
     let count = 0, skippedFx = 0, skippedDupe = 0;
+    const failures = [];
     const newLedgerIds = [];
     const matchedNames = [];
     for (const r of selectedRows) {
@@ -802,11 +803,20 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
         await gmailApi.markTxStatus(r.email_sync_id, r.tx_index ?? 0, "confirmed");
         removeRow(r._id);
         count++;
-      } catch (_) { /* skip failures */ }
+      } catch (e) { failures.push(`${r.description || "row"}: ${e?.message || "unknown"}`); }
     }
     setImporting(false);
     setProcessedCount(n => n + count);
-    showToast(`${count} transaction${count !== 1 ? "s" : ""} imported`);
+    // Say WHY nothing landed. "0 transactions imported" on its own reads as a
+    // broken button when the real reason is that every row was a known duplicate
+    // or errored — both were previously silent.
+    if (count === 0 && skippedDupe > 0 && !failures.length) {
+      showToast(`Tidak ada yang diimpor — ${skippedDupe} baris sudah ada di ledger (duplikat). Tekan ✕ untuk membuangnya.`, "info");
+    } else {
+      showToast(`${count} transaction${count !== 1 ? "s" : ""} imported`);
+      if (skippedDupe > 0) showToast(`${skippedDupe} dilewati — sudah ada di ledger`, "info");
+    }
+    if (failures.length) showToast(`${failures.length} gagal: ${failures[0]}`, "error");
     if (skippedFx > 0) showToast(`${skippedFx} transaksi valas → Waiting for statement (kurs belum pasti)`, "info");
     if (matchedNames.length === 1) showToast(`✓ "${matchedNames[0]}" recurring linked and reminder confirmed`);
     else if (matchedNames.length > 1) showToast(`${matchedNames.length} recurring expenses linked`);
