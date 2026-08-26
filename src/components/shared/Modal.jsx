@@ -135,7 +135,7 @@ export default function Modal({ isOpen, onClose, title, children, footer, width 
 }
 
 // ─── CONFIRM DIALOG ───────────────────────────────────────────
-export function ConfirmModal({ isOpen, onClose, onConfirm, title, message, danger = false, busy = false }) {
+export function ConfirmModal({ isOpen, onClose, onConfirm, title, message, danger = false, busy = false, confirmLabel }) {
   return (
     <Modal
       isOpen={isOpen}
@@ -166,7 +166,7 @@ export function ConfirmModal({ isOpen, onClose, onConfirm, title, message, dange
               opacity: busy ? 0.6 : 1,
             }}
           >
-            {busy ? "..." : (danger ? "Delete" : "Confirm")}
+            {busy ? "..." : (confirmLabel || (danger ? "Delete" : "Confirm"))}
           </button>
         </div>
       }

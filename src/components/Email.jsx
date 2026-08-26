@@ -877,6 +877,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
         onConfirm={() => { const r = dupWarn.row; setDupWarn(null); confirm({ ...r, _dupeOk: true }); }}
         title="Possible duplicate"
         danger
+        confirmLabel="Import Anyway"
         message={dupWarn ? `Mirip transaksi yang sudah ada di ledger: "${dupWarn.dupe.description || ""}" pada ${dupWarn.dupe.tx_date} (${Number(dupWarn.dupe.amount_idr || dupWarn.dupe.amount || 0).toLocaleString("id-ID")}). Tetap import?` : ""}
       />
 
