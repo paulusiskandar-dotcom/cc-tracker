@@ -408,7 +408,7 @@ export default function Reconcile({
         <div style={{ marginBottom: 22 }}>
           {sectionTitle("Needs review", monthData.needsReview.length, "#fef3c7", "#b45309")}
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {monthData.needsReview.map(({ acc, s, gap, valas }) => (
+            {monthData.needsReview.map(({ acc, s, gap, valas, live }) => (
               <div key={acc.id} style={{
                 background: "#fff", border: "1px solid #e5e7eb", borderRadius: 14,
                 borderLeft: `3px solid ${gap !== null && Math.abs(gap) >= 1 ? "#dc2626" : "#d97706"}`,
@@ -422,8 +422,8 @@ export default function Reconcile({
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                  <span style={CHIP("#dcfce7", "#059669")}><Check size={11} strokeWidth={2.5} />{(item.live ? item.live.matched : s.total_match) || 0} matched</span>
-                  {((item.live ? item.live.missing : s.total_missing) || 0) > 0 && <span style={CHIP("#fef3c7", "#b45309")}>{item.live ? item.live.missing : s.total_missing} not in ledger</span>}
+                  <span style={CHIP("#dcfce7", "#059669")}><Check size={11} strokeWidth={2.5} />{(live ? live.matched : s.total_match) || 0} matched</span>
+                  {((live ? live.missing : s.total_missing) || 0) > 0 && <span style={CHIP("#fef3c7", "#b45309")}>{live ? live.missing : s.total_missing} not in ledger</span>}
                   {gap !== null && Math.abs(gap) >= 1 && <span style={CHIP("#fee2e2", "#dc2626")}>gap {fmtIDR(Math.abs(gap))}</span>}
                   {gap !== null && Math.abs(gap) < 1 && <span style={CHIP("#f3f4f6", "#6b7280")}>closing matches</span>}
                   {gap === null && <span style={CHIP("#f3f4f6", "#6b7280")}>no closing balance</span>}
