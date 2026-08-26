@@ -426,7 +426,10 @@ function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeri
 
   // Insights: top category, largest tx, biggest category increase vs prev period
   const expTxs     = txs.filter(t => isExpenseRow(t) && !t.is_reimburse);
-  const topCat     = catBreak[0];
+  // Top-spend insight highlights the top SPENDING category — the fixed BYD
+  // leg (Loan Installments) would head the line every month (same treatment
+  // as the Dashboard Top Category card). It still appears in the lists.
+  const topCat     = catBreak.find(c => c.name !== "Loan Installments") || catBreak[0];
   const largestTx  = expTxs.slice().sort((a, b) => Number(b.amount_idr) - Number(a.amount_idr))[0];
   const prevCatMap = useMemo(() => {
     const m = {};
@@ -460,8 +463,8 @@ function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeri
         <MetricCard label="Total Income" value={fmtIDR(totalInc)} valueColor="#059669" delta={incDelta}
           prevText={prevInc > 0 ? `prev ${fmtIDR(prevInc)}` : undefined}
           icon={TrendingUp} iconBg="#dcfce7" iconColor="#059669" />
-        <MetricCard label="Net Surplus" value={(netSurp >= 0 ? "+" : "") + fmtIDR(netSurp)} valueColor={netSurp >= 0 ? "#3b5bdb" : "#dc2626"} delta={netDelta}
-          prevText={prevNet !== 0 ? `prev ${(prevNet >= 0 ? "+" : "") + fmtIDR(prevNet)}` : undefined}
+        <MetricCard label="Net Surplus" value={(netSurp >= 0 ? "+" : "\u2212") + fmtIDR(Math.abs(netSurp))} valueColor={netSurp >= 0 ? "#3b5bdb" : "#dc2626"} delta={netDelta}
+          prevText={prevNet !== 0 ? `prev ${(prevNet >= 0 ? "+" : "\u2212") + fmtIDR(Math.abs(prevNet))}` : undefined}
           icon={PiggyBank} iconBg="#dbeafe" iconColor="#3b5bdb" />
         <MetricCard
           label="Savings Rate"
