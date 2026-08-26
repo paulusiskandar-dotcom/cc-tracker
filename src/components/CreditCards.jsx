@@ -360,45 +360,10 @@ export default function CreditCards({
     setSaving(false);
   };
 
-  // ── Mark installment month paid ──
-  const markInstPaid = async (inst) => {
-    try {
-      const total    = Math.max(1, Number(inst.total_months ?? inst.months ?? 0) || 1);
-      const newPaid  = Math.min(Number(inst.paid_months ?? 0) + 1, total);
-      // Advance next_payment_date by 1 month
-      let nextDate = inst.next_payment_date || null;
-      if (nextDate) {
-        const d = new Date(nextDate + "T00:00:00");
-        d.setMonth(d.getMonth() + 1);
-        nextDate = d.toISOString().slice(0, 10);
-      }
-      const updates = {
-        paid_months: newPaid,
-        next_payment_date: nextDate,
-        ...(newPaid >= total ? { status: "completed" } : {}),
-      };
-      await installmentsApi.update(inst.id, updates);
-      setInstallments(p => p.map(x => x.id === inst.id ? { ...x, ...updates } : x));
-      const sn2 = (v) => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
-      const entry = {
-        tx_date:         todayStr(),
-        description:     `${inst.description} — Month ${newPaid}/${total}`,
-        amount:          sn2(inst.monthly_amount),
-        currency:        inst.currency || "IDR",
-        amount_idr:      sn2(inst.monthly_amount),
-        tx_type:         "cc_installment",
-        from_type:       "account",
-        to_type:         "expense",
-        from_id:         inst.account_id,
-        to_id:           null,
-        entity:          inst.entity || "Personal",
-        notes:           "CC Installment",
-      };
-      const created = await ledgerApi.create(user.id, entry, accounts);
-      if (created) setLedger(p => [created, ...p]);
-      showToast(`Month ${newPaid} marked paid`);
-    } catch (e) { showToast(e.message, "error"); }
-  };
+  // NB: manual "mark installment paid" was removed — paid_months advances
+  // automatically from statement X/N markers on reconcile finalize
+  // (installmentsApi.syncFromStatementRows). A manual bump also inserted its
+  // own ledger expense row, which would double-count against the statement leg.
 
   const deleteInstallment = async () => {
     if (!deleteInstId) return;
