@@ -271,7 +271,7 @@ export function ProgressBar({ value, max, color = "#3b5bdb", height = 6, showPct
 }
 
 // ─── EMPTY STATE ──────────────────────────────────────────────
-export function Empty({ icon = "📭", message = "Nothing here yet", th }) {
+export function Empty({ icon = "", message = "Nothing here yet", th }) {
   return (
     <div style={{ textAlign:"center", padding:"40px 20px", color:th.tx3 }}>
       <div style={{ fontSize:36, marginBottom:8 }}>{icon}</div>
@@ -379,7 +379,7 @@ export function AmountInput({ value, onChange, currency, onCurrencyChange, curre
     <div style={{ display:"flex", gap:6 }}>
       <select className="inp" value={currency} onChange={e=>onCurrencyChange(e.target.value)}
         style={{ width:80, background:th.sur, color:th.tx, borderColor:th.bor2, cursor:"pointer", flexShrink:0 }}>
-        {currencies.map(c=><option key={c.code} value={c.code}>{c.flag} {c.code}</option>)}
+        {currencies.map(c=><option key={c.code} value={c.code}>{c.code}</option>)}
       </select>
       <input className="inp" type="number" value={value} onChange={onChange} placeholder="0"
         style={{ background:th.sur, color:th.tx, borderColor:th.bor2, fontFamily:"'JetBrains Mono',monospace" }}/>

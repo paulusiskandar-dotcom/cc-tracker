@@ -402,9 +402,9 @@ export default function CCStatement({
               {data && !reconcile.active && (
                 <button onClick={reconcile.startReconcile} style={BTN()}>☑ Reconcile</button>
               )}
-              <button onClick={exportPDF} style={BTN()}>🖨 PDF</button>
+              <button onClick={exportPDF} style={BTN()}>PDF</button>
               <button onClick={exportExcel} disabled={!data} style={BTN({ opacity: data ? 1 : 0.4, cursor: data ? "pointer" : "default" })}>
-                📊 Excel
+                Excel
               </button>
             </div>
           </>

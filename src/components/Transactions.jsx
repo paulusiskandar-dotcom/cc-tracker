@@ -180,7 +180,7 @@ export default function Transactions({
               color: "#111827", background: "#fff", outline: "none", boxSizing: "border-box",
             }}
           />
-          <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", fontSize: 12, color: "#9ca3af" }}>🔍</span>
+          <span style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", fontSize: 12, color: "#9ca3af" }}>⌕</span>
           {search && (
             <button
               type="button"
@@ -345,7 +345,7 @@ export default function Transactions({
       {/* ── TRANSACTION LIST ── */}
       {subTab !== "pending" && (
         grouped.length === 0
-          ? <EmptyState icon="📋" title="No transactions" message="Add your first transaction or adjust the filters." />
+          ? <EmptyState icon="" title="No transactions" message="Add your first transaction or adjust the filters." />
           : grouped.map(([date, rows]) => {
               const dayNet = rows.reduce((sum, e) => {
                 const a = Number(e.amount_idr || e.amount || 0);
@@ -649,7 +649,7 @@ function TxRow({ entry: e, accounts, categories = [], onEdit, onDelete }) {
               marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
             }}>
               {isBill && (
-                <span style={{ fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 4, background: "#EDE8FF", color: "#5B2DC4", marginRight: 4, verticalAlign: "middle", display: "inline-block" }}>🔁 Bill</span>
+                <span style={{ fontSize: 10, fontWeight: 600, padding: "1px 6px", borderRadius: 4, background: "#EDE8FF", color: "#5B2DC4", marginRight: 4, verticalAlign: "middle", display: "inline-block" }}>Bill</span>
               )}
               {meta}
             </div>
@@ -724,7 +724,7 @@ function PendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, user,
   const [progress,  setProgress]  = useState({ done: 0, total: 0 });
 
   if (!pendingSyncs?.length) return (
-    <EmptyState icon="📧" title="No pending emails" message="Gmail sync will surface transactions here for review." />
+    <EmptyState icon="" title="No pending emails" message="Gmail sync will surface transactions here for review." />
   );
 
   const selectedSyncs = pendingSyncs.filter(s => checked.has(s.id));

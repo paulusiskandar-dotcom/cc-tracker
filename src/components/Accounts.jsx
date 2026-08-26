@@ -440,7 +440,7 @@ export default function Accounts({
       {/* ── BANK PAGE ── */}
       {locked && initialSubTab === "bank" && (
         filtered.length === 0
-          ? <EmptyState icon="🏦" title="No bank accounts" message="Add a bank account to get started." />
+          ? <EmptyState icon="" title="No bank accounts" message="Add a bank account to get started." />
           : <BankPageContent
               accounts={filtered}
               ledger={ledger}
@@ -456,7 +456,7 @@ export default function Accounts({
       {/* ── CASH PAGE ── */}
       {locked && initialSubTab === "cash" && (
         filtered.length === 0
-          ? <EmptyState icon="💵" title="No cash accounts" message="Add a cash account to get started." />
+          ? <EmptyState icon="" title="No cash accounts" message="Add a cash account to get started." />
           : <CashPageContent
               accounts={filtered}
               fxRates={fxRates}
@@ -509,7 +509,7 @@ export default function Accounts({
         </div>
 
         {filtered.length === 0 ? (
-          <EmptyState icon="🏦" title="No accounts" message="Add your first account to get started." />
+          <EmptyState icon="" title="No accounts" message="Add your first account to get started." />
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {filtered.map(a => (
@@ -558,7 +558,7 @@ export default function Accounts({
                       onClick={() => navigate(`/accounts/${a.id}/statement`)}
                       style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, border: "1px solid #e5e7eb", background: "#fff", color: "#6b7280", cursor: "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 600, flexShrink: 0 }}
                     >
-                      📄 History
+                      History
                     </button>
                   </div>
                 ))}
@@ -602,12 +602,12 @@ export default function Accounts({
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               {[
-                { id: "bank",        icon: "🏦", label: "Bank Account",  bg: "#e8f4fd", color: "#3b5bdb" },
-                { id: "cash",        icon: "💵", label: "Cash",          bg: "#f0fdf4", color: "#059669" },
-                { id: "credit_card", icon: "💳", label: "Credit Card",   bg: "#fde8e8", color: "#dc2626" },
-                { id: "asset",       icon: "📈", label: "Asset",         bg: "#e8fdf0", color: "#059669" },
-                { id: "liability",   icon: "📉", label: "Liability",     bg: "#fff0f0", color: "#dc2626" },
-                { id: "receivable",  icon: "📋", label: "Receivable",    bg: "#fdf6e8", color: "#d97706" },
+                { id: "bank",        icon: "▤", label: "Bank Account",  bg: "#e8f4fd", color: "#3b5bdb" },
+                { id: "cash",        icon: "▥", label: "Cash",          bg: "#f0fdf4", color: "#059669" },
+                { id: "credit_card", icon: "▦", label: "Credit Card",   bg: "#fde8e8", color: "#dc2626" },
+                { id: "asset",       icon: "↗", label: "Asset",         bg: "#e8fdf0", color: "#059669" },
+                { id: "liability",   icon: "↘", label: "Liability",     bg: "#fff0f0", color: "#dc2626" },
+                { id: "receivable",  icon: "↺", label: "Receivable",    bg: "#fdf6e8", color: "#d97706" },
               ].map(t => (
                 <button key={t.id} onClick={() => selectType(t.id)} style={{
                   background:     t.bg,
@@ -728,7 +728,7 @@ export default function Accounts({
         title={withdrawAcc && isDepositoAcc(withdrawAcc) ? "Cairkan Deposito" : "Sell Asset"}
         footer={
           <Button fullWidth onClick={saveWithdraw} busy={withdrawSaving}>
-            {withdrawAcc && isDepositoAcc(withdrawAcc) ? "💰 Cairkan" : "💰 Sell Asset"}
+            {withdrawAcc && isDepositoAcc(withdrawAcc) ? "Cairkan" : "Sell Asset"}
           </Button>
         }
       >
@@ -926,7 +926,7 @@ function BankAccountCard({ account: a, ledger, fxRates = {}, CURRENCIES: C = [],
 
         {/* Actions */}
         <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
-          <button onClick={() => onStatement && onStatement(a)} style={ACCT_BTN}>📄 Statement</button>
+          <button onClick={() => onStatement && onStatement(a)} style={ACCT_BTN}>Statement</button>
           <button onClick={onEdit}                              style={{ ...ACCT_BTN, flex: 1 }}>✏️ Edit</button>
         </div>
       </div>
@@ -950,7 +950,7 @@ function CashAccountCard({ account: a, fxRates = {}, CURRENCIES: C = [], ledger,
         {/* Flag + Name + edit */}
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ width: 36, height: 36, borderRadius: 8, background: (color || "#059669") + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>
-            {cur?.flag || "💵"}
+            {cur?.code || ""}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -985,7 +985,7 @@ function CashAccountCard({ account: a, fxRates = {}, CURRENCIES: C = [], ledger,
 
         {/* Actions */}
         <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
-          <button onClick={() => onStatement && onStatement(a)} style={ACCT_BTN}>📄 Statement</button>
+          <button onClick={() => onStatement && onStatement(a)} style={ACCT_BTN}>Statement</button>
           <button onClick={onEdit}                              style={{ ...ACCT_BTN, flex: 1 }}>✏️ Edit</button>
         </div>
       </div>
@@ -1185,7 +1185,7 @@ function AccountCard({ account: a, ledger, accounts, fxRates = {}, onEdit, onDel
   const isCash = a.type === "bank" && a.subtype === "cash";
   const bg    = isCash ? "#f0fdf4" : (TYPE_BG[a.type]    || "#f9fafb");
   const color = isCash ? "#059669" : (TYPE_COLOR[a.type] || "#6b7280");
-  const icon  = isCash ? "💵" : (ACC_TYPE_ICON[a.type] || "🏦");
+  const icon  = isCash ? "▥" : (ACC_TYPE_ICON[a.type] || "▤");
   const txCount = ledger.filter(e => e.from_id === a.id || e.to_id === a.id).length;
 
   // Balance display per type
@@ -1445,7 +1445,7 @@ function AccountCard({ account: a, ledger, accounts, fxRates = {}, onEdit, onDel
                 Maturity: {maturityStr}
                 {daysLeft !== null && (
                   <span style={{ marginLeft: 6, color: daysLeft <= 30 ? "#dc2626" : daysLeft <= 90 ? "#d97706" : "#9ca3af" }}>
-                    {daysLeft > 0 ? `⏰ ${daysLeft} days` : "⚠️ Matured"}
+                    {daysLeft > 0 ? `${daysLeft} days` : "⚠ Matured"}
                   </span>
                 )}
               </div>
@@ -1463,7 +1463,7 @@ function AccountCard({ account: a, ledger, accounts, fxRates = {}, onEdit, onDel
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         {a.type === "asset" && a.subtype === "PT Investment" && (
           <button onClick={onUpdateNilai} style={{ ...ACTION_BTN, background: "#e8f4fd", color: "#3b5bdb", border: "1px solid #bfdbfe" }}>
-            📊 Update Nilai
+            Update Nilai
           </button>
         )}
         {(a.subtype === "Deposit" || a.subtype === "Deposito") && a.deposit_status !== "closed" && <>
@@ -1471,24 +1471,24 @@ function AccountCard({ account: a, ledger, accounts, fxRates = {}, onEdit, onDel
             + Bunga
           </button>
           <button onClick={onWithdraw} style={{ ...ACTION_BTN, background: "#fef9ec", color: "#d97706", border: "1px solid #fde68a" }}>
-            💰 Cair
+            Cair
           </button>
         </>}
         {onSell && (
           <button onClick={onSell} style={{ ...ACTION_BTN, background: "#fef9ec", color: "#d97706", border: "1px solid #fde68a" }}>
-            💰 Sell
+            Sell
           </button>
         )}
         {a.type === "asset" && onStatement && (
           <button onClick={onStatement} style={ACTION_BTN}>
-            📄 Statement
+            Statement
           </button>
         )}
         <button onClick={onEdit} style={ACTION_BTN}>
           ✏️ Edit
         </button>
         <button onClick={onDelete} style={{ ...ACTION_BTN, background: "#fee2e2", color: "#dc2626", border: "1px solid #fecaca" }}>
-          🗑
+          ✕
         </button>
       </div>
     </div>
@@ -1555,7 +1555,7 @@ function AccountHistory({ account, ledger, accounts }) {
     .slice(0, 50);
 
   if (entries.length === 0) return (
-    <EmptyState icon="📋" message="No transactions for this account yet" />
+    <EmptyState icon="" message="No transactions for this account yet" />
   );
 
   const rows = [];
@@ -1736,7 +1736,7 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
       {/* CASH */}
       {type === "cash" && <>
         <Select label="Currency" value={form.currency || "IDR"} onChange={e => set("currency", e.target.value)}
-          options={C.map(c => ({ value: c.code, label: `${c.flag} ${c.code}` }))} />
+          options={C.map(c => ({ value: c.code, label: c.code }))} />
         <AmountInput label="Initial Balance" value={form.initial_balance || ""}
           currency={form.currency || "IDR"}
           onChange={v => { set("initial_balance", v); set("current_balance", v); }} />
@@ -1750,7 +1750,7 @@ function AccountForm({ type, form, set, accounts, bankAccounts, CURRENCIES: C = 
           <Input label="Account No." value={form.account_no || ""} onChange={e => set("account_no", e.target.value)}
             placeholder="Last 4 digits" style={{ flex: 1 }} />
           <Select label="Currency" value={form.currency || "IDR"} onChange={e => set("currency", e.target.value)}
-            options={C.map(c => ({ value: c.code, label: `${c.flag} ${c.code}` }))}
+            options={C.map(c => ({ value: c.code, label: c.code }))}
             style={{ flex: 1 }} />
         </FormRow>
         <AmountInput label="Initial Balance" value={form.initial_balance || ""}

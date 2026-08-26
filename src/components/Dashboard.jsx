@@ -184,7 +184,7 @@ export default function Dashboard({
         const key  = e.category_id || (e.tx_type === "pay_liability" ? "loan_installment" : "other");
         const cat  = (categories || []).find(c => c.id === e.category_id);
         const name = cat?.name || e.category_name || (e.tx_type === "pay_liability" ? "Loan Installments" : "Other");
-        const icon = cat?.icon || "💸";
+        const icon = null;
         const color = cat?.color || "#9ca3af";
         if (!map[key]) map[key] = { name, icon, color, total: 0 };
         map[key].total += Number(e.amount_idr || e.amount || 0);
@@ -250,7 +250,7 @@ export default function Dashboard({
       .filter(t => t.tx_type === "reimburse_out" && !t.reimburse_settlement_id && (now - new Date(t.tx_date + "T00:00:00")) / 86400000 > 14)
       .forEach(t => { byEntity[t.entity] = (byEntity[t.entity] || 0) + Number(t.amount_idr || 0); });
     Object.entries(byEntity).forEach(([entity, total]) => {
-      result.push({ icon: "🕐", message: `${entity} reimburse >14d`, value: `${fmtIDR(total)} pending`, severity: "medium" });
+      result.push({ icon: "⚠", message: `${entity} reimburse >14d`, value: `${fmtIDR(total)} pending`, severity: "medium" });
     });
     return result.slice(0, 5);
   }, [accounts, budgets, ledger]);
@@ -289,7 +289,7 @@ export default function Dashboard({
         amount: Number(tmpl.amount || 0),
         amountColor: isIncome ? "#059669" : "#dc2626",
         amountSign:  isIncome ? "+" : "−",
-        icon: isIncome ? "💰" : "↑",
+        icon: isIncome ? "↓" : "↑",
         iconBg: isIncome ? "#dcfce7" : "#fee2e2",
         iconColor: isIncome ? "#059669" : "#dc2626",
         actionable: true,
@@ -312,7 +312,7 @@ export default function Dashboard({
           sub: `Monthly payment · Remaining ${fmtIDR(loan.remaining, true)}`,
           amount: Number(loan.monthly_installment),
           amountColor: "#3b5bdb", amountSign: "−",
-          icon: "👤", iconBg: "#dbeafe", iconColor: "#3b5bdb",
+          icon: "↓", iconBg: "#dbeafe", iconColor: "#3b5bdb",
           actionable: false,
         });
       });
@@ -329,7 +329,7 @@ export default function Dashboard({
           sub: "Outstanding reimburse",
           amount: Number(r.receivable_outstanding),
           amountColor: "#d97706", amountSign: "+",
-          icon: "📋", iconBg: "#fef3c7", iconColor: "#d97706",
+          icon: "↺", iconBg: "#fef3c7", iconColor: "#d97706",
           actionable: false,
         });
       });
@@ -347,7 +347,7 @@ export default function Dashboard({
         sub:   `Expected reimbursement · ${fmtIDR(net)}`,
         amount: net,
         amountColor: "#059669", amountSign: "+",
-        icon: "💰", iconBg: "#dcfce7", iconColor: "#059669",
+        icon: "↓", iconBg: "#dcfce7", iconColor: "#059669",
         actionable: true,
       });
     });
@@ -365,7 +365,7 @@ export default function Dashboard({
           sub: `${cc?.name || "CC"} · Month ${(inst.paid_months || 0) + 1}/${inst.total_months ?? inst.months ?? "?"}`,
           amount: Number(inst.monthly_amount || 0),
           amountColor: "#9ca3af", amountSign: "−",
-          icon: "📅", iconBg: "#f3f4f6", iconColor: "#9ca3af",
+          icon: "•", iconBg: "#f3f4f6", iconColor: "#9ca3af",
           actionable: false, infoOnly: true,
         });
       });
@@ -390,7 +390,7 @@ export default function Dashboard({
           sub: `Deposito${bankAcc ? ` ${bankAcc.name}` : ""} · ${fmtIDR(Number(a.current_value || 0), true)} · ${rolloverLabel}`,
           amount: Number(a.current_value || 0),
           amountColor: "#2563eb", amountSign: "",
-          icon: "🏦", iconBg: "#dbeafe", iconColor: "#2563eb",
+          icon: "↔", iconBg: "#dbeafe", iconColor: "#2563eb",
           actionable: true,
         });
       });
@@ -431,7 +431,7 @@ export default function Dashboard({
         sub: `Due: ${fmtIDR(pendingDue)}`,
         amount: pendingDue,
         amountColor: "#dc2626", amountSign: "−",
-        icon: "💳", iconBg: "#fee2e2", iconColor: "#dc2626",
+        icon: "↑", iconBg: "#fee2e2", iconColor: "#dc2626",
         actionable: true, confirmLabel: "Pay", confirmStyle: "danger",
       });
     });
@@ -753,7 +753,7 @@ export default function Dashboard({
       if (newPaid >= Number(payLoan.total_amount || 0)) {
         await employeeLoanApi.update(payLoan.id, { status: "settled" });
         setEmployeeLoans?.(prev => prev.map(l => l.id === payLoan.id ? { ...l, status: "settled" } : l));
-        showToast("Payment recorded — loan fully settled! 🎉");
+        showToast("Payment recorded — loan fully settled!");
       } else {
         showToast(`Payment of ${fmtIDR(amt, true)} recorded`);
       }

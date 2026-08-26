@@ -65,8 +65,8 @@ function txDirection(tx, accountId) {
 // ─── GROUPED ACCOUNT OPTIONS ─────────────────────────────────
 function AccountOptions({ accounts }) {
   const GROUPS = [
-    { type: "bank",  label: "🏦 Bank"  },
-    { type: "cash",  label: "💵 Cash"  },
+    { type: "bank",  label: "Bank"  },
+    { type: "cash",  label: "Cash"  },
   ];
   return (
     <>
@@ -435,9 +435,9 @@ export default function BankStatement({
               {rawData && !reconcile.active && (
                 <button onClick={reconcile.startReconcile} style={BTN()}>☑ Reconcile</button>
               )}
-              <button onClick={exportPDF} style={BTN()}>🖨 PDF</button>
+              <button onClick={exportPDF} style={BTN()}>PDF</button>
               <button onClick={exportExcel} disabled={!rawData} style={BTN({ opacity: rawData ? 1 : 0.4, cursor: rawData ? "pointer" : "default" })}>
-                📊 Excel
+                Excel
               </button>
             </div>
           </>

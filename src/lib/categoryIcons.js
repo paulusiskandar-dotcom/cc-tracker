@@ -10,6 +10,8 @@ import {
   Repeat, Percent, Car, Plane, Tag,
   // income sources
   Wallet, KeyRound, PiggyBank, Laptop, BadgePercent, Gift, RotateCcw,
+  // asset subtypes
+  TrendingUp, Bitcoin, Medal, Gem, Banknote, Package,
 } from "lucide-react";
 
 // Pastel tints from the Ryūsei token palette (LIGHT theme values;
@@ -83,6 +85,41 @@ export function getCategoryVisual(name) {
 // size = outer box px (icon scales to ~55%).
 export function CategoryIcon({ name, size = 26, radius, style }) {
   const { Icon, bg, fg } = getCategoryVisual(name);
+  return (
+    <span style={{
+      width: size, height: size, borderRadius: radius ?? Math.round(size * 0.3),
+      background: bg, color: fg, display: "inline-flex",
+      alignItems: "center", justifyContent: "center", flexShrink: 0, ...style,
+    }}>
+      <Icon size={Math.round(size * 0.55)} strokeWidth={2} />
+    </span>
+  );
+}
+
+// Asset subtypes — same pastel-tile treatment (replaces constants.ASSET_ICON emoji).
+const ASSET_VISUAL = {
+  "property":      { Icon: Building2,  tint: "blue"   },
+  "vehicle":       { Icon: Car,        tint: "teal"   },
+  "stock":         { Icon: TrendingUp, tint: "green"  },
+  "mutual fund":   { Icon: Briefcase,  tint: "purple" },
+  "crypto":        { Icon: Bitcoin,    tint: "amber"  },
+  "gold":          { Icon: Medal,      tint: "amber"  },
+  "deposit":       { Icon: Landmark,   tint: "blue"   },
+  "deposito":      { Icon: Landmark,   tint: "blue"   },
+  "valuables":     { Icon: Gem,        tint: "purple" },
+  "fx/cash":       { Icon: Banknote,   tint: "teal"   },
+  "pt investment": { Icon: Building2,  tint: "blue"   },
+};
+
+export function getAssetVisual(subtype) {
+  const key = String(subtype || "").trim().toLowerCase();
+  const hit = ASSET_VISUAL[key];
+  const tint = TINTS[hit?.tint || "grey"];
+  return { Icon: hit?.Icon || Package, bg: tint.bg, fg: tint.fg };
+}
+
+export function AssetIcon({ subtype, size = 26, radius, style }) {
+  const { Icon, bg, fg } = getAssetVisual(subtype);
   return (
     <span style={{
       width: size, height: size, borderRadius: radius ?? Math.round(size * 0.3),

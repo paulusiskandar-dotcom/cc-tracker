@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { getCategoryVisual } from "../../lib/categoryIcons";
 import { fmtIDR, fmtDateLabel, fmtCur } from "../../utils";
 import { TX_TYPE_MAP } from "../../constants";
 
@@ -51,43 +52,25 @@ function getExpandedContent(entry, accounts) {
 // ─── CATEGORY ICON ────────────────────────────────────────────
 // categories = DB expense_categories array (id, name, icon, color)
 function CategoryIcon({ categoryId, categoryName, txType, size = 36, categories = [] }) {
-  let icon  = "💸";
-  let color = "#9ca3af";
-  let bg    = "#f3f4f6";
-
-  // 1. DB lookup by UUID
+  // Resolve the category NAME (by UUID, then by name), then render the shared
+  // lucide pastel tile from lib/categoryIcons — emoji in the DB icon column
+  // are legacy and ignored. Rows without a category fall back to a tile keyed
+  // on the tx-type label so transfers/pay_cc still get a stable visual.
   let hit = categories.find(c => c.id === categoryId);
-  // 2. DB lookup by name (case-insensitive)
   if (!hit && categoryName) {
     const lower = categoryName.toLowerCase().trim();
     hit = categories.find(c => c.name?.toLowerCase().trim() === lower);
   }
   const tx = TX_TYPE_MAP[txType];
-
-  if (hit?.icon) {
-    icon  = hit.icon;
-    color = hit.color || "#9ca3af";
-    bg    = (hit.color || "#9ca3af") + "18";
-  } else if (tx) {
-    icon  = tx.icon;
-    color = tx.color;
-    bg    = tx.color + "18";
-  }
-
+  const name = hit?.name || categoryName || tx?.label || "Other";
+  const { Icon, bg, fg } = getCategoryVisual(name);
   return (
     <div style={{
-      width:           size,
-      height:          size,
-      borderRadius:    size * 0.3,
-      background:      bg,
-      display:         "flex",
-      alignItems:      "center",
-      justifyContent:  "center",
-      fontSize:        size * 0.46,
-      flexShrink:      0,
-      color:           color,
+      width: size, height: size, borderRadius: size * 0.3, background: bg,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      flexShrink: 0, color: fg,
     }}>
-      {icon}
+      <Icon size={Math.round(size * 0.52)} strokeWidth={2} />
     </div>
   );
 }

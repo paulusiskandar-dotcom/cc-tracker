@@ -578,7 +578,7 @@ export default function Settings({
             {!changingPass ? (
               <div style={{ marginTop: 10 }}>
                 <Button variant="secondary" size="sm" onClick={() => setChangingPass(true)}>
-                  🔑 Change Password
+                  Change Password
                 </Button>
               </div>
             ) : (
@@ -635,7 +635,7 @@ export default function Settings({
 
           {/* ── Status card ── */}
           <div style={{ ...card, borderColor: gmailToken ? "#059669" : T.border }}>
-            <SectionHeader title={gmailToken ? "✅ Gmail Connected" : "📧 Gmail Not Connected"} />
+            <SectionHeader title={gmailToken ? "Gmail Connected" : "Gmail Not Connected"} />
             {gmailToken ? (
               <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{gmailToken.gmail_email || user?.email}</div>
@@ -646,7 +646,7 @@ export default function Settings({
                   const fmt = `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
                   return (
                     <div style={{ fontSize: 11, color: T.text3 }}>
-                      Last sync: {fmt} · {last.emails_processed ?? 0} emails · {last.new_transactions ?? 0} transactions · {last.status === "success" ? "✅" : "❌"}
+                      Last sync: {fmt} · {last.emails_processed ?? 0} emails · {last.new_transactions ?? 0} transactions · {last.status === "success" ? "✓" : "✕"}
                     </div>
                   );
                 })() : gmailToken.last_sync ? (
@@ -679,11 +679,11 @@ export default function Settings({
                   </FormRow>
                   {rangeWarning && (
                     <div style={{ fontSize: 11, color: "#d97706", background: "#fef9c3", borderRadius: 8, padding: "8px 12px" }}>
-                      ⚠️ Range is {days} days. Large ranges may take longer and could hit Gmail API limits.
+                      ⚠ Range is {days} days. Large ranges may take longer and could hit Gmail API limits.
                     </div>
                   )}
                   <div style={{ display: "flex", gap: 8 }}>
-                    <Button variant="primary" size="sm" busy={syncingNow} onClick={syncNow}>🔄 Sync Now</Button>
+                    <Button variant="primary" size="sm" busy={syncingNow} onClick={syncNow}>Sync Now</Button>
                     <Button variant="danger"  size="sm" onClick={disconnectGmail}>Disconnect Gmail</Button>
                   </div>
                 </div>
@@ -718,7 +718,7 @@ export default function Settings({
                       <span style={{ flex: 1 }}>{fmt}</span>
                       <span style={{ width: 52, textAlign: "right", flexShrink: 0, color: T.text3 }}>{entry.emails_processed ?? 0}</span>
                       <span style={{ width: 90, textAlign: "right", flexShrink: 0, color: entry.new_transactions > 0 ? "#059669" : T.text3, fontWeight: entry.new_transactions > 0 ? 600 : 400 }}>{entry.new_transactions ?? 0}</span>
-                      <span style={{ width: 44, textAlign: "center", flexShrink: 0 }}>{entry.status === "success" ? "✅" : "❌"}</span>
+                      <span style={{ width: 44, textAlign: "center", flexShrink: 0 }}>{entry.status === "success" ? "✓" : "✕"}</span>
                     </div>
                   );
                 })}
@@ -799,7 +799,7 @@ export default function Settings({
                 display: "flex", alignItems: "center", gap: 10,
                 padding: "10px 12px", background: T.sur2, borderRadius: 10,
               }}>
-                <span style={{ fontSize: 18 }}>{c.flag}</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "#6b7280", minWidth: 34 }}>{c.code}</span>
                 <span style={{ fontWeight: 700, fontSize: 13, color: T.text, minWidth: 36 }}>{c.code}</span>
                 {fxEditCode === c.code ? (
                   <>
@@ -851,7 +851,7 @@ export default function Settings({
               Save All Rates
             </Button>
             <Button variant="secondary" size="md" busy={refreshingFx} onClick={handleRefreshFxRates}>
-              {refreshingFx ? "Refreshing..." : "🔄 Refresh from API"}
+              {refreshingFx ? "Refreshing..." : "Refresh from API"}
             </Button>
           </div>
         </div>
@@ -895,7 +895,7 @@ export default function Settings({
             </div>
 
             {recurTemplates.length === 0 ? (
-              <EmptyState icon="🔄" message="No recurring templates yet." />
+              <EmptyState icon="" message="No recurring templates yet." />
             ) : (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
                 {recurTemplates.map(t => {
@@ -981,7 +981,7 @@ export default function Settings({
                           onMouseEnter={e => e.currentTarget.style.color = "#ef4444"}
                           onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}
                         >
-                          🗑
+                          ✕
                         </button>
                       </div>
                     </div>
@@ -1012,7 +1012,7 @@ export default function Settings({
             style={{ width: "100%", fontSize: 12, padding: "6px 10px", borderRadius: 8, border: `1px solid ${T.border}`, background: T.sur2, color: T.text, fontFamily: "Figtree, sans-serif", marginBottom: 10, boxSizing: "border-box" }}
           />
           {merchantMaps.length === 0 ? (
-            <EmptyState icon="🏪" message="No merchant rules yet. Add one to auto-categorize transactions." />
+            <EmptyState icon="" message="No merchant rules yet. Add one to auto-categorize transactions." />
           ) : (
             merchantMaps
               .filter(m => !merchantSearch || m.merchant_name?.toLowerCase().includes(merchantSearch.toLowerCase()))
@@ -1053,8 +1053,8 @@ export default function Settings({
             <SectionHeader title="Theme" />
             <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
               {[
-                { label: "Light", isDark: false, icon: "☀️" },
-                { label: "Dark",  isDark: true,  icon: "🌙" },
+                { label: "Light", isDark: false, icon: "" },
+                { label: "Dark",  isDark: true,  icon: "" },
               ].map(opt => (
                 <button
                   key={opt.label}
@@ -1117,12 +1117,12 @@ export default function Settings({
                 }}>
                   <div style={{ fontWeight: 700, color: T.ac, marginBottom: 6 }}>v{APP_VERSION} — {APP_BUILD}</div>
                   {[
-                    "📧 Gmail auto-sync: connect once, transactions import automatically",
-                    "🔍 Duplicate detection: smart matching prevents double-imports",
-                    "🏪 Merchant learning: categories remembered per merchant",
-                    "⏳ Pending review UI: approve, edit or skip each email transaction",
-                    "🎨 Complete UI overhaul: Linear/Notion design system",
-                    "🔢 Unified ledger v5 with full double-entry accounting",
+                    "Gmail auto-sync: connect once, transactions import automatically",
+                    "Duplicate detection: smart matching prevents double-imports",
+                    "Merchant learning: categories remembered per merchant",
+                    "Pending review UI: approve, edit or skip each email transaction",
+                    "Complete UI overhaul: Linear/Notion design system",
+                    "Unified ledger v5 with full double-entry accounting",
                   ].map((item, i) => <div key={i}>• {item}</div>)}
                 </div>
               )}
@@ -1166,8 +1166,8 @@ export default function Settings({
                 { value: "expense",      label: "↑ Expense"      },
                 { value: "income",       label: "↓ Income"       },
                 { value: "transfer",     label: "↔ Transfer"     },
-                { value: "pay_cc",       label: "💳 Pay CC"       },
-                { value: "pay_liability",label: "📉 Pay Liability" },
+                { value: "pay_cc",       label: "Pay CC"       },
+                { value: "pay_liability",label: "Pay Liability" },
               ]}
             />
           </Field>
@@ -1193,7 +1193,7 @@ export default function Settings({
               <Select
                 value={recurForm.currency}
                 onChange={e => setRecurForm(f => ({ ...f, currency: e.target.value }))}
-                options={CURRENCIES.map(c => ({ value: c.code, label: `${c.flag} ${c.code}` }))}
+                options={CURRENCIES.map(c => ({ value: c.code, label: c.code }))}
               />
             </Field>
           </FormRow>
@@ -1420,7 +1420,7 @@ function AccountsSection({ user, T, card, accounts, setAccounts, onRefresh }) {
           <Button size="sm" variant="primary" onClick={openAdd}>+ Add</Button>
         </div>
         {liabilities.length === 0 ? (
-          <EmptyState icon="📋" message="No liabilities added yet." />
+          <EmptyState icon="" message="No liabilities added yet." />
         ) : (
           liabilities.map((a, i) => (
             <div key={a.id} style={{ ...rowStyle, borderBottom: i === liabilities.length - 1 ? "none" : `1px solid ${T.border}` }}>
@@ -1444,7 +1444,7 @@ function AccountsSection({ user, T, card, accounts, setAccounts, onRefresh }) {
         <SectionHeader title="Receivables (Piutang)" />
         <div style={{ marginTop: 8 }}>
           {receivables.length === 0 ? (
-            <EmptyState icon="📎" message="No receivable accounts." />
+            <EmptyState icon="" message="No receivable accounts." />
           ) : (
             receivables.map((a, i) => (
               <div key={a.id} style={{ ...rowStyle, borderBottom: i === receivables.length - 1 ? "none" : `1px solid ${T.border}` }}>
@@ -1612,10 +1612,10 @@ function BackupSection({ user, T, card, ledger }) {
           )}
           <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
             <Button variant="primary" size="sm" busy={backingUp} onClick={runBackup}>
-              🔄 Backup Now
+              Backup Now
             </Button>
             <Button variant="secondary" size="sm" onClick={exportCSV}>
-              📊 Export CSV
+              Export CSV
             </Button>
           </div>
         </div>
@@ -1630,7 +1630,7 @@ function BackupSection({ user, T, card, ledger }) {
         {loadingFiles ? (
           <div style={{ textAlign: "center", padding: 20, fontSize: 12, color: T.text3 }}>Loading…</div>
         ) : files.length === 0 ? (
-          <EmptyState icon="☁️" message="No backups yet. Click 'Backup Now' to create one." />
+          <EmptyState icon="" message="No backups yet. Click 'Backup Now' to create one." />
         ) : (
           files.map((f, i) => (
             <div key={f.name} style={{
@@ -1638,7 +1638,7 @@ function BackupSection({ user, T, card, ledger }) {
               borderBottom: i === files.length - 1 ? "none" : `1px solid ${T.border}`,
             }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: 14 }}>📁</span>
+                <span style={{ fontSize: 14, color: "#9ca3af" }}>▤</span>
                 <div>
                   <div style={{ fontSize: 12, fontWeight: 600, color: T.text, fontFamily: "Figtree, sans-serif" }}>
                     {f.name}

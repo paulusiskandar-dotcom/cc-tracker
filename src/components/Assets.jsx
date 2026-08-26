@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { accountsApi, ledgerApi, getTxFromToTypes } from "../api";
 import { supabase } from "../lib/supabase";
 import { fmtIDR, fmtCurNative, fmtCurNativeShort, todayStr } from "../utils";
-import { ASSET_SUBTYPES, ASSET_ICON, ASSET_COL } from "../constants";
+import { ASSET_SUBTYPES, ASSET_COL } from "../constants";
+import { AssetIcon, getAssetVisual } from "../lib/categoryIcons";
 import { LIGHT, DARK } from "../theme";
 import {
   Modal, Button,
@@ -56,7 +57,6 @@ function AssetCard({ asset: a, color, onUpdate, onEdit, onTimeline, fxRates = {}
   const costIdr   = bought * rate;
   const gain      = costIdr > 0 ? valueIdr - costIdr : 0;
   const gainPct   = costIdr > 0 ? ((gain / costIdr) * 100).toFixed(1) : null;
-  const icon      = ASSET_ICON[a.subtype] || "📦";
 
   return (
     <div className="asset-card" onClick={onTimeline} style={{
@@ -77,9 +77,7 @@ function AssetCard({ asset: a, color, onUpdate, onEdit, onTimeline, fxRates = {}
 
         {/* Icon + Name */}
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: color + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>
-            {icon}
-          </div>
+          <AssetIcon subtype={a.subtype} size={36} radius={10} />
           <div style={{ flex: 1, minWidth: 0, paddingRight: 30 }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {a.name}
@@ -160,9 +158,7 @@ function DepositoCard({ asset: a, color, onUpdate, onEdit, onTimeline }) {
 
         {/* Header: name + badge */}
         <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10, background: color + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>
-            🏦
-          </div>
+          <AssetIcon subtype="Deposit" size={36} radius={10} />
           <div style={{ flex: 1, minWidth: 0, paddingRight: 30 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
               <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -204,7 +200,7 @@ function DepositoCard({ asset: a, color, onUpdate, onEdit, onTimeline }) {
               <strong style={{ color: matColor }}>{maturityStr}</strong>
               {daysLeft !== null && (
                 <span style={{ marginLeft: 5, fontWeight: 700, color: matColor }}>
-                  · {daysLeft > 0 ? `${daysLeft} hari lagi` : "⚠️ Jatuh tempo"}
+                  · {daysLeft > 0 ? `${daysLeft} hari lagi` : "⚠ Jatuh tempo"}
                 </span>
               )}
             </div>
@@ -502,7 +498,7 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
       </div>
 
       {assets.length === 0 ? (
-        <EmptyState icon="📈" message="No assets yet. Tap '+ Add Asset' to get started." />
+        <EmptyState icon="" message="No assets yet. Tap '+ Add Asset' to get started." />
       ) : (
         <>
           {/* ── DONUT + BREAKDOWN ──────────────────────────── */}
@@ -516,7 +512,7 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
                     <div key={c.name} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
                         <div style={{ width: 8, height: 8, borderRadius: 2, background: donutColors[i], flexShrink: 0 }} />
-                        <span style={{ fontSize: 12, color: T.text2, fontFamily: "Figtree, sans-serif" }}>{ASSET_ICON[c.name] || "📦"} {c.name}</span>
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: T.text2, fontFamily: "Figtree, sans-serif" }}><AssetIcon subtype={c.name} size={18} radius={5} /> {c.name}</span>
                       </div>
                       <span style={{ fontSize: 12, fontWeight: 700, color: T.text, fontFamily: "Figtree, sans-serif" }}>{fmtIDR(c.value, true)}</span>
                     </div>
@@ -579,9 +575,7 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
                   <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif", padding: "6px 0" }}>No archived assets.</div>
                 ) : archivedAssets.map(a => (
                   <div key={a.id} style={{ background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", gap: 12, opacity: 0.75 }}>
-                    <div style={{ width: 32, height: 32, borderRadius: 8, background: (ASSET_COL[a.subtype] || "#9ca3af") + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>
-                      {ASSET_ICON[a.subtype] || "📦"}
-                    </div>
+                    <AssetIcon subtype={a.subtype} size={32} radius={8} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 700, color: "#374151", fontFamily: "Figtree, sans-serif" }}>{a.name}</div>
                       <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2 }}>
@@ -593,7 +587,7 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
                       onClick={() => navigate(`/accounts/${a.id}/statement`)}
                       style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, border: "1px solid #e5e7eb", background: "#fff", color: "#6b7280", cursor: "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 600, flexShrink: 0 }}
                     >
-                      📄 History
+                      History
                     </button>
                   </div>
                 ))}
@@ -667,7 +661,7 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
                 <Select
                   value={addAssetForm.subtype}
                   onChange={e => setAF("subtype", e.target.value)}
-                  options={ASSET_SUBTYPES.map(s => ({ value: s, label: `${ASSET_ICON[s] || "📦"} ${s}` }))}
+                  options={ASSET_SUBTYPES.map(s => ({ value: s, label: s }))}
                   placeholder="Select type…"
                 />
               </Field>
@@ -721,7 +715,7 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
             <Select
               value={editDepositoForm.subtype || ""}
               onChange={e => setEDF("subtype", e.target.value)}
-              options={ASSET_SUBTYPES.map(s => ({ value: s, label: `${ASSET_ICON[s] || "📦"} ${s}` }))}
+              options={ASSET_SUBTYPES.map(s => ({ value: s, label: s }))}
               placeholder="Select type…"
             />
           </Field>
@@ -762,7 +756,7 @@ export default function Assets({ user, accounts, setAccounts, dark, ledger = [],
             <Select
               value={editAssetForm.subtype || ""}
               onChange={e => setEAF("subtype", e.target.value)}
-              options={ASSET_SUBTYPES.map(s => ({ value: s, label: `${ASSET_ICON[s] || "📦"} ${s}` }))}
+              options={ASSET_SUBTYPES.map(s => ({ value: s, label: s }))}
               placeholder="Select type…"
             />
           </Field>

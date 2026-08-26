@@ -89,7 +89,7 @@ function resolveCatMeta(categoryId, categoryName, dbList = [], isIncome = false)
     if (hit?.icon) return { icon: hit.icon, color: hit.color || "#9ca3af" };
   }
 
-  return { icon: isIncome ? "💰" : "📝", color: isIncome ? "#059669" : "#9ca3af" };
+  return { icon: null, color: isIncome ? "#059669" : "#9ca3af" };
 }
 
 function groupByCategory(txs, type = "expense", dbCategories = []) {
@@ -136,7 +136,7 @@ function groupByIncomeSource(txs, incomeSrcs) {
     const srcId = t.from_id || t.category_id || "unknown";
     const src   = incomeSrcs.find(s => s.id === srcId);
     const name  = src?.name || t.category_name || "Other Income";
-    const icon  = src?.icon || "💰";
+    const icon  = null;
     const color = src?.color || "#059669";
     if (!map[srcId]) { map[srcId] = { id: srcId, name, icon, color, total: 0, count: 0, txs: [] }; }
     map[srcId].total += Number(t.amount_idr || 0);
@@ -704,7 +704,7 @@ function ExpenseTab({ ledger, categories = [], period, dark }) {
                 height: 32, padding: "0 12px", borderRadius: 8, border: "1px solid #e5e7eb",
                 background: "#fff", fontSize: 12, cursor: "pointer", fontFamily: "Figtree, sans-serif", color: "#374151",
               }}
-            >📥 Export CSV</button>
+            >Export CSV</button>
           </div>
         </div>
         <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 8 }}>{filtered.length} transactions · {fmtIDR(filtered.reduce((s, t) => s + Number(t.amount_idr || 0), 0))}</div>
@@ -796,7 +796,7 @@ function IncomeTab({ ledger, incomeSrcs, period, dark }) {
       <div style={card}>
         <div style={{ marginBottom: 12 }}><SectionHeader title="Recent Income Transactions" /></div>
         {txs.length === 0
-          ? <EmptyState icon="💸" message="No income transactions." />
+          ? <EmptyState icon="" message="No income transactions." />
           : [...txs].sort((a, b) => (b.tx_date || "").localeCompare(a.tx_date || "")).slice(0, 30).map(t => (
               <div key={t.id || t._id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "9px 0", borderBottom: "1px solid #f3f4f6" }}>
                 <div>
@@ -809,7 +809,7 @@ function IncomeTab({ ledger, incomeSrcs, period, dark }) {
         }
         <div style={{ marginTop: 10 }}>
           <button onClick={() => exportCSV(txs, "income")} style={{ height: 32, padding: "0 12px", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", fontSize: 12, cursor: "pointer", fontFamily: "Figtree, sans-serif", color: "#374151" }}>
-            📥 Export CSV
+            Export CSV
           </button>
         </div>
       </div>

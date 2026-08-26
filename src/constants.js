@@ -36,11 +36,11 @@ export const ACC_TYPE_LABEL = {
 };
 
 export const ACC_TYPE_ICON = {
-  bank:        "🏦",
-  credit_card: "💳",
-  asset:       "📈",
-  liability:   "📉",
-  receivable:  "📋",
+  bank:        "▤",
+  credit_card: "▦",
+  asset:       "↗",
+  liability:   "↘",
+  receivable:  "↺",
 };
 
 // ─── ASSET SUBTYPES ───────────────────────────────────────────
@@ -80,15 +80,15 @@ export const TX_TYPES = [
   { id: "expense",         label: "Expense",       icon: "↑",  color: "#dc2626" },
   { id: "income",          label: "Income",        icon: "↓",  color: "#059669" },
   { id: "transfer",        label: "Transfer",      icon: "↔",  color: "#3b5bdb" },
-  { id: "pay_cc",          label: "Pay CC",        icon: "💳", color: "#7c3aed" },
-  { id: "buy_asset",       label: "Buy Asset",     icon: "📈", color: "#0891b2" },
-  { id: "sell_asset",      label: "Sell Asset",    icon: "💰", color: "#059669" },
-  { id: "pay_liability",   label: "Pay Liability", icon: "📉", color: "#d97706" },
+  { id: "pay_cc",          label: "Pay CC",        icon: "↑", color: "#7c3aed" },
+  { id: "buy_asset",       label: "Buy Asset",     icon: "↗", color: "#0891b2" },
+  { id: "sell_asset",      label: "Sell Asset",    icon: "↘", color: "#059669" },
+  { id: "pay_liability",   label: "Pay Liability", icon: "↑", color: "#d97706" },
   { id: "reimburse_out",   label: "Reimburse Out", icon: "↻",  color: "#d97706" },
   { id: "reimburse_in",    label: "Reimburse In",  icon: "↺",  color: "#0891b2" },
   { id: "give_loan",       label: "Give Loan",     icon: "↗",  color: "#d97706" },
   { id: "collect_loan",    label: "Collect Loan",  icon: "↙",  color: "#059669" },
-  { id: "fx_exchange",     label: "FX Exchange",   icon: "💱", color: "#0891b2" },
+  { id: "fx_exchange",     label: "FX Exchange",   icon: "⇄", color: "#0891b2" },
   { id: "opening_balance", label: "Opening Bal",   icon: "◈",  color: "#3b5bdb" },
 ];
 

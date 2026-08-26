@@ -521,7 +521,7 @@ export function ReconcileBar({ reconcile, onRefresh, onClearDraft, currentAccoun
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
               {stagedFiles.map((f, i) => (
                 <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#f9fafb", borderRadius: 8, border: "1px solid #e5e7eb" }}>
-                  <span style={{ fontSize: 20 }}>📄</span>
+                  <span style={{ fontSize: 20, color: "#9ca3af" }}>▤</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", fontFamily: FF, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.name}</div>
                     <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF }}>
@@ -565,7 +565,7 @@ export function ReconcileBar({ reconcile, onRefresh, onClearDraft, currentAccoun
               if (files.length) setStagedFiles(files);
             }}
             style={{ border: "2px dashed #e5e7eb", borderRadius: 16, padding: "28px 24px", textAlign: "center", cursor: "pointer", background: "#fafafa" }}>
-            <div style={{ fontSize: 28, marginBottom: 6 }}>📄</div>
+            <div style={{ fontSize: 28, marginBottom: 6, color: "#9ca3af" }}>▤</div>
             <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: FF, marginBottom: 4 }}>Drop PDF(s) here or click to browse</div>
             <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: FF }}>Bank or credit card statement — one or multiple PDFs</div>
             <input ref={fileRef} type="file" accept=".pdf" multiple style={{ display: "none" }}

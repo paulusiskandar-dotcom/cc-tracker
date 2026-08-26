@@ -128,7 +128,7 @@ export default function GlobalReconcileButton({ accounts, type, onNavigate, user
             <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
               {stagedFiles.map((f, i) => (
                 <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "#f9fafb", borderRadius: 6, fontSize: 11, fontFamily: FF }}>
-                  <span>📄 {f.name} · {Math.round(f.size / 1024)} KB</span>
+                  <span>{f.name} · {Math.round(f.size / 1024)} KB</span>
                   <button onClick={() => setStagedFiles(prev => prev.filter((_, idx) => idx !== i))}
                     style={{ background: "none", border: "none", color: "#6b7280", cursor: "pointer", fontSize: 14, lineHeight: 1 }}>✕</button>
                 </div>
@@ -160,7 +160,7 @@ export default function GlobalReconcileButton({ accounts, type, onNavigate, user
             onDragOver={e => e.preventDefault()}
             onDrop={e => { e.preventDefault(); addFiles(e.dataTransfer.files); }}
             style={{ border: "2px dashed #e5e7eb", borderRadius: 16, padding: "28px 24px", textAlign: "center", cursor: "pointer", background: "#fafafa" }}>
-            <div style={{ fontSize: 28, marginBottom: 6 }}>📄</div>
+            <div style={{ fontSize: 28, marginBottom: 6, color: "#9ca3af" }}>▤</div>
             <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: FF, marginBottom: 4 }}>Drop PDF here or click to browse</div>
             <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: FF }}>Bank or credit card statement (PDF) — multiple files supported</div>
             <input ref={fileRef} type="file" accept=".pdf" multiple style={{ display: "none" }}

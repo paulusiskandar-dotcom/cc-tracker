@@ -1,9 +1,9 @@
 export default function AutoDetectBadge({ confidence, matchedBy, style }) {
   if (!confidence) return null;
   const cfgMap = {
-    high:   { color: '#0F6E56', bg: '#E1F5EE', text: '✨ Auto-detected' },
-    medium: { color: '#854F0B', bg: '#FAEEDA', text: '✨ Auto-detected' },
-    low:    { color: '#5F5E5A', bg: '#F1EFE8', text: '✨ Suggested'     },
+    high:   { color: '#0F6E56', bg: '#E1F5EE', text: 'Auto-detected' },
+    medium: { color: '#854F0B', bg: '#FAEEDA', text: 'Auto-detected' },
+    low:    { color: '#5F5E5A', bg: '#F1EFE8', text: 'Suggested'     },
   };
   const cfg = cfgMap[confidence];
   if (!cfg) return null;

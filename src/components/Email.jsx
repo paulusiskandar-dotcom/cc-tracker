@@ -179,8 +179,8 @@ export default function Email({
   const waitingCount = (pendingSyncs || []).filter(s => s.currency && s.currency !== "IDR").length;
   const TABS_LIST = [
     { id: "pending", label: "✉️ Email Pending" },
-    { id: "waiting", label: `⏳ Waiting for Statement${waitingCount ? ` (${waitingCount})` : ""}` },
-    { id: "sync",    label: "🔄 Email Sync"    },
+    { id: "waiting", label: `Waiting for Statement${waitingCount ? ` (${waitingCount})` : ""}` },
+    { id: "sync",    label: "Email Sync"    },
   ];
 
   return (
@@ -233,7 +233,7 @@ export default function Email({
 
           {/* Status card */}
           <div style={{ ...card, borderColor: gmailToken ? "#059669" : T.border }}>
-            <SectionHeader title={gmailToken ? "✅ Gmail Connected" : "📧 Gmail Not Connected"} />
+            <SectionHeader title={gmailToken ? "Gmail Connected" : "Gmail Not Connected"} />
             {gmailToken ? (
               <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: T.text }}>{gmailToken.gmail_email || user?.email}</div>
@@ -244,7 +244,7 @@ export default function Email({
                   const fmt = `${String(d.getDate()).padStart(2,"0")}/${String(d.getMonth()+1).padStart(2,"0")}/${d.getFullYear()} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}`;
                   return (
                     <div style={{ fontSize: 11, color: T.text3 }}>
-                      Last sync: {fmt} · {last.emails_processed ?? 0} emails · {last.new_transactions ?? 0} transactions · {last.status === "success" ? "✅" : "❌"}
+                      Last sync: {fmt} · {last.emails_processed ?? 0} emails · {last.new_transactions ?? 0} transactions · {last.status === "success" ? "✓" : "✕"}
                     </div>
                   );
                 })() : gmailToken.last_sync ? (
@@ -277,11 +277,11 @@ export default function Email({
                   </FormRow>
                   {rangeWarning && (
                     <div style={{ fontSize: 11, color: "#d97706", background: "#fef9c3", borderRadius: 8, padding: "8px 12px" }}>
-                      ⚠️ Range is {days} days. Large ranges may take longer and could hit Gmail API limits.
+                      ⚠ Range is {days} days. Large ranges may take longer and could hit Gmail API limits.
                     </div>
                   )}
                   <div style={{ display: "flex", gap: 8 }}>
-                    <Button variant="primary" size="sm" busy={syncingNow} onClick={syncNow}>🔄 Sync Now</Button>
+                    <Button variant="primary" size="sm" busy={syncingNow} onClick={syncNow}>Sync Now</Button>
                     <Button variant="danger"  size="sm" onClick={disconnectGmail}>Disconnect Gmail</Button>
                   </div>
                 </div>
@@ -311,7 +311,7 @@ export default function Email({
                       <span style={{ flex: 1 }}>{fmt}</span>
                       <span style={{ width: 52, textAlign: "right", flexShrink: 0, color: T.text3 }}>{entry.emails_processed ?? 0}</span>
                       <span style={{ width: 90, textAlign: "right", flexShrink: 0, color: entry.new_transactions > 0 ? "#059669" : T.text3, fontWeight: entry.new_transactions > 0 ? 600 : 400 }}>{entry.new_transactions ?? 0}</span>
-                      <span style={{ width: 44, textAlign: "center", flexShrink: 0 }}>{entry.status === "success" ? "✅" : "❌"}</span>
+                      <span style={{ width: 44, textAlign: "center", flexShrink: 0 }}>{entry.status === "success" ? "✓" : "✕"}</span>
                     </div>
                   );
                 })}
@@ -667,7 +667,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
         await gmailApi.markTxWaiting(r.email_sync_id, r.tx_index ?? 0);
         updateRow(r._id, { _waiting_statement: true });
       } catch (e) { console.warn("[markTxWaiting]", e?.message); }
-      showToast("⏳ Waiting for statement — kurs belum pasti (lihat tab Waiting)", "info");
+      showToast("Waiting for statement — kurs belum pasti (lihat tab Waiting)", "info");
       return;
     }
     try {
@@ -856,12 +856,12 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
   };
 
   if (waitingMode && !visibleRows.length) return (
-    <EmptyState icon="⏳" title="No transactions waiting" message="Transaksi mata uang asing akan parkir di sini sampai statement bulanannya masuk (bawa nilai IDR pasti), lalu hilang otomatis." />
+    <EmptyState icon="" title="No transactions waiting" message="Transaksi mata uang asing akan parkir di sini sampai statement bulanannya masuk (bawa nilai IDR pasti), lalu hilang otomatis." />
   );
 
   if (!waitingMode && !visibleRows.length && failedRows === null) return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <EmptyState icon="📧" title="No pending emails" message="Gmail sync will surface transactions here for review." />
+      <EmptyState icon="" title="No pending emails" message="Gmail sync will surface transactions here for review." />
       <button onClick={loadFailed} disabled={loadingFailed}
         style={{ fontSize: 11, color: "#9ca3af", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "Figtree, sans-serif", alignSelf: "flex-start" }}>
         {loadingFailed ? "Loading…" : "Show failed extractions"}
@@ -897,12 +897,12 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       )}
       {!waitingMode && visibleRows.some(r => r._dup) && (
         <div style={{ fontSize: 12, color: "#92400e", background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 8, padding: "8px 12px", fontFamily: "Figtree, sans-serif" }}>
-          ⚠️ {visibleRows.filter(r => r._dup).length} kemungkinan duplikat (nominal &amp; tanggal sudah ada di ledger) — tidak dicentang otomatis. Cek dulu sebelum approve.
+          ⚠ {visibleRows.filter(r => r._dup).length} kemungkinan duplikat (nominal &amp; tanggal sudah ada di ledger) — tidak dicentang otomatis. Cek dulu sebelum approve.
         </div>
       )}
       {waitingMode && (
         <div style={{ fontSize: 12, color: "#1e40af", background: "#dbeafe", border: "1px solid #bfdbfe", borderRadius: 8, padding: "8px 12px", fontFamily: "Figtree, sans-serif" }}>
-          ⏳ Transaksi valas <b>waiting for statement</b> — kurs belum pasti, jadi tidak masuk ledger dulu. Nilai IDR asli diambil dari statement bulanan; begitu statement masuk &amp; di-reconcile, item di sini hilang otomatis. Tombol ✕ = buang kalau bukan transaksi.
+          Transaksi valas <b>waiting for statement</b> — kurs belum pasti, jadi tidak masuk ledger dulu. Nilai IDR asli diambil dari statement bulanan; begitu statement masuk &amp; di-reconcile, item di sini hilang otomatis. Tombol ✕ = buang kalau bukan transaksi.
         </div>
       )}
       {visibleRows.length > 0 && (
@@ -964,7 +964,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
                   disabled={reprocessing.has(row.id)}
                   style={ACT_BTN({ background: "#fff7ed", border: "1px solid #fed7aa", fontSize: 13, opacity: reprocessing.has(row.id) ? 0.5 : 1 })}
                   title="Re-process with AI">
-                  {reprocessing.has(row.id) ? "…" : "🔄"}
+                  {reprocessing.has(row.id) ? "…" : "↻"}
                 </button>
                 <button onClick={() => skipFailed(row)}
                   style={ACT_BTN({ color: "#9ca3af" })}

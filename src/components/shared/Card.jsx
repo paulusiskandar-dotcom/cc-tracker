@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Inbox } from "lucide-react";
 import { fmtIDR } from "../../utils";
 
 // ─── BASE CARD ────────────────────────────────────────────────
@@ -263,7 +264,7 @@ export function SectionHeader({ title, action, style = {} }) {
 }
 
 // ─── EMPTY STATE ──────────────────────────────────────────────
-export function EmptyState({ icon = "📭", title, message, action }) {
+export function EmptyState({ icon = "", title, message, action }) {
   return (
     <div style={{
       display:        "flex",
@@ -274,7 +275,9 @@ export function EmptyState({ icon = "📭", title, message, action }) {
       gap:            8,
       textAlign:      "center",
     }}>
-      <div style={{ fontSize: 36, marginBottom: 4 }}>{icon}</div>
+      {icon
+        ? <div style={{ fontSize: 36, marginBottom: 4 }}>{icon}</div>
+        : <Inbox size={34} strokeWidth={1.5} color="#d1d5db" style={{ marginBottom: 4 }} />}
       {title && (
         <div style={{
           fontSize:   15, fontWeight: 700, color: "#111827",

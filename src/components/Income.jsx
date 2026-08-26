@@ -126,7 +126,7 @@ function SourceCard({ src, onEdit, onAddIncome }) {
 // ── SourceEditModal ───────────────────────────────────────────────
 function SourceEditModal({ source, onSave, onClose, saving }) {
   const [name,          setName]          = useState(source.name || "");
-  const [icon,          setIcon]          = useState(source.icon || "💰");
+  const [icon,          setIcon]          = useState(source.icon || "");
   const [color,         setColor]         = useState(source.color || "#059669");
   const [monthlyTarget, setMonthlyTarget] = useState(
     String(source.monthly_target || source.expected_amount || 0)
@@ -342,13 +342,13 @@ function NetForecastCard({ netForecast, period, onPeriodChange }) {
         </div>
 
         {/* Income */}
-        <NfSectionHeader icon="📈" label="Income" amount={totalIncomeP} color="#059669" />
+        <NfSectionHeader icon="↑" label="Income" amount={totalIncomeP} color="#059669" />
 
         {/* Spacer */}
         <div style={{ height: 12 }} />
 
         {/* Outflow */}
-        <NfSectionHeader icon="📉" label="Outflow" amount={-totalOutflowP} color="#dc2626" />
+        <NfSectionHeader icon="↓" label="Outflow" amount={-totalOutflowP} color="#dc2626" />
 
         {netForecast.billsBank.length > 0 && (
           <NfSubGroup
@@ -395,7 +395,7 @@ function NetForecastCard({ netForecast, period, onPeriodChange }) {
 
         {/* Divider + Net Monthly — big, prominent */}
         <div style={{ borderTop: "2px solid #e5e7eb", paddingTop: 16, marginTop: 20, display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: "#111827" }}>💰 Net {periodLabel}</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#111827" }}>Net {periodLabel}</div>
           <div style={{ fontSize: 26, fontWeight: 800, color: isHealthy ? "#059669" : "#dc2626", letterSpacing: -0.5 }}>
             {netP >= 0 ? "+" : ""}{fmtIDR(netP)}
           </div>
@@ -411,7 +411,7 @@ function NetForecastCard({ netForecast, period, onPeriodChange }) {
         }}>
           {isHealthy
             ? `✅ Net positive${netForecast.netPct !== null ? ` (+${netForecast.netPct}%)` : ""}`
-            : `⚠️ Net negative — outflow exceeds income by ${fmtIDR(Math.abs(netP))}`}
+            : `⚠ Net negative — outflow exceeds income by ${fmtIDR(Math.abs(netP))}`}
         </div>
       </div>
     </div>

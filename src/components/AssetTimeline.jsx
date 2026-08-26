@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { supabase } from "../lib/supabase";
 import { fmtIDR, todayStr } from "../utils";
-import { ASSET_ICON } from "../constants";
+import { AssetIcon } from "../lib/categoryIcons";
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import { EmptyState, showToast } from "./shared/Card";
 import Modal from "./shared/Modal";
@@ -75,7 +75,6 @@ export default function AssetTimeline({
   const [delSaving,   setDelSaving]   = useState(false);
 
   const assetAccs = useMemo(() => accounts.filter(a => a.type === "asset"), [accounts]);
-  const icon = ASSET_ICON[asset.subtype] || "📦";
 
   useEffect(() => {
     if (!asset?.id || !user?.id) return;
@@ -285,9 +284,7 @@ export default function AssetTimeline({
       {/* ── Header ── */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <button onClick={onBack} style={BTN()}>← Back</button>
-        <div style={{ width: 40, height: 40, borderRadius: 12, background: "#eff6ff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>
-          {icon}
-        </div>
+        <AssetIcon subtype={asset.subtype} size={40} radius={12} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div style={{ fontSize: 18, fontWeight: 800, color: "#111827" }}>{asset.name}</div>
@@ -300,10 +297,10 @@ export default function AssetTimeline({
           <div style={{ fontSize: 12, color: "#9ca3af" }}>{asset.subtype || "Asset"}</div>
         </div>
         <div style={{ display: "flex", gap: 6, flexShrink: 0, flexWrap: "wrap" }}>
-          <button style={BTN()} onClick={exportPDF}>🖨 PDF</button>
-          <button style={BTN()} onClick={exportExcel}>📊 Excel</button>
+          <button style={BTN()} onClick={exportPDF}>PDF</button>
+          <button style={BTN()} onClick={exportExcel}>Excel</button>
           <button style={BTN()} onClick={() => { setUpdateForm({ value: String(asset.current_value || ""), date: todayStr(), notes: "" }); setUpdateModal(true); }}>
-            📈 Update Value
+            Update Value
           </button>
           <button style={BTN({ background: "#111827", color: "#fff", border: "none" })}
             onClick={() => { setTxMode("add"); setTxInitial(null); setTxOpen(true); }}>
@@ -324,7 +321,7 @@ export default function AssetTimeline({
       {!histLoading && sparkData.length === 0 && (
         <div style={{ background: "#fff", borderRadius: 16, border: "0.5px solid #e5e7eb", padding: "28px 16px", textAlign: "center" }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: "#6b7280", fontFamily: FF }}>No value history yet</div>
-          <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 4, fontFamily: FF }}>Click "📈 Update Value" to start tracking</div>
+          <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 4, fontFamily: FF }}>Click "Update Value" to start tracking</div>
         </div>
       )}
       {sparkData.length === 1 && (
@@ -336,7 +333,7 @@ export default function AssetTimeline({
             <div style={{ fontSize: 13, color: "#374151", fontFamily: FF }}>{sparkData[0].label}</div>
             <div style={{ fontSize: 15, fontWeight: 800, color: "#3b5bdb", fontFamily: FF }}>{fmtIDR(sparkData[0].value)}</div>
           </div>
-          <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 8, fontFamily: FF }}>💡 Update value to track changes over time</div>
+          <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 8, fontFamily: FF }}>Update value to track changes over time</div>
         </div>
       )}
       {sparkData.length >= 2 && (
@@ -378,7 +375,7 @@ export default function AssetTimeline({
           <div style={{ textAlign: "center", padding: 32, color: "#9ca3af", fontSize: 13 }}>Loading…</div>
         ) : allEvents.length === 0 ? (
           <div style={{ padding: "40px 20px", textAlign: "center" }}>
-            <EmptyState icon="📋" message="No history for this asset yet" />
+            <EmptyState icon="" message="No history for this asset yet" />
           </div>
         ) : (
           <>

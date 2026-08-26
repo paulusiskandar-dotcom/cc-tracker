@@ -163,7 +163,7 @@ export default function Billing({
         border: `1px solid ${hasUnpaid ? "#fed7aa" : "#a7f3d0"}`, borderRadius: 16, padding: "14px 16px" }}>
         {hasUnpaid ? (
           <>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#92400e" }}>💸 Total perlu disiapkan bulan ini</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#92400e" }}>Total perlu disiapkan bulan ini</div>
             <div style={{ fontSize: 24, fontWeight: 800, color: "#111827", marginTop: 2 }}>{fmtIDR(totalAll)}</div>
           </>
         ) : (

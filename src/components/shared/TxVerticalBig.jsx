@@ -49,15 +49,15 @@ export const TYPE_META = {
   expense:       { label: "Expense",       icon: "↑",  color: "#dc2626" },
   income:        { label: "Income",        icon: "↓",  color: "#059669" },
   transfer:      { label: "Transfer",      icon: "↔",  color: "#3b5bdb" },
-  pay_cc:        { label: "Pay CC",        icon: "💳", color: "#7c3aed" },
-  pay_liability: { label: "Pay Liability", icon: "📉", color: "#d97706" },
+  pay_cc:        { label: "Pay CC",        icon: "↑", color: "#7c3aed" },
+  pay_liability: { label: "Pay Liability", icon: "↑", color: "#d97706" },
   reimburse_out: { label: "Reimburse Out", icon: "↻",  color: "#d97706" },
   reimburse_in:  { label: "Reimburse In",  icon: "↺",  color: "#0891b2" },
-  buy_asset:     { label: "Buy Asset",     icon: "📈", color: "#0891b2" },
-  sell_asset:    { label: "Sell Asset",    icon: "💰", color: "#059669" },
+  buy_asset:     { label: "Buy Asset",     icon: "↗", color: "#0891b2" },
+  sell_asset:    { label: "Sell Asset",    icon: "↘", color: "#059669" },
   give_loan:     { label: "Give Loan",     icon: "↗",  color: "#d97706" },
   collect_loan:  { label: "Collect Loan",  icon: "↙",  color: "#059669" },
-  fx_exchange:   { label: "FX Exchange",   icon: "💱", color: "#0891b2" },
+  fx_exchange:   { label: "FX Exchange",   icon: "⇄", color: "#0891b2" },
 };
 
 const groupForType = (txType) => {
@@ -175,7 +175,7 @@ function CicilanSection({ enabled, onToggle, form, set }) {
         }}
       >
         <span style={{ fontSize: 13, fontWeight: 600, color: enabled ? "#3b5bdb" : "#374151" }}>
-          💳 Cicilan (Installment)
+          Cicilan (Installment)
         </span>
         <span style={{
           width: 36, height: 20, borderRadius: 10,
@@ -581,7 +581,7 @@ export default function TxVerticalBig({
         };
         const created = await ledgerApi.create(user.id, entry, accounts);
         setLedger?.(p => [created, ...p]);
-        showToast(isFullyPaid ? "Loan fully paid! 🎉" : `Payment ${newPaidMonths}${totalMonths > 0 ? ` of ${totalMonths}` : ""} recorded`);
+        showToast(isFullyPaid ? "Loan fully paid!" : `Payment ${newPaidMonths}${totalMonths > 0 ? ` of ${totalMonths}` : ""} recorded`);
         await onRefresh?.();
         onSave?.(created);
         onClose();
@@ -965,7 +965,7 @@ export default function TxVerticalBig({
         <Field label="Currency" style={{ width: 90, flexShrink: 0 }}>
           <select value={form.currency || "IDR"} onChange={e => set("currency", e.target.value)} style={{ ...SEL, padding: "0 8px", fontSize: 13, fontWeight: 600 }}>
             {allCurrencies.length > 0
-              ? allCurrencies.map(c => <option key={c.code} value={c.code}>{c.flag ? `${c.flag} ` : ""}{c.code}</option>)
+              ? allCurrencies.map(c => <option key={c.code} value={c.code}>{c.code}</option>)
               : ["IDR","USD","SGD","EUR","GBP","AUD","JPY","MYR","HKD"].map(c => <option key={c} value={c}>{c}</option>)
             }
           </select>
@@ -1467,7 +1467,7 @@ export default function TxVerticalBig({
                 {(recurTemplates || [])
                   .filter(t => t.tx_type === "expense" && t.is_active !== false)
                   .map(t => (
-                    <option key={t.id} value={t.id}>🔁 {t.name}</option>
+                    <option key={t.id} value={t.id}>{t.name}</option>
                   ))}
               </select>
             )}

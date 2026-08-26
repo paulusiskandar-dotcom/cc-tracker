@@ -13,7 +13,7 @@
 //   accounts        Account[]
 //   T               Theme
 //   busy            bool
-//   onRefreshScan   () => void         — optional, shows 🔄 button
+//   onRefreshScan   () => void         — optional, shows refresh button
 //   onCreateInstallment (row) => void  — optional, estatement only
 
 import { useState, useEffect, Fragment } from "react";
@@ -511,7 +511,7 @@ function TxHorizontalCard({
   return (
     <div style={{ background: cardBg, border: cardBorder, borderRadius: 10, opacity: isSkipped ? 0.55 : 1, overflow: "hidden" }}>
 
-      {/* ── ROW 1: ☑ date desc [badges] amount ✓ ✗ ✏️ ── */}
+      {/* ── ROW 1: ☑ date desc [badges] amount ✓ ✗ ✎ ── */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 10px 4px" }}>
         <input type="checkbox" checked={isSelected && !isSkipped}
           onChange={onToggleSelect} disabled={isSkipped}
@@ -532,7 +532,7 @@ function TxHorizontalCard({
 
         {/* Inline badges next to description */}
         {isStmtRow && (
-          <span style={BADGE("#e0e7ff","#3730a3")} title="Baris dari statement bulanan yang belum ada di ledger (hasil reconcile matching)">📄 STATEMENT</span>
+          <span style={BADGE("#e0e7ff","#3730a3")} title="Baris dari statement bulanan yang belum ada di ledger (hasil reconcile matching)">STATEMENT</span>
         )}
         {r._invalidAmount && <span style={BADGE("#fee2e2","#dc2626")}>Amount!</span>}
         {dupLevel > 0 && !dupDismissed && (
@@ -553,7 +553,7 @@ function TxHorizontalCard({
           <span style={BADGE("#fef9c3","#a16207")}>Suggest</span>
         )}
         {r._transferPair && (
-          <span style={BADGE("#dbeafe","#1d4ed8")}>🔄 Transfer</span>
+          <span style={BADGE("#dbeafe","#1d4ed8")}>⇄ Transfer</span>
         )}
         {r._transferSuggest && !r._transferPair && (
           <span style={BADGE("#ede9fe","#6d28d9")}
@@ -565,7 +565,7 @@ function TxHorizontalCard({
           <span style={BADGE("#fef9c3","#a16207")} title="Kategori disarankan AI — ganti kalau salah">AI</span>
         )}
         {fxWaiting && (
-          <span style={BADGE("#dbeafe","#1e40af")} title="Kurs belum pasti — nilai IDR asli diambil dari statement bulanan">⏳ Waiting for statement</span>
+          <span style={BADGE("#dbeafe","#1e40af")} title="Kurs belum pasti — nilai IDR asli diambil dari statement bulanan">Waiting for statement</span>
         )}
         {r._autoDetect?.confidence && (
           <span
@@ -574,7 +574,7 @@ function TxHorizontalCard({
               r._autoDetect.confidence === 'high' ? '#E1F5EE' : '#FAEEDA',
               r._autoDetect.confidence === 'high' ? '#0F6E56' : '#854F0B',
             )}
-          >✨</span>
+          >✦</span>
         )}
 
         <span style={{ fontSize: 12, fontWeight: 800, color, fontFamily: "Figtree, sans-serif", flexShrink: 0, whiteSpace: "nowrap" }}>
@@ -586,7 +586,7 @@ function TxHorizontalCard({
             ? { background: T.sur2, color: T.text3, border: `1px solid ${T.border}`, cursor: "not-allowed" }
             : { background: "#dcfce7", color: "#059669", border: "1px solid #bbf7d0" })}
           title={fxWaiting ? "Waiting for statement — belum bisa diimport" : "Import"}>
-          {isConfirming ? "…" : fxWaiting ? "⏳" : "✓"}
+          {isConfirming ? "…" : fxWaiting ? "…" : "✓"}
         </button>
 
         <button onClick={() => onSkip(r._id)}
@@ -598,7 +598,7 @@ function TxHorizontalCard({
         <button onClick={onToggleNotes}
           style={ACT_BTN({ background: isNotesOpen ? "#dbeafe" : T.sur2, color: isNotesOpen ? "#3b5bdb" : T.text3, width: 24, height: 24, fontSize: 11 })}
           title="Notes">
-          ✏️
+          ✎
         </button>
       </div>
 
@@ -763,7 +763,7 @@ function TxHorizontalCard({
             <input type="checkbox" checked={!!r._cicilan}
               onChange={e => onUpdate({ _cicilan: e.target.checked, ...(!e.target.checked ? { _cicilanKe: null, _cicilanMonths: null } : { _cicilanKe: r._cicilanKe || 1, _cicilanMonths: r._cicilanMonths || 3 }) })}
               style={{ accentColor: "#3b5bdb", width: 13, height: 13 }} />
-            🔄 Cicilan
+            ↻ Cicilan
           </label>
           {r._cicilan && (
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -825,7 +825,7 @@ function TxHorizontalCard({
                 <option value="">— Not recurring —</option>
                 {(recurTemplates || [])
                   .filter(t => t.tx_type === "expense" && t.is_active !== false)
-                  .map(t => <option key={t.id} value={t.id}>🔁 {t.name}</option>)}
+                  .map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
             </div>
           )}
@@ -1035,13 +1035,13 @@ export default function TxHorizontal({
           {onRefreshScan && (
             <button onClick={onRefreshScan}
               style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, border: `1px solid ${T.border}`, background: T.sur2, color: T.text2, cursor: "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 600 }}>
-              🔄 Refresh Scan
+              ↻ Refresh Scan
             </button>
           )}
           {onRetrySonnet && (
             <button onClick={onRetrySonnet} disabled={retrySonnet}
               style={{ fontSize: 11, padding: "4px 10px", borderRadius: 6, border: `1px solid ${T.border}`, background: T.sur2, color: T.text2, cursor: retrySonnet ? "default" : "pointer", fontFamily: "Figtree, sans-serif", fontWeight: 600, opacity: retrySonnet ? 0.6 : 1 }}>
-              {retrySonnet ? "Scanning…" : "✨ Try Sonnet"}
+              {retrySonnet ? "Scanning…" : "Try Sonnet"}
             </button>
           )}
           {onClearAll && (
@@ -1235,7 +1235,7 @@ export default function TxHorizontal({
                 <Fragment key={r._id}>
                   {showDivider && (
                     <div style={{ fontSize: 10, fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", padding: "6px 2px", borderBottom: "1px solid #e5e7eb", fontFamily: "Figtree, sans-serif" }}>
-                      📄 {r._sourceFile}
+                      {r._sourceFile}
                     </div>
                   )}
                   <TxHorizontalCard

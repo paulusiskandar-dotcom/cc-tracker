@@ -553,7 +553,7 @@ export default function CreditCards({
           + Installment
         </Button>
         <Button size="sm" onClick={() => { setPayForm({ cardId: "", bankId: "", amount: "", admin_fee: "", stamp_duty: "", notes: "" }); setModal("pay"); }}>
-          💳 Pay Bill
+          Pay Bill
         </Button>
       </div>
 
@@ -589,7 +589,7 @@ export default function CreditCards({
       {/* ══ OVERVIEW ══ */}
       {subTab === "overview" && (
         creditCards.length === 0
-          ? <EmptyState icon="💳" title="No credit cards" message="Add a credit card from Accounts." />
+          ? <EmptyState icon="" title="No credit cards" message="Add a credit card from Accounts." />
           : (() => {
               const totalDebt  = cardStats.reduce((s, c) => s + c.debt, 0);
               const totalLimit = (() => {
@@ -732,7 +732,7 @@ export default function CreditCards({
             {ccLedger.length} transactions · {fmtIDR(ccLedger.reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0), true)}
           </div>
           {ccLedger.length === 0
-            ? <EmptyState icon="📋" message="No CC transactions found" />
+            ? <EmptyState icon="" message="No CC transactions found" />
             : ccLedger.map(e => {
                 const cc  = creditCards.find(c => c.id === e.from_id || c.id === e.to_id);
                 const cat = categories.find(c => c.id === e.category_id);
@@ -827,7 +827,7 @@ export default function CreditCards({
 
             {/* Cards grid */}
             {ccInstallments.length === 0
-              ? <EmptyState icon="📅" title="No installments" message="Track 0% installment plans here." />
+              ? <EmptyState icon="" title="No installments" message="Track 0% installment plans here." />
               : (
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
                   {ccInstallments.map((inst, idx) => {
@@ -905,7 +905,7 @@ export default function CreditCards({
                             onMouseEnter={e => e.currentTarget.style.color = "#ef4444"}
                             onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}
                           >
-                            🗑 Delete
+                            Delete
                           </button>
                         </div>
                       </div>
@@ -922,7 +922,7 @@ export default function CreditCards({
       {subTab === "recurring" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {ccRecurring.length === 0
-            ? <EmptyState icon="🔄" title="No recurring templates" message="Add recurring CC templates in Settings → Recurring." />
+            ? <EmptyState icon="" title="No recurring templates" message="Add recurring CC templates in Settings → Recurring." />
             : ccRecurring.map(r => {
                 const cc = creditCards.find(c => c.id === r.from_id);
                 return (
@@ -991,7 +991,7 @@ export default function CreditCards({
       <Modal
         isOpen={modal === "pay"}
         onClose={() => setModal(null)}
-        title="💳 Pay Credit Card"
+        title="Pay Credit Card"
         footer={
           <Button fullWidth onClick={payBill} busy={saving}>
             Pay Now →
@@ -1340,7 +1340,7 @@ function SharedLimitGroupCard({ group, cardStats, paletteStart = 0, onPay, onTra
       {/* ── Group header ── */}
       <div style={{ padding: "16px 18px", borderBottom: "1px solid #f3f4f6" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-          <span style={{ fontSize: 18 }}>🏦</span>
+          <span style={{ fontSize: 18 }}>▤</span>
           <span style={{ fontSize: 15, fontWeight: 800, color: "#111827", fontFamily: "Figtree, sans-serif", flex: 1 }}>
             {name}
           </span>
@@ -1389,7 +1389,7 @@ function SharedLimitGroupCard({ group, cardStats, paletteStart = 0, onPay, onTra
                 <div style={{ fontSize: 16, fontWeight: 800, color: debt > 0 ? "#dc2626" : "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
                   {fmtIDR(debt, true)}
                 </div>
-                <button onClick={() => onPay(cc.id)} style={CC_BTN("#fde8e8", "#dc2626", "#fecaca")}>💳 Pay</button>
+                <button onClick={() => onPay(cc.id)} style={CC_BTN("#fde8e8", "#dc2626", "#fecaca")}>Pay</button>
               </div>
             </div>
           );
@@ -1559,7 +1559,7 @@ function CCCard({ cc, color, onPay, onHistory, onInstallments, onBill, onEdit })
         <div style={{ display: "flex", gap: 6, marginTop: "auto", flexWrap: "wrap" }}>
           <button onClick={onPay} disabled={cc.debt === 0}
             style={{ ...CC_BTN("#fde8e8", "#dc2626", "#fecaca"), opacity: cc.debt === 0 ? 0.5 : 1, cursor: cc.debt === 0 ? "not-allowed" : "pointer" }}>
-            💳 Pay
+            Pay
           </button>
           <button onClick={onHistory}      style={CC_BTN("#f3f4f6", "#374151", "#e5e7eb")}>History</button>
           <button onClick={onInstallments} style={CC_BTN("#f3f4f6", "#374151", "#e5e7eb")}>Installments</button>
@@ -1710,7 +1710,7 @@ function WalletCard({ cc, color, isActive, onPay, onTransactions, onInstallments
 
         {/* Action buttons — exact same styles as before */}
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          <button onClick={(e) => { e.stopPropagation(); onPay();          }} style={CC_BTN("#fde8e8", "#dc2626", "#fecaca")}>💳 Pay</button>
+          <button onClick={(e) => { e.stopPropagation(); onPay();          }} style={CC_BTN("#fde8e8", "#dc2626", "#fecaca")}>Pay</button>
           <button onClick={(e) => { e.stopPropagation(); onTransactions(); }} style={CC_BTN("#f3f4f6", "#374151", "#e5e7eb")}>Txns</button>
           <button onClick={(e) => { e.stopPropagation(); onInstallments(); }} style={CC_BTN("#f3f4f6", "#374151", "#e5e7eb")}>Install.</button>
           <button onClick={(e) => { e.stopPropagation(); onStatement();    }} style={CC_BTN("#f0f9ff", "#0369a1", "#bae6fd")}>Statement</button>

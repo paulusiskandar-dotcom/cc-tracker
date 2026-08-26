@@ -726,7 +726,7 @@ export default function AIImport({ user, accounts, categories = [], incomeSrcs =
           border: `2px dashed ${T.border}`, borderRadius: 16, padding: "28px 24px",
           textAlign: "center", cursor: "pointer", background: T.sur2,
         }}>
-        <div style={{ fontSize: 28, marginBottom: 6 }}>📄</div>
+        <div style={{ fontSize: 28, marginBottom: 6, color: "#9ca3af" }}>▤</div>
         <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 4 }}>
           Drop receipt, invoice, or bank statement
         </div>

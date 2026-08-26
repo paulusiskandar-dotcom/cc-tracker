@@ -211,8 +211,8 @@ export default function EmployeeLoanStatement({
           <button onClick={openNewLoan} style={BTN({ background: "#eff6ff", color: "#3b5bdb", border: "1px solid #bfdbfe" })}>
             + New Loan
           </button>
-          <button onClick={exportPDF}   style={BTN()}>🖨 PDF</button>
-          <button onClick={exportExcel} style={BTN()}>📊 Excel</button>
+          <button onClick={exportPDF}   style={BTN()}>PDF</button>
+          <button onClick={exportExcel} style={BTN()}>Excel</button>
         </div>
       </div>
 

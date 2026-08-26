@@ -58,7 +58,7 @@ export default function Notifications({
           id: `cc-${c.id}`,
           type: "cc_due",
           severity: days <= 1 ? "high" : days <= 3 ? "medium" : "low",
-          icon: "💳",
+          icon: "↑",
           title: `${c.name} payment due`,
           subtitle: formatRelativeDate(days),
           amount: c.outstanding_amount,
@@ -81,7 +81,7 @@ export default function Notifications({
         id: `email-${e.id || idx}`,
         type: "email_pending",
         severity: "medium",
-        icon: "📧",
+        icon: "✉",
         title: e.subject || "Email pending review",
         subtitle: e.sender_email || e.from || "Gmail Sync",
         amount: null,
@@ -115,7 +115,7 @@ export default function Notifications({
           id: `recon-${a.id}`,
           type: "reconcile",
           severity: !lastDate ? "high" : days > 30 ? "high" : "low",
-          icon: "⚖️",
+          icon: "⚖",
           title: `${a.name} needs reconcile`,
           subtitle: !lastDate ? "Never reconciled" : `Last: ${days} days ago`,
           amount: null,
@@ -143,7 +143,7 @@ export default function Notifications({
         id: `recur-rem-${r.id}`,
         type: "recurring_reminder",
         severity: days <= 0 ? "high" : days <= 3 ? "medium" : "low",
-        icon: "🔄",
+        icon: "↻",
         title: tmpl.name,
         subtitle: `${tmpl.tx_type === "income" ? "Income" : "Expense"} · ${formatRelativeDate(days)}`,
         amount: tmpl.amount,
@@ -167,7 +167,7 @@ export default function Notifications({
         id: `recur-tmpl-${t.id}`,
         type: "recurring_template",
         severity: days <= 3 ? "medium" : "low",
-        icon: "🔄",
+        icon: "↻",
         title: t.name,
         subtitle: `${t.tx_type === "income" ? "Income" : "Expense"} · ${formatRelativeDate(days)}`,
         amount: t.amount,
@@ -199,7 +199,7 @@ export default function Notifications({
           id: `inst-${i.id}`,
           type: "installment",
           severity: "low",
-          icon: "📦",
+          icon: "▪",
           title: i.description,
           subtitle: `Month ${(i.paid_months || 0) + 1}/${i.total_months ?? i.tenor_months} · ${formatRelativeDate(days)}`,
           amount: i.monthly_amount,
@@ -375,7 +375,7 @@ export default function Notifications({
         </button>
         <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#111827" }}>Notifications</h1>
         {allItems.length === 0 && (
-          <div style={{ fontSize: 13, color: "#16a34a", marginTop: 6 }}>🎉 All caught up</div>
+          <div style={{ fontSize: 13, color: "#16a34a", marginTop: 6 }}>All caught up</div>
         )}
       </div>
 

@@ -6,12 +6,12 @@ import Select from "./shared/Select";
 import { LIGHT, DARK } from "../theme";
 
 const TYPE_META = {
-  reminder:         { icon: "🔄", color: "#3b5bdb", bg: "#dbeafe" },
-  loan:             { icon: "👤", color: "#d97706", bg: "#fef3c7" },
-  receivable:       { icon: "📋", color: "#d97706", bg: "#fef9ec" },
-  loan_recv:        { icon: "💰", color: "#059669", bg: "#f0fdf4" },
-  installment:      { icon: "📅", color: "#9ca3af", bg: "#f3f4f6" },
-  cc_due:           { icon: "💳", color: "#dc2626", bg: "#fde8e8" },
+  reminder:         { icon: "↻", color: "#3b5bdb", bg: "#dbeafe" },
+  loan:             { icon: "↓", color: "#d97706", bg: "#fef3c7" },
+  receivable:       { icon: "↺", color: "#d97706", bg: "#fef9ec" },
+  loan_recv:        { icon: "↓", color: "#059669", bg: "#f0fdf4" },
+  installment:      { icon: "•", color: "#9ca3af", bg: "#f3f4f6" },
+  cc_due:           { icon: "↑", color: "#dc2626", bg: "#fde8e8" },
   income_recur:     { icon: "↓",  color: "#059669", bg: "#f0fdf4" },
   expense_recur:    { icon: "↑",  color: "#dc2626", bg: "#fee2e2" },
   reimburse_pend:   { icon: "↙",  color: "#d97706", bg: "#fef9ec" },
@@ -331,7 +331,7 @@ export default function Upcoming({
         const { employeeLoanApi } = await import("../api");
         await employeeLoanApi.update(payLoan.id, { status: "settled" });
         setEmployeeLoans?.(prev => prev.map(l => l.id === payLoan.id ? { ...l, status: "settled" } : l));
-        showToast("Payment recorded — loan fully settled! 🎉");
+        showToast("Payment recorded — loan fully settled!");
       } else {
         showToast(`Payment of ${fmtIDR(amt, true)} recorded`);
       }
@@ -467,7 +467,7 @@ export default function Upcoming({
           textAlign: "center", padding: "48px 0",
           color: T.text3, fontFamily: "Figtree, sans-serif",
         }}>
-          <div style={{ fontSize: 32, marginBottom: 12 }}>🎉</div>
+          <div style={{ fontSize: 32, marginBottom: 12 }}>✓</div>
           <div style={{ fontSize: 14, fontWeight: 600 }}>All clear!</div>
           <div style={{ fontSize: 12, marginTop: 4 }}>No upcoming items.</div>
         </div>

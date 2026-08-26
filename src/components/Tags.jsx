@@ -8,9 +8,9 @@ const FF = "Figtree, system-ui, -apple-system, sans-serif";
 
 const TAG_TYPES = [
   { value: "trip",    label: "Trip",    icon: "✈️" },
-  { value: "project", label: "Project", icon: "🛠️" },
-  { value: "event",   label: "Event",   icon: "🎉" },
-  { value: "other",   label: "Other",   icon: "📌" },
+  { value: "project", label: "Project", icon: "" },
+  { value: "event",   label: "Event",   icon: "" },
+  { value: "other",   label: "Other",   icon: "" },
 ];
 
 const TAG_COLORS = [
@@ -367,7 +367,7 @@ function TagEditModal({ tag, onClose, onSave }) {
             type="text"
             value={icon}
             onChange={e => setIcon(e.target.value)}
-            placeholder="🏖️ ✈️ 🎉"
+            placeholder="Icon (optional)"
             maxLength={4}
             style={iStyle}
           />

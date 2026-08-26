@@ -925,7 +925,7 @@ export default function Receivables({
           )}
 
           {reimburseAccs.length === 0 ? (
-            <EmptyState icon="📋" message="No reimburse accounts. Add one from Accounts (type: Receivable → Reimburse)." />
+            <EmptyState icon="" message="No reimburse accounts. Add one from Accounts (type: Receivable → Reimburse)." />
           ) : (
             <>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
@@ -942,7 +942,7 @@ export default function Receivables({
                     fontSize: 12, fontWeight: 700, fontFamily: "Figtree, sans-serif",
                   }}
                 >
-                  ✨ Suggested match: {suggestMatch ? "On" : "Off"}
+                  Suggested match: {suggestMatch ? "On" : "Off"}
                 </button>
                 <SortDropdown
                   storageKey="sort_receivables"
@@ -1023,7 +1023,7 @@ export default function Receivables({
                           onClick={() => navigate(`/reimburse/${r.entity}/statement`)}
                           style={{ height: 32, padding: "0 12px", border: "1px solid #e5e7eb", borderRadius: 8, cursor: "pointer", background: "#fff", color: "#374151", fontSize: 11, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
                         >
-                          📄 Statement
+                          Statement
                         </button>
                       </div>
                     </div>
@@ -1057,7 +1057,7 @@ export default function Receivables({
                               <div style={{ display: "flex", justifyContent: "space-between", gap: 4 }}>
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                   <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "Figtree, sans-serif" }}>
-                                    {pidx && <span style={{ color: "#7c3aed", fontWeight: 800, marginRight: 4 }}>✨{pidx}</span>}
+                                    {pidx && <span style={{ color: "#7c3aed", fontWeight: 800, marginRight: 4 }}>✦{pidx}</span>}
                                     {e.description}
                                   </div>
                                   <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1 }}>
@@ -1099,7 +1099,7 @@ export default function Receivables({
                               <div style={{ display: "flex", justifyContent: "space-between", gap: 4 }}>
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                   <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "Figtree, sans-serif" }}>
-                                    {pidx && <span style={{ color: "#7c3aed", fontWeight: 800, marginRight: 4 }}>✨{pidx}</span>}
+                                    {pidx && <span style={{ color: "#7c3aed", fontWeight: 800, marginRight: 4 }}>✦{pidx}</span>}
                                     {e.description}
                                   </div>
                                   <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1 }}>
@@ -1302,7 +1302,7 @@ export default function Receivables({
           </div>
 
           {loansWithIndex.length === 0 ? (
-            <EmptyState icon="👤" message="No employee loans yet. Click + Add Loan to create one." />
+            <EmptyState icon="" message="No employee loans yet. Click + Add Loan to create one." />
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
               {loansWithIndex.map(loan => {
@@ -1493,7 +1493,7 @@ export default function Receivables({
                           onMouseEnter={e => e.currentTarget.style.color = "#ef4444"}
                           onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}
                         >
-                          🗑
+                          ✕
                         </button>
                       </div>
                     </div>
@@ -1511,7 +1511,7 @@ export default function Receivables({
       {subTab === "history" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {settledEntries.length === 0 ? (
-            <EmptyState icon="📜" message="No settled receivables yet." />
+            <EmptyState icon="" message="No settled receivables yet." />
           ) : (
             settledEntries.map(e => {
               const rec = accounts.find(a => a.id === e.from_id);
