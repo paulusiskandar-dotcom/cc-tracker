@@ -420,12 +420,6 @@ function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeri
   const tooltipStyle = { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 11, fontFamily: "Figtree, sans-serif" };
   const card = { background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 16, padding: "16px 18px" };
 
-  // Avg spend per elapsed day in the range (not the full range length)
-  const now       = new Date();
-  const rangeEnd  = range.to > now ? now : range.to;
-  const daysGone  = Math.max(1, Math.round((rangeEnd - range.from) / 86400000) + 1);
-  const avgDaily  = totalExp / daysGone;
-
   // Insights: top category, largest tx, biggest category increase vs prev period
   const expTxs     = txs.filter(t => isExpenseRow(t) && !t.is_reimburse);
   const topCat     = catBreak[0];
@@ -473,9 +467,6 @@ function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeri
           prevText={prevSav !== null ? `prev ${prevSav}%` : undefined}
           icon={PiggyBank} iconBg="#fef3c7" iconColor="#d97706"
         />
-        <MetricCard label="Avg Spend / Day" value={fmtIDR(avgDaily)} valueColor="#111827" delta={null}
-          sub={`${expTxs.length} tx over ${daysGone} days`}
-          icon={CalendarDays} iconBg="#ede9fe" iconColor="#7c3aed" />
       </div>
 
       {/* Insight strip */}

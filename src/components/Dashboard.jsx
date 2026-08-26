@@ -1049,11 +1049,11 @@ export default function Dashboard({
           );
         })()}
 
-        {/* 5-col stat grid: LIQUIDITY / ASSETS / RECEIVABLES / CC DEBT / LIABILITIES */}
+        {/* 6-col stat grid, one row: LIQUIDITY / ASSETS / RECEIVABLES / CC DEBT / INSTALLMENTS / LOANS */}
         <div style={{
           display: "grid",
-          gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(5, 1fr)",
-          gap: isMobile ? "14px 12px" : "0 16px",
+          gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(6, 1fr)",
+          gap: isMobile ? "14px 12px" : "0 14px",
           paddingTop: 14,
           borderTop: "1px solid #bbf7d0",
         }}>
@@ -1065,10 +1065,10 @@ export default function Dashboard({
               { label: "ASSETS",       value: nw.assets || 0,    color: "#047857", prefix: "" },
               { label: "RECEIVABLES",  value: totalRecv,          color: "#047857", prefix: "" },
               { label: "CC DEBT",      value: nw.ccDebt || 0,    color: "#b91c1c", prefix: (nw.ccDebt || 0) > 0 ? "−" : "" },
-              { label: "CICILAN",      value: nw.installmentDebt || 0, color: "#b91c1c", prefix: (nw.installmentDebt || 0) > 0 ? "−" : "" },
-              // LIABILITIES excludes installments (shown separately as CICILAN) so
-              // nothing is double-shown; the total still subtracts both.
-              { label: "LIABILITIES",  value: Math.max(0, (nw.liabilities || 0) - (nw.installmentDebt || 0)), color: "#9ca3af", prefix: "" },
+              { label: "INSTALLMENTS", value: nw.installmentDebt || 0, color: "#b91c1c", prefix: (nw.installmentDebt || 0) > 0 ? "−" : "" },
+              // LOANS = liability accounts (e.g. BYD leasing), excluding CC
+              // installments shown separately — the total still subtracts both.
+              { label: "LOANS",        value: Math.max(0, (nw.liabilities || 0) - (nw.installmentDebt || 0)), color: "#b91c1c", prefix: Math.max(0, (nw.liabilities || 0) - (nw.installmentDebt || 0)) > 0 ? "−" : "" },
             ].map(s => (
               <div key={s.label}>
                 <div style={{ fontSize: 9, fontWeight: 500, color: "#16a34a", letterSpacing: "0.6px", fontFamily: "Figtree, sans-serif", marginBottom: 3, whiteSpace: "nowrap" }}>
