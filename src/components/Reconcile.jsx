@@ -107,6 +107,28 @@ export default function Reconcile({
     () => (accounts || []).filter(a => a.is_active && (a.type === "bank" || a.type === "credit_card")),
     [accounts]);
 
+  // Live per-card re-match: the stored session totals (total_match/total_missing/
+  // calculated_balance) are PREPARE-TIME snapshots and go stale the moment rows
+  // are imported via Email Pending. Recompute against the current ledger so the
+  // review cards agree with the live "ready to finalize" strip.
+  const liveByAcc = useMemo(() => {
+    const out = {};
+    for (const d of (drafts || [])) {
+      const st = d.state_json;
+      if (!st?.stmtRows?.length) continue;
+      const led = (ledger || []).filter(l => l.from_id === d.account_id || l.to_id === d.account_id);
+      const { matched, missing } = matchRows(st.stmtRows, led);
+      const ignored = new Set(st.ignoredIds || []);
+      const open = missing.filter(m => !ignored.has(m._id));
+      out[d.account_id] = {
+        matched: matched.size,
+        missing: open.length,
+        missingSum: open.reduce((sum, m) => sum + Math.abs(Number(m.amount || 0)), 0),
+      };
+    }
+    return out;
+  }, [drafts, ledger]);
+
   // ── Derive per-account status for the selected month ─────────
   const monthData = useMemo(() => {
     const inMonth = allSessions.filter(s => s.period_year === month.y && s.period_month === month.m);
@@ -124,17 +146,23 @@ export default function Reconcile({
       const s = byAcc[acc.id];
       if (!s) { waiting.push({ acc }); continue; }
       if (s.status === "completed") { completed.push({ acc, s }); continue; }
-      const gap = (s.closing_balance != null && s.calculated_balance != null)
-        ? Math.round(Number(s.closing_balance) - Number(s.calculated_balance)) : null;
-      const item = { acc, s, gap, valas: valasByAcc[acc.id] || 0 };
-      if ((s.total_missing || 0) > 0 || gap === null || Math.abs(gap) >= 1) needsReview.push(item);
+      const live = liveByAcc[acc.id] || null;
+      // Live re-match wins over the stored prepare-time snapshot; without a
+      // draft (nothing left to match) fall back to the stored numbers.
+      const missingN = live ? live.missing : (s.total_missing || 0);
+      const gap = live
+        ? (live.missing > 0 ? Math.round(live.missingSum) : 0)
+        : ((s.closing_balance != null && s.calculated_balance != null)
+            ? Math.round(Number(s.closing_balance) - Number(s.calculated_balance)) : null);
+      const item = { acc, s, gap, live, valas: valasByAcc[acc.id] || 0 };
+      if (missingN > 0 || gap === null || Math.abs(gap) >= 1) needsReview.push(item);
       else ready.push(item);
     }
     // gap issues first
     needsReview.sort((a, b) => (Math.abs(b.gap || 0)) - (Math.abs(a.gap || 0)));
     completed.sort((a, b) => new Date(b.s.completed_at || 0) - new Date(a.s.completed_at || 0));
     return { needsReview, ready, completed, waiting };
-  }, [allSessions, activeAccounts, month, valasByAcc]);
+  }, [allSessions, activeAccounts, month, valasByAcc, liveByAcc]);
 
   // "usually ~day X" — median statement day from this account's history
   const usualDay = useCallback((accId) => {
@@ -159,20 +187,14 @@ export default function Reconcile({
     const accById = Object.fromEntries((accounts || []).map(a => [a.id, a]));
     const prepared = allSessions
       .filter(s => s.period_year === month.y && s.period_month === month.m && s.status === "prepared");
-    const sessByAcc = Object.fromEntries(prepared.map(s => [s.account_id, s]));
     const ready = [];
-    for (const d of (drafts || [])) {
-      const sess = sessByAcc[d.account_id];
-      const acc = accById[d.account_id];
-      const st = d.state_json;
-      if (!sess || !acc || !st?.stmtRows?.length) continue;
-      const led = (ledger || []).filter(l => l.from_id === acc.id || l.to_id === acc.id);
-      const { missing } = matchRows(st.stmtRows, led);
-      const ignored = new Set(st.ignoredIds || []);
-      if (!missing.some(m => !ignored.has(m._id))) ready.push({ acc, s: sess });
+    for (const s of prepared) {
+      const acc = accById[s.account_id];
+      const live = liveByAcc[s.account_id];
+      if (acc && live && live.missing === 0) ready.push({ acc, s });
     }
     return ready;
-  }, [drafts, ledger, accounts, allSessions, month]);
+  }, [liveByAcc, accounts, allSessions, month]);
 
   const isCurrentMonth = month.y === now.getFullYear() && month.m === now.getMonth() + 1;
   const monthLabel = new Date(month.y, month.m - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
@@ -400,8 +422,8 @@ export default function Reconcile({
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                  <span style={CHIP("#dcfce7", "#059669")}><Check size={11} strokeWidth={2.5} />{s.total_match || 0} matched</span>
-                  {(s.total_missing || 0) > 0 && <span style={CHIP("#fef3c7", "#b45309")}>{s.total_missing} not in ledger</span>}
+                  <span style={CHIP("#dcfce7", "#059669")}><Check size={11} strokeWidth={2.5} />{(item.live ? item.live.matched : s.total_match) || 0} matched</span>
+                  {((item.live ? item.live.missing : s.total_missing) || 0) > 0 && <span style={CHIP("#fef3c7", "#b45309")}>{item.live ? item.live.missing : s.total_missing} not in ledger</span>}
                   {gap !== null && Math.abs(gap) >= 1 && <span style={CHIP("#fee2e2", "#dc2626")}>gap {fmtIDR(Math.abs(gap))}</span>}
                   {gap !== null && Math.abs(gap) < 1 && <span style={CHIP("#f3f4f6", "#6b7280")}>closing matches</span>}
                   {gap === null && <span style={CHIP("#f3f4f6", "#6b7280")}>no closing balance</span>}
