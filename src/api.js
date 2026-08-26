@@ -849,6 +849,38 @@ export const installmentsApi = {
     });
     return inst;
   },
+
+  // Advance paid_months from a reconciled CC statement's rows. The bank prints
+  // the leg position ("… : X/N" → installment_current/total, set by the
+  // gmail-estatement parser), which is authoritative — ledger leg COUNTS are
+  // not (pre-anchor legs are absorbed in the CC-rebuild initial_balance).
+  // Idempotent: only ever moves paid_months forward, one statement row per plan.
+  // Called from BOTH completion paths: ReconcileOverlay.exitReconcile (full
+  // review) and Reconcile.jsx finalize (one-click).
+  syncFromStatementRows: async (userId, accountId, stmtRows) => {
+    const insts = await installmentsApi.getAll(userId);
+    const active = insts.filter(i => i.account_id === accountId && i.status === "active");
+    const used = new Set();
+    let synced = 0;
+    for (const s of stmtRows || []) {
+      const cur = Number(s.installment_current);
+      if (!s.is_installment || !(cur >= 1)) continue;
+      const amt = Math.abs(Number(s.amount || 0));
+      const m = active.find(i => !used.has(i.id) && Math.abs(Number(i.monthly_amount) - amt) <= 50);
+      if (!m) continue;
+      used.add(m.id);
+      const total = Number(m.total_months) || Number(s.installment_total) || cur;
+      if (cur > (m.paid_months || 0)) {
+        await installmentsApi.update(m.id, {
+          paid_months: cur,
+          total_paid: Number(m.monthly_amount) * cur,
+          ...(cur >= total ? { status: "settled" } : {}),
+        });
+        synced++;
+      }
+    }
+    return synced;
+  },
 };
 
 // ─── RECURRING ────────────────────────────────────────────────

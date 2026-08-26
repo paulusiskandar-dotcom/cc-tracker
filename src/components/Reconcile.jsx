@@ -8,7 +8,7 @@ import { importDrafts } from "../lib/importDrafts";
 import { useReconcileDrafts } from "../lib/useReconcileDrafts";
 import { processReconcilePDF, matchDetectedAccount } from "../lib/reconcilePdfUpload";
 import { matchRows, statementAnchorDate } from "./shared/ReconcileOverlay";
-import { reconcileApi } from "../api";
+import { reconcileApi, installmentsApi } from "../api";
 import { fmtIDR } from "../utils";
 import { showToast } from "./shared/index";
 import GlobalReconcileButton from "./shared/GlobalReconcileButton";
@@ -231,6 +231,14 @@ export default function Reconcile({
             last_statement_date: statementAnchorDate(st.stmtRows, st.stmtStatementDate),
           })
           .eq("id", acc.id).eq("user_id", user.id);
+      }
+      // Advance installment paid_months from the statement's "… : X/N" markers —
+      // same sync ReconcileOverlay runs on full-review exit.
+      if (acc.type === "credit_card") {
+        try {
+          const synced = await installmentsApi.syncFromStatementRows(user.id, acc.id, st.stmtRows);
+          if (synced) showToast(`${synced} cicilan disinkron dari statement`);
+        } catch (e2) { console.error("[finalize] installment sync error:", e2); }
       }
       await supabase.from("reconcile_sessions")
         .update({ status: "completed", completed_at: nowIso }).eq("id", s.id).eq("user_id", user.id);
