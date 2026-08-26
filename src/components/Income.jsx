@@ -23,6 +23,93 @@ const RECURRENCE_LABELS = {
   yearly: "Yearly", ad_hoc: "Ad-hoc",
 };
 
+
+// ── SALARY THIS MONTH (attribution view) ──────────────────────────
+// "Gaji untuk bulan X": the fixed-income templates are paid on two schedules
+// (Paulus, 2026-08-26): end-of-month deposits (day_of_month >= 25) are paid IN
+// ADVANCE for the FOLLOWING month (setoran 31 Jul = gaji Agustus, arriving in
+// the 25th-prev-month .. 10th window), while SDC (day <= 5) is paid IN ARREARS
+// on the 1st of the NEXT month. This card answers "is this month's salary in?"
+// — something the cash-basis totals can't, since they book on arrival date.
+function SalaryThisMonth({ recurTemplates, ledger }) {
+  const rows = useMemo(() => {
+    const now = new Date();
+    const y = now.getFullYear(), m = now.getMonth(); // attribution month = current
+    const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const tpls = (recurTemplates || []).filter(t =>
+      t.tx_type === "income" && t.is_active && t.frequency === "monthly" && t.match_rule);
+    return tpls.map(t => {
+      const day = Number(t.day_of_month || 30);
+      const advance = day >= 25; // paid ahead for the following month
+      // Window where THIS month's pay lands:
+      //   advance: 25th of previous month .. 10th of this month
+      //   arrears: 25th of this month .. 10th of next month
+      const from = advance ? new Date(y, m - 1, 25) : new Date(y, m, 25);
+      const to   = advance ? new Date(y, m, 10)     : new Date(y, m + 1, 10);
+      const rule = t.match_rule || {};
+      const tol  = Number(rule.amount_tol || 0);
+      const base = Number(rule.amount || t.amount || 0);
+      const kws  = (rule.keywords || []).map(k => String(k).toLowerCase());
+      const hit  = (ledger || []).find(l => {
+        if (l.tx_type !== "income") return false;
+        if (l.tx_date < iso(from) || l.tx_date > iso(to)) return false;
+        const amt = Number(l.amount_idr || l.amount || 0);
+        if (base > 0 && Math.abs(amt - base) > (tol || base * 0.02)) return false;
+        if (kws.length && !kws.some(k => (l.description || "").toLowerCase().includes(k))) return false;
+        return true;
+      });
+      return {
+        id: t.id, name: t.name, expected: Number(t.amount || 0),
+        hit, dueLabel: advance ? null : `due ${to.getDate() >= 10 ? "1" : ""} ${to.toLocaleDateString("en-GB", { month: "short" })}`,
+        late: !hit && now > to,
+      };
+    });
+  }, [recurTemplates, ledger]);
+
+  if (!rows.length) return null;
+  const expected = rows.reduce((s, r) => s + r.expected, 0);
+  const received = rows.filter(r => r.hit).reduce((s, r) => s + Number(r.hit.amount_idr || 0), 0);
+  const monthName = new Date().toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+
+  return (
+    <div style={{ background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 16, padding: "16px 20px", marginBottom: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#111827", textTransform: "uppercase", letterSpacing: "0.04em", fontFamily: FF }}>
+            Salary — {monthName}
+          </div>
+          <div style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF, marginTop: 2 }}>
+            Paid in advance at prev month-end; SDC follows on the 1st
+          </div>
+        </div>
+        <div style={{ fontSize: 15, fontWeight: 800, fontFamily: FF, color: received >= expected ? "#059669" : "#111827" }}>
+          {fmtIDR(received)} <span style={{ color: "#9ca3af", fontWeight: 500 }}>/ {fmtIDR(expected)}</span>
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "6px 20px" }}>
+        {rows.map(r => (
+          <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "5px 0", borderBottom: "1px solid #f7f7f8" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12, color: "#374151", fontFamily: FF, minWidth: 0 }}>
+              <span style={{
+                width: 16, height: 16, borderRadius: 99, flexShrink: 0,
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                fontSize: 10, fontWeight: 800,
+                background: r.hit ? "#dcfce7" : r.late ? "#fee2e2" : "#f3f4f6",
+                color: r.hit ? "#059669" : r.late ? "#dc2626" : "#9ca3af",
+              }}>{r.hit ? "\u2713" : r.late ? "!" : "\u00b7"}</span>
+              <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.name}</span>
+            </span>
+            <span style={{ fontSize: 12, fontWeight: 600, fontFamily: FF, flexShrink: 0, fontVariantNumeric: "tabular-nums", color: r.hit ? "#059669" : "#9ca3af" }}>
+              {r.hit ? fmtIDR(Number(r.hit.amount_idr || 0)) : fmtIDR(r.expected)}
+              {!r.hit && <span style={{ fontWeight: 400 }}> · {r.late ? "late" : "pending"}</span>}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── SourceCard ────────────────────────────────────────────────────
 function SourceCard({ src, onEdit, onAddIncome }) {
   const max = Math.max(...src.sparkline, 1);
@@ -905,6 +992,8 @@ export default function Income({
       {/* ── Overview tab ── */}
       {tab === "overview" && (
         <>
+          <SalaryThisMonth recurTemplates={recurTemplates} ledger={ledger} />
+
           {/* Hero KPI card */}
           <div style={{
             background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 16,
