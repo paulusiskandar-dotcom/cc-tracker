@@ -250,17 +250,22 @@ function PeriodFilter({ period, setPeriod }) {
   );
 }
 
-// "1 Aug – 26 Aug 2026 · 26 days" — shows the exact window being reported so the
-// period filter is verifiable at a glance.
+// "1 Aug – 31 Aug 2026 · 26 of 31 days" — the exact window being reported, so
+// the period filter is verifiable at a glance. The FULL range is always shown
+// (a picked month means the whole month); when today falls inside it, the day
+// counter shows progress instead of silently clipping the end date. Date-only
+// math — mixing in time-of-day made the count off by one.
 function RangeLabel({ range }) {
-  const now = new Date();
-  const end = range.to > now ? now : range.to;
-  const days = Math.max(1, Math.round((end - range.from) / 86400000) + 1);
+  const day0 = (d) => { const t = new Date(d); t.setHours(0, 0, 0, 0); return t; };
+  const from = day0(range.from), to = day0(range.to), today = day0(new Date());
+  const totalDays = Math.max(1, Math.round((to - from) / 86400000) + 1);
+  const elapsed   = Math.min(totalDays, Math.max(0, Math.round((today - from) / 86400000) + 1));
+  const ongoing   = today >= from && today < to;
   const f = (d) => d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
   return (
     <div style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
       <CalendarDays size={13} />
-      {f(range.from)} – {f(end)} {end.getFullYear()} · {days} days
+      {f(from)} – {f(to)} {to.getFullYear()} · {ongoing ? `${elapsed} of ${totalDays} days` : `${totalDays} days`}
     </div>
   );
 }
