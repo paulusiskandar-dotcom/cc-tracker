@@ -42,6 +42,7 @@ const CAT_VISUAL = {
   "health":                { Icon: Activity,       tint: "green"  },
   "home & furniture":      { Icon: Home,           tint: "teal"   },
   "installment":           { Icon: Calendar,       tint: "blue"   },
+  "loan installments":     { Icon: Calendar,       tint: "blue"   },
   "materai":               { Icon: Percent,        tint: "grey"   },
   "other":                 { Icon: MoreHorizontal, tint: "grey"   },
   "personal care":         { Icon: Sparkles,       tint: "purple" },

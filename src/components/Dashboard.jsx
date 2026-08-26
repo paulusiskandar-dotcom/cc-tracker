@@ -1043,7 +1043,7 @@ export default function Dashboard({
       {/* ════════════ SECTION 3 — THIS MONTH METRICS ════════════ */}
       <div style={{
         display: "grid",
-        gridTemplateColumns: isMobile ? "1fr" : "repeat(3, 1fr)",
+        gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(240px, 1fr))",
         gap: 12,
       }}>
         {/* Col 1: Cash Flow */}
@@ -1069,8 +1069,8 @@ export default function Dashboard({
             ].map(s => (
               <div key={s.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={{ fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>{s.label}</span>
-                <span style={{ fontSize: 14, fontWeight: 700, color: s.color, fontFamily: "Figtree, sans-serif" }}>
-                  {s.prefix}{fmtIDR(Math.abs(s.value), true)}
+                <span style={{ fontSize: 13, fontWeight: 700, color: s.color, fontFamily: "Figtree, sans-serif", fontVariantNumeric: "tabular-nums" }}>
+                  {s.prefix}{fmtIDR(Math.abs(s.value))}
                 </span>
               </div>
             ))}
@@ -1088,49 +1088,43 @@ export default function Dashboard({
               </span>
             )}
           </div>
-          <div style={{ fontSize: 26, fontWeight: 900, color: "#111827", fontFamily: "Figtree, sans-serif", marginBottom: 4 }}>
-            {fmtIDR(thisMonthCCSpend, true)}
+          <div style={{ fontSize: 20, fontWeight: 900, color: "#111827", fontFamily: "Figtree, sans-serif", marginBottom: 4, whiteSpace: "nowrap" }}>
+            {fmtIDR(thisMonthCCSpend)}
           </div>
           <div style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif", marginBottom: 14 }}>
-            This month · <strong style={{ color: "#dc2626" }}>{fmtIDR(totalCCDebt, true)}</strong> outstanding
+            This month · <strong style={{ color: "#dc2626" }}>{fmtIDR(totalCCDebt)}</strong> outstanding
           </div>
-          {/* Top shared group utilization */}
-          {Object.values(ccGroupMap).slice(0, 1).map(g => {
-            const util = g.sharedLimit > 0 ? Math.min(100, (g.totalDebt / g.sharedLimit) * 100) : 0;
-            const utilColor = util > 80 ? "#dc2626" : util > 50 ? "#d97706" : "#059669";
-            return (
-              <div key={g.id}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                  <span style={{ fontSize: 11, color: "#374151", fontFamily: "Figtree, sans-serif" }}>{g.name}</span>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: utilColor, fontFamily: "Figtree, sans-serif" }}>{util.toFixed(0)}% used</span>
+          {/* Top-3 utilization: shared groups + standalone cards with a limit */}
+          {(() => {
+            const items = [
+              ...Object.values(ccGroupMap).map(g => ({
+                key: g.id, name: g.name, debt: g.totalDebt, limit: g.sharedLimit,
+              })),
+              ...creditCards
+                .filter(c => !ccGroupedIds.has(c.id) && Number(c.card_limit || 0) > 0 && Number(c.outstanding_amount || 0) > 0)
+                .map(c => ({ key: c.id, name: c.name, debt: Number(c.outstanding_amount || 0), limit: Number(c.card_limit || 0) })),
+            ]
+              .map(x => ({ ...x, util: x.limit > 0 ? Math.min(100, (x.debt / x.limit) * 100) : 0 }))
+              .sort((a, b) => b.util - a.util)
+              .slice(0, 3);
+            return items.map(x => {
+              const utilColor = x.util > 80 ? "#dc2626" : x.util > 50 ? "#d97706" : "#059669";
+              return (
+                <div key={x.key} style={{ marginBottom: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                    <span style={{ fontSize: 11, color: "#374151", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{x.name}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: utilColor, fontFamily: "Figtree, sans-serif", flexShrink: 0 }}>{x.util.toFixed(0)}%</span>
+                  </div>
+                  <div style={{ height: 5, borderRadius: 3, background: "#f3f4f6" }}>
+                    <div style={{ width: `${x.util}%`, height: "100%", background: utilColor, borderRadius: 3, transition: "width 0.3s" }} />
+                  </div>
+                  <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
+                    {fmtIDR(x.debt)} of {fmtIDR(x.limit, true)}
+                  </div>
                 </div>
-                <div style={{ height: 6, borderRadius: 3, background: "#f3f4f6" }}>
-                  <div style={{ width: `${util}%`, height: "100%", background: utilColor, borderRadius: 3, transition: "width 0.3s" }} />
-                </div>
-                <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 3 }}>
-                  {fmtIDR(g.totalDebt, true)} of {fmtIDR(g.sharedLimit, true)}
-                </div>
-              </div>
-            );
-          })}
-          {/* Standalone top card if no groups */}
-          {Object.keys(ccGroupMap).length === 0 && creditCards.filter(c => Number(c.card_limit || 0) > 0 && Number(c.outstanding_amount || 0) > 0).slice(0, 1).map(c => {
-            const debt = Number(c.outstanding_amount || 0);
-            const limit = Number(c.card_limit || 0);
-            const util = Math.min(100, (debt / limit) * 100);
-            const utilColor = util > 80 ? "#dc2626" : util > 50 ? "#d97706" : "#059669";
-            return (
-              <div key={c.id}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
-                  <span style={{ fontSize: 11, color: "#374151", fontFamily: "Figtree, sans-serif" }}>{c.name}</span>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: utilColor, fontFamily: "Figtree, sans-serif" }}>{util.toFixed(0)}% used</span>
-                </div>
-                <div style={{ height: 6, borderRadius: 3, background: "#f3f4f6" }}>
-                  <div style={{ width: `${util}%`, height: "100%", background: utilColor, borderRadius: 3 }} />
-                </div>
-              </div>
-            );
-          })}
+              );
+            });
+          })()}
         </div>
 
         {/* Col 3: Top Category (icons/colors from DB) */}
@@ -1140,24 +1134,30 @@ export default function Dashboard({
             <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginTop: 8 }}>
               No spending this month
             </div>
-          ) : (
+          ) : (() => {
+            // Highlight the top SPENDING category — the fixed BYD leg (Loan
+            // Installments) would otherwise sit at #1 every single month and
+            // make the highlight useless. It still shows in the list below.
+            const hero = topCategories.find(c => c.name !== "Loan Installments") || topCategories[0];
+            const rest = topCategories.filter(c => c !== hero).slice(0, 4);
+            return (
             <>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-                <CategoryIcon name={topCategories[0]?.name} size={44} radius={12} />
-                <div>
-                  <div style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>{topCategories[0]?.name || "Other"}</div>
-                  <div style={{ fontSize: 22, fontWeight: 900, color: topCategories[0]?.color || "#dc2626", fontFamily: "Figtree, sans-serif" }}>
-                    {fmtIDR(topCategories[0]?.total || 0, true)}
+                <CategoryIcon name={hero.name} size={44} radius={12} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>{hero.name || "Other"}</div>
+                  <div style={{ fontSize: 19, fontWeight: 900, color: hero.color || "#dc2626", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
+                    {fmtIDR(hero.total || 0)}
                   </div>
                 </div>
               </div>
-              {topCategories.slice(1, 5).map((cat, i) => {
-                const pct = topCategories[0]?.total > 0 ? (cat.total / topCategories[0].total) * 100 : 0;
+              {rest.map((cat, i) => {
+                const pct = hero.total > 0 ? Math.min(100, (cat.total / hero.total) * 100) : 0;
                 return (
                   <div key={cat.name + i} style={{ marginBottom: 7 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3 }}>
-                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "#374151", fontFamily: "Figtree, sans-serif" }}><CategoryIcon name={cat.name} size={18} /> {cat.name}</span>
-                      <span style={{ fontSize: 11, fontWeight: 600, color: "#374151", fontFamily: "Figtree, sans-serif" }}>{fmtIDR(cat.total, true)}</span>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 3, gap: 8 }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "#374151", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}><CategoryIcon name={cat.name} size={18} /> {cat.name}</span>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: "#374151", fontFamily: "Figtree, sans-serif", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{fmtIDR(cat.total)}</span>
                     </div>
                     <div style={{ height: 3, borderRadius: 2, background: "#f3f4f6" }}>
                       <div style={{ width: `${pct}%`, height: "100%", background: cat.color || "#9ca3af", borderRadius: 2 }} />
@@ -1166,55 +1166,35 @@ export default function Dashboard({
                 );
               })}
             </>
-          )}
+            );
+          })()}
         </div>
+
+        {/* Col 4: Reimbursable Outstanding (compact) */}
+        {totalReimburseOutstanding > 0 && (
+          <div style={SEC_CARD}>
+            <div style={SEC_HEAD}>
+              <span style={SEC_TITLE}>Reimbursable</span>
+              <button onClick={() => setTab?.("receivables")} style={LINK_BTN}>View all →</button>
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: "#d97706", letterSpacing: -0.3, marginBottom: 10, fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>
+              {fmtIDR(totalReimburseOutstanding)}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              {pendingReimburseByEntity.map((e, idx) => (
+                <div key={e.entity} style={{
+                  display: "flex", justifyContent: "space-between", alignItems: "center",
+                  padding: "7px 0", borderTop: idx > 0 ? "1px solid #f3f4f6" : "none",
+                  fontFamily: "Figtree, sans-serif", gap: 8,
+                }}>
+                  <span style={{ fontSize: 12, fontWeight: 500, color: "#374151" }}>{e.entity}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "#d97706", fontVariantNumeric: "tabular-nums" }}>{fmtIDR(e.net)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
-
-      {/* ════════════ SECTION 3.5 — REIMBURSABLE OUTSTANDING ════════════ */}
-      {totalReimburseOutstanding > 0 && (
-        <div style={SEC_CARD}>
-          <div style={SEC_HEAD}>
-            <span style={SEC_TITLE}>Reimbursable Outstanding</span>
-            <button onClick={() => setTab?.("receivables")} style={LINK_BTN}>
-              View all →
-            </button>
-          </div>
-
-          <div style={{
-            fontSize: 24,
-            fontWeight: 900,
-            color: "#d97706",
-            letterSpacing: -0.5,
-            marginBottom: 12,
-            fontFamily: "Figtree, sans-serif",
-          }}>
-            {fmtIDR(totalReimburseOutstanding)}
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", maxWidth: 440 }}>
-            {pendingReimburseByEntity.map((e, idx) => (
-              <div
-                key={e.entity}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  padding: "10px 0",
-                  borderTop: idx > 0 ? "1px solid #f3f4f6" : "none",
-                  fontFamily: "Figtree, sans-serif",
-                }}
-              >
-                <span style={{ fontSize: 13, fontWeight: 500, color: "#374151" }}>
-                  {e.entity}
-                </span>
-                <span style={{ fontSize: 13, fontWeight: 700, color: "#d97706", fontVariantNumeric: "tabular-nums" }}>
-                  {fmtIDR(e.net)}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* ════════════ SECTION 4 — CC OVERVIEW ════════════ */}
       {creditCards.length > 0 && (
