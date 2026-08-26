@@ -212,7 +212,11 @@ export default function Reconcile({
         .gte("tx_date", addDays(dates[0], -7)).lte("tx_date", addDays(dates[dates.length - 1], 7));
       if (error) throw error;
       const { matched, missing } = matchRows(st.stmtRows, led || []);
-      if (missing.length) { showToast(`${missing.length} row(s) no longer match — use Review`, "warning"); return; }
+      // Ignored rows (e.g. installment-conversion wash pairs) have no ledger
+      // counterpart by design — inboxReady skips them, so finalize must too.
+      const ignored = new Set(st.ignoredIds || []);
+      const stillMissing = missing.filter(m => !ignored.has(m._id));
+      if (stillMissing.length) { showToast(`${stillMissing.length} row(s) no longer match — use Review`, "warning"); return; }
 
       const nowIso = new Date().toISOString();
       if (matched.size) {

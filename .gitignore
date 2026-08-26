@@ -34,3 +34,4 @@ statements/
 statement_fetch_config.json
 statement_fetch.log
 __pycache__/
+.backups/
