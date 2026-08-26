@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { TrendingUp, TrendingDown, Wallet, PiggyBank, Sparkles, CalendarDays, X } from "lucide-react";
 import { fmtIDR, mlShort } from "../utils";
 import { LIGHT, DARK } from "../theme";
 import { SectionHeader, EmptyState } from "./shared/index";
@@ -32,9 +33,15 @@ function getPreviousRange({ from, to }) {
   return { from: new Date(from.getTime() - dur - 86400000), to: new Date(from.getTime() - 1) };
 }
 
+// Local-date YYYY-MM-DD. NOT toISOString(), which is UTC: at WIB (UTC+7) local
+// midnight converts to the PREVIOUS day, so "This Month" leaked the last day of
+// the prior month in and dropped the last day of the current month out.
+const ymdLocal = (d) =>
+  d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+
 function filterByRange(ledger, range) {
-  const f = range.from.toISOString().slice(0, 10);
-  const t = range.to.toISOString().slice(0, 10);
+  const f = ymdLocal(range.from);
+  const t = ymdLocal(range.to);
   return ledger.filter(e => e.tx_date >= f && e.tx_date <= t);
 }
 
@@ -42,12 +49,25 @@ function sumType(txs, type) {
   return txs.filter(t => t.tx_type === type).reduce((s, t) => s + Number(t.amount_idr || 0), 0);
 }
 
+// Expense view = every rupiah that leaves and does not come back:
+//   "expense" rows (including Reimbursable Loss) + "pay_liability" rows
+//   (loan/leasing installments, e.g. BYD Seal). Excluded on purpose:
+//   reimburse_out (comes back at settlement), pay_cc (transfer — card spend is
+//   already counted per charge), buy_asset (asset swap), transfers.
+//   (Paulus, 2026-08-26: "semua expense masuk termasuk BYD dan reimbursable
+//   expense; yang tidak masuk hanya reimburse out")
+const isExpenseRow = (t) => t.tx_type === "expense" || t.tx_type === "pay_liability";
+
+function sumExpense(txs) {
+  return txs.filter(isExpenseRow).reduce((s, t) => s + Number(t.amount_idr || 0), 0);
+}
+
 function last6Months() {
   return Array.from({ length: 6 }, (_, i) => {
     const d = new Date();
     d.setDate(1);
     d.setMonth(d.getMonth() - (5 - i));
-    return d.toISOString().slice(0, 7);
+    return ymdLocal(d).slice(0, 7); // local month — toISOString() shifts to UTC
   });
 }
 
@@ -75,9 +95,10 @@ function resolveCatMeta(categoryId, categoryName, dbList = [], isIncome = false)
 function groupByCategory(txs, type = "expense", dbCategories = []) {
   const map = {};
   const isIncome = type === "income";
-  txs.filter(t => t.tx_type === type).forEach(t => {
-    const key  = t.category_id || t.category_name || "other";
-    const name = t.category_name || "Other";
+  txs.filter(t => (type === "expense" ? isExpenseRow(t) : t.tx_type === type)).forEach(t => {
+    const isLoan = t.tx_type === "pay_liability";
+    const key  = t.category_id || t.category_name || (isLoan ? "loan_installment" : "other");
+    const name = t.category_name || (isLoan ? "Loan Installments" : "Other");
     if (!map[key]) {
       const meta = resolveCatMeta(t.category_id, name, dbCategories, isIncome);
       map[key] = { id: key, name, ...meta, total: 0, count: 0, txs: [] };
@@ -94,7 +115,7 @@ function groupByCategory(txs, type = "expense", dbCategories = []) {
 
 function groupByMerchant(txs) {
   const map = {};
-  txs.filter(t => t.tx_type === "expense" && !t.is_reimburse).forEach(t => {
+  txs.filter(t => isExpenseRow(t) && !t.is_reimburse).forEach(t => {
     const key  = (t.merchant_name || t.description || "Unknown").trim();
     if (!key) return;
     if (!map[key]) { map[key] = { name: key, category_name: t.category_name || "", total: 0, count: 0, txs: [] }; }
@@ -167,53 +188,86 @@ function PeriodFilter({ period, setPeriod }) {
         );
       })}
       {/^\d{4}-\d{2}$/.test(period) && (
-        <button style={{
+        <button onClick={() => setPeriod("this_month")} style={{
           height: 30, padding: "0 12px", borderRadius: 20,
           border: "1.5px solid #111827", background: "#111827",
           color: "#fff", fontSize: 12, fontWeight: 700,
           cursor: "pointer", fontFamily: "Figtree, sans-serif",
+          display: "inline-flex", alignItems: "center", gap: 6,
         }}>
-          {getDateRange(period).label} ✕
+          {getDateRange(period).label} <X size={12} strokeWidth={3} />
         </button>
       )}
     </div>
   );
 }
 
-function MetricCard({ label, value, valueColor, delta, deltaGoodWhenNeg = false }) {
-  const deltaColor = delta === null ? "#9ca3af" :
-    delta === 0 ? "#9ca3af" :
-    (deltaGoodWhenNeg ? delta < 0 : delta > 0) ? "#059669" : "#dc2626";
-  const deltaArrow = delta !== null && delta !== 0 ? (delta > 0 ? "▲" : "▼") : "";
+// "1 Aug – 26 Aug 2026 · 26 days" — shows the exact window being reported so the
+// period filter is verifiable at a glance.
+function RangeLabel({ range }) {
+  const now = new Date();
+  const end = range.to > now ? now : range.to;
+  const days = Math.max(1, Math.round((end - range.from) / 86400000) + 1);
+  const f = (d) => d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
   return (
-    <div style={{
-      background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 16, padding: "14px 16px",
-    }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6 }}>
-        {label}
-      </div>
-      <div style={{ fontSize: 20, fontWeight: 800, color: valueColor, lineHeight: 1.2, fontFamily: "Figtree, sans-serif", marginBottom: 4 }}>
-        {value}
-      </div>
-      {delta !== null ? (
-        <div style={{ fontSize: 10, color: deltaColor, fontFamily: "Figtree, sans-serif" }}>
-          {deltaArrow} {Math.abs(delta).toFixed(0)}% vs prev period
-        </div>
-      ) : (
-        <div style={{ fontSize: 10, color: "#9ca3af" }}>—</div>
-      )}
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+      <CalendarDays size={13} />
+      {f(range.from)} – {f(end)} {end.getFullYear()} · {days} days
     </div>
   );
 }
 
-function HBar({ label, value, max, color, pct, onClick }) {
+function MetricCard({ label, value, valueColor, delta, deltaGoodWhenNeg = false, prevText, icon: Icon, iconBg, iconColor, sub }) {
+  const good = delta !== null && delta !== 0 && (deltaGoodWhenNeg ? delta < 0 : delta > 0);
+  const deltaColor = delta === null || delta === 0 ? "#9ca3af" : good ? "#059669" : "#dc2626";
+  const deltaBg    = delta === null || delta === 0 ? "#f3f4f6" : good ? "#dcfce7" : "#fee2e2";
+  const Arrow = delta !== null && delta !== 0 ? (delta > 0 ? TrendingUp : TrendingDown) : null;
+  return (
+    <div style={{
+      background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 16, padding: "14px 16px",
+      display: "flex", flexDirection: "column", gap: 6, minWidth: 0,
+    }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", letterSpacing: "0.06em", textTransform: "uppercase" }}>
+          {label}
+        </div>
+        {Icon && (
+          <div style={{ width: 24, height: 24, borderRadius: 8, background: iconBg || "#f3f4f6", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <Icon size={13} color={iconColor || "#6b7280"} />
+          </div>
+        )}
+      </div>
+      <div style={{ fontSize: 18, fontWeight: 800, color: valueColor, lineHeight: 1.2, fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {value}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 18, flexWrap: "wrap" }}>
+        {delta !== null && (
+          <span style={{
+            display: "inline-flex", alignItems: "center", gap: 3, padding: "1px 7px", borderRadius: 99,
+            background: deltaBg, color: deltaColor, fontSize: 10, fontWeight: 700, fontFamily: "Figtree, sans-serif",
+          }}>
+            {Arrow && <Arrow size={10} strokeWidth={2.5} />}
+            {Math.abs(delta).toFixed(0)}%
+          </span>
+        )}
+        <span style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {prevText || sub || (delta === null ? "no prev data" : "vs prev period")}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function HBar({ label, value, max, color, pct, count, onClick }) {
   const w = max > 0 ? Math.min(100, (value / max) * 100) : 0;
   return (
     <div onClick={onClick} style={{ marginBottom: 10, cursor: onClick ? "pointer" : "default" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-        <span style={{ fontSize: 12, color: "#374151", fontFamily: "Figtree, sans-serif" }}>{label}</span>
-        <span style={{ fontSize: 11, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif" }}>
-          {fmtIDR(value, true)}&nbsp;
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, gap: 8 }}>
+        <span style={{ fontSize: 12, color: "#374151", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {label}{count ? <span style={{ color: "#c4c8cf" }}> · {count} tx</span> : null}
+        </span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", flexShrink: 0 }}>
+          {fmtIDR(value)}&nbsp;
           <span style={{ color: "#9ca3af", fontWeight: 400 }}>{pct}%</span>
         </span>
       </div>
@@ -251,7 +305,7 @@ function DrillDownModal({ open, onClose, title, transactions }) {
           {transactions.length} transactions · {fmtIDR(total)}
         </div>
         {transactions.length === 0
-          ? <EmptyState icon="📋" message="No transactions." />
+          ? <EmptyState icon="" message="No transactions." />
           : transactions
               .slice()
               .sort((a, b) => (b.tx_date || "").localeCompare(a.tx_date || ""))
@@ -292,12 +346,12 @@ function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeri
   const txs      = useMemo(() => filterByRange(ledger, range), [ledger, range]);
   const prevTxs  = useMemo(() => filterByRange(ledger, prevRange), [ledger, prevRange]);
 
-  const totalExp  = sumType(txs, "expense");
+  const totalExp  = sumExpense(txs);
   const totalInc  = sumType(txs, "income");
   const netSurp   = totalInc - totalExp;
   const savRate   = totalInc > 0 ? Math.round((netSurp / totalInc) * 100) : null;
 
-  const prevExp   = sumType(prevTxs, "expense");
+  const prevExp   = sumExpense(prevTxs);
   const prevInc   = sumType(prevTxs, "income");
   const prevNet   = prevInc - prevExp;
 
@@ -315,53 +369,96 @@ function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeri
   const trendData = useMemo(() => TREND_MONTHS.map(mo => {
     const moTxs   = ledger.filter(e => e.tx_date?.slice(0, 7) === mo);
     const income  = sumType(moTxs, "income");
-    const expense = sumType(moTxs, "expense");
+    const expense = sumExpense(moTxs);
     return { month: mlShort(mo), mo, income, expense, surplus: income - expense };
   }), [ledger]);
 
   const tooltipStyle = { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 11, fontFamily: "Figtree, sans-serif" };
   const card = { background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 16, padding: "16px 18px" };
 
-  // Insight
+  // Avg spend per elapsed day in the range (not the full range length)
+  const now       = new Date();
+  const rangeEnd  = range.to > now ? now : range.to;
+  const daysGone  = Math.max(1, Math.round((rangeEnd - range.from) / 86400000) + 1);
+  const avgDaily  = totalExp / daysGone;
+
+  // Insights: top category, largest tx, biggest category increase vs prev period
+  const expTxs     = txs.filter(t => isExpenseRow(t) && !t.is_reimburse);
   const topCat     = catBreak[0];
-  const largestTx  = txs.filter(t => t.tx_type === "expense" && !t.is_reimburse).sort((a, b) => Number(b.amount_idr) - Number(a.amount_idr))[0];
-  const showInsight = topCat && largestTx;
+  const largestTx  = expTxs.slice().sort((a, b) => Number(b.amount_idr) - Number(a.amount_idr))[0];
+  const prevCatMap = useMemo(() => {
+    const m = {};
+    prevTxs.filter(isExpenseRow).forEach(t => {
+      const k = t.category_id || t.category_name || "other";
+      m[k] = (m[k] || 0) + Number(t.amount_idr || 0);
+    });
+    return m;
+  }, [prevTxs]);
+  const biggestRise = useMemo(() => catBreak
+    .map(c => ({ ...c, rise: c.total - (prevCatMap[c.id] || 0) }))
+    .filter(c => c.rise > 0)
+    .sort((a, b) => b.rise - a.rise)[0] || null, [catBreak, prevCatMap]);
+
+  const insights = [];
+  if (topCat)      insights.push(<span key="top">Top spend: <strong>{topCat.name}</strong> — {fmtIDR(topCat.total)} ({topCat.pct.toFixed(0)}%)</span>);
+  if (largestTx)   insights.push(<span key="big">Largest tx: <strong>{largestTx.merchant_name || largestTx.description}</strong> — {fmtIDR(Number(largestTx.amount_idr || 0))}</span>);
+  if (biggestRise) insights.push(<span key="rise">Biggest increase: <strong>{biggestRise.name}</strong> +{fmtIDR(biggestRise.rise)} vs prev</span>);
+
+  const legendDot = (color) => ({ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: color, marginRight: 5 });
+  const merchantsTop = merchants.slice(0, 8);
+  const merchantMax  = merchantsTop[0]?.total || 0;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {/* Metric cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
-        <MetricCard label="Total Expenses" value={fmtIDR(totalExp)} valueColor="#dc2626" delta={expDelta} deltaGoodWhenNeg />
-        <MetricCard label="Total Income"   value={fmtIDR(totalInc)} valueColor="#059669" delta={incDelta} />
-        <MetricCard label="Net Surplus"    value={(netSurp >= 0 ? "+" : "") + fmtIDR(netSurp)} valueColor={netSurp >= 0 ? "#3b5bdb" : "#dc2626"} delta={netDelta} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 8 }}>
+        <MetricCard label="Total Expenses" value={fmtIDR(totalExp)} valueColor="#dc2626" delta={expDelta} deltaGoodWhenNeg
+          prevText={prevExp > 0 ? `prev ${fmtIDR(prevExp)}` : undefined}
+          icon={Wallet} iconBg="#fee2e2" iconColor="#dc2626" />
+        <MetricCard label="Total Income" value={fmtIDR(totalInc)} valueColor="#059669" delta={incDelta}
+          prevText={prevInc > 0 ? `prev ${fmtIDR(prevInc)}` : undefined}
+          icon={TrendingUp} iconBg="#dcfce7" iconColor="#059669" />
+        <MetricCard label="Net Surplus" value={(netSurp >= 0 ? "+" : "") + fmtIDR(netSurp)} valueColor={netSurp >= 0 ? "#3b5bdb" : "#dc2626"} delta={netDelta}
+          prevText={prevNet !== 0 ? `prev ${(prevNet >= 0 ? "+" : "") + fmtIDR(prevNet)}` : undefined}
+          icon={PiggyBank} iconBg="#dbeafe" iconColor="#3b5bdb" />
         <MetricCard
           label="Savings Rate"
           value={savRate !== null ? `${savRate}%` : "—"}
           valueColor={savRate !== null && savRate >= 20 ? "#059669" : savRate !== null && savRate < 0 ? "#dc2626" : "#d97706"}
           delta={savDelta}
+          prevText={prevSav !== null ? `prev ${prevSav}%` : undefined}
+          icon={PiggyBank} iconBg="#fef3c7" iconColor="#d97706"
         />
+        <MetricCard label="Avg Spend / Day" value={fmtIDR(avgDaily)} valueColor="#111827" delta={null}
+          sub={`${expTxs.length} tx over ${daysGone} days`}
+          icon={CalendarDays} iconBg="#ede9fe" iconColor="#7c3aed" />
       </div>
 
-      {/* Insight bar */}
-      {showInsight && (
+      {/* Insight strip */}
+      {insights.length > 0 && (
         <div style={{
-          background: "#fef3c7", border: "0.5px solid #fde68a", borderRadius: 12,
-          padding: "12px 16px", display: "flex", gap: 10, alignItems: "flex-start", fontSize: 12, color: "#78350f",
+          background: "#fffbeb", border: "0.5px solid #fde68a", borderRadius: 12,
+          padding: "10px 16px", display: "flex", gap: 10, alignItems: "flex-start", fontSize: 12, color: "#78350f",
         }}>
-          <span style={{ fontSize: 16, flexShrink: 0 }}>💡</span>
-          <div>
-            Top spend: <strong>{topCat.name} ({fmtIDR(topCat.total, true)}, {topCat.pct.toFixed(0)}%)</strong>.{" "}
-            Largest tx: <strong>{largestTx.merchant_name || largestTx.description} — {fmtIDR(Number(largestTx.amount_idr || 0), true)}</strong>
-            {largestTx.category_name ? ` (${largestTx.category_name})` : ""}.
+          <Sparkles size={15} style={{ flexShrink: 0, marginTop: 1 }} color="#d97706" />
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 18px", lineHeight: 1.6 }}>
+            {insights}
           </div>
         </div>
       )}
 
       {/* 6-Month Trend */}
       <div style={card}>
-        <div style={{ marginBottom: 14 }}>
-          <SectionHeader title="6-Month Trend" />
-          <div style={{ fontSize: 11, color: T.text3, marginTop: 2 }}>Click a bar to drill into that month</div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+          <div>
+            <SectionHeader title="6-Month Trend" />
+            <div style={{ fontSize: 11, color: T.text3, marginTop: 2 }}>Click a bar to drill into that month</div>
+          </div>
+          <div style={{ display: "flex", gap: 14, fontSize: 11, color: "#6b7280", fontFamily: "Figtree, sans-serif", alignItems: "center" }}>
+            <span><i style={legendDot("#059669")} />Income</span>
+            <span><i style={legendDot("#dc2626")} />Expense</span>
+            <span><i style={{ ...legendDot("#9ca3af"), borderRadius: 99 }} />Net below</span>
+          </div>
         </div>
         <ResponsiveContainer width="100%" height={200}>
           <BarChart
@@ -373,7 +470,15 @@ function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeri
           >
             <XAxis dataKey="month" tick={{ fontSize: 10, fill: "#9ca3af", fontFamily: "Figtree, sans-serif" }} axisLine={false} tickLine={false} />
             <YAxis hide />
-            <Tooltip contentStyle={tooltipStyle} formatter={(v, name) => [fmtIDR(v, true), name]} cursor={{ fill: "rgba(0,0,0,0.04)" }} />
+            <Tooltip
+              contentStyle={tooltipStyle}
+              formatter={(v, name) => [fmtIDR(v), name]}
+              labelFormatter={(label, payload) => {
+                const p = payload?.[0]?.payload;
+                return p ? `${label} · net ${(p.surplus >= 0 ? "+" : "")}${fmtIDR(p.surplus)}` : label;
+              }}
+              cursor={{ fill: "rgba(0,0,0,0.04)" }}
+            />
             <Bar dataKey="income"  name="Income"  fill="#059669" radius={[3, 3, 0, 0]}>
               {trendData.map(d => <Cell key={d.mo} fill={d.mo === period ? "#059669" : "#05996966"} />)}
             </Bar>
@@ -384,7 +489,12 @@ function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeri
         </ResponsiveContainer>
         <div style={{ display: "flex", justifyContent: "space-around", marginTop: 6, borderTop: `1px solid ${T.border}`, paddingTop: 8 }}>
           {trendData.map(d => (
-            <div key={d.mo} style={{ textAlign: "center", flex: 1, fontSize: 9, fontWeight: 700, color: d.surplus >= 0 ? "#059669" : "#dc2626", fontFamily: "Figtree, sans-serif" }}>
+            <div
+              key={d.mo}
+              onClick={() => setPeriod(d.mo)}
+              title={`${d.month}: income ${fmtIDR(d.income)} − expense ${fmtIDR(d.expense)}`}
+              style={{ textAlign: "center", flex: 1, fontSize: 9, fontWeight: 700, cursor: "pointer", color: d.surplus >= 0 ? "#059669" : "#dc2626", fontFamily: "Figtree, sans-serif" }}
+            >
               {d.surplus >= 0 ? "+" : ""}{fmtIDR(d.surplus, true)}
             </div>
           ))}
@@ -392,18 +502,19 @@ function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeri
       </div>
 
       {/* 2-col: Expense by Category | Top Merchants */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12 }}>
         <div style={card}>
           <div style={{ marginBottom: 12 }}>
             <SectionHeader title="Expense by Category" />
-            <div style={{ fontSize: 11, color: T.text3, marginTop: 2 }}>Total: <strong style={{ color: "#111827" }}>{fmtIDR(catTotal)}</strong></div>
+            <div style={{ fontSize: 11, color: T.text3, marginTop: 2 }}>Total: <strong style={{ color: "#111827" }}>{fmtIDR(catTotal)}</strong> · {catBreak.length} categories · click to drill in</div>
           </div>
           {catBreak.length === 0
-            ? <EmptyState icon="📊" message="No expenses." />
+            ? <EmptyState icon="" message="No expenses in this period." />
             : catBreak.map(c => (
                 <HBar
                   key={c.id}
                   label={c.name}
+                  count={c.count}
                   value={c.total}
                   max={catTotal}
                   color={c.color}
@@ -417,20 +528,33 @@ function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeri
         <div style={card}>
           <div style={{ marginBottom: 12 }}>
             <SectionHeader title="Top Merchants" />
+            <div style={{ fontSize: 11, color: T.text3, marginTop: 2 }}>By total spend in this period</div>
           </div>
-          {merchants.length === 0
-            ? <EmptyState icon="🏪" message="No merchant data." />
-            : merchants.slice(0, 8).map(m => (
+          {merchantsTop.length === 0
+            ? <EmptyState icon="" message="No merchant data." />
+            : merchantsTop.map((m, i) => (
                 <div
                   key={m.name}
                   onClick={() => setDrill({ title: m.name, transactions: m.txs })}
-                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: "1px solid #f3f4f6", cursor: "pointer" }}
+                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 0", borderBottom: "1px solid #f3f4f6", cursor: "pointer" }}
                 >
+                  <div style={{
+                    width: 22, height: 22, borderRadius: 8, background: i === 0 ? "#111827" : "#f3f4f6",
+                    color: i === 0 ? "#fff" : "#6b7280", display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 10, fontWeight: 700, flexShrink: 0, fontFamily: "Figtree, sans-serif",
+                  }}>{i + 1}</div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 500, color: "#111827", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.name}</div>
-                    <div style={{ fontSize: 10, color: "#9ca3af" }}>{m.category_name || "Other"} · {m.count} tx</div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 12, fontWeight: 500, color: "#111827", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.name}</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: "#dc2626", flexShrink: 0 }}>{fmtIDR(m.total)}</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3 }}>
+                      <div style={{ flex: 1, background: "#f3f4f6", borderRadius: 99, height: 3 }}>
+                        <div style={{ width: `${merchantMax > 0 ? (m.total / merchantMax) * 100 : 0}%`, height: "100%", background: "#fca5a5", borderRadius: 99 }} />
+                      </div>
+                      <span style={{ fontSize: 10, color: "#9ca3af", flexShrink: 0 }}>{m.category_name || "Other"} · {m.count} tx</span>
+                    </div>
                   </div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "#dc2626", flexShrink: 0, marginLeft: 12 }}>{fmtIDR(m.total, true)}</div>
                 </div>
               ))
           }
@@ -454,7 +578,7 @@ const PIE_COLORS = ["#dc2626","#d97706","#3b5bdb","#059669","#7c3aed","#0891b2",
 function ExpenseTab({ ledger, categories = [], period, dark }) {
   const T = dark ? DARK : LIGHT;
   const range   = useMemo(() => getDateRange(period), [period]);
-  const txs     = useMemo(() => filterByRange(ledger, range).filter(t => t.tx_type === "expense" && !t.is_reimburse), [ledger, range]);
+  const txs     = useMemo(() => filterByRange(ledger, range).filter(t => isExpenseRow(t) && !t.is_reimburse), [ledger, range]);
   const cats    = useMemo(() => groupByCategory(txs, "expense", categories), [txs, categories]);
   const [search, setSearch] = useState("");
   const [drill,  setDrill]  = useState(null);
@@ -478,14 +602,14 @@ function ExpenseTab({ ledger, categories = [], period, dark }) {
         <div style={card}>
           <SectionHeader title="Expense Distribution" />
           {cats.length === 0
-            ? <EmptyState icon="📊" message="No expenses." />
+            ? <EmptyState icon="" message="No expenses." />
             : (
               <div style={{ display: "flex", justifyContent: "center", marginTop: 12 }}>
                 <PieChart width={220} height={220}>
                   <Pie data={pieData} cx={110} cy={110} innerRadius={60} outerRadius={100} paddingAngle={2} dataKey="value">
                     {pieData.map((e, i) => <Cell key={e.name} fill={e.color} />)}
                   </Pie>
-                  <Tooltip contentStyle={tooltipStyle} formatter={v => fmtIDR(v, true)} />
+                  <Tooltip contentStyle={tooltipStyle} formatter={v => fmtIDR(v)} />
                 </PieChart>
               </div>
             )
@@ -497,7 +621,7 @@ function ExpenseTab({ ledger, categories = [], period, dark }) {
             <div style={{ fontSize: 11, color: T.text3, marginTop: 2 }}>Total: <strong style={{ color: "#111827" }}>{fmtIDR(catTotal)}</strong></div>
           </div>
           {cats.length === 0
-            ? <EmptyState icon="📊" message="No expenses." />
+            ? <EmptyState icon="" message="No expenses." />
             : cats.map((c, i) => (
                 <div
                   key={c.id}
@@ -508,7 +632,7 @@ function ExpenseTab({ ledger, categories = [], period, dark }) {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
                       <span style={{ fontSize: 12, color: "#374151" }}>{c.name}</span>
-                      <span style={{ fontSize: 11, fontWeight: 700 }}>{fmtIDR(c.total, true)}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700 }}>{fmtIDR(c.total)}</span>
                     </div>
                     <div style={{ background: "#f3f4f6", borderRadius: 3, height: 3, marginTop: 3 }}>
                       <div style={{ width: `${c.pct}%`, height: "100%", background: PIE_COLORS[i % PIE_COLORS.length], borderRadius: 3 }} />
@@ -546,7 +670,7 @@ function ExpenseTab({ ledger, categories = [], period, dark }) {
         </div>
         <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 8 }}>{filtered.length} transactions · {fmtIDR(filtered.reduce((s, t) => s + Number(t.amount_idr || 0), 0))}</div>
         {filtered.length === 0
-          ? <EmptyState icon="📋" message="No transactions found." />
+          ? <EmptyState icon="" message="No transactions found." />
           : filtered.slice(0, 50).map(t => (
               <div key={t.id || t._id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "9px 0", borderBottom: "1px solid #f3f4f6" }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
@@ -586,14 +710,14 @@ function IncomeTab({ ledger, incomeSrcs, period, dark }) {
         <div style={card}>
           <SectionHeader title="Income Distribution" />
           {srcs.length === 0
-            ? <EmptyState icon="💰" message="No income." />
+            ? <EmptyState icon="" message="No income." />
             : (
               <div style={{ display: "flex", justifyContent: "center", marginTop: 12 }}>
                 <PieChart width={220} height={220}>
                   <Pie data={pieData} cx={110} cy={110} innerRadius={60} outerRadius={100} paddingAngle={2} dataKey="value">
                     {pieData.map((e, i) => <Cell key={e.name} fill={e.color} />)}
                   </Pie>
-                  <Tooltip contentStyle={tooltipStyle} formatter={v => fmtIDR(v, true)} />
+                  <Tooltip contentStyle={tooltipStyle} formatter={v => fmtIDR(v)} />
                 </PieChart>
               </div>
             )
@@ -605,7 +729,7 @@ function IncomeTab({ ledger, incomeSrcs, period, dark }) {
             <div style={{ fontSize: 11, color: T.text3, marginTop: 2 }}>Total: <strong style={{ color: "#111827" }}>{fmtIDR(total)}</strong></div>
           </div>
           {srcs.length === 0
-            ? <EmptyState icon="💰" message="No income." />
+            ? <EmptyState icon="" message="No income." />
             : srcs.map((s, i) => (
                 <div
                   key={s.id}
@@ -693,12 +817,12 @@ function ComparisonTab({ ledger, categories = [], period, dark }) {
   const txs       = useMemo(() => filterByRange(ledger, range), [ledger, range]);
   const prevTxs   = useMemo(() => filterByRange(ledger, prevRange), [ledger, prevRange]);
 
-  const thisExp  = sumType(txs, "expense");
+  const thisExp  = sumExpense(txs);
   const thisInc  = sumType(txs, "income");
   const thisNet  = thisInc - thisExp;
   const thisSav  = thisInc > 0 ? Math.round((thisNet / thisInc) * 100) : 0;
 
-  const prevExp  = sumType(prevTxs, "expense");
+  const prevExp  = sumExpense(prevTxs);
   const prevInc  = sumType(prevTxs, "income");
   const prevNet  = prevInc - prevExp;
   const prevSav  = prevInc > 0 ? Math.round((prevNet / prevInc) * 100) : 0;
@@ -743,7 +867,7 @@ function ComparisonTab({ ledger, categories = [], period, dark }) {
       <div style={card}>
         <div style={{ marginBottom: 12 }}><SectionHeader title="Expense by Category" /></div>
         {allCatNames.length === 0
-          ? <EmptyState icon="📊" message="No expense data." />
+          ? <EmptyState icon="" message="No expense data." />
           : (
             <>
               {/* Header row */}
@@ -799,14 +923,15 @@ export default function Reports({ user, ledger = [], accounts = [], categories =
       {/* ── Period Filter ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
         <PeriodFilter period={period} setPeriod={setPeriod} />
-        <div style={{ fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
-          {getDateRange(period).label}
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 10, fontSize: 12, color: "#9ca3af", fontFamily: "Figtree, sans-serif" }}>
+          <span>{getDateRange(period).label}</span>
+          <RangeLabel range={getDateRange(period)} />
           {/^\d{4}-\d{2}$/.test(period) && (
             <button
               onClick={() => setPeriod("this_month")}
-              style={{ marginLeft: 8, fontSize: 11, color: "#3b5bdb", background: "none", border: "none", cursor: "pointer", fontFamily: "Figtree, sans-serif" }}
+              style={{ fontSize: 11, color: "#3b5bdb", background: "none", border: "none", cursor: "pointer", fontFamily: "Figtree, sans-serif" }}
             >
-              ← Back
+              Back
             </button>
           )}
         </div>
