@@ -98,7 +98,11 @@ function groupByCategory(txs, type = "expense", dbCategories = []) {
   txs.filter(t => (type === "expense" ? isExpenseRow(t) : t.tx_type === type)).forEach(t => {
     const isLoan = t.tx_type === "pay_liability";
     const key  = t.category_id || t.category_name || (isLoan ? "loan_installment" : "other");
-    const name = t.category_name || (isLoan ? "Loan Installments" : "Other");
+    // Resolve the display name from the LIVE category list first — the row-level
+    // category_name is denormalized and some import paths leave it NULL, which
+    // made properly-categorized rows show up as separate "Other" groups.
+    const dbHit = t.category_id ? dbCategories.find(c => c.id === t.category_id) : null;
+    const name = dbHit?.name || t.category_name || (isLoan ? "Loan Installments" : "Other");
     if (!map[key]) {
       const meta = resolveCatMeta(t.category_id, name, dbCategories, isIncome);
       map[key] = { id: key, name, ...meta, total: 0, count: 0, txs: [] };

@@ -1059,7 +1059,9 @@ export default function Dashboard({
         }}>
           {(() => {
             const liquidity = (nw.bank || 0) + (nw.cash || 0);
-            const totalRecv = (nw.receivables || 0) + (nw.employeeLoanTotal || 0) + (nw.reimburseOutstanding || 0);
+            // nw.receivables IS nw.reimburseOutstanding (same value in calcNetWorth) —
+            // summing both double-counted reimburse receivables here.
+            const totalRecv = (nw.reimburseOutstanding || 0) + (nw.employeeLoanTotal || 0);
             return [
               { label: "LIQUIDITY",    value: liquidity,          color: "#047857", prefix: "" },
               { label: "ASSETS",       value: nw.assets || 0,    color: "#047857", prefix: "" },
