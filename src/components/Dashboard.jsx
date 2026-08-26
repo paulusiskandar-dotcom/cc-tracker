@@ -96,6 +96,10 @@ export default function Dashboard({
   });
   const closeBankPicker = useCallback(() => setBankPickerState(s => ({ ...s, isOpen: false })), []);
   const [upcomingExpanded, setUpcomingExpanded] = useState(false);
+  // Local YYYY-MM for a Date — toISOString() is UTC and turns local
+  // first-of-month midnight into the PREVIOUS month at WIB.
+  const ymLocal = (d) => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+
   // ─── DERIVED STATS ───────────────────────────────────────────
   const nw = netWorth || { total: 0, bank: 0, cash: 0, assets: 0, receivables: 0, ccDebt: 0, liabilities: 0, reimburseOutstanding: 0 };
 
@@ -105,9 +109,11 @@ export default function Dashboard({
       .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0),
   [thisMonthLedger]);
 
+  // Expense = expense rows + pay_liability (BYD installment) — same scope as
+  // Reports; only reimburse_out is excluded (Paulus 2026-08-26).
   const thisMonthExpense = useMemo(() =>
     thisMonthLedger
-      .filter(e => e.tx_type === "expense" && !e.is_reimburse)
+      .filter(e => (e.tx_type === "expense" || e.tx_type === "pay_liability") && !e.is_reimburse)
       .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0),
   [thisMonthLedger]);
 
@@ -158,10 +164,10 @@ export default function Dashboard({
     const now = new Date();
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const m = d.toISOString().slice(0, 7);
+      const m = ymLocal(d);
       const income  = ledger.filter(e => ym(e.tx_date) === m && e.tx_type === "income")
         .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
-      const expense = ledger.filter(e => ym(e.tx_date) === m && e.tx_type === "expense" && !e.is_reimburse)
+      const expense = ledger.filter(e => ym(e.tx_date) === m && (e.tx_type === "expense" || e.tx_type === "pay_liability") && !e.is_reimburse)
         .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
       months.push({ month: mlShort(m), income, expense, m });
     }
@@ -173,11 +179,11 @@ export default function Dashboard({
   const topCategories = useMemo(() => {
     const map = {};
     thisMonthLedger
-      .filter(e => e.tx_type === "expense" && !e.is_reimburse)
+      .filter(e => (e.tx_type === "expense" || e.tx_type === "pay_liability") && !e.is_reimburse)
       .forEach(e => {
-        const key  = e.category_id || "other";
+        const key  = e.category_id || (e.tx_type === "pay_liability" ? "loan_installment" : "other");
         const cat  = (categories || []).find(c => c.id === e.category_id);
-        const name = cat?.name || e.category_name || "Other";
+        const name = cat?.name || e.category_name || (e.tx_type === "pay_liability" ? "Loan Installments" : "Other");
         const icon = cat?.icon || "💸";
         const color = cat?.color || "#9ca3af";
         if (!map[key]) map[key] = { name, icon, color, total: 0 };
@@ -196,7 +202,7 @@ export default function Dashboard({
     const months = [];
     for (let i = 11; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      months.push(d.toISOString().slice(0, 7));
+      months.push(ymLocal(d));
     }
     const deltas = months.map(m =>
       ledger.filter(e => ym(e.tx_date) === m).reduce((s, e) => {
@@ -1059,7 +1065,7 @@ export default function Dashboard({
             {[
               { label: "Income",  value: thisMonthIncome,  color: "#059669", prefix: "" },
               { label: "Expense", value: thisMonthExpense, color: "#dc2626", prefix: "" },
-              { label: "Surplus", value: surplus,          color: surplus >= 0 ? "#059669" : "#dc2626", prefix: surplus >= 0 ? "+" : "" },
+              { label: "Surplus", value: surplus,          color: surplus >= 0 ? "#059669" : "#dc2626", prefix: surplus >= 0 ? "+" : "\u2212" },
             ].map(s => (
               <div key={s.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <span style={{ fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif" }}>{s.label}</span>
@@ -1175,17 +1181,17 @@ export default function Dashboard({
           </div>
 
           <div style={{
-            fontSize: 26,
+            fontSize: 24,
             fontWeight: 900,
             color: "#d97706",
             letterSpacing: -0.5,
-            marginBottom: 16,
+            marginBottom: 12,
             fontFamily: "Figtree, sans-serif",
           }}>
-            {fmtIDR(totalReimburseOutstanding, true)}
+            {fmtIDR(totalReimburseOutstanding)}
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column" }}>
+          <div style={{ display: "flex", flexDirection: "column", maxWidth: 440 }}>
             {pendingReimburseByEntity.map((e, idx) => (
               <div
                 key={e.entity}
@@ -1201,8 +1207,8 @@ export default function Dashboard({
                 <span style={{ fontSize: 13, fontWeight: 500, color: "#374151" }}>
                   {e.entity}
                 </span>
-                <span style={{ fontSize: 14, fontWeight: 700, color: "#d97706" }}>
-                  {fmtIDR(e.net, true)}
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#d97706", fontVariantNumeric: "tabular-nums" }}>
+                  {fmtIDR(e.net)}
                 </span>
               </div>
             ))}
