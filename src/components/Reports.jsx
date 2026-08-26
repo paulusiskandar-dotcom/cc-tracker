@@ -62,6 +62,52 @@ function sumExpense(txs) {
   return txs.filter(isExpenseRow).reduce((s, t) => s + Number(t.amount_idr || 0), 0);
 }
 
+// ── SALARY ATTRIBUTION ────────────────────────────────────────
+// Fixed income is paid on two schedules (Paulus, 2026-08-26): the month-end
+// batch (template day >= 25) is salary for the FOLLOWING month, while SDC
+// (day <= 5) pays the PREVIOUS month on the 1st. Cash-basis monthly income
+// therefore sawtooths (every month "drops 70%" until its pre-paid salary is
+// counted). Reports re-date those rows to their attributed month — identified
+// via the active income templates' match_rules — so a month shows the income
+// that belongs to it. tx_date is shifted for grouping; _cashDate keeps the
+// real arrival date for display. Everything else stays cash-basis.
+export function attributeFixedIncome(ledger, recurTemplates) {
+  const tpls = (recurTemplates || []).filter(t =>
+    t.tx_type === "income" && t.is_active && t.frequency === "monthly" && t.match_rule);
+  if (!tpls.length) return ledger;
+  const shift = (ymd, delta) => {
+    const [y, m] = ymd.split("-").map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  };
+  return (ledger || []).map(row => {
+    if (row.tx_type !== "income" || !row.tx_date) return row;
+    const amt = Number(row.amount_idr || row.amount || 0);
+    const desc = (row.description || "").toLowerCase();
+    const t = tpls.find(tp => {
+      const r = tp.match_rule || {};
+      const base = Number(r.amount || tp.amount || 0);
+      const tol = Number(r.amount_tol || 0) || base * 0.02;
+      if (base > 0 && Math.abs(amt - base) > tol) return false;
+      const kws = (r.keywords || []).map(k => String(k).toLowerCase());
+      if (kws.length && !kws.some(k => desc.includes(k))) return false;
+      return true;
+    });
+    if (!t) return row;
+    const day = Number(String(row.tx_date).slice(8, 10));
+    const advance = Number(t.day_of_month || 30) >= 25;
+    // advance batch landing >=25 belongs to next month; landing early (1-10,
+    // e.g. Lieche on the 1st) already sits in its month. Arrears (SDC) landing
+    // 1-10 belongs to the previous month.
+    let delta = 0;
+    if (advance && day >= 25) delta = 1;
+    else if (!advance && day <= 10) delta = -1;
+    if (!delta) return row;
+    const ym2 = shift(String(row.tx_date).slice(0, 10), delta);
+    return { ...row, tx_date: `${ym2}-01`, _cashDate: row.tx_date, _attributed: true };
+  });
+}
+
 function last6Months() {
   return Array.from({ length: 6 }, (_, i) => {
     const d = new Date();
@@ -372,7 +418,7 @@ function DrillDownModal({ open, onClose, title, transactions }) {
                       {t.merchant_name || t.description || "—"}
                     </div>
                     <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>
-                      {t.tx_date} · {t.category_name || "Uncategorized"}
+                      {t._cashDate || t.tx_date} · {t.category_name || "Uncategorized"}
                     </div>
                   </div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: "#dc2626", flexShrink: 0, marginLeft: 12 }}>
@@ -722,7 +768,7 @@ function ExpenseTab({ ledger, categories = [], period, dark }) {
               <div key={t.id || t._id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "9px 0", borderBottom: "1px solid #f3f4f6" }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12, fontWeight: 500, color: "#111827", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.merchant_name || t.description || "—"}</div>
-                  <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>{t.tx_date} · {t.category_name || "—"}</div>
+                  <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>{t._cashDate || t.tx_date} · {t.category_name || "—"}</div>
                 </div>
                 <div style={{ fontSize: 12, fontWeight: 600, color: "#dc2626", flexShrink: 0, marginLeft: 12 }}>{fmtIDR(Number(t.amount_idr || 0))}</div>
               </div>
@@ -809,7 +855,7 @@ function IncomeTab({ ledger, incomeSrcs, period, dark }) {
               <div key={t.id || t._id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "9px 0", borderBottom: "1px solid #f3f4f6" }}>
                 <div>
                   <div style={{ fontSize: 12, fontWeight: 500, color: "#111827" }}>{t.description || t.merchant_name || "—"}</div>
-                  <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>{t.tx_date} · {t.category_name || "—"}</div>
+                  <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>{t._cashDate || t.tx_date} · {t.category_name || "—"}</div>
                 </div>
                 <div style={{ fontSize: 12, fontWeight: 600, color: "#059669", flexShrink: 0, marginLeft: 12 }}>{fmtIDR(Number(t.amount_idr || 0))}</div>
               </div>
@@ -959,10 +1005,12 @@ const TABS = [
   { id: "comparison",  label: "Comparison" },
 ];
 
-export default function Reports({ user, ledger = [], accounts = [], categories = [], incomeSrcs = [], dark }) {
+export default function Reports({ user, ledger = [], accounts = [], categories = [], incomeSrcs = [], recurTemplates = [], dark }) {
   const T = dark ? DARK : LIGHT;
   const [period,    setPeriod]    = useState("this_month");
   const [activeTab, setActiveTab] = useState("overview");
+  // Salary re-dated to its attributed month (see attributeFixedIncome).
+  const rLedger = useMemo(() => attributeFixedIncome(ledger, recurTemplates), [ledger, recurTemplates]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -1015,18 +1063,18 @@ export default function Reports({ user, ledger = [], accounts = [], categories =
       {/* ── Tab Content ── */}
       {activeTab === "overview" && (
         <OverviewTab
-          ledger={ledger} accounts={accounts} categories={categories}
+          ledger={rLedger} accounts={accounts} categories={categories}
           incomeSrcs={incomeSrcs} period={period} setPeriod={setPeriod} dark={dark}
         />
       )}
       {activeTab === "expense" && (
-        <ExpenseTab ledger={ledger} categories={categories} period={period} dark={dark} />
+        <ExpenseTab ledger={rLedger} categories={categories} period={period} dark={dark} />
       )}
       {activeTab === "income" && (
-        <IncomeTab ledger={ledger} incomeSrcs={incomeSrcs} period={period} dark={dark} />
+        <IncomeTab ledger={rLedger} incomeSrcs={incomeSrcs} period={period} dark={dark} />
       )}
       {activeTab === "comparison" && (
-        <ComparisonTab ledger={ledger} categories={categories} period={period} dark={dark} />
+        <ComparisonTab ledger={rLedger} categories={categories} period={period} dark={dark} />
       )}
     </div>
   );
