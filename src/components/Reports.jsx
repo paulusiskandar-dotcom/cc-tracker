@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { TrendingUp, TrendingDown, Wallet, PiggyBank, Sparkles, CalendarDays, X } from "lucide-react";
+import { TrendingUp, TrendingDown, Wallet, PiggyBank, Sparkles, CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import { fmtIDR, mlShort } from "../utils";
 import { LIGHT, DARK } from "../theme";
 import { SectionHeader, EmptyState } from "./shared/index";
@@ -171,11 +171,39 @@ const PERIOD_PILLS = [
 
 // ─── SHARED SUB-COMPONENTS ────────────────────────────────────
 
+// Last 18 months, newest first, as {key: "YYYY-MM", label: "August 2026"}
+function monthOptions() {
+  const out = [];
+  const d = new Date();
+  d.setDate(1);
+  for (let i = 0; i < 18; i++) {
+    out.push({ key: ymdLocal(d).slice(0, 7), label: d.toLocaleDateString("en-US", { month: "long", year: "numeric" }) });
+    d.setMonth(d.getMonth() - 1);
+  }
+  return out;
+}
+
 function PeriodFilter({ period, setPeriod }) {
+  const months  = useMemo(monthOptions, []);
+  const isMonth = /^\d{4}-\d{2}$/.test(period);
+  // Where the stepper stands: the picked month, or the current month as origin.
+  const curKey  = isMonth ? period : months[0].key;
+  const idx     = months.findIndex(m => m.key === curKey);
+  const older   = idx >= 0 && idx < months.length - 1 ? months[idx + 1].key : null;
+  const newer   = isMonth && idx > 0 ? months[idx - 1].key : null;
+
+  const stepBtn = (disabled) => ({
+    width: 30, height: 30, borderRadius: 20, padding: 0,
+    border: "1.5px solid #e5e7eb", background: "#fff",
+    color: disabled ? "#d1d5db" : "#6b7280",
+    cursor: disabled ? "default" : "pointer",
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+  });
+
   return (
-    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
       {PERIOD_PILLS.map(p => {
-        const active = period === p.key || (!PERIOD_PILLS.find(x => x.key === period) && p.key === "this_month");
+        const active = period === p.key || (!isMonth && !PERIOD_PILLS.find(x => x.key === period) && p.key === "this_month");
         return (
           <button key={p.key} onClick={() => setPeriod(p.key)} style={{
             height: 30, padding: "0 12px", borderRadius: 20,
@@ -187,17 +215,33 @@ function PeriodFilter({ period, setPeriod }) {
           }}>{p.label}</button>
         );
       })}
-      {/^\d{4}-\d{2}$/.test(period) && (
-        <button onClick={() => setPeriod("this_month")} style={{
-          height: 30, padding: "0 12px", borderRadius: 20,
-          border: "1.5px solid #111827", background: "#111827",
-          color: "#fff", fontSize: 12, fontWeight: 700,
-          cursor: "pointer", fontFamily: "Figtree, sans-serif",
-          display: "inline-flex", alignItems: "center", gap: 6,
-        }}>
-          {getDateRange(period).label} <X size={12} strokeWidth={3} />
+
+      {/* Month picker: chevrons step, dropdown jumps straight to a month */}
+      <div style={{ display: "inline-flex", gap: 4, alignItems: "center", marginLeft: 4 }}>
+        <button aria-label="Previous month" disabled={!older} onClick={() => older && setPeriod(older)} style={stepBtn(!older)}>
+          <ChevronLeft size={15} />
         </button>
-      )}
+        <select
+          value={isMonth ? period : ""}
+          onChange={e => setPeriod(e.target.value || "this_month")}
+          style={{
+            height: 30, padding: "0 10px", borderRadius: 20,
+            border: `1.5px solid ${isMonth ? "#111827" : "#e5e7eb"}`,
+            background: isMonth ? "#111827" : "#fff",
+            color: isMonth ? "#fff" : "#6b7280",
+            fontSize: 12, fontWeight: isMonth ? 700 : 500,
+            cursor: "pointer", fontFamily: "Figtree, sans-serif",
+            appearance: "none", WebkitAppearance: "none", MozAppearance: "none",
+            textAlign: "center",
+          }}
+        >
+          <option value="">Pick a month</option>
+          {months.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
+        </select>
+        <button aria-label="Next month" disabled={!newer} onClick={() => newer && setPeriod(newer)} style={stepBtn(!newer)}>
+          <ChevronRight size={15} />
+        </button>
+      </div>
     </div>
   );
 }
