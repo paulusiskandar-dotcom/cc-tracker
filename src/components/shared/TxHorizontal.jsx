@@ -463,7 +463,7 @@ function TxHorizontalCard({
   source, accounts, employeeLoans, txTypes,
   categories, incomeSrcs, recurTemplates = [],
   onUpdate, onConfirm, onSkip, onToggleSelect, onToggleNotes,
-  onCreateInstallment, confirmingId, onMergeTransfer,
+  onCreateInstallment, confirmingId, onMergeTransfer, onSplit,
 }) {
   const [validErr, setValidErr] = useState(null);
   const [dupDismissed, setDupDismissed] = useState(false);
@@ -594,6 +594,14 @@ function TxHorizontalCard({
           title={isSkipped ? "Restore" : "Skip"}>
           {isSkipped ? "↩" : "✕"}
         </button>
+
+        {onSplit && (
+          <button onClick={onSplit} disabled={isSkipped || fxWaiting || !(Number(r.amount_idr || r.amount) > 0)}
+            style={ACT_BTN({ background: T.sur2, color: (isSkipped || fxWaiting) ? "#d1d5db" : "#7c3aed", width: 24, height: 24, fontSize: 11 })}
+            title="Split jadi beberapa baris (patungan / talangan)">
+            ½
+          </button>
+        )}
 
         <button onClick={onToggleNotes}
           style={ACT_BTN({ background: isNotesOpen ? "#dbeafe" : T.sur2, color: isNotesOpen ? "#3b5bdb" : T.text3, width: 24, height: 24, fontSize: 11 })}
@@ -877,6 +885,7 @@ export default function TxHorizontal({
   onUpdateRow,
   onConfirmRow,
   onSkipRow,
+  onSplitRow,
   onConfirmAll,
   onToggleSelect,
   onToggleAll,
@@ -1254,6 +1263,7 @@ export default function TxHorizontal({
                     onUpdate={patch => onUpdateRow(r._id, patch)}
                     onConfirm={() => handleConfirmRow(r)}
                     onSkip={onSkipRow}
+                    onSplit={onSplitRow ? () => onSplitRow(r) : null}
                     onToggleSelect={() => onToggleSelect(r._id)}
                     onToggleNotes={() => toggleNotes(r._id)}
                     onCreateInstallment={onCreateInstallment}

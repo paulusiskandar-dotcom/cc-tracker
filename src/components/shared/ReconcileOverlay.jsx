@@ -48,7 +48,34 @@ export function matchRows(stmtRows, ledgerRows) {
   const usedL = new Set();
   const matched = new Map(); // ledgerId → stmtRow
 
+  // Pass 0 — SPLIT GROUPS (deterministic, before any fuzzy matching): rows
+  // sharing split_group_id are ONE real transaction; their sum must equal a
+  // statement line. Matching them first stops the fuzzy passes from stealing
+  // a single member (e.g. half of a 50/50 split matching some unrelated row).
+  // Keep in sync with matchRowsSrv in supabase/functions/gmail-estatement.
+  const splitGroups = {};
+  ledgerRows.forEach((l, li) => {
+    if (l.split_group_id) (splitGroups[l.split_group_id] = splitGroups[l.split_group_id] || []).push(li);
+  });
+  const groupList = Object.values(splitGroups).filter(g => g.length > 1);
+  if (groupList.length) {
+    for (const s of stmtRows) {
+      const target = Math.abs(Number(s.amount || 0));
+      if (!target) continue;
+      for (const g of groupList) {
+        if (g.some(li => usedL.has(li))) continue;
+        const sum = g.reduce((t, li) => t + Math.abs(Number(ledgerRows[li].amount_idr || ledgerRows[li].amount || 0)), 0);
+        if (Math.abs(sum - target) > 100) continue;
+        const near = g.some(li => Math.abs((new Date((s.date || "") + "T00:00:00") - new Date((ledgerRows[li].tx_date || "") + "T00:00:00")) / 86400000) <= 3);
+        if (!near) continue;
+        for (const li of g) { matched.set(ledgerRows[li].id, s); usedL.add(li); }
+        break;
+      }
+    }
+  }
+
   for (const s of stmtRows) {
+    if ([...matched.values()].some(m => m._id === s._id)) continue;
     let bestIdx = -1, bestScore = 0;
     for (let li = 0; li < ledgerRows.length; li++) {
       if (usedL.has(li)) continue;

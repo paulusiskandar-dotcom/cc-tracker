@@ -444,6 +444,16 @@ export default function TxVerticalBig({
     setSaving(true);
     try {
       const isEdit = mode === "edit" && initialData;
+      // Split guard: changing the AMOUNT of one split member breaks the group
+      // invariant (sum == statement line) and future statement matching.
+      if (isEdit && initialData.split_group_id
+          && Math.round(sn(form.amount)) !== Math.round(Number(initialData.amount_idr ?? initialData.amount ?? 0))) {
+        const ok = window.confirm(
+          "Baris ini bagian dari transaksi SPLIT — jumlah semua bagiannya harus tetap sama dengan nominal di statement. " +
+          "Mengubah nominal satu bagian akan merusak pencocokan statement.\n\nYakin tetap simpan? " +
+          "(Kalau mau menggeser porsi, ubah juga bagian pasangannya supaya totalnya kembali pas.)");
+        if (!ok) { setSaving(false); return; }
+      }
 
       // ── FX Exchange ──────────────────────────────────────────
       if (type === "fx_exchange" && !isEdit) {

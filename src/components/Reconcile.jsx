@@ -228,7 +228,7 @@ export default function Reconcile({
       const dates = st.stmtRows.map(r => r.date).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d || "")).sort();
       if (!dates.length) throw new Error("Statement rows have no dates — use Review");
       const { data: led, error } = await supabase.from("ledger")
-        .select("id, tx_date, description, merchant_name, amount, amount_idr, from_id, to_id")
+        .select("id, tx_date, description, merchant_name, amount, amount_idr, from_id, to_id, split_group_id")
         .eq("user_id", user.id)
         .or(`from_id.eq.${acc.id},to_id.eq.${acc.id}`)
         .gte("tx_date", addDays(dates[0], -7)).lte("tx_date", addDays(dates[dates.length - 1], 7));

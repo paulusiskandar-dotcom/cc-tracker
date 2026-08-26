@@ -23,7 +23,27 @@ const wordOverlap = (a, b) => {
  * @param {{ sameAccountId?: string }} options
  * @returns {{ level: number, dupEntry: object, reasons: string[] } | null}
  */
+// Build one virtual row per split group (summed amount, earliest date) so a
+// statement/import line equal to a whole group is recognized as "already in
+// ledger" even though no single row carries that amount.
+function withSplitVirtuals(ledgerRows) {
+  const groups = {};
+  for (const l of ledgerRows || []) {
+    if (l.split_group_id) (groups[l.split_group_id] = groups[l.split_group_id] || []).push(l);
+  }
+  const virtuals = Object.values(groups)
+    .filter(g => g.length > 1)
+    .map(g => ({
+      ...g[0],
+      amount_idr: g.reduce((s, l) => s + Math.abs(Number(l.amount_idr || l.amount || 0)), 0),
+      description: g[0].description,
+      _split_virtual: true,
+    }));
+  return virtuals.length ? [...ledgerRows, ...virtuals] : ledgerRows;
+}
+
 export function detectDuplicate(candidate, ledgerRows, { sameAccountId } = {}) {
+  ledgerRows = withSplitVirtuals(ledgerRows);
   const candAmt = Math.abs(Number(candidate.amount_idr || candidate.amount || 0));
   const candDateStr = candidate.tx_date || candidate.date || "";
   const candDate = new Date(candDateStr + "T00:00:00").getTime();

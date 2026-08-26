@@ -254,6 +254,13 @@ export default function TransactionRow({
             textOverflow: "ellipsis",
           }}>
             {entry.description || entry.merchant_name || "—"}
+            {entry.split_group_id && (
+              <span title="Bagian dari transaksi yang di-split — jumlah grup = satu baris statement" style={{
+                marginLeft: 6, fontSize: 9, fontWeight: 800, letterSpacing: "0.04em",
+                padding: "1px 5px", borderRadius: 99, background: "#ede9fe", color: "#6d28d9",
+                verticalAlign: "middle",
+              }}>SPLIT</span>
+            )}
           </div>
           {meta && (
             <div style={{

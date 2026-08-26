@@ -135,18 +135,28 @@ export default function Transactions({
 
 
   // ── Delete ──
+  // Split-aware: a row with split_group_id is one PART of a real transaction
+  // (its group sums to a statement line). Deleting one part silently breaks
+  // statement matching, so the whole group is deleted together.
+  const splitSiblings = deleteEntry?.split_group_id
+    ? ledger.filter(e => e.split_group_id === deleteEntry.split_group_id)
+    : null;
   const confirmDelete = async () => {
     if (!deleteEntry) return;
+    const targets = (splitSiblings && splitSiblings.length > 1) ? splitSiblings : [deleteEntry];
     try {
-      await ledgerApi.delete(deleteEntry.id, deleteEntry, accounts);
-      undoManager.register({ type: "delete_single", deletedRow: deleteEntry, label: `Deleted: ${deleteEntry.description || "transaction"}` });
-      setLedger(p => p.filter(e => e.id !== deleteEntry.id));
-      const affectedIds = [
-        ...(deleteEntry.from_type === "account" && deleteEntry.from_id ? [deleteEntry.from_id] : []),
-        ...(deleteEntry.to_type   === "account" && deleteEntry.to_id   ? [deleteEntry.to_id]   : []),
-      ];
+      for (const t of targets) {
+        await ledgerApi.delete(t.id, t, accounts);
+        undoManager.register({ type: "delete_single", deletedRow: t, label: `Deleted: ${t.description || "transaction"}` });
+      }
+      const targetIds = new Set(targets.map(t => t.id));
+      setLedger(p => p.filter(e => !targetIds.has(e.id)));
+      const affectedIds = targets.flatMap(t => [
+        ...(t.from_type === "account" && t.from_id ? [t.from_id] : []),
+        ...(t.to_type   === "account" && t.to_id   ? [t.to_id]   : []),
+      ]);
       await Promise.all([...new Set(affectedIds)].map(id => recalculateBalance(id, user.id)));
-      showToast("Deleted");
+      showToast(targets.length > 1 ? `Deleted split group (${targets.length} rows)` : "Deleted");
       await onRefresh();
     } catch (e) { showToast(e.message, "error"); }
     setDeleteEntry(null);
@@ -436,8 +446,10 @@ export default function Transactions({
         isOpen={!!deleteEntry}
         onClose={() => setDeleteEntry(null)}
         onConfirm={confirmDelete}
-        title="Delete Transaction"
-        message={`Delete "${deleteEntry?.description}"? This cannot be undone and will reverse the balance update.`}
+        title={splitSiblings && splitSiblings.length > 1 ? "Delete Split Group" : "Delete Transaction"}
+        message={splitSiblings && splitSiblings.length > 1
+          ? `"${deleteEntry?.description}" adalah bagian dari transaksi yang di-SPLIT (${splitSiblings.length} baris, total ${splitSiblings.reduce((s, e) => s + Number(e.amount_idr || 0), 0).toLocaleString("id-ID")}). Menghapus sebagian akan merusak pencocokan statement — SEMUA ${splitSiblings.length} baris akan dihapus bersama. Lanjut?`
+          : `Delete "${deleteEntry?.description}"? This cannot be undone and will reverse the balance update.`}
         danger
       />
     </div>

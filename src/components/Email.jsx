@@ -5,7 +5,7 @@ import { undoManager } from "../lib/undoManager";
 import { merchantRules } from "../lib/merchantRules";
 import { detectAccount, BANK_KEYWORDS } from "../lib/accountDetection";
 import { todayStr, autoCategorize, toIDR } from "../utils";
-import { CURRENCIES } from "../constants";
+import { CURRENCIES, REIMBURSE_ENTITIES } from "../constants";
 import { LIGHT, DARK } from "../theme";
 import {
   Button, EmptyState, showToast,
@@ -13,6 +13,8 @@ import {
   TxHorizontal, ConfirmModal,
 } from "./shared/index";
 import ProgressIndicator from "./shared/ProgressIndicator";
+import Modal from "./shared/Modal";
+import { fmtIDR } from "../utils";
 import { useImportDraft } from "../lib/useImportDraft";
 import DraftBanner from "./shared/DraftBanner";
 import { detectTransferPairs } from "../lib/transferDetection";
@@ -59,6 +61,99 @@ const SETUP_STEPS = [
   "Copy Client ID and paste below",
   "Click Connect Gmail → authorize",
 ];
+
+
+// ── SPLIT MODAL ───────────────────────────────────────────────
+// Divide one pending transaction into N ledger parts (expense / income /
+// reimburse_out). Import is locked until the parts sum EXACTLY to the original
+// amount — the invariant the reconcile group-matcher depends on.
+function SplitModal({ row, onClose, onSubmit, categories = [], incomeSrcs = [] }) {
+  const [parts, setParts] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const total = Math.round(Number(row?.amount_idr || row?.amount || 0));
+
+  useEffect(() => {
+    if (!row) return;
+    const half = Math.round(total / 2);
+    setParts([
+      { amount: half, tx_type: "expense", category_id: row.category_id || "", entity: "Personal", description: (row.description || "") + " — bagian saya" },
+      { amount: total - half, tx_type: "reimburse_out", category_id: "", entity: "Personal", description: (row.description || "") + " — bagian ditalangin" },
+    ]);
+  }, [row]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!row) return null;
+  const sum = parts.reduce((s, p) => s + Math.round(Number(p.amount || 0)), 0);
+  const diff = total - sum;
+  const ok = diff === 0 && parts.length >= 2 && parts.every(p => Number(p.amount) > 0);
+  const upd = (i, patch) => setParts(prev => prev.map((p, idx) => idx === i ? { ...p, ...patch } : p));
+
+  const SEL = { height: 30, fontSize: 12, border: "1px solid #e5e7eb", borderRadius: 8, padding: "0 8px", fontFamily: "Figtree, sans-serif", background: "#fff" };
+
+  return (
+    <Modal isOpen={!!row} onClose={onClose} title="Split transaksi"
+      footer={
+        <div style={{ display: "flex", gap: 8, alignItems: "center", width: "100%" }}>
+          <span style={{ flex: 1, fontSize: 12, fontFamily: "Figtree, sans-serif", color: diff === 0 ? "#059669" : "#dc2626" }}>
+            {diff === 0 ? "Jumlah pas dengan nominal asli" : `Selisih ${fmtIDR(Math.abs(diff))} ${diff > 0 ? "kurang" : "kelebihan"}`}
+          </span>
+          <button onClick={onClose} style={{ height: 38, padding: "0 16px", borderRadius: 10, border: "1.5px solid #e5e7eb", background: "#fff", color: "#374151", fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "Figtree, sans-serif" }}>Cancel</button>
+          <button disabled={!ok || busy} onClick={async () => { setBusy(true); await onSubmit(row, parts.map(p => ({ ...p, amount: Math.round(Number(p.amount)) }))); setBusy(false); }}
+            style={{ height: 38, padding: "0 16px", borderRadius: 10, border: "none", background: ok ? "#111827" : "#e5e7eb", color: ok ? "#fff" : "#9ca3af", fontSize: 13, fontWeight: 700, cursor: ok ? "pointer" : "not-allowed", fontFamily: "Figtree, sans-serif" }}>
+            {busy ? "…" : `Import ${parts.length} baris`}
+          </button>
+        </div>
+      }>
+      <div style={{ fontSize: 12, color: "#6b7280", fontFamily: "Figtree, sans-serif", marginBottom: 12 }}>
+        {row.description || "(tanpa deskripsi)"} · <strong style={{ color: "#111827" }}>{fmtIDR(total)}</strong>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {parts.map((p, i) => (
+          <div key={i} style={{ border: "1px solid #f3f4f6", borderRadius: 10, padding: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+            <div style={{ display: "flex", gap: 6 }}>
+              <input value={p.description} onChange={e => upd(i, { description: e.target.value })}
+                style={{ ...SEL, flex: 1 }} placeholder="Deskripsi bagian" />
+              <input type="number" value={p.amount} onChange={e => upd(i, { amount: e.target.value })}
+                style={{ ...SEL, width: 120, textAlign: "right" }} />
+              {parts.length > 2 && (
+                <button onClick={() => setParts(prev => prev.filter((_, idx) => idx !== i))}
+                  style={{ ...SEL, width: 30, color: "#dc2626", cursor: "pointer" }}>✕</button>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <select value={p.tx_type} onChange={e => upd(i, { tx_type: e.target.value })} style={{ ...SEL, width: 140 }}>
+                <option value="expense">Expense</option>
+                <option value="reimburse_out">Reimburse Out</option>
+                <option value="income">Income</option>
+              </select>
+              {p.tx_type === "expense" && (
+                <select value={p.category_id} onChange={e => upd(i, { category_id: e.target.value })} style={{ ...SEL, flex: 1 }}>
+                  <option value="">Category…</option>
+                  {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              )}
+              {p.tx_type === "income" && (
+                <select value={p.category_id} onChange={e => upd(i, { category_id: e.target.value })} style={{ ...SEL, flex: 1 }}>
+                  <option value="">Source…</option>
+                  {incomeSrcs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              )}
+              {p.tx_type === "reimburse_out" && (
+                <select value={p.entity} onChange={e => upd(i, { entity: e.target.value })} style={{ ...SEL, flex: 1 }}>
+                  {REIMBURSE_ENTITIES.map(x => <option key={x} value={x}>{x}</option>)}
+                </select>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+      <button onClick={() => setParts(prev => [...prev, { amount: 0, tx_type: "expense", category_id: "", entity: "Personal", description: (row.description || "") + " — bagian " + (prev.length + 1) }])}
+        disabled={parts.length >= 4}
+        style={{ marginTop: 10, height: 30, padding: "0 12px", borderRadius: 8, border: "1px dashed #d1d5db", background: "#fff", color: "#6b7280", fontSize: 12, cursor: "pointer", fontFamily: "Figtree, sans-serif" }}>
+        + Tambah bagian
+      </button>
+    </Modal>
+  );
+}
 
 export default function Email({
   user, accounts, categories, incomeSrcs = [], ledger, setLedger,
@@ -651,6 +746,40 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
   };
   const [dupWarn, setDupWarn] = useState(null); // { row, dupe }
 
+  // ── SPLIT: satu transaksi nyata (satu baris statement) → N baris ledger ──
+  // Semua bagian memakai split_group_id yang sama; jumlah bagian HARUS = nominal
+  // asli (divalidasi modal). Matcher reconcile (client & server) menjumlah grup
+  // dan mencocokkannya sebagai satu baris virtual — lihat migrasi v3.3.
+  const [splitRow, setSplitRow] = useState(null);
+  const importSplit = async (r, parts) => {
+    const gid = crypto.randomUUID();
+    const createdIds = [];
+    try {
+      for (const p of parts) {
+        const pseudo = {
+          ...r,
+          amount: p.amount, amount_idr: p.amount,
+          tx_type: p.tx_type,
+          category_id: p.tx_type === "reimburse_out" ? null : (p.category_id || null),
+          category_name: null,
+          entity: p.entity || "Personal",
+          description: p.description || r.description,
+        };
+        const entry = { ...buildEntry(pseudo), split_group_id: gid };
+        const created = await ledgerApi.create(user.id, entry, accounts);
+        if (created) { createdIds.push(created.id); setLedger(prev => [created, ...prev]); }
+      }
+      undoManager.push({ type: "save_batch", ids: createdIds, label: `Split ${r.description || ""} (${parts.length} baris)` });
+      await gmailApi.markTxStatus(r.email_sync_id, r.tx_index ?? 0, "confirmed");
+      removeRow(r._id);
+      setProcessedCount(n => n + 1);
+      showToast(`Split diimpor — ${parts.length} baris`);
+    } catch (e) {
+      showToast(e?.message || "Split gagal", "error");
+    }
+    setSplitRow(null);
+  };
+
   const confirm = async (r) => {
     // Duplicate guard (skippable via r._dupeOk after user confirms)
     if (!r._dupeOk && (!r.currency || r.currency === "IDR")) {
@@ -871,6 +1000,14 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <SplitModal
+        row={splitRow}
+        onClose={() => setSplitRow(null)}
+        onSubmit={importSplit}
+        categories={categories}
+        incomeSrcs={incomeSrcs}
+      />
+
       <ConfirmModal
         isOpen={!!dupWarn}
         onClose={() => setDupWarn(null)}
@@ -911,6 +1048,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
           selected={selected}
           onUpdateRow={updateRow}
           onConfirmRow={confirm}
+          onSplitRow={(r) => setSplitRow(r)}
           onSkipRow={skipById}
           onConfirmAll={importAll}
           onToggleSelect={(id) => setSelected(s => ({ ...s, [id]: !s[id] }))}

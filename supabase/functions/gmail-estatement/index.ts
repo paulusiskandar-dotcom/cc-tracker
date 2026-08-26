@@ -1066,7 +1066,35 @@ function matchRowsSrv(stmtRows: any[], ledgerRows: any[]): { match: number; miss
   const usedL = new Set<number>();
   let match = 0;
   const matchedStmtIds = new Set<string>();
+
+  // Pass 0 — SPLIT GROUPS: rows sharing split_group_id are one real transaction
+  // whose sum equals a statement line. Deterministic, runs before any fuzzy
+  // matching. Keep in sync with matchRows in ReconcileOverlay.jsx.
+  const splitGroups: Record<string, number[]> = {};
+  ledgerRows.forEach((l: any, li: number) => {
+    if (l.split_group_id) (splitGroups[l.split_group_id] = splitGroups[l.split_group_id] || []).push(li);
+  });
+  const groupList = Object.values(splitGroups).filter((g) => g.length > 1);
+  if (groupList.length) {
+    for (const s of stmtRows) {
+      const target = Math.abs(Number(s.amount || 0));
+      if (!target) continue;
+      for (const g of groupList) {
+        if (g.some((li) => usedL.has(li))) continue;
+        const sum = g.reduce((t, li) => t + Math.abs(Number(ledgerRows[li].amount_idr || ledgerRows[li].amount || 0)), 0);
+        if (Math.abs(sum - target) > 100) continue;
+        const near = g.some((li) => Math.abs((new Date((s.date || "") + "T00:00:00").getTime() - new Date((ledgerRows[li].tx_date || "") + "T00:00:00").getTime()) / 86400000) <= 3);
+        if (!near) continue;
+        for (const li of g) usedL.add(li);
+        matchedStmtIds.add(s._id);
+        match++;
+        break;
+      }
+    }
+  }
+
   for (const s of stmtRows) {
+    if (matchedStmtIds.has(s._id)) continue;
     let bestIdx = -1, bestScore = 0;
     for (let li = 0; li < ledgerRows.length; li++) {
       if (usedL.has(li)) continue;
@@ -1166,7 +1194,7 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
 
   // Ledger rows touching this account (all-time: needed for closing calc; window slice for diff)
   const { data: ledAll } = await serviceSupabase.from("ledger")
-    .select("id, tx_date, description, merchant_name, amount, amount_idr, from_id, to_id, reconciled_at")
+    .select("id, tx_date, description, merchant_name, amount, amount_idr, from_id, to_id, reconciled_at, split_group_id")
     .eq("user_id", userId)
     .or(`from_id.eq.${acc.id},to_id.eq.${acc.id}`);
   // For the dup hint the whole ledger matters, not just this account: photo/email
