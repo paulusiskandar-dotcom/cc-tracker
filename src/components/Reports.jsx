@@ -58,8 +58,20 @@ function sumType(txs, type) {
 //   expense; yang tidak masuk hanya reimburse out")
 const isExpenseRow = (t) => t.tx_type === "expense" || t.tx_type === "pay_liability";
 
+// CC refunds/reversals (income rows credited INTO a credit card — annual-fee
+// reversals, merchant refunds; flagged _ccRefund by the Reports root) are not
+// income: they are expense REDUCTIONS. The original charge sits in expenses,
+// so counting the credit as income inflated BOTH totals (net was untouched).
+const isIncomeRow = (t) => t.tx_type === "income" && !t._ccRefund;
+
+function sumIncome(txs) {
+  return txs.filter(isIncomeRow).reduce((s, t) => s + Number(t.amount_idr || 0), 0);
+}
+
 function sumExpense(txs) {
-  return txs.filter(isExpenseRow).reduce((s, t) => s + Number(t.amount_idr || 0), 0);
+  const gross = txs.filter(isExpenseRow).reduce((s, t) => s + Number(t.amount_idr || 0), 0);
+  const refunds = txs.filter(t => t._ccRefund).reduce((s, t) => s + Number(t.amount_idr || 0), 0);
+  return gross - refunds;
 }
 
 // ── SALARY ATTRIBUTION ────────────────────────────────────────
@@ -178,7 +190,7 @@ function groupByMerchant(txs) {
 
 function groupByIncomeSource(txs, incomeSrcs) {
   const map = {};
-  txs.filter(t => t.tx_type === "income").forEach(t => {
+  txs.filter(isIncomeRow).forEach(t => {
     const srcId = t.from_id || t.category_id || "unknown";
     const src   = incomeSrcs.find(s => s.id === srcId);
     const name  = src?.name || t.category_name || "Other Income";
@@ -446,12 +458,12 @@ function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeri
   const prevTxs  = useMemo(() => filterByRange(ledger, prevRange), [ledger, prevRange]);
 
   const totalExp  = sumExpense(txs);
-  const totalInc  = sumType(txs, "income");
+  const totalInc  = sumIncome(txs);
   const netSurp   = totalInc - totalExp;
   const savRate   = totalInc > 0 ? Math.round((netSurp / totalInc) * 100) : null;
 
   const prevExp   = sumExpense(prevTxs);
-  const prevInc   = sumType(prevTxs, "income");
+  const prevInc   = sumIncome(prevTxs);
   const prevNet   = prevInc - prevExp;
 
   const expDelta  = prevExp  > 0 ? ((totalExp - prevExp) / prevExp) * 100 : null;
@@ -467,7 +479,7 @@ function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeri
   // 6-month trend
   const trendData = useMemo(() => TREND_MONTHS.map(mo => {
     const moTxs   = ledger.filter(e => e.tx_date?.slice(0, 7) === mo);
-    const income  = sumType(moTxs, "income");
+    const income  = sumIncome(moTxs);
     const expense = sumExpense(moTxs);
     return { month: mlShort(mo), mo, income, expense, surplus: income - expense };
   }), [ledger]);
@@ -787,7 +799,7 @@ function ExpenseTab({ ledger, categories = [], period, dark }) {
 function IncomeTab({ ledger, incomeSrcs, period, dark }) {
   const T = dark ? DARK : LIGHT;
   const range  = useMemo(() => getDateRange(period), [period]);
-  const txs    = useMemo(() => filterByRange(ledger, range).filter(t => t.tx_type === "income"), [ledger, range]);
+  const txs    = useMemo(() => filterByRange(ledger, range).filter(isIncomeRow), [ledger, range]);
   const srcs   = useMemo(() => groupByIncomeSource(txs, incomeSrcs), [txs, incomeSrcs]);
   const [drill, setDrill] = useState(null);
   const total  = srcs.reduce((s, c) => s + c.total, 0);
@@ -911,12 +923,12 @@ function ComparisonTab({ ledger, categories = [], period, dark }) {
   const prevTxs   = useMemo(() => filterByRange(ledger, prevRange), [ledger, prevRange]);
 
   const thisExp  = sumExpense(txs);
-  const thisInc  = sumType(txs, "income");
+  const thisInc  = sumIncome(txs);
   const thisNet  = thisInc - thisExp;
   const thisSav  = thisInc > 0 ? Math.round((thisNet / thisInc) * 100) : 0;
 
   const prevExp  = sumExpense(prevTxs);
-  const prevInc  = sumType(prevTxs, "income");
+  const prevInc  = sumIncome(prevTxs);
   const prevNet  = prevInc - prevExp;
   const prevSav  = prevInc > 0 ? Math.round((prevNet / prevInc) * 100) : 0;
 
@@ -1009,8 +1021,13 @@ export default function Reports({ user, ledger = [], accounts = [], categories =
   const T = dark ? DARK : LIGHT;
   const [period,    setPeriod]    = useState("this_month");
   const [activeTab, setActiveTab] = useState("overview");
-  // Salary re-dated to its attributed month (see attributeFixedIncome).
-  const rLedger = useMemo(() => attributeFixedIncome(ledger, recurTemplates), [ledger, recurTemplates]);
+  // Salary re-dated to its attributed month (see attributeFixedIncome), and
+  // income credited into a credit card flagged as _ccRefund (expense offset).
+  const rLedger = useMemo(() => {
+    const ccIds = new Set((accounts || []).filter(a => a.type === "credit_card").map(a => a.id));
+    return attributeFixedIncome(ledger, recurTemplates).map(r =>
+      r.tx_type === "income" && ccIds.has(r.to_id) ? { ...r, _ccRefund: true } : r);
+  }, [ledger, recurTemplates, accounts]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
