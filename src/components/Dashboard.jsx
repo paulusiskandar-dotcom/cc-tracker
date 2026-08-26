@@ -1043,7 +1043,7 @@ export default function Dashboard({
       {/* ════════════ SECTION 3 — THIS MONTH METRICS ════════════ */}
       <div style={{
         display: "grid",
-        gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(240px, 1fr))",
+        gridTemplateColumns: isMobile ? "1fr" : "repeat(2, 1fr)",
         gap: 12,
       }}>
         {/* Col 1: Cash Flow */}
