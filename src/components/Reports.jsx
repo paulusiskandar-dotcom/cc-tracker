@@ -202,17 +202,30 @@ function groupByCategory(txs, type = "expense", dbCategories = []) {
     .sort((a, b) => b.total - a.total);
 }
 
+// Merchant totals must net out refunds the same way category totals do. Without
+// this a reversed charge tops the list on money that came straight back: the
+// 45.871.000 Samsung TV installment was credited in full the same day, yet stood
+// as the largest merchant of the year.
 function groupByMerchant(txs) {
   const map = {};
-  txs.filter(isExpenseRow).forEach(t => {
-    const key  = (t.merchant_name || t.description || "Unknown").trim();
+  const add = (t, sign) => {
+    const key = (t.merchant_name || t.description || "Unknown").trim();
     if (!key) return;
-    if (!map[key]) { map[key] = { name: key, category_name: t.category_name || "", total: 0, count: 0, txs: [] }; }
-    map[key].total += Number(t.amount_idr || 0);
-    map[key].count++;
+    if (!map[key]) map[key] = { name: key, category_name: t.category_name || "", total: 0, count: 0, txs: [] };
+    map[key].total += sign * Number(t.amount_idr || 0);
+    if (sign > 0) map[key].count++;
     map[key].txs.push(t);
-  });
-  return Object.values(map).sort((a, b) => b.total - a.total);
+  };
+  txs.filter(isExpenseRow).forEach(t => add(t, 1));
+  // A refund rarely carries the merchant's exact wording, so match on the amount
+  // it reverses within the same period and take that row's merchant.
+  const refunds = txs.filter(t => t._ccRefund);
+  for (const r of refunds) {
+    const amt = Number(r.amount_idr || 0);
+    const hit = txs.find(t => isExpenseRow(t) && Math.abs(Number(t.amount_idr || 0) - amt) < 1);
+    if (hit) add({ ...r, merchant_name: hit.merchant_name, description: hit.description }, -1);
+  }
+  return Object.values(map).filter(m => m.total > 0).sort((a, b) => b.total - a.total);
 }
 
 function groupByIncomeSource(txs, incomeSrcs) {
