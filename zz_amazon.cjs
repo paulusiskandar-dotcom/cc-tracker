@@ -24,6 +24,7 @@ const AZ={
  5000 :{k:'Hobbies & Entertainment', n:'Nintendo prepaid ¥5.000 (pesanan 21 Jan)'},
  6982 :{k:'Hobbies & Entertainment', n:'Mario Tennis Fever unduhan (pesanan 8 Feb) — kecocokan dari tanggal, bukan harga tertulis'},
  11008:{k:'Electronics & Gadgets',   n:'Spigen case MacBook Air 13" M5 ¥9.349 + bantal leher ¥1.659 (pesanan 503-3847632-0294241, 2 Jun)'},
+ 3612 :{k:'Electronics & Gadgets',   n:'ORICO Magnetic M.2 Docking Station (pesanan 249-1306321-5572615, 31 Des; ¥8.999 − promo ¥1.800 − poin ¥3.587)'},
 };
 let led=[];for(let off=0;;off+=1000){const{data:c}=await supabase.from('ledger').select('id,tx_date,tx_type,amount,amount_idr,currency,from_id,category_name,description').eq('user_id',uid).order('tx_date').range(off,off+999);led=led.concat(c||[]);if(!c||c.length<1000)break;}
 const az=led.filter(r=>r.tx_type==='expense'&&/AMAZON\.CO\.JP/i.test(r.description||''));
