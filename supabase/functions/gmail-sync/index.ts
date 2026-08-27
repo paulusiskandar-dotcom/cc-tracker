@@ -56,12 +56,11 @@ function parseOrderNote(subject: string, body: string): { amount: number; note: 
   if (totalStruk) {
     const nama   = body.match(/NAMA\s+PELANGGAN[^A-Za-z0-9]{0,20}([A-Z][A-Za-z0-9 .'-]{2,40})/i)?.[1];
     const idPel  = body.match(/ID\s+PELANGGAN[^\d]{0,20}(\d{6,20})/i)?.[1];
-    const tarif  = body.match(/\b([RBI]\d)\s*\/\s*([\d.]+)\s*VA/i);
     const period = body.match(/\b(BL\/TH|PERIODE|BULAN)[^A-Z0-9]{0,10}([A-Z]{3}\s?\d{2,4})/i)?.[2];
     const jenis  = /PLN|LISTRIK/i.test(subject + body) ? "PLN"
                  : /TELKOMSEL|HALO/i.test(subject + body) ? "Telkomsel"
                  : /BIZNET|INDOSAT|INTERNET/i.test(subject + body) ? "Internet" : "Tagihan";
-    const bagian = [jenis, nama?.trim(), tarif ? `${tarif[1]}/${tarif[2]} VA` : null, period].filter(Boolean);
+    const bagian = [jenis, nama?.trim(), period].filter(Boolean);
     if (!nama && idPel) bagian.splice(1, 0, idPel);
     return { amount: angka(totalStruk[1]), note: RINGKAS(bagian.join(" · ")) };
   }
