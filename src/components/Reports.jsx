@@ -217,12 +217,25 @@ function groupByMerchant(txs) {
     map[key].txs.push(t);
   };
   txs.filter(isExpenseRow).forEach(t => add(t, 1));
-  // A refund rarely carries the merchant's exact wording, so match on the amount
-  // it reverses within the same period and take that row's merchant.
-  const refunds = txs.filter(t => t._ccRefund);
-  for (const r of refunds) {
+  // A refund rarely carries the merchant's exact wording — a cancelled Tokopedia
+  // order comes back as "Credit IDN Jakarta …" against a "Retail IDN Jakarta …"
+  // charge — so it is matched to the charge it reverses by amount. Exact first;
+  // otherwise the closest charge that is at least as large and within 10%, since
+  // a reversal often keeps a fee (the cancelled Oakley order was charged
+  // 10.328.301 and credited 10.262.701).
+  const spent = txs.filter(isExpenseRow);
+  for (const r of txs.filter(t => t._ccRefund)) {
     const amt = Number(r.amount_idr || 0);
-    const hit = txs.find(t => isExpenseRow(t) && Math.abs(Number(t.amount_idr || 0) - amt) < 1);
+    if (!amt) continue;
+    let hit = spent.find(t => Math.abs(Number(t.amount_idr || 0) - amt) < 1);
+    if (!hit) {
+      let best = Infinity;
+      for (const t of spent) {
+        const v = Number(t.amount_idr || 0);
+        if (v < amt || v > amt * 1.1) continue;
+        if (v - amt < best) { best = v - amt; hit = t; }
+      }
+    }
     if (hit) add({ ...r, merchant_name: hit.merchant_name, description: hit.description }, -1);
   }
   return Object.values(map).filter(m => m.total > 0).sort((a, b) => b.total - a.total);
