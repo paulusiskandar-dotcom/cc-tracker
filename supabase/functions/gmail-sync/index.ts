@@ -23,6 +23,112 @@ const CORS = {
 };
 
 // Bank/ewallet sender domains (domain-based matching, more robust than exact emails)
+
+// ── DESKRIPSI BELANJA DARI EMAIL PESANAN ────────────────────────────────────
+// Statement kartu cuma menyebut salurannya: "TOKOPEDIA", "Blibli", "LAZADA".
+// Apa yang sebenarnya dibeli ada di email pesanan/struk. Fungsi ini membaca
+// email-email itu di jendela waktu yang sama, lalu memetakan NOMINAL → catatan
+// singkat, yang nanti ditempelkan ke transaksi dengan nominal sama.
+// Sengaja regex, bukan AI: bentuk strukya baku, dan ini jalan tiap sync.
+function decodeBodyPlain(part: any): string {
+  const walk = (p: any): string => {
+    if (!p) return "";
+    if (p.body?.data) { try { return atob(p.body.data.replace(/-/g, "+").replace(/_/g, "/")); } catch { return ""; } }
+    if (p.parts) return p.parts.map(walk).join("\n");
+    return "";
+  };
+  // Tanda baris dipertahankan: nama barang dikenali dari posisinya tepat sebelum "Berat:".
+  return walk(part).replace(/<[^>]+>/g, " ").replace(/[ \t]+/g, " ");
+}
+
+const ORDER_DOMAINS = ["tokopedia.com", "receipt.iak.id", "lazada.co.id", "blibli.com", "shopee.co.id"];
+const RINGKAS = (s: string, n = 58) => {
+  const t = (s || "").replace(/\s+/g, " ").trim();
+  return t.length > n ? t.slice(0, n - 1) + "…" : t;
+};
+const BULAN_ID = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
+
+function parseOrderNote(subject: string, body: string): { amount: number; note: string } | null {
+  const angka = (t: string) => Number((t || "").replace(/[^\d]/g, "")) || 0;
+
+  // 1. Struk tagihan (PLN / Telkomsel / Biznet) — lewat IAK, dipakai Lazada & Tokopedia
+  const totalStruk = body.match(/TOTAL\s+PEMBAYARAN[^\d]{0,40}([\d.,]+)/i);
+  if (totalStruk) {
+    const nama   = body.match(/NAMA\s+PELANGGAN[^A-Za-z0-9]{0,20}([A-Z][A-Za-z0-9 .'-]{2,40})/i)?.[1];
+    const idPel  = body.match(/ID\s+PELANGGAN[^\d]{0,20}(\d{6,20})/i)?.[1];
+    const tarif  = body.match(/\b([RBI]\d)\s*\/\s*([\d.]+)\s*VA/i);
+    const period = body.match(/\b(BL\/TH|PERIODE|BULAN)[^A-Z0-9]{0,10}([A-Z]{3}\s?\d{2,4})/i)?.[2];
+    const jenis  = /PLN|LISTRIK/i.test(subject + body) ? "PLN"
+                 : /TELKOMSEL|HALO/i.test(subject + body) ? "Telkomsel"
+                 : /BIZNET|INDOSAT|INTERNET/i.test(subject + body) ? "Internet" : "Tagihan";
+    const bagian = [jenis, nama?.trim(), tarif ? `${tarif[1]}/${tarif[2]} VA` : null, period].filter(Boolean);
+    if (!nama && idPel) bagian.splice(1, 0, idPel);
+    return { amount: angka(totalStruk[1]), note: RINGKAS(bagian.join(" · ")) };
+  }
+
+  // 2. Bukti Penerimaan Negara (pajak DJP, dibayar lewat marketplace)
+  if (/BUKTI PENERIMAAN NEGARA|NTPN/i.test(body)) {
+    const npwp = body.match(/NPWP[^\d]{0,20}([\d.\-]{10,25})/i)?.[1];
+    const nama = body.match(/NAMA\s*(?:WP)?[^A-Za-z]{0,15}([A-Z][A-Za-z .'-]{3,40})/i)?.[1];
+    const tot  = body.match(/(?:JUMLAH SETOR|NOMINAL|TOTAL)[^\d]{0,30}([\d.,]+)/i);
+    if (tot) return { amount: angka(tot[1]), note: RINGKAS(["Pajak DJP", nama?.trim() || (npwp ? "NPWP " + npwp.slice(-6) : null)].filter(Boolean).join(" · ")) };
+  }
+
+  // 3. Checkout marketplace — "Total Bayar" + nama barang (muncul tepat sebelum "Berat:")
+  const totalBayar = body.match(/Total\s+(?:Bayar|Pembayaran|Dibayarkan)[^\d]{0,40}([\d.,]+)/i);
+  if (totalBayar) {
+    const barang: string[] = [];
+    const re = /([^\n\t][^\n]{6,140}?)\s*\n[\s\S]{0,60}?Berat\s*:/gi;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(body)) && barang.length < 12) {
+      const b = m[1].replace(/\s+/g, " ").trim();
+      if (b && !/^(toko|no\.|invoice|alamat|rincian|ringkasan)/i.test(b)) barang.push(b);
+    }
+    if (barang.length) {
+      const note = barang.length === 1 ? barang[0] : `${barang[0]} +${barang.length - 1} barang`;
+      return { amount: angka(totalBayar[1]), note: RINGKAS(note) };
+    }
+    // tanpa rincian barang: pakai subjek kalau menyebut nama barang di tanda kutip
+    const dariSubjek = subject.match(/[""]([^""]{4,80})/)?.[1];
+    if (dariSubjek) return { amount: angka(totalBayar[1]), note: RINGKAS(dariSubjek) };
+  }
+  return null;
+}
+
+// Ambil email pesanan di jendela yang sama, kembalikan peta nominal → catatan.
+async function buildOrderNotes(accessToken: string, afterDate: string, beforeDate?: string) {
+  const peta = new Map<number, string>();
+  try {
+    let q = `(${ORDER_DOMAINS.map(d => `from:${d}`).join(" OR ")}) after:${afterDate}`;
+    if (beforeDate) q += ` before:${beforeDate}`;
+    const res = await fetch(`https://www.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(q)}&maxResults=60`,
+      { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!res.ok) return peta;
+    const list = (await res.json()).messages || [];
+    for (const m of list) {
+      const r = await fetch(`https://www.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=full`,
+        { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!r.ok) continue;
+      const d = await r.json();
+      const subj = (d.payload?.headers || []).find((h: any) => h.name === "Subject")?.value || "";
+      const body = decodeBodyPlain(d.payload);
+      const hasil = parseOrderNote(subj, body);
+      if (hasil && hasil.amount > 0 && !peta.has(hasil.amount)) peta.set(hasil.amount, hasil.note);
+    }
+  } catch (e) {
+    console.warn("[gmail-sync] buildOrderNotes gagal:", e);
+  }
+  console.log(`[gmail-sync] catatan pesanan terkumpul: ${peta.size}`);
+  return peta;
+}
+
+// Tagihan kartu bisa berbeda ~Rp1.000 dari total struk (biaya saluran pembayaran).
+function cariCatatan(peta: Map<number, string>, amount: number): string | null {
+  if (!amount) return null;
+  for (const [a, n] of peta) if (Math.abs(a - amount) <= 1500) return n;
+  return null;
+}
+
 const BANK_DOMAINS = [
   "klikbca.com", "bca.co.id",
   "bankmandiri.co.id", "mandiri.co.id",
@@ -461,6 +567,9 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
   const listData = await listRes.json();
   const messages = listData.messages || [];
 
+  // Peta nominal → deskripsi belanja, dari email pesanan/struk di jendela yang sama.
+  const orderNotes = await buildOrderNotes(accessToken, afterDate, beforeDate);
+
   let processed = 0;
   let newTransactions = 0;
 
@@ -639,6 +748,14 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
       }
     } catch (e) {
       console.warn("[gmail-sync] AI extraction error:", e);
+    }
+
+    // Tempelkan deskripsi belanja: cocokkan nominal transaksi ke struk/pesanan.
+    if (Array.isArray(aiResult)) {
+      for (const tx of aiResult) {
+        const n = cariCatatan(orderNotes, Number(tx.amount_idr || tx.amount || 0));
+        if (n) tx.item_note = n;
+      }
     }
 
     // Save to email_sync

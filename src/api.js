@@ -1584,6 +1584,9 @@ export function flattenEmailSync(rows) {
         raw_body:                row.raw_body,
         transaction_date:        tx.date,
         merchant_name:           tx.merchant_name || tx.description,
+        // Isi belanja hasil parser email pesanan (gmail-sync) — masuk ke ledger.notes
+        // saat disetujui, supaya Reports menampilkan barangnya, bukan cuma "TOKOPEDIA".
+        notes:                   tx.item_note || null,
         amount:                  tx.amount,
         currency:                tx.currency || "IDR",
         amount_idr:              tx.amount_idr || tx.amount,
