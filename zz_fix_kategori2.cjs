@@ -15,6 +15,7 @@ const PLAN=[
   {re:/HOTSUKAIDOUMIYAGE/i,             to:'Donations & Gifts',      why:'miyage = oleh-oleh Hokkaido'},
   {re:/NAMBA CITY/i,                    to:'Clothing & Accessories', why:'baju (Paulus)'},
   {re:/GRAND FRONT OSAKA/i,             to:'Clothing & Accessories', why:'baju (Paulus) — termasuk baris refundnya'},
+  {re:/CHITOSE AIRPORT/i,               to:'Donations & Gifts',      why:'oleh-oleh bandara (Paulus)'},
   {re:/SURUGAYA/i,                      to:'Hobbies & Entertainment',why:'toko game/anime'},
 ];
 let led=[];for(let off=0;;off+=1000){const{data:c}=await supabase.from('ledger').select('id,tx_date,tx_type,amount_idr,category_name,description').eq('user_id',uid).order('tx_date').range(off,off+999);led=led.concat(c||[]);if(!c||c.length<1000)break;}
