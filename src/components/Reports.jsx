@@ -10,27 +10,39 @@ import {
 
 // ─── PERIOD HELPERS ───────────────────────────────────────────
 
-function getDateRange(key) {
-  const now = new Date();
-  switch (key) {
-    case "3_months":
-      return { from: new Date(now.getFullYear(), now.getMonth() - 2, 1), to: new Date(now.getFullYear(), now.getMonth() + 1, 0), label: "Last 3 Months" };
-    case "6_months":
-      return { from: new Date(now.getFullYear(), now.getMonth() - 5, 1), to: new Date(now.getFullYear(), now.getMonth() + 1, 0), label: "Last 6 Months" };
-    case "ytd":
-      return { from: new Date(now.getFullYear(), 0, 1), to: now, label: "Year to Date" };
-    default: // 'this_month' or 'YYYY-MM' drill-in from chart
-      if (/^\d{4}-\d{2}$/.test(key)) {
-        const [y, m] = key.split("-").map(Number);
-        return { from: new Date(y, m - 1, 1), to: new Date(y, m, 0), label: new Date(y, m - 1).toLocaleDateString("en-US", { month: "long", year: "numeric" }) };
-      }
-      return { from: new Date(now.getFullYear(), now.getMonth(), 1), to: new Date(now.getFullYear(), now.getMonth() + 1, 0), label: "This Month" };
-  }
+// Every range carries its own `prev` window. Comparisons are CALENDAR-based,
+// not duration-based: subtracting the elapsed milliseconds made "previous"
+// straddle month boundaries whenever the neighbouring month had a different
+// length (picking September compared against 2–31 Aug; March against 29 Jan –
+// 28 Feb), so deltas and the whole Comparison tab were off in those months.
+function monthSpan(endY, endM, n) {
+  return {
+    from: new Date(endY, endM - n + 1, 1),
+    to:   new Date(endY, endM + 1, 0),
+    prev: { from: new Date(endY, endM - 2 * n + 1, 1), to: new Date(endY, endM - n + 1, 0) },
+  };
 }
 
-function getPreviousRange({ from, to }) {
-  const dur = to.getTime() - from.getTime();
-  return { from: new Date(from.getTime() - dur - 86400000), to: new Date(from.getTime() - 1) };
+function getDateRange(key) {
+  const now = new Date();
+  const y = now.getFullYear(), m = now.getMonth();
+  switch (key) {
+    case "3_months":
+      return { ...monthSpan(y, m, 3), label: "Last 3 Months" };
+    case "6_months":
+      return { ...monthSpan(y, m, 6), label: "Last 6 Months" };
+    case "ytd":
+      return {
+        from: new Date(y, 0, 1), to: now, label: "Year to Date",
+        prev: { from: new Date(y - 1, 0, 1), to: new Date(y - 1, m, now.getDate()) },
+      };
+    default: // 'this_month' or 'YYYY-MM' drill-in from chart
+      if (/^\d{4}-\d{2}$/.test(key)) {
+        const [yy, mm] = key.split("-").map(Number);
+        return { ...monthSpan(yy, mm - 1, 1), label: new Date(yy, mm - 1).toLocaleDateString("en-US", { month: "long", year: "numeric" }) };
+      }
+      return { ...monthSpan(y, m, 1), label: "This Month" };
+  }
 }
 
 // Local-date YYYY-MM-DD. NOT toISOString(), which is UTC: at WIB (UTC+7) local
@@ -43,10 +55,6 @@ function filterByRange(ledger, range) {
   const f = ymdLocal(range.from);
   const t = ymdLocal(range.to);
   return ledger.filter(e => e.tx_date >= f && e.tx_date <= t);
-}
-
-function sumType(txs, type) {
-  return txs.filter(t => t.tx_type === type).reduce((s, t) => s + Number(t.amount_idr || 0), 0);
 }
 
 // Expense view = every rupiah that leaves and does not come back:
@@ -175,17 +183,18 @@ function groupByCategory(txs, type = "expense", dbCategories = []) {
   if (!isIncome) {
     txs.filter(t => t._ccRefund && t.category_id && map[t.category_id]).forEach(t => {
       map[t.category_id].total -= Number(t.amount_idr || 0);
+      map[t.category_id].txs.push(t); // so the drill-down total matches the bar
     });
   }
   const total = Object.values(map).reduce((s, g) => s + g.total, 0);
   return Object.values(map)
-    .map(g => ({ ...g, pct: total > 0 ? (g.total / total) * 100 : 0 }))
+    .map(g => ({ ...g, pct: total > 0 ? Math.max(0, (g.total / total) * 100) : 0 }))
     .sort((a, b) => b.total - a.total);
 }
 
 function groupByMerchant(txs) {
   const map = {};
-  txs.filter(t => isExpenseRow(t) && !t.is_reimburse).forEach(t => {
+  txs.filter(isExpenseRow).forEach(t => {
     const key  = (t.merchant_name || t.description || "Unknown").trim();
     if (!key) return;
     if (!map[key]) { map[key] = { name: key, category_name: t.category_name || "", total: 0, count: 0, txs: [] }; }
@@ -218,7 +227,7 @@ function exportCSV(txs, label = "export") {
     t.tx_date, t.tx_type,
     (t.merchant_name || t.description || "").replace(/,/g, ";"),
     (t.category_name || "").replace(/,/g, ";"),
-    Math.round(t.amount_idr || 0),
+    Math.round((t._ccRefund ? -1 : 1) * (t.amount_idr || 0)),
     t.currency || "IDR",
     (t.notes || "").replace(/,/g, ";"),
   ]);
@@ -229,8 +238,6 @@ function exportCSV(txs, label = "export") {
   a.download = `${label}-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
 }
-
-const TREND_MONTHS = last6Months();
 
 const PERIOD_PILLS = [
   { key: "this_month", label: "This Month" },
@@ -378,7 +385,7 @@ function MetricCard({ label, value, valueColor, delta, deltaGoodWhenNeg = false,
 }
 
 function HBar({ label, value, max, color, pct, count, onClick }) {
-  const w = max > 0 ? Math.min(100, (value / max) * 100) : 0;
+  const w = max > 0 ? Math.max(0, Math.min(100, (value / max) * 100)) : 0;
   return (
     <div onClick={onClick} style={{ marginBottom: 10, cursor: onClick ? "pointer" : "default" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, gap: 8 }}>
@@ -399,7 +406,8 @@ function HBar({ label, value, max, color, pct, count, onClick }) {
 
 function DrillDownModal({ open, onClose, title, transactions }) {
   if (!open) return null;
-  const total = transactions.reduce((s, t) => s + Number(t.amount_idr || 0), 0);
+  // Refund rows carry a minus here, so the modal total equals the bar it came from.
+  const total = transactions.reduce((s, t) => s + (t._ccRefund ? -1 : 1) * Number(t.amount_idr || 0), 0);
   return (
     <div
       onClick={onClose}
@@ -438,11 +446,12 @@ function DrillDownModal({ open, onClose, title, transactions }) {
                       {t.merchant_name || t.description || "—"}
                     </div>
                     <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>
-                      {t._cashDate || t.tx_date} · {t.category_name || "Uncategorized"}
+                      {t._cashDate || t.tx_date} · {t.category_name || "Uncategorized"}{t._ccRefund ? " · refund" : ""}
                     </div>
                   </div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "#dc2626", flexShrink: 0, marginLeft: 12 }}>
-                    {fmtIDR(Number(t.amount_idr || 0))}
+                  <div style={{ fontSize: 13, fontWeight: 600, flexShrink: 0, marginLeft: 12,
+                    color: t._ccRefund || t.tx_type === "income" ? "#059669" : "#dc2626" }}>
+                    {t._ccRefund ? "−" : ""}{fmtIDR(Number(t.amount_idr || 0))}
                   </div>
                 </div>
               ))
@@ -460,7 +469,7 @@ function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeri
   const [drill, setDrill] = useState(null); // { title, transactions }
 
   const range     = useMemo(() => getDateRange(period), [period]);
-  const prevRange = useMemo(() => getPreviousRange(range), [range]);
+  const prevRange = range.prev;
 
   const txs      = useMemo(() => filterByRange(ledger, range), [ledger, range]);
   const prevTxs  = useMemo(() => filterByRange(ledger, prevRange), [ledger, prevRange]);
@@ -484,8 +493,8 @@ function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeri
   const merchants = useMemo(() => groupByMerchant(txs), [txs]);
   const catTotal  = catBreak.reduce((s, c) => s + c.total, 0);
 
-  // 6-month trend
-  const trendData = useMemo(() => TREND_MONTHS.map(mo => {
+  // 6-month trend (recomputed per mount so it can't go stale across a month roll)
+  const trendData = useMemo(() => last6Months().map(mo => {
     const moTxs   = ledger.filter(e => e.tx_date?.slice(0, 7) === mo);
     const income  = sumIncome(moTxs);
     const expense = sumExpense(moTxs);
@@ -496,7 +505,7 @@ function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeri
   const card = { background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 16, padding: "16px 18px" };
 
   // Insights: top category, largest tx, biggest category increase vs prev period
-  const expTxs     = txs.filter(t => isExpenseRow(t) && !t.is_reimburse);
+  const expTxs     = txs.filter(isExpenseRow);
   // Top-spend insight highlights the top SPENDING category — the fixed BYD
   // leg (Loan Installments) would head the line every month (same treatment
   // as the Dashboard Top Category card). It still appears in the lists.
@@ -507,6 +516,11 @@ function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeri
     prevTxs.filter(isExpenseRow).forEach(t => {
       const k = t.category_id || t.category_name || "other";
       m[k] = (m[k] || 0) + Number(t.amount_idr || 0);
+    });
+    // Net of refunds, matching how catBreak counts this period — otherwise a
+    // refunded month looks like a spending increase.
+    prevTxs.filter(t => t._ccRefund && t.category_id && m[t.category_id]).forEach(t => {
+      m[t.category_id] -= Number(t.amount_idr || 0);
     });
     return m;
   }, [prevTxs]);
@@ -691,22 +705,33 @@ const PIE_COLORS = ["#dc2626","#d97706","#3b5bdb","#059669","#7c3aed","#0891b2",
 function ExpenseTab({ ledger, categories = [], period, dark }) {
   const T = dark ? DARK : LIGHT;
   const range   = useMemo(() => getDateRange(period), [period]);
-  const txs     = useMemo(() => filterByRange(ledger, range).filter(t => isExpenseRow(t) && !t.is_reimburse), [ledger, range]);
-  const cats    = useMemo(() => groupByCategory(txs, "expense", categories), [txs, categories]);
+  // The whole window, refund rows included: filtering them out up front (as this
+  // tab used to) meant groupByCategory never saw them, so every number here was
+  // GROSS while the Overview KPI was net — June 2026 read 170,7jt here against
+  // 145,6jt there.
+  const rangeTxs = useMemo(() => filterByRange(ledger, range), [ledger, range]);
+  const txs      = useMemo(() => rangeTxs.filter(t => isExpenseRow(t) || t._ccRefund), [rangeTxs]);
+  const cats     = useMemo(() => groupByCategory(rangeTxs, "expense", categories), [rangeTxs, categories]);
   const [search, setSearch] = useState("");
   const [drill,  setDrill]  = useState(null);
-  const catTotal = cats.reduce((s, c) => s + c.total, 0);
+  const catTotal = sumExpense(rangeTxs);
 
   const filtered = useMemo(() => {
-    if (!search) return txs.slice().sort((a, b) => (b.tx_date || "").localeCompare(a.tx_date || ""));
     const q = search.toLowerCase();
-    return txs.filter(t => (t.merchant_name || t.description || "").toLowerCase().includes(q)).slice().sort((a, b) => (b.tx_date || "").localeCompare(a.tx_date || ""));
+    return txs
+      .filter(t => !q || (t.merchant_name || t.description || "").toLowerCase().includes(q))
+      .slice()
+      .sort((a, b) => (b.tx_date || "").localeCompare(a.tx_date || ""));
   }, [txs, search]);
+  const filteredTotal = filtered.reduce((s, t) => s + (t._ccRefund ? -1 : 1) * Number(t.amount_idr || 0), 0);
 
   const card = { background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 16, padding: "16px 18px" };
   const tooltipStyle = { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 11, fontFamily: "Figtree, sans-serif" };
 
-  const pieData = cats.slice(0, 8).map((c, i) => ({ name: c.name, value: c.total, color: PIE_COLORS[i % PIE_COLORS.length] }));
+  // A category can go negative when its refunds outweigh its spend in the
+  // window; recharts renders a negative slice as a wedge of nonsense.
+  const pieData = cats.filter(c => c.total > 0).slice(0, 8)
+    .map((c, i) => ({ name: c.name, value: c.total, color: PIE_COLORS[i % PIE_COLORS.length] }));
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -748,7 +773,7 @@ function ExpenseTab({ ledger, categories = [], period, dark }) {
                       <span style={{ fontSize: 11, fontWeight: 700 }}>{fmtIDR(c.total)}</span>
                     </div>
                     <div style={{ background: "#f3f4f6", borderRadius: 3, height: 3, marginTop: 3 }}>
-                      <div style={{ width: `${c.pct}%`, height: "100%", background: PIE_COLORS[i % PIE_COLORS.length], borderRadius: 3 }} />
+                      <div style={{ width: `${Math.max(0, c.pct)}%`, height: "100%", background: PIE_COLORS[i % PIE_COLORS.length], borderRadius: 3 }} />
                     </div>
                   </div>
                   <span style={{ fontSize: 10, color: "#9ca3af", flexShrink: 0 }}>{c.count} tx</span>
@@ -781,16 +806,18 @@ function ExpenseTab({ ledger, categories = [], period, dark }) {
             >Export CSV</button>
           </div>
         </div>
-        <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 8 }}>{filtered.length} transactions · {fmtIDR(filtered.reduce((s, t) => s + Number(t.amount_idr || 0), 0))}</div>
+        <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 8 }}>{filtered.length} transactions · {fmtIDR(filteredTotal)} net of refunds</div>
         {filtered.length === 0
           ? <EmptyState icon="" message="No transactions found." />
           : filtered.slice(0, 50).map(t => (
               <div key={t.id || t._id} style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "9px 0", borderBottom: "1px solid #f3f4f6" }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12, fontWeight: 500, color: "#111827", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.merchant_name || t.description || "—"}</div>
-                  <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>{t._cashDate || t.tx_date} · {t.category_name || "—"}</div>
+                  <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>{t._cashDate || t.tx_date} · {t.category_name || "—"}{t._ccRefund ? " · refund" : ""}</div>
                 </div>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#dc2626", flexShrink: 0, marginLeft: 12 }}>{fmtIDR(Number(t.amount_idr || 0))}</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: t._ccRefund ? "#059669" : "#dc2626", flexShrink: 0, marginLeft: 12 }}>
+                  {t._ccRefund ? "−" : ""}{fmtIDR(Number(t.amount_idr || 0))}
+                </div>
               </div>
             ))
         }
@@ -926,7 +953,7 @@ function ComparisonCard({ label, thisVal, prevVal, format = "idr", inverse = fal
 function ComparisonTab({ ledger, categories = [], period, dark }) {
   const T = dark ? DARK : LIGHT;
   const range     = useMemo(() => getDateRange(period), [period]);
-  const prevRange = useMemo(() => getPreviousRange(range), [range]);
+  const prevRange = range.prev;
   const txs       = useMemo(() => filterByRange(ledger, range), [ledger, range]);
   const prevTxs   = useMemo(() => filterByRange(ledger, prevRange), [ledger, prevRange]);
 
@@ -1033,12 +1060,15 @@ export default function Reports({ user, ledger = [], accounts = [], categories =
   // income credited into a credit card flagged as _ccRefund (expense offset).
   const rLedger = useMemo(() => {
     const ccIds = new Set((accounts || []).filter(a => a.type === "credit_card").map(a => a.id));
-    // Refunds are expense REDUCTIONS, not income (Paulus, 2026-08-27). Two shapes:
-    // credits INTO a credit card, and rows whose income source is "Refund"
-    // (cancelled bookings, fee reversals, installment-conversion credits).
+    // Refunds are expense REDUCTIONS, not income (Paulus, 2026-08-27): cancelled
+    // bookings, fee reversals, installment-conversion credits. Identified by the
+    // "Refund" income source — NOT by "lands on a credit card", which also swept
+    // up cashback credited to the card (Cashback & Rewards is real income, and
+    // was disappearing from income while shrinking expenses). Sourceless credits
+    // into a card stay treated as refunds: nothing else lands there.
     const refundSrc = new Set((incomeSrcs || []).filter(s => s.name === "Refund").map(s => s.id));
     return attributeFixedIncome(ledger, recurTemplates).map(r =>
-      r.tx_type === "income" && (ccIds.has(r.to_id) || refundSrc.has(r.from_id))
+      r.tx_type === "income" && (refundSrc.has(r.from_id) || (!r.from_id && ccIds.has(r.to_id)))
         ? { ...r, _ccRefund: true } : r);
   }, [ledger, recurTemplates, accounts, incomeSrcs]);
 
