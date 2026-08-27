@@ -38,5 +38,22 @@ const f=d=>d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numer
 console.log('\nprev-range (kalender):');
 for(const[y,m,n,lab]of[[2026,8,1,'Sep 2026'],[2026,2,1,'Mar 2026'],[2026,1,1,'Feb 2026'],[2026,7,3,'3M s/d Agu']]){
   const r=monthSpan(y,m,n);console.log(` ${lab.padEnd(12)} ${f(r.from)} – ${f(r.to)}  ← prev ${f(r.prev.from)} – ${f(r.prev.to)}`);}
+
+// ── CEK KETIGA: kolom amount_idr utk akun valas ────────────────────────────
+// Celah yang meloloskan 46 baris JPY/SGD/EUR: validasi saldo dilakukan dalam
+// mata uang akun (dan lulus, memang benar begitu), sementara Reports membaca
+// amount_idr — kolom yang tak pernah diuji apa pun. Sekarang diuji.
+const fxAcc=accounts.filter(a=>a.currency&&a.currency!=='IDR');
+const fxIds=new Set(fxAcc.map(a=>a.id));
+const belum=led.filter(r=>r.tx_type!=='fx_exchange'&&r.currency&&r.currency!=='IDR'
+  &&((fxIds.has(r.from_id))||(fxIds.has(r.to_id)))
+  &&Math.abs(Number(r.amount_idr)-Number(r.amount))<1);
+console.log('\ncek amount_idr akun valas:',belum.length?`⚠ ${belum.length} baris masih memakai nominal mata uang asing sebagai rupiah`:'✓ semua baris valas punya nilai rupiah hasil konversi');
+for(const r of belum.slice(0,5))console.log('   ',r.tx_date,r.currency,r.amount,'|',(r.description||'').slice(0,45));
+// dan: adakah baris IDR yang justru punya fx_rate aneh
+const anom=led.filter(r=>r.currency&&r.currency!=='IDR'&&Number(r.amount_idr)>0&&Number(r.amount)>0
+  &&(Number(r.amount_idr)/Number(r.amount)<1||Number(r.amount_idr)/Number(r.amount)>50000));
+console.log('cek kurs implisit di luar akal (<1 atau >50.000 per unit):',anom.length?`⚠ ${anom.length} baris`:'✓ tidak ada');
+for(const r of anom.slice(0,5))console.log('   ',r.tx_date,r.currency,r.amount,'→',Math.round(r.amount_idr),'|',(r.description||'').slice(0,40));
 process.exit(0);
 })();

@@ -69,8 +69,15 @@ const ids=[];
 try{
   for(const p of plan){
     const amt=Number(p.r.amount);
+    // amount_idr HARUS hasil konversi, bukan salinan nominal valas. Versi pertama
+    // skrip ini menulis amount_idr:amt dengan fx_rate_used kosong, jadi JPY 968
+    // masuk ke Reports sebagai Rp 968 — 46 baris, Rp 23,3jt belanja hilang dari
+    // laporan. Saldo tetap cocok karena dihitung dalam mata uang akun, sehingga
+    // tak satu pun uji menangkapnya (lihat zz_fix_valas_idr.cjs). Kurs wajib
+    // bersumber dari catatan sendiri; tanpa kurs, baris ini jangan dimasukkan.
+    if(!p.rate) throw new Error('tidak ada kurs bersumber utk '+p.cur+' @ '+p.r.tx_date);
     const{data,error}=await supabase.from('ledger').insert([{user_id:uid,tx_date:p.r.tx_date,tx_type:'expense',
-      amount:amt,currency:p.cur,amount_idr:amt,description:(p.r.description||'').replace(/DB INTERCHANGE TRN MASTERCARD DBT \| ?/,'').slice(0,290),
+      amount:amt,currency:p.cur,amount_idr:Math.round(amt*p.rate),fx_rate_used:p.rate,description:(p.r.description||'').replace(/DB INTERCHANGE TRN MASTERCARD DBT \| ?/,'').slice(0,290),
       source:'backfill',notes:'backfill valas BCA (trip)',from_type:'account',from_id:p.A.id,to_type:'expense',to_id:null,
       category_id:cat(p.kat),category_name:p.kat,entity:'Personal'}]).select('id').single();
     if(error)throw new Error(error.message+' @ '+p.r.description);
