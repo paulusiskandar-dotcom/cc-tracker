@@ -46,7 +46,7 @@ Return a JSON array of transactions. Most messages contain ONE transaction, but 
   "is_debit": boolean (true if debit card / direct bank account),
   "is_transfer": boolean (true if transfer between accounts),
   "is_cc_payment": boolean (true if credit card bill payment),
-  "suggested_category": string (e.g. "Salary" for income, "Food & Drink", "Transport", "Shopping" for expense, "Bank Charges", "Other Income"),
+  "suggested_category": string (e.g. "Salary" for income, "Food & Dining", "Transport", "Online Shopping" for expense, "Bank & Card Fees", "Other Income"),
   "suggested_entity": "Personal" | "Hamasa" | "SDC" (default "Personal" unless context suggests otherwise),
   "suggested_tx_type": "expense" | "income" | "transfer" | "pay_cc" | "reimburse_in" | "reimburse_out" (default "income" if KREDIT/in, "expense" if DEBET/out),
   "confidence": number 0-1 (0.95 if very clear, 0.7 if some ambiguity),
@@ -253,6 +253,7 @@ Deno.serve(async (req: Request) => {
           { command: "settle", description: "🧾 Cocokin & settle reimburse" },
           { command: "statements", description: "📄 Status statement & tagihan kartu" },
           { command: "hutang", description: "🏛 Hutang, kartu & cicilan" },
+          { command: "kartu", description: "💳 Kartu terbaik utk belanja (miles)" },
           { command: "piutang", description: "🤝 Utang karyawan & reimburse" },
           { command: "investasi", description: "📈 Nilai investasi/aset" },
           { command: "weekly", description: "📅 Insight mingguan" },
@@ -936,6 +937,80 @@ async function getActiveAccounts(supabase: any, uid: string): Promise<any[]> {
   return (data || []).filter((a: any) => a.is_active !== false);
 }
 
+
+// ── /kartu — kartu terbaik utk belanja (SweetSpot miles engine) ─────────────
+// Snapshot dari src/lib/milesRules.js (KrisFlyer+Accor priority; as_of 2026).
+const KARTU_RULES: any[] = [
+  { card: "Maybank VI", rules: [
+    { cat: "general", rpm: 8888 },
+    { cat: "dining", rpm: 7500, note: "cap spend 26,25jt/bln" },
+    { cat: "travel", rpm: 7500, note: "cap spend 26,25jt/bln" },
+    { cat: "fx", rpm: 7500, note: "cap spend 56,25jt/bln" } ]},
+  { card: "Maybank VP", rules: [
+    { cat: "general", rpm: 20000 },
+    { cat: "online", rpm: 6667, note: "3x poin; bonus cap ≈ spend 25jt/bln" },
+    { cat: "dining", rpm: 6667, note: "3x poin; cap gabung online" } ]},
+  { card: "Jenius", rules: [ { cat: "general", rpm: 13333 }, { cat: "dining", rpm: 6667, note: "Double Yay" } ]},
+  { card: "UOB", rules: [
+    { cat: "general", rpm: 12000 },
+    { cat: "fx", rpm: 4500, corridors: ["SGD","MYR","THB","VND"], note: "khusus SG/MY/TH/VN — terbaik se-Indonesia" } ]},
+  { card: "CIMB JCB", rules: [ { cat: "general", rpm: 37500 }, { cat: "fx", cb: 4, corridors: ["JPY","KRW","CNY","TWD"], note: "4% cashback JP/KR/CN/TW" } ]},
+  { card: "OCBC 90N", rules: [ { cat: "general", rpm: 12000 }, { cat: "fx", rpm: 10000, note: "bebas biaya valas" } ]},
+  { card: "BCA Krisflyer", rules: [ { cat: "general", rpm: 13500, note: "efektif ~8.060 di spend 20jt/bln" } ]},
+  { card: "HSBC", rules: [ { cat: "general", rpm: 37500 }, { cat: "travel", rpm: 9375, note: "4x poin, in-store" }, { cat: "dining", rpm: 9375, note: "in-store" } ]},
+  { card: "Skorcard", rules: [ { cat: "general", cb: 1 }, { cat: "online", rpm: 5000, note: "merchant boosted → LinkMiles" } ]},
+  { card: "Mandiri Signa", rules: [ { cat: "general", rpm: 10000, note: "1.000 poin pertama/bln (≈10jt); QRIS cuma 1/100rb" } ]},
+  { card: "DBS", rules: [ { cat: "general", rpm: 13500 }, { cat: "fx", rpm: 10000, note: "kecuali Eropa" } ]},
+  { card: "BRI", rules: [ { cat: "fx", cb: 10, note: "cap Rp150rb/bln, tanpa markup" } ]},
+];
+const KARTU_GRP: [RegExp, string, string?][] = [
+  [/tokopedia|tokped|shopee|lazada|blibli|online|marketplace|e-?commerce/i, "online"],
+  [/makan|resto|dining|dinner|lunch|kopi|cafe|restoran/i, "dining"],
+  [/hotel|tiket|pesawat|flight|airline|travel|airbnb|agoda/i, "travel"],
+  [/jepang|japan|jp\b|osaka|tokyo|sapporo|kyoto|yen|jpy/i, "fx", "JPY"],
+  [/korea|seoul|krw/i, "fx", "KRW"], [/china|cny|shanghai|beijing/i, "fx", "CNY"], [/taiwan|taipei|twd/i, "fx", "TWD"],
+  [/singapur|singapore|sgd|sg\b/i, "fx", "SGD"], [/malaysia|myr|kl\b/i, "fx", "MYR"],
+  [/thailand|bangkok|thb/i, "fx", "THB"], [/vietnam|vnd|hanoi|saigon/i, "fx", "VND"],
+  [/eropa|europe|berlin|jerman|germany|eur|paris|london|valas|luar negeri|overseas|fx\b/i, "fx", "EUR"],
+];
+function cmdKartu(arg: string): string {
+  const t = (arg || "").trim();
+  let grp = "general", cor: string | undefined;
+  for (const [re, g, c] of KARTU_GRP) { if (re.test(t)) { grp = g; cor = c; break; } }
+  const mAmt = t.match(/([\d.,]+)\s*(jt|juta|rb|ribu|k)?/i);
+  let amt = 0;
+  if (mAmt && mAmt[1]) {
+    amt = parseFloat(mAmt[1].replace(/\./g, "").replace(",", "."));
+    const u = (mAmt[2] || "").toLowerCase();
+    if (u === "jt" || u === "juta") amt *= 1e6; else if (u === "rb" || u === "ribu" || u === "k") amt *= 1e3;
+    if (amt < 1000) amt = 0;
+  }
+  const scored: any[] = [];
+  for (const c of KARTU_RULES) {
+    let r = c.rules.find((x: any) => x.cat === grp);
+    if (r && r.corridors && (!cor || !r.corridors.includes(cor))) r = null;
+    if (!r) r = c.rules.find((x: any) => x.cat === "general");
+    if (!r) continue;
+    const val = r.cb ? (r.cb / 100) * 200000 : r.rpm ? 1e6 / r.rpm * 200 : 0; // nilai per 1jt, Rp200/mile
+    scored.push({ card: c.card, r, val });
+  }
+  scored.sort((a, b) => b.val - a.val);
+  const top = scored.slice(0, 3);
+  if (!top.length) return "Tidak ada rule yang cocok.";
+  const label = grp === "fx" ? `luar negeri${cor ? " (" + cor + ")" : ""}` : grp;
+  const fmt = (x: any) => {
+    const rate = x.r.cb ? `${x.r.cb}% cashback` : `Rp ${x.r.rpm.toLocaleString("id-ID")}/mile`;
+    const est = amt && x.r.rpm ? ` ≈ ${Math.round(amt / x.r.rpm).toLocaleString("id-ID")} miles` : amt && x.r.cb ? ` ≈ cashback ${fmtIDR(amt * x.r.cb / 100)}` : "";
+    return `${rate}${est}${x.r.note ? ` — ${x.r.note}` : ""}`;
+  };
+  let out = `💳 <b>Belanja ${label}${amt ? " " + fmtIDR(amt) : ""}</b>\n\n`;
+  out += `1️⃣ <b>${top[0].card}</b>\n     ${fmt(top[0])}\n`;
+  if (top[1]) out += `2️⃣ ${top[1].card} — ${fmt(top[1])}\n`;
+  if (top[2]) out += `3️⃣ ${top[2].card} — ${fmt(top[2])}\n`;
+  out += `\n<i>KrisFlyer+Accor priority · rules per 2026 · CIMB Accor belum ada rate</i>`;
+  return out;
+}
+
 async function handleCommand(cmd: string, arg: string, supabase: any, uid: string, token: string, chatId: number) {
   try {
     switch (cmd) {
@@ -955,6 +1030,7 @@ async function handleCommand(cmd: string, arg: string, supabase: any, uid: strin
         return;
       }
       case "/hutang": return sendTelegramHTML(token, chatId, await cmdHutang(supabase, uid));
+      case "/kartu": case "/miles": return sendTelegramHTML(token, chatId, cmdKartu(arg));
       case "/weekly": return sendTelegramHTML(token, chatId, await cmdWeekly(supabase, uid));
       case "/statements": case "/statement": case "/tagihan":
         return sendTelegramHTML(token, chatId, await cmdStatements(supabase, uid));
@@ -1813,28 +1889,28 @@ async function handleCallback(cb: any, token: string, supabase: any, uid: string
 // Short category words -> canonical expense_categories.name. First match wins,
 // so more-specific rows (Groceries, Coffee) come before broad ones (Shopping).
 const CAT_KW: [RegExp, string][] = [
-  [/\bcoffee\b|kopi|snack|cemilan|jajan/, "Coffee & Snacks"],
-  [/grocer|belanja\s*bulanan|sembako|supermarket|indomaret|alfamart/, "Groceries"],
-  [/\bfood\b|makan|makanan|resto|restoran|f\s*&?\s*b|fnb|kuliner/, "Food & Drink"],
+  [/\bcoffee\b|kopi|snack|cemilan|jajan/, "Food & Dining"],
+  [/grocer|belanja\s*bulanan|sembako|supermarket|indomaret|alfamart/, "Groceries & Household"],
+  [/\bfood\b|makan|makanan|resto|restoran|f\s*&?\s*b|fnb|kuliner/, "Food & Dining"],
   [/gadget|elektronik|electronic|gawai|hp\b|laptop/, "Electronics & Gadgets"],
   [/\bhome\b|furnitur|furniture|rumah|perabot|dekorasi/, "Home & Furniture"],
-  [/fuel|bensin|bbm|pertamax|vehicle|kendaraan|bengkel|servis\s*mobil|parkir|\btol\b/, "Fuel & Vehicle"],
+  [/fuel|bensin|bbm|pertamax|vehicle|kendaraan|bengkel|servis\s*mobil|parkir|\btol\b/, "Vehicle"],
   [/transport|transportasi|ojek|taksi|taxi|angkot|kereta|busway|mrt/, "Transport"],
-  [/health|kesehatan|obat|dokter|rumah\s*sakit|klinik|apotek/, "Health"],
-  [/fashion|apparel|baju|pakaian|sepatu|clothing|tas\b/, "Fashion & Apparel"],
-  [/bills?|utilit|listrik|\bpln\b|\bpdam\b|internet|wifi|pulsa|telepon/, "Bills (Utilities)"],
-  [/charity|donasi|sedekah|zakat|amal/, "Charity"],
-  [/education|pendidikan|sekolah|kuliah|kursus|\bles\b|buku/, "Education"],
-  [/entertainment|hiburan|nonton|bioskop|\bgame\b|\bfilm\b/, "Entertainment"],
+  [/health|kesehatan|obat|dokter|rumah\s*sakit|klinik|apotek/, "Health & Personal Care"],
+  [/fashion|apparel|baju|pakaian|sepatu|clothing|tas\b/, "Clothing & Accessories"],
+  [/bills?|utilit|listrik|\bpln\b|\bpdam\b|internet|wifi|pulsa|telepon/, "Housing & Utilities"],
+  [/charity|donasi|sedekah|zakat|amal/, "Donations & Gifts"],
+  [/education|pendidikan|sekolah|kuliah|kursus|\bles\b|buku/, "Subscriptions & Software"],
+  [/entertainment|hiburan|nonton|bioskop|\bgame\b|\bfilm\b/, "Hobbies & Entertainment"],
   [/family|keluarga/, "Family"],
-  [/subscription|langganan|netflix|spotify|icloud|apple\s*one|youtube/, "Subscription"],
-  [/\btax\b|pajak|pph|ppn/, "Tax"],
+  [/subscription|langganan|netflix|spotify|icloud|apple\s*one|youtube/, "Subscriptions & Software"],
+  [/\btax\b|pajak|pph|ppn/, "Taxes"],
   [/travel|liburan|hotel|tiket|pesawat|wisata/, "Travel"],
-  [/personal\s*care|perawatan|salon|\bspa\b|barber|skincare/, "Personal Care"],
-  [/property|\bipl\b|apartemen|apartment/, "Property & IPL"],
-  [/bank\s*charge|biaya\s*bank|admin\s*bank/, "Bank Charges"],
-  [/staff|salary|gaji|payroll/, "Staff & Salary"],
-  [/shopping|belanja/, "Shopping"],
+  [/personal\s*care|perawatan|salon|\bspa\b|barber|skincare/, "Health & Personal Care"],
+  [/property|\bipl\b|apartemen|apartment/, "Housing & Utilities"],
+  [/bank\s*charge|biaya\s*bank|admin\s*bank/, "Bank & Card Fees"],
+  [/staff|salary|gaji|payroll/, "Staff & Services"],
+  [/shopping|belanja/, "Online Shopping"],
 ];
 function matchCategory(s: string): string | null {
   for (const [re, name] of CAT_KW) if (re.test(s)) return name;
@@ -2274,7 +2350,7 @@ async function importPending(supabase: any, uid: string, token?: string, chatId?
   }
 
   // 5) build inserts
-  const INCOME_SRC = ["Salary", "Dividend", "Freelance", "Rental Income", "Bank Interest", "Cashback"];
+  const INCOME_SRC = ["Salary", "Dividend", "Freelance", "Rental Income", "Interest & Investment", "Cashback & Rewards"];
   const PIU: Record<string, string> = {};
   for (const a of accounts) if (a.type === "receivable" && a.entity) PIU[a.entity] = a.id;
   const ins: any[] = []; const counts: Record<string, number> = {}; let totalAmt = 0;

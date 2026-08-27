@@ -203,7 +203,7 @@ For each transaction return a JSON array:
   "is_cc_payment": false,
   "from_account_id": "null - leave null, will be matched by post-processing",
   "to_account_id": "null - leave null, will be matched by post-processing",
-  "suggested_category": "Food & Drink",
+  "suggested_category": "Food & Dining",
   "category_is_new": false,
   "suggested_entity": "Personal",
   "suggested_tx_type": "expense",

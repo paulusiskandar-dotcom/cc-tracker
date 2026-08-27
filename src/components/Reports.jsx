@@ -169,6 +169,14 @@ function groupByCategory(txs, type = "expense", dbCategories = []) {
     map[key].count++;
     map[key].txs.push(t);
   });
+  // A refund that carries the original spend category reduces that category,
+  // so e.g. a cancelled Trip.com booking nets out of Travel instead of
+  // inflating both income and expenses.
+  if (!isIncome) {
+    txs.filter(t => t._ccRefund && t.category_id && map[t.category_id]).forEach(t => {
+      map[t.category_id].total -= Number(t.amount_idr || 0);
+    });
+  }
   const total = Object.values(map).reduce((s, g) => s + g.total, 0);
   return Object.values(map)
     .map(g => ({ ...g, pct: total > 0 ? (g.total / total) * 100 : 0 }))
@@ -1025,9 +1033,14 @@ export default function Reports({ user, ledger = [], accounts = [], categories =
   // income credited into a credit card flagged as _ccRefund (expense offset).
   const rLedger = useMemo(() => {
     const ccIds = new Set((accounts || []).filter(a => a.type === "credit_card").map(a => a.id));
+    // Refunds are expense REDUCTIONS, not income (Paulus, 2026-08-27). Two shapes:
+    // credits INTO a credit card, and rows whose income source is "Refund"
+    // (cancelled bookings, fee reversals, installment-conversion credits).
+    const refundSrc = new Set((incomeSrcs || []).filter(s => s.name === "Refund").map(s => s.id));
     return attributeFixedIncome(ledger, recurTemplates).map(r =>
-      r.tx_type === "income" && ccIds.has(r.to_id) ? { ...r, _ccRefund: true } : r);
-  }, [ledger, recurTemplates, accounts]);
+      r.tx_type === "income" && (ccIds.has(r.to_id) || refundSrc.has(r.from_id))
+        ? { ...r, _ccRefund: true } : r);
+  }, [ledger, recurTemplates, accounts, incomeSrcs]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>

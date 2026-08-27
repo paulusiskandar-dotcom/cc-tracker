@@ -311,6 +311,23 @@ const SLUG_TO_LABEL_LEGACY = {
   personal_shopping: "Personal Shopping",
 };
 
+// Old → new category names (2026-08-27 restructure). Anything still emitting
+// the old labels — AI prompts, merchant mappings, legacy slugs — resolves here.
+const RENAMED_2026_08 = {
+  "food & drink": "Food & Dining", "food & drinks": "Food & Dining",
+  "coffee & snacks": "Food & Dining",
+  "fashion & apparel": "Clothing & Accessories",
+  "bank charges": "Bank & Card Fees", "tax": "Taxes",
+  "fuel & vehicle": "Vehicle", "entertainment": "Hobbies & Entertainment",
+  "staff & salary": "Staff & Services", "subscription": "Subscriptions & Software",
+  "education": "Subscriptions & Software", "charity": "Donations & Gifts",
+  "groceries": "Groceries & Household", "property & ipl": "Housing & Utilities",
+  "bills (utilities)": "Housing & Utilities", "health": "Health & Personal Care",
+  "personal care": "Health & Personal Care", "shopping": "Online Shopping",
+  "installment": "Electronics & Gadgets", "other": "Online Shopping",
+  "bank interest": "Interest & Investment", "cashback": "Cashback & Rewards",
+};
+
 const _norm = (s) => String(s ?? "").trim().toLowerCase();
 
 // Generic name → entity lookup with plural-tolerant + legacy-slug fallback.
@@ -321,6 +338,13 @@ function _lookupByName(nameOrSlug, list, fallbackNames = []) {
   // 1. Exact match
   let hit = list.find(c => _norm(c.name) === t);
   if (hit) return { id: hit.id, name: hit.name, source: "exact" };
+
+  // 1b. Renamed category (2026-08 restructure)
+  const renamed = RENAMED_2026_08[t];
+  if (renamed) {
+    hit = list.find(c => _norm(c.name) === _norm(renamed));
+    if (hit) return { id: hit.id, name: hit.name, source: "fuzzy" };
+  }
 
   // 2. Legacy slug → label, then exact match
   const slugLabel = SLUG_TO_LABEL_LEGACY[t];
@@ -348,7 +372,7 @@ function _lookupByName(nameOrSlug, list, fallbackNames = []) {
 
 /** Lookup expense category UUID by name (case-insensitive, plural-tolerant, slug-tolerant). */
 export const lookupExpenseCategory = (nameOrSlug, userCategories = []) =>
-  _lookupByName(nameOrSlug, userCategories, ["Other"]);
+  _lookupByName(nameOrSlug, userCategories, ["Online Shopping"]);
 
 /** Lookup income source UUID by name. */
 export const lookupIncomeSource = (nameOrSlug, userIncomeSources = []) =>
@@ -447,7 +471,7 @@ export const autoCategorize = ({
   }
 
   // Layer 3 — fallback to "Other" / "Other Income"
-  const fb = lookup(isIncome ? "Other Income" : "Other", userCategories);
+  const fb = lookup(isIncome ? "Other Income" : "Online Shopping", userCategories);
   if (fb) return { id: fb.id, name: fb.name, source: "fallback", confidence: 0 };
 
   return { id: null, name: null, source: null, confidence: 0 };

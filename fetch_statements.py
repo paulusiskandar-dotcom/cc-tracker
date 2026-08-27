@@ -13,7 +13,7 @@ Setup (once):
 
 Nothing is deleted from Gmail; already-downloaded files are skipped.
 """
-import imaplib, email, json, os, re, signal, subprocess, sys, tempfile, urllib.request
+import imaplib, email, hashlib, json, os, re, shutil, signal, subprocess, sys, tempfile, urllib.request
 
 IMAP_TIMEOUT = 120   # seconds per Gmail socket operation
 RUN_TIMEOUT  = 1800  # seconds for the whole run before the watchdog kills it
@@ -36,6 +36,27 @@ def decode_str(s):
 # securities/custodian statements; everything else (the cards) = CC.
 BANK_SOURCES   = {"BCA-Bank", "Mandiri-Bank", "Sinarmas"}
 INVEST_SOURCES = {"KSEI", "Mirae"}
+
+
+def file_md5(path):
+    h = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def account_no_in_pdf(path):
+    """Account number printed inside the statement, used to tell apart files that
+    arrive with identical names (BCA RDN sends one email per account, same subject)."""
+    try:
+        txt = subprocess.run(["pdftotext", "-layout", path, "-"],
+                             capture_output=True, timeout=30).stdout.decode("utf8", "ignore")
+    except Exception:
+        return None
+    m = re.search(r"(?:NOMOR REKENING|No\.? Rekening|Account Number)\s*:?\s*(\d{6,})", txt, re.I)
+    return m.group(1) if m else None
+
 
 def source_kind(src_name):
     if src_name in BANK_SOURCES:   return "Bank"
@@ -122,14 +143,35 @@ def main():
                 out_dir = month_folder(base, dt, classify_kind(src["name"], fn))
                 safe = re.sub(r"[^A-Za-z0-9._ -]", "_", f'{src["name"]} - {fn}')
                 out_path = os.path.join(out_dir, safe)
-                if os.path.exists(out_path):
-                    continue  # already have it
                 payload = part.get_payload(decode=True)
                 if not payload: continue
                 with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tf:
                     tf.write(payload); tmp = tf.name
-                ok = unlock(tmp, out_path, passwords)
+                # Unlock to a scratch file first so we can look inside before naming.
+                with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tf2:
+                    scratch = tf2.name
+                ok = unlock(tmp, scratch, passwords)
                 os.unlink(tmp)
+                if ok and os.path.exists(out_path):
+                    # Same name already there: keep it only if the content matches,
+                    # otherwise disambiguate by account number read from the PDF.
+                    # (BCA sends every RDN account with an identical subject+filename;
+                    #  the old "skip if exists" silently dropped 4 of 5 每 month.)
+                    if file_md5(scratch) == file_md5(out_path):
+                        os.unlink(scratch); continue
+                    acct = account_no_in_pdf(scratch)
+                    stem, ext = os.path.splitext(safe)
+                    tag = acct or "2"
+                    out_path = os.path.join(out_dir, f"{stem} [{tag}]{ext}")
+                    n = 2
+                    while os.path.exists(out_path) and file_md5(out_path) != file_md5(scratch):
+                        out_path = os.path.join(out_dir, f"{stem} [{tag}-{n}]{ext}"); n += 1
+                    if os.path.exists(out_path):
+                        os.unlink(scratch); continue
+                if ok:
+                    shutil.move(scratch, out_path)
+                elif os.path.exists(scratch):
+                    os.unlink(scratch)
                 if ok:
                     got += 1
                     saved_files.append({"name": safe, "path": out_path})

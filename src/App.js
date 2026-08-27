@@ -39,6 +39,7 @@ import Email        from "./components/Email";
 import Reconcile       from "./components/Reconcile";
 import Notifications   from "./components/Notifications";
 import Tags            from "./components/Tags";
+import SweetSpot       from "./components/SweetSpot";
 import StatementPage          from "./pages/StatementPage";
 import ReimburseStatementPage from "./pages/ReimburseStatementPage";
 import LoanStatementPage      from "./pages/LoanStatementPage";
@@ -439,6 +440,7 @@ function Finance({ user, signOut }) {
       case "reports":      return <Reports      {...shared} />;
       case "budget":       return <Budget       {...shared} />;
       case "tags":         return <Tags         user={user} ledger={ledger} onRefresh={loadData} />;
+      case "sweetspot":    return <SweetSpot    ledger={ledger} accounts={accounts} />;
       case "calendar":     return <Calendar     {...shared} />;
       case "billing":      return <Billing      {...shared} />;
       case "settings":     return <Settings     {...shared} signOut={signOut} initialTab={settingsInitialTab} />;

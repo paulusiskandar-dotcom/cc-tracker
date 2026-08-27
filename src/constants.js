@@ -119,6 +119,7 @@ export const TABS = [
   { id: "reports",      label: "Reports"      },
   { id: "budget",       label: "Budget"       },
   { id: "tags",         label: "Tags"         },
+  { id: "sweetspot",    label: "SweetSpot"    },
   { id: "calendar",     label: "Calendar"     },
   { id: "settings",     label: "Settings"     },
 ];

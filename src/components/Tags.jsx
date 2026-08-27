@@ -3,14 +3,15 @@ import { tagsApi } from "../api";
 import { supabase } from "../lib/supabase";
 import { fmtIDR } from "../utils";
 import { showToast } from "./shared/Card";
+import { Plane, Briefcase, CalendarDays, Tag as TagIcon } from "lucide-react";
 
 const FF = "Figtree, system-ui, -apple-system, sans-serif";
 
 const TAG_TYPES = [
-  { value: "trip",    label: "Trip",    icon: "✈️" },
-  { value: "project", label: "Project", icon: "" },
-  { value: "event",   label: "Event",   icon: "" },
-  { value: "other",   label: "Other",   icon: "" },
+  { value: "trip",    label: "Trip",    Icon: Plane },
+  { value: "project", label: "Project", Icon: Briefcase },
+  { value: "event",   label: "Event",   Icon: CalendarDays },
+  { value: "other",   label: "Other",   Icon: TagIcon },
 ];
 
 const TAG_COLORS = [
@@ -247,7 +248,7 @@ function TagCard({ tag, stats, onClick, onEdit, onArchive, onComplete, onReactiv
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ fontSize: 16 }}>{tag.icon || typeInfo.icon}</span>
+          <typeInfo.Icon size={16} strokeWidth={2} color={tag.color || "#3b5bdb"} />
           <span style={{ fontSize: 15, fontWeight: 700, color: "#111827" }}>{tag.name}</span>
         </div>
         <span style={{ fontSize: 9, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5, background: "#f3f4f6", padding: "2px 6px", borderRadius: 4 }}>
@@ -349,7 +350,7 @@ function TagEditModal({ tag, onClose, onSave }) {
 
         <ModalField label="Type">
           <select value={type} onChange={e => setType(e.target.value)} style={iStyle}>
-            {TAG_TYPES.map(t => <option key={t.value} value={t.value}>{t.icon} {t.label}</option>)}
+            {TAG_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
           </select>
         </ModalField>
 
@@ -563,7 +564,7 @@ function TagDetailView({ tag, user, ledger, onBack, onRefresh, onEdit, editTag, 
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 28 }}>{tag.icon || typeInfo.icon}</span>
+          <typeInfo.Icon size={26} strokeWidth={2} color={tag.color || "#3b5bdb"} />
           <div>
             <div style={{ fontSize: 24, fontWeight: 800, color: "#111827" }}>{tag.name}</div>
             <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>

@@ -17,9 +17,9 @@ import { REIMBURSE_ENTITIES } from "../constants";
 
 // ── Normalise AI pseudo-types to real tx_type + category ─────────
 const PSEUDO_TYPE_MAP = {
-  bank_charges:  { tx_type: "expense", category_id: "bank_charges", category_name: "Bank Charges"  },
+  bank_charges:  { tx_type: "expense", category_id: "bank_charges", category_name: "Bank & Card Fees"  },
   materai:       { tx_type: "expense", category_id: "materai",      category_name: "Stamp Duty"    },
-  tax:           { tx_type: "expense", category_id: "tax",          category_name: "Tax"           },
+  tax:           { tx_type: "expense", category_id: "tax",          category_name: "Taxes"           },
   bank_interest: { tx_type: "income",  category_id: "bank_interest",category_name: "Bank Interest" },
   cashback:      { tx_type: "income",  category_id: "cashback",     category_name: "Cashback"      },
 };
