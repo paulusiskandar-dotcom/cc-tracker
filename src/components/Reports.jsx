@@ -66,6 +66,16 @@ function filterByRange(ledger, range) {
 //   expense; yang tidak masuk hanya reimburse out")
 const isExpenseRow = (t) => t.tx_type === "expense" || t.tx_type === "pay_liability";
 
+// Statements name the payment rail, not the purchase: "TOKOPEDIA", "Blibli",
+// "AMAZON.CO.JP". What was actually bought lives in notes, recovered from order
+// emails. Show it where it says something — bookkeeping notes ("Statement
+// rebuild", "backfill …", "Imported from Gmail …") only add noise.
+const NOTE_NOISE = /^(backfill|statement |imported from|migrated|auto|ipl\/internet)/i;
+const txNote = (t) => {
+  const n = (t.notes || "").trim();
+  return n && !NOTE_NOISE.test(n) ? n : null;
+};
+
 // CC refunds/reversals (income rows credited INTO a credit card — annual-fee
 // reversals, merchant refunds; flagged _ccRefund by the Reports root) are not
 // income: they are expense REDUCTIONS. The original charge sits in expenses,
@@ -448,6 +458,11 @@ function DrillDownModal({ open, onClose, title, transactions }) {
                     <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>
                       {t._cashDate || t.tx_date} · {t.category_name || "Uncategorized"}{t._ccRefund ? " · refund" : ""}
                     </div>
+                    {txNote(t) && (
+                      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3, lineHeight: 1.45 }}>
+                        {txNote(t)}
+                      </div>
+                    )}
                   </div>
                   <div style={{ fontSize: 13, fontWeight: 600, flexShrink: 0, marginLeft: 12,
                     color: t._ccRefund || t.tx_type === "income" ? "#059669" : "#dc2626" }}>
@@ -814,6 +829,7 @@ function ExpenseTab({ ledger, categories = [], period, dark }) {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12, fontWeight: 500, color: "#111827", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.merchant_name || t.description || "—"}</div>
                   <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>{t._cashDate || t.tx_date} · {t.category_name || "—"}{t._ccRefund ? " · refund" : ""}</div>
+                  {txNote(t) && <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2, lineHeight: 1.45 }}>{txNote(t)}</div>}
                 </div>
                 <div style={{ fontSize: 12, fontWeight: 600, color: t._ccRefund ? "#059669" : "#dc2626", flexShrink: 0, marginLeft: 12 }}>
                   {t._ccRefund ? "−" : ""}{fmtIDR(Number(t.amount_idr || 0))}
@@ -903,6 +919,7 @@ function IncomeTab({ ledger, incomeSrcs, period, dark }) {
                 <div>
                   <div style={{ fontSize: 12, fontWeight: 500, color: "#111827" }}>{t.description || t.merchant_name || "—"}</div>
                   <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2 }}>{t._cashDate || t.tx_date} · {t.category_name || "—"}</div>
+                  {txNote(t) && <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2, lineHeight: 1.45 }}>{txNote(t)}</div>}
                 </div>
                 <div style={{ fontSize: 12, fontWeight: 600, color: "#059669", flexShrink: 0, marginLeft: 12 }}>{fmtIDR(Number(t.amount_idr || 0))}</div>
               </div>
