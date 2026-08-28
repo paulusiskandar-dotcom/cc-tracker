@@ -599,7 +599,16 @@ function TxRow({ entry: e, accounts, categories = [], onEdit, onDelete, onSplit 
     collect_loan:  { bg: "#DFF5E8", color: "#1A7A42", label: "Collect Loan"  },
     pay_liability: { bg: "#FFE8DC", color: "#A04A0A", label: "Pay Liability" },
   };
-  const bdg = e.tx_type ? TX_BADGE[e.tx_type] : null;
+  // Kredit kartu (refund, reversal annual fee, konversi cicilan) bertipe income
+  // atau reimburse_in karena arah uangnya masuk — tapi menyebutnya "Income"
+  // menyesatkan: Reports sendiri MENGECUALIKANNYA dari pendapatan (isIncomeRow,
+  // Reports.jsx). Dikenali dari tujuannya: uang masuk ke KARTU KREDIT.
+  const kartuTujuan = accounts.find(a => a.id === e.to_id);
+  const kreditKartu = kartuTujuan?.type === "credit_card"
+    && ["income", "reimburse_in"].includes(e.tx_type);
+  const bdg = kreditKartu
+    ? { bg: "#DFF5E8", color: "#1A7A42", label: "Refund" }
+    : (e.tx_type ? TX_BADGE[e.tx_type] : null);
   const badgeEl = e.tx_type ? (bdg ? (
     <span key="badge" style={{
       display:       "inline-block",

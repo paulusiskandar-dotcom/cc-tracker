@@ -1365,8 +1365,14 @@ export default function Receivables({
                                     {pidx && <span style={{ color: "#7c3aed", fontWeight: 800, marginRight: 4 }}>✦{pidx}</span>}
                                     {e.description}
                                   </div>
+                                  {/* Kredit kartu (refund/reversal) masuk ke KARTU, bukan setoran
+                                      Hamasa. Ia sah berada di kolom ini — mengurangi piutang seperti
+                                      seharusnya — tapi harus dibedakan supaya tidak terbaca "mereka bayar". */}
                                   <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1 }}>
                                     {e.tx_date} · {toAcc?.name || "—"}
+                                    {toAcc?.type === "credit_card" && (
+                                      <span style={{ marginLeft: 4, color: "#0e7490", fontWeight: 700 }}>· refund</span>
+                                    )}
                                     {settled && <span style={{ marginLeft: 4, color: "#d1d5db" }}>· settled</span>}
                                   </div>
                                 </div>
