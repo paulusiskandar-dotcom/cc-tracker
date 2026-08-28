@@ -199,6 +199,18 @@ function cariBarisSelisih(ledger, s) {
   ) || null;
 }
 
+// Selisih pelunasan yang dibukukan ke Bank & Card Fees disebut "Payment difference"
+// — istilah Paulus untuk kasus ini (setoran tunai dibulatkan ke bawah). Nama kategori
+// mentahnya dipakai apa adanya untuk pilihan lain.
+const KAT_SELISIH = "6cc50f51-b1fc-4dbd-8f1f-32010b60dfb3"; // Bank & Card Fees
+function labelSelisih(row, incomeSrcs) {
+  if (!row) return "not recorded";
+  if (row.tx_type === "income")
+    return incomeSrcs.find(x => x.id === row.from_id)?.name || "Other Income";
+  if (row.category_id === KAT_SELISIH) return "Payment difference";
+  return row.category_name || "not recorded";
+}
+
 function SettlementCard({ settlement, ledger, expanded, onToggle, incomeSrcs = [] }) {
   const totalOut  = Number(settlement.total_out || 0);
   const totalIn   = Number(settlement.total_in  || 0);
@@ -210,13 +222,9 @@ function SettlementCard({ settlement, ledger, expanded, onToggle, incomeSrcs = [
   const badgeBg    = isLoss ? "#fef2f2" : isSurplus ? "#ecfdf5" : "#f3f4f6";
   // Tanda menampilkan TUJUAN pembukuan selisihnya, bukan label generik.
   const diffRow = cariBarisSelisih(ledger, settlement);
-  const badgeLabel = (() => {
-    if (!isLoss && !isSurplus) return "BALANCED";
-    if (diffRow?.tx_type === "income")
-      return (incomeSrcs.find(x => x.id === diffRow.from_id)?.name || "Other Income").toUpperCase();
-    if (diffRow?.category_name) return String(diffRow.category_name).toUpperCase();
-    return "NOT RECORDED";   // Finalize lama, selisihnya belum masuk ke mana pun
-  })();
+  const badgeLabel = (!isLoss && !isSurplus)
+    ? "BALANCED"
+    : labelSelisih(diffRow, incomeSrcs).toUpperCase();
 
   const outLedgerIds = settlement.out_ledger_ids || [];
   const inLedgerIds  = settlement.in_ledger_ids  || [];
@@ -694,7 +702,7 @@ export default function Receivables({
       if (reimbursable > 0) {
         const { error: lErr } = await supabase.from("ledger").insert([{
           user_id: user.id, tx_date: settledAtForInsert,
-          description: `Short on finalize — ${entity}`,
+          description: `Payment difference — ${entity}`,
           amount: reimbursable, amount_idr: reimbursable, currency: "IDR",
           tx_type: "expense",
           from_type: akunPiutang ? "account" : null, from_id: akunPiutang?.id || null,
@@ -1302,13 +1310,7 @@ export default function Receivables({
                           // sumber pendapatannya; kalau tidak ada (Finalize lama), jatuh ke
                           // sebutan umum.
                           const sDiffRow = cariBarisSelisih(ledger, s);
-                          const sReLabel = (() => {
-                            if (sNet === 0) return "balanced";
-                            if (sDiffRow?.tx_type === "income")
-                              return incomeSrcs.find(x => x.id === sDiffRow.from_id)?.name || "Other Income";
-                            if (sDiffRow?.category_name) return sDiffRow.category_name;
-                            return "not recorded";   // Finalize lama, selisihnya belum masuk ke mana pun
-                          })();
+                          const sReLabel = sNet === 0 ? "balanced" : labelSelisih(sDiffRow, incomeSrcs);
                           return (
                             <div key={s.id} style={{ border: "0.5px solid #f3f4f6", borderRadius: 8, marginBottom: 4, overflow: "hidden" }}>
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", background: "#fafafa" }}>

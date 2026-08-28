@@ -1413,7 +1413,7 @@ async function executeSettle(entity: string, selOut: any[], selIn: any[], supaba
   }]).select().single();
   if (error) { await sendTelegramHTML(token, chatId, "❌ Gagal settle: " + esc(error.message)); return; }
   if (reimbursable > 0) await supabase.from("ledger").insert([{
-    user_id: uid, tx_date: today, description: `Short on finalize — ${entity}`,
+    user_id: uid, tx_date: today, description: `Payment difference — ${entity}`,
     amount: reimbursable, amount_idr: reimbursable, currency: "IDR",
     tx_type: "expense",
     from_type: akunPiutang ? "account" : null, from_id: akunPiutang?.id || null,
