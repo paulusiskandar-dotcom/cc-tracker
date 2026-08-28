@@ -1171,6 +1171,46 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
   const { data: accounts } = await serviceSupabase.from("accounts")
     .select("id, name, type, bank_name, account_no, card_last4, currency, initial_balance, is_active")
     .eq("user_id", userId);
+
+  // ── SATU BERKAS, DUA KARTU ────────────────────────────────────────────────
+  // Statement BCA 14871216 memuat kartu 9605 (BCA Card) DAN 3776 (Krisflyer);
+  // tiap baris membawa card_last4-nya sendiri. resolveStatementAccount hanya
+  // mengembalikan SATU akun, jadi seluruh baris dulu masuk ke satu sesi dan
+  // baris milik kartu lain dilaporkan "hilang" — itulah 12 hilang palsu di
+  // BCA Card Agustus 2026, padahal barisnya ada di Krisflyer dengan tanggal
+  // yang sama persis. Pecah per kartu, satu sesi per kartu.
+  //
+  // Saldo pembukaan/penutupan hanya diberikan ke kartu yang TERDETEKSI di
+  // kepala statement — untuk BCA itu 3776, dan penutupannya (30.638.872)
+  // memang cocok dengan anchor Krisflyer. Kartu lain sesinya tanpa saldo,
+  // karena statement tidak mencantumkan penutupan terpisah untuknya.
+  if (!extraction._splitByCard) {
+    const perCard: Record<string, any[]> = {};
+    for (const t of txs) {
+      const l4 = t.card_last4 ? String(t.card_last4) : null;
+      if (l4) (perCard[l4] = perCard[l4] || []).push(t);
+    }
+    const kartu = Object.keys(perCard)
+      .map((l4) => ({ l4, acc: (accounts || []).find((a: any) => a.is_active !== false && String(a.card_last4 || "") === l4) }))
+      .filter((x) => x.acc);
+    const idUnik = [...new Set(kartu.map((x) => x.acc.id))];
+    if (idUnik.length > 1) {
+      const utama = String(extraction.detected_account?.last4 || "");
+      const hasil: any[] = [];
+      for (const { l4, acc: ka } of kartu) {
+        const sub = {
+          ...extraction, _splitByCard: true, transactions: perCard[l4],
+          detected_account: { ...(extraction.detected_account || {}), last4: l4 },
+          opening_balance: l4 === utama ? extraction.opening_balance : null,
+          closing_balance: l4 === utama ? extraction.closing_balance : null,
+        };
+        hasil.push({ card_last4: l4, account_name: ka.name,
+          ...(await prepareReconcile(serviceSupabase, userId, sub, `${filename} · kartu ${l4}`)) });
+      }
+      return { prepared: true, split_by_card: true, cards: hasil };
+    }
+  }
+
   const acc = resolveStatementAccount(extraction.detected_account, txs, accounts || []);
   if (!acc) {
     return {

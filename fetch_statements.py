@@ -112,7 +112,10 @@ def main():
         log("ERROR: fill app_password in statement_fetch_config.json first."); sys.exit(1)
     all_mode = "--all" in sys.argv
     since = None if all_mode else (datetime.now() - timedelta(days=cfg.get("since_days", 40)))
-    base = os.path.expanduser(cfg["output_base"])
+    # macOS bisa menolak akses ke folder CloudStorage/Downloads untuk proses ini
+    # (TCC, bukan sandbox aplikasi). Override lewat env supaya penarikan tetap jalan
+    # ke folder lokal; konfigurasi asli tidak disentuh.
+    base = os.path.expanduser(os.environ.get("STATEMENT_OUT_BASE") or cfg["output_base"])
     os.makedirs(base, exist_ok=True)
 
     passwords = load_passwords(cfg)
