@@ -7,7 +7,7 @@ import {
   Landmark, Lightbulb, Heart, Coffee, BookOpen, Smartphone, Clapperboard,
   Users, Shirt, Utensils, Fuel, ShoppingCart, Activity, Home, Calendar,
   MoreHorizontal, Sparkles, Building2, TrendingDown, ShoppingBag, Briefcase,
-  Repeat, Percent, Car, Plane, Tag,
+  Repeat, Percent, Car, Plane, Tag, SlidersHorizontal,
   // income sources
   Wallet, KeyRound, PiggyBank, Laptop, BadgePercent, Gift, RotateCcw,
   // asset subtypes
@@ -54,6 +54,28 @@ const CAT_VISUAL = {
   "tax":                   { Icon: Percent,        tint: "grey"   },
   "transport":             { Icon: Car,            tint: "blue"   },
   "travel":                { Icon: Plane,          tint: "teal"   },
+
+  // Nama kategori HASIL PENGGANTIAN NAMA 2026-08 (RENAMED_2026_08 di utils.js).
+  // Tanpa baris-baris ini, 13 dari 20 kategori aktif jatuh ke ikon generik Tag —
+  // terlihat di Transactions, Dashboard, dan Budget sekaligus.
+  "adjustments":              { Icon: SlidersHorizontal, tint: "grey"   },
+  "bank & card fees":         { Icon: Landmark,          tint: "blue"   },
+  "clothing & accessories":   { Icon: Shirt,             tint: "purple" },
+  "donations & gifts":        { Icon: Gift,              tint: "red"    },
+  "food & dining":            { Icon: Utensils,          tint: "amber"  },
+  "groceries & household":    { Icon: ShoppingCart,      tint: "green"  },
+  "health & personal care":   { Icon: Activity,          tint: "green"  },
+  "hobbies & entertainment":  { Icon: Clapperboard,      tint: "purple" },
+  "housing & utilities":      { Icon: Lightbulb,         tint: "amber"  },
+  "staff & services":         { Icon: Briefcase,         tint: "blue"   },
+  "subscriptions & software": { Icon: Repeat,            tint: "teal"   },
+  "taxes":                    { Icon: Percent,           tint: "grey"   },
+  "vehicle":                  { Icon: Car,               tint: "blue"   },
+  "utility income":           { Icon: Lightbulb,         tint: "amber"  },
+  "asset sale":               { Icon: Package,           tint: "grey"   },
+  "refund":                   { Icon: RotateCcw,         tint: "green"  },
+  "interest & investment":    { Icon: BadgePercent,      tint: "green"  },
+  "cashback & rewards":       { Icon: Gift,              tint: "purple" },
 };
 
 // Income sources get the same treatment

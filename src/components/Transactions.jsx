@@ -7,6 +7,8 @@ import { ConfirmModal } from "./shared/Modal";
 import { EmptyState, showToast } from "./shared/Card";
 import SortDropdown from "./shared/SortDropdown";
 import TxVerticalBig from "./shared/TxVerticalBig";
+import { Pencil, X, ArrowUp, ArrowDown, ArrowLeftRight, RotateCw, RotateCcw } from "lucide-react";
+import { getCategoryVisual } from "../lib/categoryIcons";
 
 // ─── SUBTABS ─────────────────────────────────────────────────
 const SUBTABS = [
@@ -41,6 +43,7 @@ export default function Transactions({
   const [filterMonth,  setFilterMonth]  = useState("");
   const [filterEntity, setFilterEntity] = useState("");
   const [filterAccId,  setFilterAccId]  = useState("");
+  const [filterCatId,  setFilterCatId]  = useState("");
   const [search,       setSearch]       = useState("");
   const [dateFrom,     setDateFrom]     = useState("");
   const [dateTo,       setDateTo]       = useState("");
@@ -65,6 +68,9 @@ export default function Transactions({
     if (filterMonth)  list = list.filter(e => ym(e.tx_date) === filterMonth);
     if (filterEntity) list = list.filter(e => e.entity === filterEntity);
     if (filterAccId)  list = list.filter(e => e.from_id === filterAccId || e.to_id === filterAccId);
+    if (filterCatId === "__none")
+      list = list.filter(e => !e.category_id && (e.tx_type === "expense" || e.tx_type === "reimburse_out"));
+    else if (filterCatId) list = list.filter(e => e.category_id === filterCatId);
     if (dateFrom)     list = list.filter(e => e.tx_date && e.tx_date >= dateFrom);
     if (dateTo)       list = list.filter(e => e.tx_date && e.tx_date <= dateTo);
     if (search) {
@@ -87,7 +93,7 @@ export default function Transactions({
       }
     }
     return list;
-  }, [ledger, subTab, filterMonth, filterEntity, filterAccId, dateFrom, dateTo, search, accountNameById]);
+  }, [ledger, subTab, filterMonth, filterEntity, filterAccId, filterCatId, dateFrom, dateTo, search, accountNameById]);
 
   const sorted = useMemo(() => {
     const arr = [...filtered];
@@ -105,7 +111,7 @@ export default function Transactions({
   // Windowed render: only the first N rows hit the DOM (ledger is 1000+ rows);
   // "Load more" reveals the rest. Reset when the filter/sort changes.
   const [visibleCount, setVisibleCount] = useState(120);
-  useEffect(() => { setVisibleCount(120); }, [subTab, filterMonth, filterEntity, filterAccId, dateFrom, dateTo, search, txSort]);
+  useEffect(() => { setVisibleCount(120); }, [subTab, filterMonth, filterEntity, filterAccId, filterCatId, dateFrom, dateTo, search, txSort]);
   const windowed = useMemo(() => sorted.slice(0, visibleCount), [sorted, visibleCount]);
   const grouped = useMemo(() => groupByDate(windowed), [windowed]);
   const hiddenCount = sorted.length - windowed.length;
@@ -255,6 +261,11 @@ export default function Transactions({
         <select value={filterAccId} onChange={e => setFilterAccId(e.target.value)} style={FILTER_SELECT}>
           <option value="">All accounts</option>
           {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+        <select value={filterCatId} onChange={e => setFilterCatId(e.target.value)} style={FILTER_SELECT}>
+          <option value="">All categories</option>
+          <option value="__none">(no category)</option>
+          {(categories || []).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
         <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
           <input
@@ -515,6 +526,7 @@ function TxRow({ entry: e, accounts, categories = [], onEdit, onDelete }) {
   const isMove   = ["transfer","fx_exchange"].includes(e.tx_type);
 
   const catDef   = categories?.find(c => c.id === e.category_id);
+  const catLabelRaw = e.category_name || catDef?.name || null;
   const isReimOut = e.tx_type === "reimburse_out";
   const isReimIn  = e.tx_type === "reimburse_in";
   // reimburse settles later → not a real expense/income: amber (out) / teal (in)
@@ -522,11 +534,18 @@ function TxRow({ entry: e, accounts, categories = [], onEdit, onDelete }) {
     : isOut ? "#dc2626" : isIn ? "#059669" : "#3b5bdb";
   const prefix   = isOut ? "−" : isIn ? "+" : "";
 
-  const iconColor = isReimOut ? "#d97706" : isReimIn ? "#0891b2"
-    : (catDef?.color || (isOut ? "#dc2626" : isIn ? "#059669" : "#2563eb"));
-  const iconEmoji = catDef?.icon || (isReimOut ? "↻" : isReimIn ? "↺" : isOut ? "↑" : isIn ? "↓" : "↔");
-  const iconBg    = catDef ? catDef.color + "18"
-    : isReimOut ? "#d9770618" : isReimIn ? "#0891b218"
+  // Ikon & warna dari sistem bersama lib/categoryIcons (ubin pastel lucide),
+  // sama seperti Dashboard/Budget/Income. Kolom expense_categories.icon (emoji)
+  // dan .color sengaja TIDAK dipakai untuk merender.
+  const catVis  = catLabelRaw ? getCategoryVisual(catLabelRaw) : null;
+  const RowIcon = catVis ? catVis.Icon
+    : isReimOut ? RotateCw : isReimIn ? RotateCcw
+    : isOut ? ArrowUp : isIn ? ArrowDown : ArrowLeftRight;
+  const iconColor = catVis ? catVis.fg
+    : isReimOut ? "#b45309" : isReimIn ? "#0e7490"
+    : isOut ? "#dc2626" : isIn ? "#059669" : "#3b5bdb";
+  const iconBg    = catVis ? catVis.bg
+    : isReimOut ? "#fef3c7" : isReimIn ? "#cffafe"
     : isOut ? "#fee2e2" : isIn ? "#dcfce7" : "#dbeafe";
 
   const expandedContent = isTwoDir ? getTxExpandedContent(e, fromAcc, toAcc) : null;
@@ -642,7 +661,7 @@ function TxRow({ entry: e, accounts, categories = [], onEdit, onDelete }) {
           display: "flex", alignItems: "center", justifyContent: "center",
           fontSize: 16, flexShrink: 0,
         }}>
-          {iconEmoji}
+          <RowIcon size={16} strokeWidth={2} />
         </div>
 
         {/* Center */}
@@ -679,8 +698,8 @@ function TxRow({ entry: e, accounts, categories = [], onEdit, onDelete }) {
 
         {/* Actions */}
         <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-          <button className="row-act" onClick={ev => { ev.stopPropagation(); onEdit(); }} style={ROW_BTN}>✎</button>
-          <button className="row-act" onClick={ev => { ev.stopPropagation(); onDelete(); }} style={{ ...ROW_BTN, color: "#dc2626", borderColor: "#fecaca" }}>✕</button>
+          <button className="row-act" onClick={ev => { ev.stopPropagation(); onEdit(); }} style={ROW_BTN} title="Edit"><Pencil size={13} strokeWidth={2} /></button>
+          <button className="row-act" onClick={ev => { ev.stopPropagation(); onDelete(); }} style={{ ...ROW_BTN, color: "#dc2626", borderColor: "#fecaca" }} title="Hapus"><X size={13} strokeWidth={2} /></button>
         </div>
       </div>
 
