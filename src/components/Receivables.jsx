@@ -1072,7 +1072,12 @@ export default function Receivables({
               const displayIn  = sugg ? sugg.orderedIn  : inRows;
               const pairIdx = sugg ? sugg.pairIndex : {};
 
-              const entitySettlements = settlements.filter(s => s.entity === r.entity);
+              // Urut menurut tanggal transaksinya (settled_at = tanggal uang masuk),
+              // terbaru di atas. Tanpa ini daftarnya mengikuti urutan pembuatan baris
+              // di database — Jan, Agu, Mar berselang-seling.
+              const entitySettlements = settlements
+                .filter(s => s.entity === r.entity)
+                .sort((a, b) => String(b.settled_at || "").localeCompare(String(a.settled_at || "")));
 
               const selOut = selectedOut[r.id] || new Set();
               const selIn  = selectedIn[r.id]  || new Set();
