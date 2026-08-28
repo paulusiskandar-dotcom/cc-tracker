@@ -17,6 +17,22 @@ const KOTAK = {
   fontSize: 12, fontFamily: "Figtree, sans-serif", background: "#fff", color: "#374151",
   width: "100%", boxSizing: "border-box",
 };
+// Arah uang harus sama dengan transaksi aslinya — lihat splitLedgerEntry.
+// Satu tagihan boleh separuh biaya pribadi, separuh piutang (kasus Siti Sarnah).
+const JENIS = {
+  expense:       "Expense",
+  reimburse_out: "Reimburse out",
+  income:        "Income",
+  reimburse_in:  "Reimburse in",
+};
+const ARAH_KELUAR = ["expense", "reimburse_out"];
+const ARAH_MASUK  = ["income", "reimburse_in"];
+const isReimburse = (t) => t === "reimburse_out" || t === "reimburse_in";
+const ribuan = (v) => {
+  const d = String(v ?? "").replace(/[^\d]/g, "");
+  return d ? Number(d).toLocaleString("id-ID") : "";
+};
+
 const LABEL = {
   fontSize: 9, fontWeight: 700, color: "#9ca3af", letterSpacing: "0.5px",
   textTransform: "uppercase", fontFamily: "Figtree, sans-serif", marginBottom: 3,
@@ -29,9 +45,13 @@ export default function SplitModal({ isOpen, onClose, entry, categories = [], ta
 
   useEffect(() => {
     if (!isOpen || !entry) return;
+    const dasar = {
+      description: entry.description || "", tx_type: entry.tx_type,
+      category_id: entry.category_id || "", entity: entry.entity || "Personal", tag_id: "",
+    };
     setParts([
-      { amount: String(total), description: entry.description || "", category_id: entry.category_id || "", entity: entry.entity || "Personal", tag_id: entry.tag_id || "" },
-      { amount: "", description: entry.description || "", category_id: entry.category_id || "", entity: entry.entity || "Personal", tag_id: "" },
+      { ...dasar, amount: String(total), tag_id: entry.tag_id || "" },
+      { ...dasar, amount: "" },
     ]);
   }, [isOpen, entry, total]);
 
@@ -43,8 +63,12 @@ export default function SplitModal({ isOpen, onClose, entry, categories = [], ta
   const ubah = (i, k, v) => setParts(ps => ps.map((p, j) => j === i ? { ...p, [k]: v } : p));
   const tambah = () => setParts(ps => [...ps, {
     amount: String(Math.max(0, sisa)), description: entry?.description || "",
-    category_id: entry?.category_id || "", entity: entry?.entity || "Personal", tag_id: "",
+    tx_type: entry?.tx_type, category_id: entry?.category_id || "",
+    entity: entry?.entity || "Personal", tag_id: "",
   }]);
+  const jenisBoleh = ARAH_KELUAR.includes(entry?.tx_type) ? ARAH_KELUAR
+                   : ARAH_MASUK.includes(entry?.tx_type)  ? ARAH_MASUK
+                   : [entry?.tx_type];
   const buang = (i) => setParts(ps => ps.length > 2 ? ps.filter((_, j) => j !== i) : ps);
 
   // Sisa dilempar ke bagian TERAKHIR, bukan dibagi rata: pembagian rata menimbulkan
@@ -62,6 +86,7 @@ export default function SplitModal({ isOpen, onClose, entry, categories = [], ta
       const hasil = await splitLedgerEntry(entry.id, parts.map(p => ({
         amount: angka(p.amount),
         description: p.description?.trim() || entry.description,
+        tx_type: p.tx_type || entry.tx_type,
         category_id: p.category_id || null,
         category_name: kat(p.category_id)?.name || null,
         entity: p.entity,
@@ -145,7 +170,7 @@ export default function SplitModal({ isOpen, onClose, entry, categories = [], ta
           <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: 8, marginBottom: 8 }}>
             <div>
               <div style={LABEL}>Amount</div>
-              <input value={p.amount} inputMode="numeric"
+              <input value={ribuan(p.amount)} inputMode="numeric"
                 onChange={e => ubah(i, "amount", e.target.value.replace(/[^\d]/g, ""))}
                 style={{ ...KOTAK, fontWeight: 700, textAlign: "right", fontVariantNumeric: "tabular-nums" }} />
             </div>
@@ -154,21 +179,35 @@ export default function SplitModal({ isOpen, onClose, entry, categories = [], ta
               <input value={p.description} onChange={e => ubah(i, "description", e.target.value)} style={KOTAK} />
             </div>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 120px 1fr", gap: 8 }}>
+          {/* Entitas hanya bermakna pada baris reimburse — sama seperti form transaksi.
+              Selain itu entitasnya selalu Personal, jadi tidak ditawarkan. */}
+          <div style={{ display: "grid",
+                        gridTemplateColumns: isReimburse(p.tx_type) ? "150px 120px 1fr" : "150px 1fr 1fr",
+                        gap: 8 }}>
             <div>
-              <div style={LABEL}>Category</div>
-              <select value={p.category_id} onChange={e => ubah(i, "category_id", e.target.value)} style={KOTAK}>
-                <option value="">—</option>
-                {[...categories].sort((a, b) => a.name.localeCompare(b.name))
-                  .map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              <div style={LABEL}>Type</div>
+              <select value={p.tx_type} disabled={jenisBoleh.length < 2}
+                onChange={e => ubah(i, "tx_type", e.target.value)} style={KOTAK}>
+                {jenisBoleh.map(t => <option key={t} value={t}>{JENIS[t] || t}</option>)}
               </select>
             </div>
-            <div>
-              <div style={LABEL}>Entity</div>
-              <select value={p.entity} onChange={e => ubah(i, "entity", e.target.value)} style={KOTAK}>
-                {ENTITIES.map(en => <option key={en} value={en}>{en}</option>)}
-              </select>
-            </div>
+            {isReimburse(p.tx_type) ? (
+              <div>
+                <div style={LABEL}>Entity</div>
+                <select value={p.entity} onChange={e => ubah(i, "entity", e.target.value)} style={KOTAK}>
+                  {ENTITIES.map(en => <option key={en} value={en}>{en}</option>)}
+                </select>
+              </div>
+            ) : (
+              <div>
+                <div style={LABEL}>Category</div>
+                <select value={p.category_id} onChange={e => ubah(i, "category_id", e.target.value)} style={KOTAK}>
+                  <option value="">—</option>
+                  {[...categories].sort((a, b) => a.name.localeCompare(b.name))
+                    .map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+            )}
             <div>
               <div style={LABEL}>Tag</div>
               <select value={p.tag_id} onChange={e => ubah(i, "tag_id", e.target.value)} style={KOTAK}>

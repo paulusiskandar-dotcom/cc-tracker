@@ -696,7 +696,13 @@ export const ledgerApi = {
 // Dry run 2026-08-28 atas 4 statement bank sungguhan: 3, 5, dan 9 bagian tetap
 // kembali ke baris statement yang sama tanpa menggeser baris lain; tanpa
 // split_group_id, 5 bagian langsung gagal total (0/5 cocok, +5 "lebih").
-// Entitas dan kategori BOLEH berbeda antar bagian (keputusan Paulus).
+// Entitas dan kategori BOLEH berbeda antar bagian (keputusan Paulus), begitu pula
+// JENIS transaksinya — selama arah uangnya sama. Satu tagihan bisa separuh biaya
+// pribadi dan separuh piutang (kasus Siti Sarnah). Aman untuk saldo karena
+// expense dan reimburse_out menarik dari akun yang sama persis; yang berbeda
+// hanya sisi lawannya (piutang), dan itu memang yang ingin dibedakan.
+const ARAH_KELUAR = ["expense", "reimburse_out"];
+const ARAH_MASUK  = ["income", "reimburse_in"];
 export const splitLedgerEntry = async (id, parts) => {
   const { data: asli, error: eGet } = await supabase
     .from("ledger").select("*").eq("id", id).single();
@@ -718,37 +724,74 @@ export const splitLedgerEntry = async (id, parts) => {
   if (jumlah !== total)
     throw new Error(`Jumlah bagian ${jumlah.toLocaleString("id-ID")} tidak sama dengan nominal aslinya ${total.toLocaleString("id-ID")}. Selisih ${(jumlah - total).toLocaleString("id-ID")}.`);
 
+  const jenisBoleh = ARAH_KELUAR.includes(asli.tx_type) ? ARAH_KELUAR
+                   : ARAH_MASUK.includes(asli.tx_type)  ? ARAH_MASUK
+                   : [asli.tx_type];
+  for (const p of parts) {
+    const t = p.tx_type || asli.tx_type;
+    if (!jenisBoleh.includes(t))
+      throw new Error(`Bagian tidak boleh berjenis "${t}" — arah uangnya harus sama dengan transaksi aslinya.`);
+  }
+
   const gid = (typeof crypto !== "undefined" && crypto.randomUUID)
     ? crypto.randomUUID() : null;
   if (!gid) throw new Error("Browser ini tidak bisa membuat id grup — pemecahan dibatalkan supaya bagiannya tidak lepas satu sama lain.");
 
+  // Entitas hanya bermakna pada baris reimburse — sama seperti form transaksi
+  // (showEntity di TxVerticalBig). Selain itu selalu Personal.
+  const { data: akun } = await supabase.from("accounts")
+    .select("id, name").eq("user_id", asli.user_id).eq("type", "receivable");
+  const sisi = (t, entity) => {
+    if (t === "expense")       return { from_type: "account", from_id: asli.from_id, to_type: "expense", to_id: null };
+    if (t === "reimburse_out") return { from_type: "account", from_id: asli.from_id, to_type: "account",
+                                        to_id: (akun || []).find(a => a.name === `Piutang ${entity}`)?.id || null };
+    if (t === "income")        return { from_type: "income_source", from_id: asli.from_type === "income_source" ? asli.from_id : null,
+                                        to_type: "account", to_id: asli.to_id };
+    if (t === "reimburse_in")  return { from_type: "expense", from_id: null, to_type: "account", to_id: asli.to_id };
+    return { from_type: asli.from_type, from_id: asli.from_id, to_type: asli.to_type, to_id: asli.to_id };
+  };
+  const rapikanBagian = (p) => {
+    const t = p.tx_type || asli.tx_type;
+    const reimburse = t === "reimburse_out" || t === "reimburse_in";
+    const entity = reimburse ? (p.entity || asli.entity || "Personal") : "Personal";
+    return {
+      t, entity,
+      category_id:   reimburse ? null : (p.category_id ?? asli.category_id),
+      category_name: reimburse ? null : (p.category_name ?? asli.category_name),
+      ...sisi(t, entity),
+    };
+  };
+
   // Bagian pertama = baris ASLINYA, dikecilkan. Semua kaitan yang punya
   // pembukuan sendiri (cicilan, pinjaman karyawan, template berulang, sinkron
   // email) ikut tinggal di sini — kalau tersalin ke tiap bagian, hitungannya dobel.
-  const p0 = parts[0];
+  const p0 = parts[0], b0 = rapikanBagian(p0);
   const { error: eUpd } = await supabase.from("ledger").update({
     amount: nilai[0], amount_idr: nilai[0],
     description:   p0.description || asli.description,
-    category_id:   p0.category_id ?? asli.category_id,
-    category_name: p0.category_name ?? asli.category_name,
-    entity:        p0.entity ?? asli.entity,
+    tx_type:       b0.t,
+    category_id:   b0.category_id, category_name: b0.category_name,
+    entity:        b0.entity,
+    from_type: b0.from_type, from_id: b0.from_id,
+    to_type:   b0.to_type,   to_id:   b0.to_id,
     tag_id:        p0.tag_id ?? asli.tag_id ?? null,
     split_group_id: gid,
   }).eq("id", asli.id);
   if (eUpd) throw new Error(eUpd.message);
 
-  const baru = parts.slice(1).map((p, i) => ({
+  const baru = parts.slice(1).map((p, i) => {
+   const b = rapikanBagian(p);
+   return {
     user_id: asli.user_id,
     tx_date: asli.tx_date,
-    tx_type: asli.tx_type,
+    tx_type: b.t,
     amount: nilai[i + 1], amount_idr: nilai[i + 1], currency: "IDR",
     description:   p.description || asli.description,
-    category_id:   p.category_id ?? asli.category_id,
-    category_name: p.category_name ?? asli.category_name,
-    entity:        p.entity ?? asli.entity,
+    category_id:   b.category_id, category_name: b.category_name,
+    entity:        b.entity,
     tag_id:        p.tag_id ?? null,
-    from_type: asli.from_type, from_id: asli.from_id,
-    to_type:   asli.to_type,   to_id:   asli.to_id,
+    from_type: b.from_type, from_id: b.from_id,
+    to_type:   b.to_type,   to_id:   b.to_id,
     merchant_name: asli.merchant_name,
     source: asli.source,
     is_reimburse: asli.is_reimburse,
@@ -757,7 +800,8 @@ export const splitLedgerEntry = async (id, parts) => {
     reconciled_at: asli.reconciled_at,
     split_group_id: gid,
     notes: p.notes ?? null,
-  }));
+   };
+  });
   const { data: hasil, error: eIns } = await supabase.from("ledger").insert(baru).select();
   if (eIns) {
     // Kembalikan baris aslinya supaya tidak tertinggal separuh terpecah.
@@ -771,7 +815,10 @@ export const splitLedgerEntry = async (id, parts) => {
 
   // Total tidak berubah dan semua bagian di akun yang sama, jadi saldo mestinya
   // tetap. Dihitung ulang supaya kepastiannya datang dari ledger, bukan asumsi.
-  for (const accId of [...new Set([asli.from_id, asli.to_id].filter(Boolean))]) {
+  const tersentuh = [asli.from_id, asli.to_id,
+    ...(hasil || []).flatMap(r => [r.from_id, r.to_id]),
+    ...(akun || []).map(a => a.id)];
+  for (const accId of [...new Set(tersentuh.filter(Boolean))]) {
     try { await recalculateBalance(accId, asli.user_id); }
     catch (e) { console.error("[splitLedgerEntry recalc]", e?.message); }
   }
