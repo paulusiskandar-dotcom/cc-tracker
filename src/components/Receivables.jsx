@@ -205,6 +205,9 @@ function cariBarisSelisih(ledger, s) {
 const KAT_SELISIH = "6cc50f51-b1fc-4dbd-8f1f-32010b60dfb3"; // Bank & Card Fees
 function labelSelisih(row, incomeSrcs) {
   if (!row) return "not recorded";
+  // Pembulatan setoran namanya sama di kedua sisi — kurang maupun lebih. Label
+  // ikut deskripsi barisnya, bukan menebak dari ambang atau kategori.
+  if (/^Payment difference/i.test(row.description || "")) return "Payment difference";
   if (row.tx_type === "income")
     return incomeSrcs.find(x => x.id === row.from_id)?.name || "Other Income";
   if (row.category_id === KAT_SELISIH) return "Payment difference";
@@ -726,9 +729,11 @@ export default function Receivables({
         const { error: sErr } = await supabase.from("ledger").insert([{
           user_id: user.id,
           tx_date: settledAtForInsert,
-          description: pilih === "utility"
-            ? `Electricity margin (${entity})`
-            : `Over on finalize — ${entity}`,
+          description: surplus <= AMBANG_SELISIH
+            ? `Payment difference — ${entity}`
+            : pilih === "utility"
+              ? `Electricity margin (${entity})`
+              : `Over on finalize — ${entity}`,
           amount: surplus, amount_idr: surplus, currency: "IDR",
           tx_type: "income",
           from_type: "income_source", from_id: srcId,
