@@ -666,8 +666,19 @@ export default function Receivables({
     { key: "date",    label: "Date",    defaultDir: "desc" },
     { key: "amount",  label: "Amount",  defaultDir: "desc" },
   ];
-  const [urutOut, setUrutOut] = useState({});
-  const [urutIn,  setUrutIn]  = useState({});
+  // Satu kontrol untuk KEDUA kolom — Out dan In selalu diurutkan sama, karena
+  // keduanya dibaca berpasangan saat mencocokkan.
+  const [urutKolom, setUrutKolom] = useState({});
+  // Saring bulan, berlaku untuk kedua kolom. Baris yang tersaring tetap terpilih
+  // kalau sudah dipilih — totalnya terlihat di ringkasan atas, jadi tidak diam-diam.
+  const [bulanKolom, setBulanKolom] = useState({});
+  const NAMA_BULAN = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
+  const labelBulan = (ym) => {
+    const [y, m] = ym.split("-");
+    return `${NAMA_BULAN[Number(m) - 1]} ${y}`;
+  };
+  const saringBulan = (baris, ym) =>
+    !ym ? baris : baris.filter(e => String(e.tx_date || "").slice(0, 7) === ym);
   const urutkan = (baris, nilai, urutanSaran) => {
     const i = String(nilai || "").lastIndexOf("_");
     const kunci = i > 0 ? nilai.slice(0, i) : "suggest";
@@ -1095,10 +1106,12 @@ export default function Receivables({
               const inRows  = allInRows.filter(e => !e.reimburse_settlement_id);
               // Suggested match: reorder both columns so likely pairs align at top + badge them
               const sugg = suggestMatch ? suggestReimbursePairs(outRows, inRows) : null;
-              const nilaiUrutOut = urutOut[r.id] || "suggest_desc";
-              const nilaiUrutIn  = urutIn[r.id]  || "suggest_desc";
-              const displayOut = urutkan(outRows, nilaiUrutOut, sugg ? sugg.orderedOut : null);
-              const displayIn  = urutkan(inRows,  nilaiUrutIn,  sugg ? sugg.orderedIn  : null);
+              const nilaiUrut  = urutKolom[r.id] || "suggest_desc";
+              const bulanDipilih = bulanKolom[r.id] || "";
+              const bulanTersedia = [...new Set([...outRows, ...inRows]
+                .map(e => String(e.tx_date || "").slice(0, 7)).filter(Boolean))].sort().reverse();
+              const displayOut = urutkan(saringBulan(outRows, bulanDipilih), nilaiUrut, sugg ? sugg.orderedOut : null);
+              const displayIn  = urutkan(saringBulan(inRows,  bulanDipilih), nilaiUrut, sugg ? sugg.orderedIn  : null);
               const pairIdx = sugg ? sugg.pairIndex : {};
 
               // Urut menurut tanggal transaksinya (settled_at = tanggal uang masuk),
@@ -1137,7 +1150,27 @@ export default function Receivables({
                           {outstanding < 0 ? "overpaid" : "outstanding"}
                         </div>
                       </div>
-                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                        <select
+                          value={bulanDipilih}
+                          onChange={e => setBulanKolom(prev => ({ ...prev, [r.id]: e.target.value }))}
+                          style={{ height: 32, padding: "0 10px", borderRadius: 8,
+                                   border: "1px solid #e5e7eb", background: "#fff",
+                                   color: "#374151", fontSize: 11, fontWeight: 600,
+                                   fontFamily: "Figtree, sans-serif", cursor: "pointer" }}
+                        >
+                          <option value="">All months</option>
+                          {bulanTersedia.map(ym => <option key={ym} value={ym}>{labelBulan(ym)}</option>)}
+                        </select>
+                        <SortDropdown
+                          storageKey={`sort_reim_${r.entity}`}
+                          options={PILIHAN_URUT}
+                          value={nilaiUrut}
+                          onChange={v => setUrutKolom(prev => ({ ...prev, [r.id]: v }))}
+                          buttonStyle={{ height: 32, padding: "0 12px", borderRadius: 8,
+                                         border: "1px solid #e5e7eb", background: "#fff",
+                                         color: "#374151", fontSize: 11, fontWeight: 600 }}
+                        />
                         <button
                           onClick={() => navigate(`/reimburse/${r.entity}/statement`)}
                           style={{ height: 32, padding: "0 12px", border: "1px solid #e5e7eb", borderRadius: 8, cursor: "pointer", background: "#fff", color: "#374151", fontSize: 11, fontWeight: 600, fontFamily: "Figtree, sans-serif" }}
@@ -1258,16 +1291,8 @@ export default function Receivables({
                     <div className="settle-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 10 }}>
                       {/* Left: Expenses OUT */}
                       <div>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: "#dc2626", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif" }}>
-                            Expenses (Out)
-                          </div>
-                          <SortDropdown
-                            storageKey={`sort_reim_out_${r.entity}`}
-                            options={PILIHAN_URUT}
-                            value={nilaiUrutOut}
-                            onChange={v => setUrutOut(prev => ({ ...prev, [r.id]: v }))}
-                          />
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#dc2626", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif", marginBottom: 6 }}>
+                          Expenses (Out)
                         </div>
                         {displayOut.length === 0 ? (
                           <div style={{ fontSize: 11, color: "#9ca3af", padding: "6px 0" }}>No expenses recorded</div>
@@ -1308,16 +1333,8 @@ export default function Receivables({
 
                       {/* Right: Received IN */}
                       <div>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: "#059669", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif" }}>
-                            Received (In)
-                          </div>
-                          <SortDropdown
-                            storageKey={`sort_reim_in_${r.entity}`}
-                            options={PILIHAN_URUT}
-                            value={nilaiUrutIn}
-                            onChange={v => setUrutIn(prev => ({ ...prev, [r.id]: v }))}
-                          />
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#059669", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif", marginBottom: 6 }}>
+                          Received (In)
                         </div>
                         {displayIn.length === 0 ? (
                           <div style={{ fontSize: 11, color: "#9ca3af", padding: "6px 0" }}>No payments received</div>

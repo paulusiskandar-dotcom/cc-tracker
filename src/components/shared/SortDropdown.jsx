@@ -13,7 +13,7 @@
 
 import { useState, useRef, useEffect } from "react";
 
-export default function SortDropdown({ options = [], value = "", onChange, storageKey }) {
+export default function SortDropdown({ options = [], value = "", onChange, storageKey, buttonStyle }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -62,6 +62,7 @@ export default function SortDropdown({ options = [], value = "", onChange, stora
           cursor: "pointer", fontFamily: "Figtree, sans-serif",
           display: "flex", alignItems: "center", gap: 4,
           whiteSpace: "nowrap", lineHeight: 1,
+          ...(buttonStyle || {}),
         }}
       >
         <span style={{ fontWeight: 700, color: open ? "#fff" : "#111827" }}>
