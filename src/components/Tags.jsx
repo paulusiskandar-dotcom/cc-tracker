@@ -5,6 +5,7 @@ import { fmtIDR } from "../utils";
 import { showToast } from "./shared/Card";
 import { Plane, Briefcase, CalendarDays, Tag as TagIcon } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip } from "recharts";
+import { DrillDownModal } from "./Reports";
 
 const FF = "Figtree, system-ui, -apple-system, sans-serif";
 
@@ -446,6 +447,7 @@ function TagDetailView({ tag, user, ledger, onBack, onRefresh, onEdit, editTag, 
   const [filterSearch,    setFilterSearch]    = useState("");
   const [showAllTypes,    setShowAllTypes]    = useState(false);
   const [busy,            setBusy]            = useState(false);
+  const [rincian,         setRincian]         = useState(null);   // kategori yang dibuka
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -508,9 +510,10 @@ function TagDetailView({ tag, user, ledger, onBack, onRefresh, onEdit, editTag, 
     for (const e of taggedEntries) {
       if (!["expense", "buy_asset"].includes(e.tx_type)) continue;
       const k = e.category_name || "Uncategorised";
-      (m[k] = m[k] || { name: k, total: 0, count: 0 });
+      (m[k] = m[k] || { name: k, total: 0, count: 0, txs: [] });
       m[k].total += Number(e.amount_idr || e.amount || 0);
       m[k].count += 1;
+      m[k].txs.push(e);
     }
     const arr = Object.values(m).sort((a, b) => b.total - a.total);
     const tot = arr.reduce((s, c) => s + c.total, 0) || 1;
@@ -680,7 +683,9 @@ function TagDetailView({ tag, user, ledger, onBack, onRefresh, onEdit, editTag, 
               </div>
             </div>
             {kategori.map((c, i) => (
-              <div key={c.name} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, padding: "4px 0" }}>
+              <div key={c.name}
+                   onClick={() => setRincian({ title: c.name, transactions: c.txs })}
+                   style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, padding: "4px 0", cursor: "pointer" }}>
                 <div style={{ width: 8, height: 8, borderRadius: "50%", background: PIE_COLORS[i % PIE_COLORS.length], flexShrink: 0 }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -767,6 +772,15 @@ function TagDetailView({ tag, user, ledger, onBack, onRefresh, onEdit, editTag, 
           ))
         )}
       </div>
+
+      {/* Rincian per kategori — komponen yang sama dengan Reports, bukan tiruan,
+          supaya isinya selalu sejalan kalau salah satunya berubah. */}
+      <DrillDownModal
+        open={!!rincian}
+        onClose={() => setRincian(null)}
+        title={rincian?.title || ""}
+        transactions={rincian?.transactions || []}
+      />
 
       {/* Edit modal (reuse from parent scope via prop) */}
       {editTag && (

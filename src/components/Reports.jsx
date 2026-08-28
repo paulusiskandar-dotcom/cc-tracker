@@ -440,7 +440,7 @@ function HBar({ label, value, max, color, pct, count, onClick }) {
   );
 }
 
-function DrillDownModal({ open, onClose, title, transactions }) {
+export function DrillDownModal({ open, onClose, title, transactions }) {
   if (!open) return null;
   // Refund rows carry a minus here, so the modal total equals the bar it came from.
   const total = transactions.reduce((s, t) => s + (t._ccRefund ? -1 : 1) * Number(t.amount_idr || 0), 0);
