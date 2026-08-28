@@ -298,9 +298,21 @@ export const ledgerApi = {
       if (Math.abs(total - amt) > 2) return null;
       if (safeEntry.currency && safeEntry.currency !== "IDR") return null;
       if (!safeEntry.from_id) return null;
+      // Tanpa crypto.randomUUID tidak ada id kelompok → biarkan UTUH. Baris utuh
+      // masih cocok dengan statement; pecahan tanpa ikatan tidak.
+      if (!safeEntry.split_group_id && typeof crypto === "undefined") return null;
       return { kirim, fee, ke: _paper_split.ke || "", ref: _paper_split.ref || "" };
     })();
+    // split_group_id WAJIB: rekonsiliasi statement ("Pass 0 — SPLIT GROUPS" di
+    // gmail-estatement & ReconcileOverlay) menjumlahkan baris se-grup jadi SATU
+    // transaksi = satu baris statement, lalu menguncinya. Tanpa ini, statement
+    // mencari 47.937.677 tapi ledger cuma punya 47.205.000 dan 732.677 yang
+    // berdiri sendiri → baris dilaporkan HILANG dan berisiko ditambahkan dobel.
+    let paperGroupId = null;
     if (pecahPaper) {
+      paperGroupId = safeEntry.split_group_id
+        || (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : null);
+      safeEntry.split_group_id = paperGroupId;
       safeEntry.amount     = pecahPaper.kirim;
       safeEntry.amount_idr = pecahPaper.kirim;
       safeEntry.description = `${safeEntry.description || ""}`.slice(0, 180);
@@ -396,6 +408,7 @@ export const ledgerApi = {
           category_name: kat?.name || "Bank & Card Fees",
           description:  `Fee Paper.id${pecahPaper.ke ? " — " + pecahPaper.ke : ""}`.slice(0, 180),
           source:       "paper-split",
+          split_group_id: paperGroupId,
           notes:        `pecahan fee dari tagihan Paper${pecahPaper.ref ? " (ref " + pecahPaper.ref + ")" : ""}; bukan piutang`,
         }]);
       } catch (e) {
