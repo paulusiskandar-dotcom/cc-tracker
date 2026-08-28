@@ -1330,19 +1330,19 @@ export default function Receivables({
                                     fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif",
                                     fontVariantNumeric: "tabular-nums",
                                   }}>
-                                    <span style={{ display: "inline-grid", gridTemplateColumns: "20px 80px", columnGap: 4 }}>
+                                    <span style={{ display: "inline-grid", gridTemplateColumns: "20px 14ch", columnGap: 4 }}>
                                       <span style={{ textAlign: "right" }}>Out</span>
-                                      <span style={{ textAlign: "right", color: "#6b7280" }}>{fmtIDR(Number(s.total_out || 0))}</span>
+                                      <span style={{ textAlign: "right", color: "#6b7280", whiteSpace: "nowrap" }}>{fmtIDR(Number(s.total_out || 0))}</span>
                                     </span>
-                                    <span style={{ display: "inline-grid", gridTemplateColumns: "20px 80px", columnGap: 4 }}>
+                                    <span style={{ display: "inline-grid", gridTemplateColumns: "20px 14ch", columnGap: 4 }}>
                                       <span style={{ textAlign: "right" }}>In</span>
-                                      <span style={{ textAlign: "right", color: "#6b7280" }}>{fmtIDR(Number(s.total_in || 0))}</span>
+                                      <span style={{ textAlign: "right", color: "#6b7280", whiteSpace: "nowrap" }}>{fmtIDR(Number(s.total_in || 0))}</span>
                                     </span>
-                                    <span style={{ display: "inline-grid", gridTemplateColumns: "80px auto", columnGap: 5 }}>
-                                      <span style={{ textAlign: "right", fontWeight: 700, color: sReColor }}>
+                                    <span style={{ display: "inline-grid", gridTemplateColumns: "14ch auto", columnGap: 5 }}>
+                                      <span style={{ textAlign: "right", fontWeight: 700, color: sReColor, whiteSpace: "nowrap" }}>
                                         {sNet === 0 ? "Rp 0" : `${sIsSurp ? "+" : ""}${fmtIDR(Math.abs(sNet))}`}
                                       </span>
-                                      <span style={{ color: sReColor }}>{sReLabel}</span>
+                                      <span style={{ color: sReColor, whiteSpace: "nowrap" }}>{sReLabel}</span>
                                     </span>
                                   </div>
                                 </div>
