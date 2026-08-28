@@ -1388,7 +1388,9 @@ async function handlePartialSettle(entity: string, outStr: string, inStr: string
 
 // Execute a settlement over the selected out/in rows (replicates app handleSettleEntity).
 async function executeSettle(entity: string, selOut: any[], selIn: any[], supabase: any, uid: string, token: string, chatId: number) {
-  const LOSS_CAT = "e054e34e-9251-461b-a118-718077cf3293";
+  // Kategori "Reimbursable Loss" dihapus 2026-08-28 — selisih pelunasan kini
+  // masuk Bank & Card Fees (fee Paper sudah dipecah di sumbernya).
+  const LOSS_CAT = "6cc50f51-b1fc-4dbd-8f1f-32010b60dfb3"; // Bank & Card Fees
   const SURPLUS_SRC = "0afb406d-fc3d-49af-a002-c40d3d865c4d";
   if (!selOut.length && !selIn.length) { await sendTelegramHTML(token, chatId, `⚠️ Ga ada yang dipilih buat settle.`); return; }
   const outIds = selOut.map((r) => r.id), inIds = selIn.map((r) => r.id);
@@ -1403,14 +1405,14 @@ async function executeSettle(entity: string, selOut: any[], selIn: any[], supaba
   }]).select().single();
   if (error) { await sendTelegramHTML(token, chatId, "❌ Gagal settle: " + esc(error.message)); return; }
   if (reimbursable > 0) await supabase.from("ledger").insert([{
-    user_id: uid, tx_date: today, description: `${entity} Reimbursable Loss`,
+    user_id: uid, tx_date: today, description: `Selisih pelunasan ${entity}`,
     amount: reimbursable, amount_idr: reimbursable, currency: "IDR",
     tx_type: "expense", from_type: null, to_type: "expense", from_id: null, to_id: null,
-    category_id: LOSS_CAT, category_name: "Reimbursable Loss", entity, is_reimburse: false,
+    category_id: LOSS_CAT, category_name: "Bank & Card Fees", entity, is_reimburse: false,
     notes: `Settlement: ${entity}`, reimburse_settlement_id: settlement.id,
   }]);
   if (surplus > 0) await supabase.from("ledger").insert([{
-    user_id: uid, tx_date: today, description: `${entity} Reimbursable Surplus`,
+    user_id: uid, tx_date: today, description: `Kelebihan pelunasan ${entity}`,
     amount: surplus, amount_idr: surplus, currency: "IDR",
     tx_type: "income", from_type: "income_source", from_id: SURPLUS_SRC, to_type: null, to_id: null,
     category_id: null, category_name: null, entity, is_reimburse: false,

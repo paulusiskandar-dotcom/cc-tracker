@@ -545,7 +545,11 @@ export default function Receivables({
       .then(({ data }) => { if (data) setSettlements(data); });
   }, [user?.id]);
 
-  const REIMBURSABLE_LOSS_CATEGORY_ID   = 'e054e34e-9251-461b-a118-718077cf3293';
+  // Kategori "Reimbursable Loss" DIHAPUS 2026-08-28. Sejak fee Paper dipecah di
+  // sumbernya (lihat _shared/paperSplit.ts), selisih pelunasan bukan lagi "kerugian"
+  // melainkan sisa pembulatan — masuk Bank & Card Fees seperti biaya kanal lainnya.
+  // Kerugian piutang SUNGGUHAN dicatat manual, bukan lewat pelunasan.
+  const SELISIH_PELUNASAN_CATEGORY_ID   = '6cc50f51-b1fc-4dbd-8f1f-32010b60dfb3'; // Bank & Card Fees
   const REIMBURSABLE_SURPLUS_SRC_ID     = '0afb406d-fc3d-49af-a002-c40d3d865c4d';
 
   const reimburseSummary = useMemo(() => {
@@ -557,7 +561,7 @@ export default function Receivables({
       .reduce((s, e) => s + Number(e.amount_idr || 0), 0);
     const lossEntries = ledger.filter(e =>
       e.reimburse_settlement_id &&
-      e.category_id === REIMBURSABLE_LOSS_CATEGORY_ID
+      e.category_id === SELISIH_PELUNASAN_CATEGORY_ID
     );
     const surplusEntries = ledger.filter(e =>
       e.reimburse_settlement_id &&
@@ -571,7 +575,7 @@ export default function Receivables({
       lossCount: lossEntries.length,
       surplusCount: surplusEntries.length,
     };
-  }, [ledger, REIMBURSABLE_LOSS_CATEGORY_ID, REIMBURSABLE_SURPLUS_SRC_ID]);
+  }, [ledger, SELISIH_PELUNASAN_CATEGORY_ID, REIMBURSABLE_SURPLUS_SRC_ID]);
 
   const settledGroups = useMemo(() =>
     (settlements || [])
@@ -635,7 +639,7 @@ export default function Receivables({
           out_ledger_ids: outIds, in_ledger_ids: inIds,
           total_out: totalOut, total_in: totalIn,
           reimbursable_expense: reimbursable,
-          re_category_id: REIMBURSABLE_LOSS_CATEGORY_ID,
+          re_category_id: SELISIH_PELUNASAN_CATEGORY_ID,
           status: 'settled',
           notes: null,
         }])
@@ -645,11 +649,11 @@ export default function Receivables({
       if (reimbursable > 0) {
         const { error: lErr } = await supabase.from("ledger").insert([{
           user_id: user.id, tx_date: settledAtForInsert,
-          description: `${entity} Reimbursable Loss`,
+          description: `Selisih pelunasan ${entity}`,
           amount: reimbursable, amount_idr: reimbursable, currency: "IDR",
           tx_type: "expense", from_type: null, to_type: "expense",
           from_id: null, to_id: null,
-          category_id: REIMBURSABLE_LOSS_CATEGORY_ID, category_name: "Reimbursable Loss",
+          category_id: SELISIH_PELUNASAN_CATEGORY_ID, category_name: "Bank & Card Fees",
           entity: entity, is_reimburse: false,
           notes: `Settlement: ${entity}`, reimburse_settlement_id: settlement.id,
         }]);
@@ -661,7 +665,7 @@ export default function Receivables({
         const { error: sErr } = await supabase.from("ledger").insert([{
           user_id: user.id,
           tx_date: settledAtForInsert,
-          description: `${entity} Reimbursable Surplus`,
+          description: `Kelebihan pelunasan ${entity}`,
           amount: surplus, amount_idr: surplus, currency: "IDR",
           tx_type: "income",
           from_type: "income_source", from_id: REIMBURSABLE_SURPLUS_SRC_ID,
@@ -677,7 +681,7 @@ export default function Receivables({
       await supabase.from("ledger").update({ reimburse_settlement_id: settlement.id }).in("id", allIds);
       setLedger(prev => prev.map(e => allIds.includes(e.id) ? { ...e, reimburse_settlement_id: settlement.id } : e));
       setSettlements(prev => [settlement, ...prev]);
-      const reLossLabel    = reimbursable > 0 ? ` · RE loss: ${fmtIDR(reimbursable)}`    : "";
+      const reLossLabel    = reimbursable > 0 ? ` · selisih: ${fmtIDR(reimbursable)}`    : "";
       const reSurplusLabel = surplus     > 0 ? ` · RE surplus: ${fmtIDR(surplus)}`    : "";
       showToast(`${entity} settled${reLossLabel}${reSurplusLabel}`);
 
@@ -726,7 +730,7 @@ export default function Receivables({
         await supabase.from("ledger").update({ reimburse_settlement_id: null }).in("id", linkedIds);
         setLedger(prev => prev.map(e => linkedIds.includes(e.id) ? { ...e, reimburse_settlement_id: null } : e));
       }
-      // Delete the generated Reimbursable Loss (expense) AND Reimbursable Surplus (income)
+      // Delete the generated selisih (expense) AND kelebihan (income)
       // entries for this settlement. Originals were unmarked above, so this only hits the
       // generated loss/surplus rows — previously the surplus/income entry was leaked.
       // Capture accounts touched by those rows first, so we can recompute their balances after.
@@ -1138,14 +1142,14 @@ export default function Receivables({
                               />
                             </div>
                             <div>
-                              <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>Reimbursable Loss</div>
+                              <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>Selisih pelunasan</div>
                               <div style={{ fontSize: 16, fontWeight: 900, fontFamily: "Figtree, sans-serif", color: reimbursable > 0 ? "#dc2626" : "#9ca3af" }}>
                                 {fmtIDR(Math.max(0, reimbursable))}
                               </div>
                             </div>
                             {surplus > 0 && (
                               <div>
-                                <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>Reimbursable Surplus</div>
+                                <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>Kelebihan pelunasan</div>
                                 <div style={{ fontSize: 16, fontWeight: 900, fontFamily: "Figtree, sans-serif", color: "#059669" }}>
                                   +{fmtIDR(surplus)}
                                 </div>
