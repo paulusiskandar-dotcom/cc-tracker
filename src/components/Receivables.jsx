@@ -600,6 +600,16 @@ export default function Receivables({
   const [openSettHist, setOpenSettHist] = useState(new Set()); // per-entity settlement history collapse (hidden by default)
   const [suggestMatch, setSuggestMatch] = useState(true);
 
+  // ── Doktrin Finalize (disepakati Paulus 2026-08-28) ────────────────────────
+  // Selisih ≤ Rp50.000 dibukukan otomatis; di atas itu Paulus yang memilih.
+  // Sebelumnya selisih apa pun diserap diam-diam ke Reimbursable Loss/Surplus —
+  // itu yang menyembunyikan margin listrik 19jt selama berbulan-bulan.
+  const AMBANG_SELISIH = 50000;
+  // Utility Income HANYA untuk listrik dua pelanggan ini. Di luar itu tidak
+  // ditawarkan sama sekali (PLN pabrik Hamasa selalu diganti persis).
+  const PLN_BERMARGIN = /SURYANTO SALIM|PAULUS ISKANDAR|545101427710|545103888558/i;
+  const [pilihanSelisih, setPilihanSelisih] = useState({});   // per-akun
+
   const getSettleDate = (rId) => settleDate[rId] || todayStr();
 
   // ── Toggle row selection ───────────────────────────────────────
@@ -619,7 +629,7 @@ export default function Receivables({
     const outIds = Array.from(selectedOut[acc.id] || []);
     const inIds  = Array.from(selectedIn[acc.id]  || []);
     if (!outIds.length || !inIds.length)
-      return showToast("Select at least one expense and one received item", "error");
+      return showToast("Pilih minimal satu tagihan dan satu penggantian", "error");
 
     const settledAtForInsert = getSettleDate(acc.id);
 
@@ -646,33 +656,47 @@ export default function Receivables({
         .select().single();
       if (settleErr) throw new Error(settleErr.message);
 
+      // Baris selisih WAJIB dua sisi: lawannya akun Piutang<entity>. Baris
+      // bersisi tunggal muncul di Reports tapi tidak pernah menyentuh piutang —
+      // itulah sebabnya piutang dulu tidak pernah bisa nol.
+      const akunPiutang = accounts.find(a => a.name === `Piutang ${entity}`);
       if (reimbursable > 0) {
         const { error: lErr } = await supabase.from("ledger").insert([{
           user_id: user.id, tx_date: settledAtForInsert,
           description: `Selisih pelunasan ${entity}`,
           amount: reimbursable, amount_idr: reimbursable, currency: "IDR",
-          tx_type: "expense", from_type: null, to_type: "expense",
-          from_id: null, to_id: null,
+          tx_type: "expense",
+          from_type: akunPiutang ? "account" : null, from_id: akunPiutang?.id || null,
+          to_type: "expense", to_id: null,
           category_id: SELISIH_PELUNASAN_CATEGORY_ID, category_name: "Bank & Card Fees",
           entity: entity, is_reimburse: false,
-          notes: `Settlement: ${entity}`, reimburse_settlement_id: settlement.id,
+          notes: `Finalize: ${entity}`, reimburse_settlement_id: settlement.id,
         }]);
         if (lErr) throw new Error(lErr.message);
       }
 
       const surplus = Math.max(0, totalIn - totalOut);
       if (surplus > 0) {
+        // Sumber pendapatan mengikuti pilihan Paulus; default Other Income.
+        // Utility Income hanya kalau kelompoknya memang listrik Suryanto/Paulus.
+        const pilih = pilihanSelisih[acc.id] || "other";
+        const srcId = pilih === "utility"
+          ? (incomeSrcs.find(x => x.name === "Utility Income")?.id || null)
+          : (incomeSrcs.find(x => x.name === "Other Income")?.id   || null);
         const { error: sErr } = await supabase.from("ledger").insert([{
           user_id: user.id,
           tx_date: settledAtForInsert,
-          description: `Kelebihan pelunasan ${entity}`,
+          description: pilih === "utility"
+            ? `Kelebihan penggantian listrik (${entity})`
+            : `Kelebihan pelunasan ${entity}`,
           amount: surplus, amount_idr: surplus, currency: "IDR",
           tx_type: "income",
-          from_type: "income_source", from_id: REIMBURSABLE_SURPLUS_SRC_ID,
-          to_type: null, to_id: null,
+          from_type: "income_source", from_id: srcId,
+          to_type: akunPiutang ? "account" : null, to_id: akunPiutang?.id || null,
           category_id: null, category_name: null,
           entity, is_reimburse: false,
-          notes: `Settlement: ${entity}`, reimburse_settlement_id: settlement.id,
+          notes: `Finalize: ${entity}${surplus > AMBANG_SELISIH ? "" : " (otomatis, di bawah ambang)"}`,
+          reimburse_settlement_id: settlement.id,
         }]);
         if (sErr) throw new Error(sErr.message);
       }
@@ -1155,6 +1179,30 @@ export default function Receivables({
                                 </div>
                               </div>
                             )}
+                            {/* Selisih di atas ambang harus dipilih, tidak boleh diserap
+                                diam-diam. Utility Income hanya ditawarkan kalau baris
+                                terpilih memang listrik Suryanto/Paulus. */}
+                            {surplus > AMBANG_SELISIH && (() => {
+                              const barisPilih = ledger.filter(e => selOut.has(e.id) || selIn.has(e.id));
+                              const adaListrik = barisPilih.some(e => PLN_BERMARGIN.test(e.description || ""));
+                              const nilai = pilihanSelisih[r.id] || "other";
+                              return (
+                                <div>
+                                  <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>
+                                    Catat kelebihan sebagai
+                                  </div>
+                                  <select
+                                    value={nilai}
+                                    onChange={ev => setPilihanSelisih(prev => ({ ...prev, [r.id]: ev.target.value }))}
+                                    style={{ height: 30, border: "1px solid #e5e7eb", borderRadius: 6, padding: "0 8px",
+                                             fontSize: 12, fontFamily: "Figtree, sans-serif", background: "#fff", color: "#374151" }}
+                                  >
+                                    <option value="other">Other Income</option>
+                                    {adaListrik && <option value="utility">Utility Income (margin listrik)</option>}
+                                  </select>
+                                </div>
+                              );
+                            })()}
                           </div>
                           <button
                             onClick={() => handleSettleEntity(r.entity, r)}
@@ -1168,7 +1216,7 @@ export default function Receivables({
                               opacity: settling ? 0.6 : 1, flexShrink: 0,
                             }}
                           >
-                            {settling ? "Settling…" : "Settle →"}
+                            {settling ? "Finalizing…" : "Finalize →"}
                           </button>
                         </div>
                       </div>
@@ -1182,7 +1230,7 @@ export default function Receivables({
                           style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", marginBottom: openSettHist.has(r.entity) ? 6 : 0 }}
                         >
                           <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif" }}>
-                            Settlement History ({entitySettlements.length})
+                            Finalized ({entitySettlements.length})
                           </div>
                           <div style={{ fontSize: 10, fontWeight: 700, color: "#3b5bdb", fontFamily: "Figtree, sans-serif" }}>
                             {openSettHist.has(r.entity) ? "Hide ▲" : "Show ▼"}
