@@ -1284,8 +1284,8 @@ export default function Receivables({
                                       panjang teksnya. */}
                                   <div style={{
                                     display: "grid",
-                                    gridTemplateColumns: "26px 108px 20px 108px 20px 108px 1fr",
-                                    alignItems: "baseline", columnGap: 4, marginTop: 2,
+                                    gridTemplateColumns: "22px 92px 14px 92px 92px 1fr",
+                                    alignItems: "baseline", columnGap: 3, marginTop: 2,
                                     fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif",
                                     fontVariantNumeric: "tabular-nums",
                                   }}>
@@ -1293,8 +1293,7 @@ export default function Receivables({
                                     <span style={{ textAlign: "right", color: "#6b7280" }}>{fmtIDR(Number(s.total_out || 0))}</span>
                                     <span style={{ textAlign: "center" }}>In</span>
                                     <span style={{ textAlign: "right", color: "#6b7280" }}>{fmtIDR(Number(s.total_in || 0))}</span>
-                                    <span style={{ textAlign: "center" }}>·</span>
-                                    <span style={{ textAlign: "right", fontWeight: 700, color: sReColor }}>
+                                    <span style={{ textAlign: "right", fontWeight: 700, color: sReColor, paddingLeft: 10 }}>
                                       {sNet === 0 ? "Rp 0" : `${sIsSurp ? "+" : ""}${fmtIDR(Math.abs(sNet))}`}
                                     </span>
                                     <span style={{ paddingLeft: 6, color: sReColor }}>{sReLabel}</span>
