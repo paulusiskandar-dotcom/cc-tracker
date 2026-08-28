@@ -240,6 +240,37 @@ export default function Reconcile({
       const stillMissing = missing.filter(m => !ignored.has(m._id));
       if (stillMissing.length) { showToast(`${stillMissing.length} row(s) no longer match — use Review`, "warning"); return; }
 
+      // ── UJI PENUTUPAN — syarat Finalize (2026-08-28) ────────────────────
+      // Nol-hilang belum berarti benar: baris bisa cocok satu-satu tapi salah
+      // klasifikasi. Ujian yang menangkap itu: rantai buku harus MENDARAT di
+      // penutupan statement, rupiah demi rupiah (toleransi 2 — pembulatan
+      // cicilan ala 4.231.333×12). Uji inilah yang menangkap beda 2 rupiah
+      // di CIMB ALL saat 12 baris dibuat manual.
+      if (acc.type === "credit_card" && st.stmtClosingBalance != null) {
+        const cutoff = statementAnchorDate(st.stmtRows, st.stmtStatementDate)
+          || dates[dates.length - 1];
+        const { data: semua, error: eAll } = await supabase.from("ledger")
+          .select("tx_date, amount_idr, amount, from_id, from_type, to_id, to_type")
+          .eq("user_id", user.id)
+          .or(`from_id.eq.${acc.id},to_id.eq.${acc.id}`);
+        if (eAll) throw eAll;
+        let net = Number(acc.initial_balance || 0);
+        for (const r of (semua || [])) {
+          if (r.tx_date > cutoff) continue;
+          const amt = Number(r.amount_idr || r.amount || 0);
+          if (r.from_id === acc.id && r.from_type === "account") net += amt;
+          if (r.to_id === acc.id && r.to_type === "account") net -= amt;
+        }
+        const selisih = Math.round(net - Number(st.stmtClosingBalance));
+        if (Math.abs(selisih) > 2) {
+          showToast(
+            `Uji penutupan gagal: buku ${fmtIDR(net)} vs statement ${fmtIDR(st.stmtClosingBalance)} ` +
+            `(selisih ${fmtIDR(selisih)}) — ada baris salah klasifikasi, pakai Review`,
+            "error");
+          return;
+        }
+      }
+
       const nowIso = new Date().toISOString();
       if (matched.size) {
         const { error: e2 } = await supabase.from("ledger")
