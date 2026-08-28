@@ -200,7 +200,7 @@ function SettlementCard({ settlement, ledger, expanded, onToggle, incomeSrcs = [
     if (diffRow?.tx_type === "income")
       return (incomeSrcs.find(x => x.id === diffRow.from_id)?.name || "Other Income").toUpperCase();
     if (diffRow?.category_name) return String(diffRow.category_name).toUpperCase();
-    return "UNBOOKED";   // Finalize lama: selisihnya tidak pernah dibukukan
+    return isSurplus ? "OTHER INCOME" : "PAYMENT DIFFERENCE";
   })();
 
   const outLedgerIds = settlement.out_ledger_ids || [];
@@ -1269,7 +1269,7 @@ export default function Receivables({
                             if (sDiffRow?.tx_type === "income")
                               return incomeSrcs.find(x => x.id === sDiffRow.from_id)?.name || "Other Income";
                             if (sDiffRow?.category_name) return sDiffRow.category_name;
-                            return "unbooked";   // Finalize lama: selisihnya tidak pernah dibukukan
+                            return sIsSurp ? "Other Income" : "Payment difference";
                           })();
                           return (
                             <div key={s.id} style={{ border: "0.5px solid #f3f4f6", borderRadius: 8, marginBottom: 4, overflow: "hidden" }}>
@@ -1282,21 +1282,28 @@ export default function Receivables({
                                   {/* Kolom tetap: angka rata kanan dengan tabular-nums supaya
                                       baris atas-bawah SEGARIS, tidak maju-mundur mengikuti
                                       panjang teksnya. */}
+                                  {/* Label menempel pada angkanya (inline-grid rapat), lalu
+                                      antar pasangan diberi jarak. Lebar angka tetap +
+                                      tabular-nums supaya baris atas-bawah tetap segaris. */}
                                   <div style={{
-                                    display: "grid",
-                                    gridTemplateColumns: "22px 92px 14px 92px 92px 1fr",
-                                    alignItems: "baseline", columnGap: 3, marginTop: 2,
+                                    display: "flex", alignItems: "baseline", gap: 18, marginTop: 2,
                                     fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif",
                                     fontVariantNumeric: "tabular-nums",
                                   }}>
-                                    <span>Out</span>
-                                    <span style={{ textAlign: "right", color: "#6b7280" }}>{fmtIDR(Number(s.total_out || 0))}</span>
-                                    <span style={{ textAlign: "center" }}>In</span>
-                                    <span style={{ textAlign: "right", color: "#6b7280" }}>{fmtIDR(Number(s.total_in || 0))}</span>
-                                    <span style={{ textAlign: "right", fontWeight: 700, color: sReColor, paddingLeft: 10 }}>
-                                      {sNet === 0 ? "Rp 0" : `${sIsSurp ? "+" : ""}${fmtIDR(Math.abs(sNet))}`}
+                                    <span style={{ display: "inline-grid", gridTemplateColumns: "20px 88px", columnGap: 3 }}>
+                                      <span>Out</span>
+                                      <span style={{ textAlign: "right", color: "#6b7280" }}>{fmtIDR(Number(s.total_out || 0))}</span>
                                     </span>
-                                    <span style={{ paddingLeft: 6, color: sReColor }}>{sReLabel}</span>
+                                    <span style={{ display: "inline-grid", gridTemplateColumns: "14px 88px", columnGap: 3 }}>
+                                      <span>In</span>
+                                      <span style={{ textAlign: "right", color: "#6b7280" }}>{fmtIDR(Number(s.total_in || 0))}</span>
+                                    </span>
+                                    <span style={{ display: "inline-grid", gridTemplateColumns: "88px auto", columnGap: 6 }}>
+                                      <span style={{ textAlign: "right", fontWeight: 700, color: sReColor }}>
+                                        {sNet === 0 ? "Rp 0" : `${sIsSurp ? "+" : ""}${fmtIDR(Math.abs(sNet))}`}
+                                      </span>
+                                      <span style={{ color: sReColor }}>{sReLabel}</span>
+                                    </span>
                                   </div>
                                 </div>
                                 <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
