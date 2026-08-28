@@ -648,7 +648,16 @@ export default function Receivables({
   const [pilihanSelisih, setPilihanSelisih] = useState({});   // per-akun, sisi LEBIH
   const [pilihanKurang,  setPilihanKurang]  = useState({});   // per-akun, sisi KURANG
 
-  const getSettleDate = (rId) => settleDate[rId] || todayStr();
+  // Tanggal Finalize = tanggal uangnya MASUK, bukan hari ini. Kalau baris In
+  // terpilih lebih dari satu, pakai yang terakhir — saat itulah tagihannya lunas.
+  // Isian manual tetap menang kalau Paulus mengubahnya sendiri.
+  const tanggalUangMasuk = (accId) => {
+    const dipilih = selectedIn[accId];
+    if (!dipilih?.size) return null;
+    const tgl = ledger.filter(e => dipilih.has(e.id)).map(e => e.tx_date).filter(Boolean).sort();
+    return tgl.length ? tgl[tgl.length - 1] : null;
+  };
+  const getSettleDate = (rId) => settleDate[rId] || tanggalUangMasuk(rId) || todayStr();
 
   // ── Toggle row selection ───────────────────────────────────────
   const toggleOutRow = (accId, entryId) => setSelectedOut(prev => {
@@ -669,7 +678,10 @@ export default function Receivables({
     if (!outIds.length || !inIds.length)
       return showToast("Select at least one Out and one In", "error");
 
-    const settledAtForInsert = getSettleDate(acc.id);
+    const settledAtForInsert = settleDate[acc.id] || (() => {
+      const tgl = ledger.filter(e => inIds.includes(e.id)).map(e => e.tx_date).filter(Boolean).sort();
+      return tgl.length ? tgl[tgl.length - 1] : todayStr();
+    })();
 
     setSettling(true);
     try {
