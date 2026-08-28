@@ -1332,11 +1332,11 @@ export default function Receivables({
                                   }}>
                                     <span style={{ display: "inline-grid", gridTemplateColumns: "20px 14ch", columnGap: 4 }}>
                                       <span style={{ textAlign: "right" }}>Out</span>
-                                      <span style={{ textAlign: "right", color: "#6b7280", whiteSpace: "nowrap" }}>{fmtIDR(Number(s.total_out || 0))}</span>
+                                      <span style={{ color: "#6b7280", whiteSpace: "nowrap" }}>{fmtIDR(Number(s.total_out || 0))}</span>
                                     </span>
                                     <span style={{ display: "inline-grid", gridTemplateColumns: "20px 14ch", columnGap: 4 }}>
                                       <span style={{ textAlign: "right" }}>In</span>
-                                      <span style={{ textAlign: "right", color: "#6b7280", whiteSpace: "nowrap" }}>{fmtIDR(Number(s.total_in || 0))}</span>
+                                      <span style={{ color: "#6b7280", whiteSpace: "nowrap" }}>{fmtIDR(Number(s.total_in || 0))}</span>
                                     </span>
                                     <span style={{ display: "inline-grid", gridTemplateColumns: "14ch auto", columnGap: 5 }}>
                                       <span style={{ textAlign: "right", fontWeight: 700, color: sReColor, whiteSpace: "nowrap" }}>
