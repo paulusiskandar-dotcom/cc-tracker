@@ -317,6 +317,19 @@ For each transaction return a JSON array:
   "reasoning": "Grab Food is food delivery"
 }]
 
+Entity rules (suggested_entity) — reimburse only; a plain expense is ALWAYS "Personal":
+- "Hamasa" — company spending Paulus fronts. Covers ALL paper.id / Blibli / PT Global
+  Digital Niaga charges, Lazada & Tokopedia office purchases, Allianz insurance,
+  DigitalOcean, and PLN bills for anyone EXCEPT the two households below.
+- "SDC" — Sahabat Dental Cemerlang. Descriptions mentioning SAHABAT DENTAL, Alice
+  Dental, or the clinic's internet/Microsoft/security costs.
+- "Personal" — money fronted for a PERSON, not a company. If the description names
+  an individual, entity is "Personal", never Hamasa or SDC. Known names:
+  HENNY DJOHARI, HERLINA DJOHARI, AMEL, SITI SARNAH, AGNES.
+  This holds even when the payment channel is Tokopedia, Lazada, or paper.id.
+- When a person's name and a company channel both appear, the PERSON wins.
+- Unsure? Use "Personal" and set confidence below 0.6 so it lands in review.
+
 Category rules:
 - "suggested_category" MUST be the exact name (string) of one of the user's categories listed above for this tx_type — NEVER a slug like "food" or "salary".
 - For tx_type=expense or reimburse_out: pick from the user's expense categories.
