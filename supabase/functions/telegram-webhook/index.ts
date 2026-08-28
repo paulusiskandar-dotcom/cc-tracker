@@ -1382,7 +1382,7 @@ async function handlePartialSettle(entity: string, outStr: string, inStr: string
   let out = `🧾 <b>SETTLE ${esc(entity)} — pilihan</b>\n\n`;
   out += `OUT (${selOut.length}): ${selOut.map((r: any) => idr(settleAmt(r))).join(" + ") || "-"} = <b>${idr(to)}</b>\n`;
   out += `IN (${selIn.length}): ${selIn.map((r: any) => idr(settleAmt(r))).join(" + ") || "-"} = <b>${idr(ti)}</b>\n`;
-  out += net > 0 ? `\n⚠️ <b>Reimbursable LOSS: ${idr(net)}</b>` : net < 0 ? `\n💰 <b>Reimbursable SURPLUS: ${idr(-net)}</b>` : `\n✅ <b>Pas (balance)</b>`;
+  out += net > 0 ? `\n<b>Short on finalize: ${idr(net)}</b>` : net < 0 ? `\n<b>Over on finalize: ${idr(-net)}</b>` : `\n<b>Balanced</b>`;
   await sendTelegramHTML(token, chatId, out, { inline_keyboard: [[{ text: "✅ Settle ini", callback_data: `psettle:${entity}:${outSel.join(",") || "0"}:${inSel.join(",") || "0"}` }, { text: "❌ Batal", callback_data: "noop:x" }]] });
 }
 
@@ -1391,7 +1391,15 @@ async function executeSettle(entity: string, selOut: any[], selIn: any[], supaba
   // Kategori "Reimbursable Loss" dihapus 2026-08-28 — selisih pelunasan kini
   // masuk Bank & Card Fees (fee Paper sudah dipecah di sumbernya).
   const LOSS_CAT = "6cc50f51-b1fc-4dbd-8f1f-32010b60dfb3"; // Bank & Card Fees
-  const SURPLUS_SRC = "0afb406d-fc3d-49af-a002-c40d3d865c4d";
+  // Sumber "Reimbursable Surplus" DIHAPUS 2026-08-28. Kelebihan pelunasan kini
+  // masuk Other Income. Dicari per nama, bukan UUID mati — id yang dihapus dulu
+  // membuat baris tercipta tanpa sumber sama sekali.
+  const { data: srcOther } = await supabase.from("income_sources")
+    .select("id").eq("user_id", uid).eq("name", "Other Income").maybeSingle();
+  // Baris selisih WAJIB dua sisi; lawannya akun Piutang<entity>. Bersisi tunggal
+  // = muncul di Reports tapi tak pernah menyentuh piutang.
+  const { data: akunPiutang } = await supabase.from("accounts")
+    .select("id").eq("user_id", uid).eq("name", `Piutang ${entity}`).maybeSingle();
   if (!selOut.length && !selIn.length) { await sendTelegramHTML(token, chatId, `⚠️ Ga ada yang dipilih buat settle.`); return; }
   const outIds = selOut.map((r) => r.id), inIds = selIn.map((r) => r.id);
   const totalOut = selOut.reduce((s: number, r: any) => s + settleAmt(r), 0);
@@ -1405,23 +1413,27 @@ async function executeSettle(entity: string, selOut: any[], selIn: any[], supaba
   }]).select().single();
   if (error) { await sendTelegramHTML(token, chatId, "❌ Gagal settle: " + esc(error.message)); return; }
   if (reimbursable > 0) await supabase.from("ledger").insert([{
-    user_id: uid, tx_date: today, description: `Selisih pelunasan ${entity}`,
+    user_id: uid, tx_date: today, description: `Short on finalize — ${entity}`,
     amount: reimbursable, amount_idr: reimbursable, currency: "IDR",
-    tx_type: "expense", from_type: null, to_type: "expense", from_id: null, to_id: null,
+    tx_type: "expense",
+    from_type: akunPiutang ? "account" : null, from_id: akunPiutang?.id || null,
+    to_type: "expense", to_id: null,
     category_id: LOSS_CAT, category_name: "Bank & Card Fees", entity, is_reimburse: false,
-    notes: `Settlement: ${entity}`, reimburse_settlement_id: settlement.id,
+    notes: `Finalize: ${entity}`, reimburse_settlement_id: settlement.id,
   }]);
   if (surplus > 0) await supabase.from("ledger").insert([{
-    user_id: uid, tx_date: today, description: `Kelebihan pelunasan ${entity}`,
+    user_id: uid, tx_date: today, description: `Over on finalize — ${entity}`,
     amount: surplus, amount_idr: surplus, currency: "IDR",
-    tx_type: "income", from_type: "income_source", from_id: SURPLUS_SRC, to_type: null, to_id: null,
+    tx_type: "income",
+    from_type: "income_source", from_id: srcOther?.id || null,
+    to_type: akunPiutang ? "account" : null, to_id: akunPiutang?.id || null,
     category_id: null, category_name: null, entity, is_reimburse: false,
-    notes: `Settlement: ${entity}`, reimburse_settlement_id: settlement.id,
+    notes: `Finalize: ${entity}`, reimburse_settlement_id: settlement.id,
   }]);
   await supabase.from("ledger").update({ reimburse_settlement_id: settlement.id }).in("id", [...outIds, ...inIds]);
   let msg = `✅ <b>${esc(entity)} settled</b>\nOut ${idr(totalOut)} (${outIds.length}) · In ${idr(totalIn)} (${inIds.length})`;
-  if (reimbursable > 0) msg += `\n⚠️ Reimbursable Loss: <b>${idr(reimbursable)}</b>`;
-  if (surplus > 0) msg += `\n💰 Reimbursable Surplus: <b>${idr(surplus)}</b>`;
+  if (reimbursable > 0) msg += `\nShort on finalize: <b>${idr(reimbursable)}</b>`;
+  if (surplus > 0) msg += `\nOver on finalize: <b>${idr(surplus)}</b>`;
   await sendTelegramHTML(token, chatId, msg);
 }
 

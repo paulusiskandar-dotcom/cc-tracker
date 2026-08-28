@@ -183,6 +183,22 @@ function KPITile({ label, value, color, showSign = false, sublabel = null }) {
   );
 }
 
+// Baris selisih Finalize dikenali dari BENTUKNYA, bukan ditebak: ia bukan anggota
+// out/in, bukan reimburse_*, dan nominalnya persis selisih Out−In. Tanpa syarat ini
+// pencarinya menyambar baris anggota pertama yang kebetulan berkategori — itulah
+// asal tanda "Travel" (Airbnb) dan "Electronics & Gadgets" (Tokopedia) yang salah.
+function cariBarisSelisih(ledger, s) {
+  const beda = Math.abs(Number(s.total_in || 0) - Number(s.total_out || 0));
+  if (beda === 0) return null;
+  const anggota = new Set([...(s.out_ledger_ids || []), ...(s.in_ledger_ids || [])]);
+  return ledger.find(e =>
+    e.reimburse_settlement_id === s.id &&
+    !anggota.has(e.id) &&
+    e.tx_type !== "reimburse_out" && e.tx_type !== "reimburse_in" &&
+    Math.abs(Number(e.amount_idr ?? e.amount ?? 0) - beda) <= 2
+  ) || null;
+}
+
 function SettlementCard({ settlement, ledger, expanded, onToggle, incomeSrcs = [] }) {
   const totalOut  = Number(settlement.total_out || 0);
   const totalIn   = Number(settlement.total_in  || 0);
@@ -193,8 +209,7 @@ function SettlementCard({ settlement, ledger, expanded, onToggle, incomeSrcs = [
   const badgeColor = isLoss ? "#dc2626" : isSurplus ? "#059669" : "#6b7280";
   const badgeBg    = isLoss ? "#fef2f2" : isSurplus ? "#ecfdf5" : "#f3f4f6";
   // Tanda menampilkan TUJUAN pembukuan selisihnya, bukan label generik.
-  const diffRow = ledger.find(e => e.reimburse_settlement_id === settlement.id &&
-    (e.tx_type === "income" || e.category_name));
+  const diffRow = cariBarisSelisih(ledger, settlement);
   const badgeLabel = (() => {
     if (!isLoss && !isSurplus) return "BALANCED";
     if (diffRow?.tx_type === "income")
@@ -1286,8 +1301,7 @@ export default function Receivables({
                           // generik. Kalau baris pembukuannya ada, pakai nama kategori /
                           // sumber pendapatannya; kalau tidak ada (Finalize lama), jatuh ke
                           // sebutan umum.
-                          const sDiffRow = ledger.find(e => e.reimburse_settlement_id === s.id &&
-                            (e.tx_type === "income" || e.category_name));
+                          const sDiffRow = cariBarisSelisih(ledger, s);
                           const sReLabel = (() => {
                             if (sNet === 0) return "balanced";
                             if (sDiffRow?.tx_type === "income")
@@ -1310,19 +1324,19 @@ export default function Receivables({
                                       antar pasangan diberi jarak. Lebar angka tetap +
                                       tabular-nums supaya baris atas-bawah tetap segaris. */}
                                   <div style={{
-                                    display: "flex", alignItems: "baseline", gap: 18, marginTop: 2,
+                                    display: "flex", alignItems: "baseline", gap: 14, marginTop: 2,
                                     fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif",
                                     fontVariantNumeric: "tabular-nums",
                                   }}>
-                                    <span style={{ display: "inline-grid", gridTemplateColumns: "20px 88px", columnGap: 3 }}>
-                                      <span>Out</span>
+                                    <span style={{ display: "inline-grid", gridTemplateColumns: "20px 80px", columnGap: 4 }}>
+                                      <span style={{ textAlign: "right" }}>Out</span>
                                       <span style={{ textAlign: "right", color: "#6b7280" }}>{fmtIDR(Number(s.total_out || 0))}</span>
                                     </span>
-                                    <span style={{ display: "inline-grid", gridTemplateColumns: "14px 88px", columnGap: 3 }}>
-                                      <span>In</span>
+                                    <span style={{ display: "inline-grid", gridTemplateColumns: "20px 80px", columnGap: 4 }}>
+                                      <span style={{ textAlign: "right" }}>In</span>
                                       <span style={{ textAlign: "right", color: "#6b7280" }}>{fmtIDR(Number(s.total_in || 0))}</span>
                                     </span>
-                                    <span style={{ display: "inline-grid", gridTemplateColumns: "88px auto", columnGap: 6 }}>
+                                    <span style={{ display: "inline-grid", gridTemplateColumns: "80px auto", columnGap: 5 }}>
                                       <span style={{ textAlign: "right", fontWeight: 700, color: sReColor }}>
                                         {sNet === 0 ? "Rp 0" : `${sIsSurp ? "+" : ""}${fmtIDR(Math.abs(sNet))}`}
                                       </span>
