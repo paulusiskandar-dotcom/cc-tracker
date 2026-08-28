@@ -200,7 +200,7 @@ function SettlementCard({ settlement, ledger, expanded, onToggle, incomeSrcs = [
     if (diffRow?.tx_type === "income")
       return (incomeSrcs.find(x => x.id === diffRow.from_id)?.name || "Other Income").toUpperCase();
     if (diffRow?.category_name) return String(diffRow.category_name).toUpperCase();
-    return isSurplus ? "OTHER INCOME" : "PAYMENT DIFFERENCE";
+    return "NOT RECORDED";   // Finalize lama, selisihnya belum masuk ke mana pun
   })();
 
   const outLedgerIds = settlement.out_ledger_ids || [];
@@ -619,7 +619,8 @@ export default function Receivables({
   // Utility Income HANYA untuk listrik dua pelanggan ini. Di luar itu tidak
   // ditawarkan sama sekali (PLN pabrik Hamasa selalu diganti persis).
   const PLN_BERMARGIN = /SURYANTO SALIM|PAULUS ISKANDAR|545101427710|545103888558/i;
-  const [pilihanSelisih, setPilihanSelisih] = useState({});   // per-akun
+  const [pilihanSelisih, setPilihanSelisih] = useState({});   // per-akun, sisi LEBIH
+  const [pilihanKurang,  setPilihanKurang]  = useState({});   // per-akun, sisi KURANG
 
   const getSettleDate = (rId) => settleDate[rId] || todayStr();
 
@@ -671,6 +672,10 @@ export default function Receivables({
       // bersisi tunggal muncul di Reports tapi tidak pernah menyentuh piutang —
       // itulah sebabnya piutang dulu tidak pernah bisa nol.
       const akunPiutang = accounts.find(a => a.name === `Piutang ${entity}`);
+      // Kekurangan di atas ambang: kategorinya dipilih Paulus, bukan dipaksa.
+      const katKurang = reimbursable > AMBANG_SELISIH
+        ? categories.find(c => c.id === pilihanKurang[acc.id])
+        : null;
       if (reimbursable > 0) {
         const { error: lErr } = await supabase.from("ledger").insert([{
           user_id: user.id, tx_date: settledAtForInsert,
@@ -679,7 +684,8 @@ export default function Receivables({
           tx_type: "expense",
           from_type: akunPiutang ? "account" : null, from_id: akunPiutang?.id || null,
           to_type: "expense", to_id: null,
-          category_id: SELISIH_PELUNASAN_CATEGORY_ID, category_name: "Bank & Card Fees",
+          category_id:   katKurang?.id   || SELISIH_PELUNASAN_CATEGORY_ID,
+          category_name: katKurang?.name || "Bank & Card Fees",
           entity: entity, is_reimburse: false,
           notes: `Finalize: ${entity}`, reimburse_settlement_id: settlement.id,
         }]);
@@ -1193,6 +1199,24 @@ export default function Receivables({
                             {/* Selisih di atas ambang harus dipilih, tidak boleh diserap
                                 diam-diam. Utility Income hanya ditawarkan kalau baris
                                 terpilih memang listrik Suryanto/Paulus. */}
+                            {/* Kekurangan di atas ambang: Paulus pilih kategorinya.
+                                Di bawah ambang langsung Bank & Card Fees, tidak ditanya. */}
+                            {reimbursable > AMBANG_SELISIH && (
+                              <div>
+                                <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>
+                                  Record short as
+                                </div>
+                                <select
+                                  value={pilihanKurang[r.id] || SELISIH_PELUNASAN_CATEGORY_ID}
+                                  onChange={ev => setPilihanKurang(prev => ({ ...prev, [r.id]: ev.target.value }))}
+                                  style={{ height: 30, border: "1px solid #e5e7eb", borderRadius: 6, padding: "0 8px",
+                                           fontSize: 12, fontFamily: "Figtree, sans-serif", background: "#fff", color: "#374151" }}
+                                >
+                                  {[...(categories || [])].sort((a, b) => a.name.localeCompare(b.name))
+                                    .map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                </select>
+                              </div>
+                            )}
                             {surplus > AMBANG_SELISIH && (() => {
                               const barisPilih = ledger.filter(e => selOut.has(e.id) || selIn.has(e.id));
                               const adaListrik = barisPilih.some(e => PLN_BERMARGIN.test(e.description || ""));
@@ -1269,7 +1293,7 @@ export default function Receivables({
                             if (sDiffRow?.tx_type === "income")
                               return incomeSrcs.find(x => x.id === sDiffRow.from_id)?.name || "Other Income";
                             if (sDiffRow?.category_name) return sDiffRow.category_name;
-                            return sIsSurp ? "Other Income" : "Payment difference";
+                            return "not recorded";   // Finalize lama, selisihnya belum masuk ke mana pun
                           })();
                           return (
                             <div key={s.id} style={{ border: "0.5px solid #f3f4f6", borderRadius: 8, marginBottom: 4, overflow: "hidden" }}>
