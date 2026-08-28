@@ -1169,7 +1169,7 @@ function ledgerClosingAt(acc: any, rows: any[], cutoff: string): number {
 async function prepareReconcile(serviceSupabase: any, userId: string, extraction: any, filename: string): Promise<any> {
   const txs: any[] = extraction.transactions || [];
   const { data: accounts } = await serviceSupabase.from("accounts")
-    .select("id, name, type, bank_name, account_no, card_last4, currency, initial_balance, is_active")
+    .select("id, name, type, bank_name, account_no, card_last4, currency, initial_balance, is_active, last_statement_date, last_statement_amount")
     .eq("user_id", userId);
 
   // ── SATU BERKAS, DUA KARTU ────────────────────────────────────────────────
@@ -1275,7 +1275,16 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
   const autoCreated: any[] = [];
   // Hanya akun IDR: insert di bawah menulis currency "IDR"; di kantong valas
   // (BCA CHF punya draft juga) itu merusak. Valas dibuat manual saat reconcile.
-  try { if ((acc.currency || "IDR") !== "IDR") throw "akun valas — auto-create dilewati";
+  try {
+    if ((acc.currency || "IDR") !== "IDR") throw "akun valas — auto-create dilewati";
+    // 🚨 PENJAGA PRA-ANCHOR untuk auto-create (bug 2026-08-28: prepare atas
+    // statement BRI JULI membuat 9 angsuran senilai 3.370.216 padahal anchor BRI
+    // sudah AGUSTUS — baris itu sudah terkandung di penutupan Agustus, jadi
+    // menambahkannya = dobel, persis jebakan yang sama dengan impor email lama).
+    // Statement LAMA tidak boleh melahirkan baris: masanya sudah ditutup
+    // statement yang lebih baru. Hanya statement TERBARU yang boleh menulis.
+    if (acc.last_statement_date && periodEnd && periodEnd < acc.last_statement_date)
+      throw `statement lama (${periodEnd} < anchor ${acc.last_statement_date}) — auto-create dilewati`;
     const BIAYA_RE = /BEA METERAI|BIAYA NOTIFIKASI|ADMINISTRATION FEE|E-?BILLING|E-?STATEMENT FEE|STAMP DUTY/i;
     const CICIL_RE = /(\d{1,2})\s*\/\s*(\d{1,2})/;
     const sisaMissing: any[] = [];

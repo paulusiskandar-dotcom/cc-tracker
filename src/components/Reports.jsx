@@ -1,5 +1,6 @@
 import { useState, useMemo } from "react";
 import { TrendingUp, TrendingDown, Wallet, PiggyBank, Sparkles, CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
+import SortDropdown from "./shared/SortDropdown";
 import { fmtIDR, mlShort } from "../utils";
 import { LIGHT, DARK } from "../theme";
 import { SectionHeader, EmptyState } from "./shared/index";
@@ -441,6 +442,8 @@ function HBar({ label, value, max, color, pct, count, onClick }) {
 }
 
 export function DrillDownModal({ open, onClose, title, transactions }) {
+  // Hooks harus dipanggil sebelum early-return apa pun.
+  const [urut, setUrut] = useState("date_desc");
   if (!open) return null;
   // Refund rows carry a minus here, so the modal total equals the bar it came from.
   const total = transactions.reduce((s, t) => s + (t._ccRefund ? -1 : 1) * Number(t.amount_idr || 0), 0);
@@ -464,14 +467,38 @@ export function DrillDownModal({ open, onClose, title, transactions }) {
           <div style={{ fontSize: 15, fontWeight: 700, color: "#111827" }}>{title}</div>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: "#9ca3af" }}>✕</button>
         </div>
-        <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 14 }}>
-          {transactions.length} transactions · {fmtIDR(total)}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+          <div style={{ fontSize: 12, color: "#6b7280" }}>
+            {transactions.length} transactions · {fmtIDR(total)}
+          </div>
+          <SortDropdown
+            storageKey="sort_drilldown"
+            options={[
+              { key: "date",     label: "Date",     defaultDir: "desc" },
+              { key: "amount",   label: "Amount",   defaultDir: "desc" },
+              { key: "merchant", label: "Merchant", defaultDir: "asc"  },
+            ]}
+            value={urut}
+            onChange={setUrut}
+          />
         </div>
         {transactions.length === 0
           ? <EmptyState icon="" message="No transactions." />
           : transactions
               .slice()
-              .sort((a, b) => (b.tx_date || "").localeCompare(a.tx_date || ""))
+              .sort((a, b) => {
+                const i = urut.lastIndexOf("_");
+                const kunci = i > 0 ? urut.slice(0, i) : "date";
+                const naik = (i > 0 ? urut.slice(i + 1) : "desc") === "asc";
+                const nilai = (t) => kunci === "amount"
+                  ? Number(t.amount_idr || 0)
+                  : kunci === "merchant"
+                    ? String(t.merchant_name || t.description || "").toLowerCase()
+                    : String(t._cashDate || t.tx_date || "");
+                const va = nilai(a), vb = nilai(b);
+                const c = va < vb ? -1 : va > vb ? 1 : 0;
+                return naik ? c : -c;
+              })
               .map(t => (
                 <div key={t.id || t._id} style={{
                   display: "flex", justifyContent: "space-between", alignItems: "flex-start",
