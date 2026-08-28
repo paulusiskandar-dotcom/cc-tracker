@@ -1254,15 +1254,25 @@ export default function Receivables({
                                   <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>
                                     Record over as
                                   </div>
-                                  <select
-                                    value={nilai}
-                                    onChange={ev => setPilihanSelisih(prev => ({ ...prev, [r.id]: ev.target.value }))}
-                                    style={{ height: 30, border: "1px solid #e5e7eb", borderRadius: 6, padding: "0 8px",
-                                             fontSize: 12, fontFamily: "Figtree, sans-serif", background: "#fff", color: "#374151" }}
-                                  >
-                                    <option value="other">Other Income</option>
-                                    {adaListrik && <option value="utility">Utility Income</option>}
-                                  </select>
+                                  {/* Utility Income hanya ditawarkan kalau baris terpilih memang
+                                      listrik Suryanto/Paulus. Selain itu pilihannya cuma satu —
+                                      tampilkan sebagai teks, jangan dropdown berisi satu isi. */}
+                                  {adaListrik ? (
+                                    <select
+                                      value={nilai}
+                                      onChange={ev => setPilihanSelisih(prev => ({ ...prev, [r.id]: ev.target.value }))}
+                                      style={{ height: 30, border: "1px solid #e5e7eb", borderRadius: 6, padding: "0 8px",
+                                               fontSize: 12, fontFamily: "Figtree, sans-serif", background: "#fff", color: "#374151" }}
+                                    >
+                                      <option value="other">Other Income</option>
+                                      <option value="utility">Utility Income</option>
+                                    </select>
+                                  ) : (
+                                    <div style={{ height: 30, display: "flex", alignItems: "center",
+                                                  fontSize: 12, fontWeight: 700, fontFamily: "Figtree, sans-serif", color: "#374151" }}>
+                                      Other Income
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })()}
