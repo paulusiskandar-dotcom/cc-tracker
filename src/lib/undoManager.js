@@ -22,6 +22,16 @@ class UndoManager {
     this.clear();
 
     if (op.type === "save_batch" && op.ids?.length) {
+      // Jangan pernah menghapus baris yang sudah di-Finalize — kelompoknya rusak
+      // diam-diam. Batalkan dulu Finalize-nya di halaman Receivables.
+      const { data: terkunci } = await supabase
+        .from("ledger").select("id").in("id", op.ids).not("reimburse_settlement_id", "is", null);
+      if (terkunci?.length) {
+        throw new Error(
+          `${terkunci.length} baris sudah di-Finalize dan tidak bisa dibatalkan. ` +
+          `Batalkan dulu Finalize-nya di halaman Receivables.`
+        );
+      }
       const { error } = await supabase.from("ledger").delete().in("id", op.ids);
       if (error) throw new Error(error.message);
       return { undone: op.ids.length };

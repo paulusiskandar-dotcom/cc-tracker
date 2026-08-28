@@ -203,6 +203,25 @@ export const accountsApi = {
   },
 };
 
+// ── Kuncian Finalize ────────────────────────────────────────────────────────
+// Baris yang sudah di-Finalize TIDAK BOLEH diubah atau dihapus. Kalau boleh,
+// kelompok Finalize-nya rusak diam-diam: total tersimpan tidak lagi cocok dengan
+// barisnya, dan sisi Out bisa jadi kosong. Itu persis yang terjadi 2026-08-28
+// ketika tiga baris pajak Henny dipindah entitas padahal sudah bercap.
+// Untuk mengubahnya: batalkan dulu Finalize-nya di halaman Receivables.
+// Pembatalan Finalize sendiri melepas cap lewat supabase langsung, jadi tidak
+// tersandung penjaga ini.
+async function pastikanBelumFinalize(id, aksi) {
+  const { data } = await supabase
+    .from("ledger").select("reimburse_settlement_id, description").eq("id", id).single();
+  if (data?.reimburse_settlement_id) {
+    throw new Error(
+      `Baris ini sudah di-Finalize, jadi tidak bisa ${aksi}. ` +
+      `Batalkan dulu Finalize-nya di halaman Receivables.`
+    );
+  }
+}
+
 // ─── LEDGER ───────────────────────────────────────────────────
 export const ledgerApi = {
   getAll: async (userId, filters = {}) => {
@@ -541,6 +560,7 @@ export const ledgerApi = {
   },
 
   update: async (id, d) => {
+    if (!d?._lewatiKuncianFinalize) await pastikanBelumFinalize(id, "diubah");
     // Capture the previously-affected accounts BEFORE the write.
     const { data: old } = await supabase
       .from("ledger").select("user_id, from_id, to_id, from_type, to_type").eq("id", id).single();
@@ -564,6 +584,7 @@ export const ledgerApi = {
 
   // Delete entry + reverse balance updates + reverse auto-link side effects
   delete: async (id, entry, accounts = []) => {
+    if (!entry?._lewatiKuncianFinalize) await pastikanBelumFinalize(id, "dihapus");
     const { error } = await supabase.from("ledger").delete().eq("id", id);
     if (error) throw new Error(error.message);
 

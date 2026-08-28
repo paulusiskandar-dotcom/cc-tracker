@@ -183,7 +183,7 @@ function KPITile({ label, value, color, showSign = false, sublabel = null }) {
   );
 }
 
-function SettlementCard({ settlement, ledger, expanded, onToggle }) {
+function SettlementCard({ settlement, ledger, expanded, onToggle, incomeSrcs = [] }) {
   const totalOut  = Number(settlement.total_out || 0);
   const totalIn   = Number(settlement.total_in  || 0);
   const net       = settlement.netAmount;
@@ -192,7 +192,16 @@ function SettlementCard({ settlement, ledger, expanded, onToggle }) {
 
   const badgeColor = isLoss ? "#dc2626" : isSurplus ? "#059669" : "#6b7280";
   const badgeBg    = isLoss ? "#fef2f2" : isSurplus ? "#ecfdf5" : "#f3f4f6";
-  const badgeLabel = isLoss ? "KURANG"  : isSurplus ? "LEBIH"   : "PAS";
+  // Tanda menampilkan TUJUAN pembukuan selisihnya, bukan label generik.
+  const diffRow = ledger.find(e => e.reimburse_settlement_id === settlement.id &&
+    (e.tx_type === "income" || e.category_name));
+  const badgeLabel = (() => {
+    if (!isLoss && !isSurplus) return "BALANCED";
+    if (diffRow?.tx_type === "income")
+      return (incomeSrcs.find(x => x.id === diffRow.from_id)?.name || "Other Income").toUpperCase();
+    if (diffRow?.category_name) return String(diffRow.category_name).toUpperCase();
+    return "UNBOOKED";   // Finalize lama: selisihnya tidak pernah dibukukan
+  })();
 
   const outLedgerIds = settlement.out_ledger_ids || [];
   const inLedgerIds  = settlement.in_ledger_ids  || [];
@@ -631,7 +640,7 @@ export default function Receivables({
     const outIds = Array.from(selectedOut[acc.id] || []);
     const inIds  = Array.from(selectedIn[acc.id]  || []);
     if (!outIds.length || !inIds.length)
-      return showToast("Pilih minimal satu tagihan dan satu penggantian", "error");
+      return showToast("Select at least one Out and one In", "error");
 
     const settledAtForInsert = getSettleDate(acc.id);
 
@@ -665,7 +674,7 @@ export default function Receivables({
       if (reimbursable > 0) {
         const { error: lErr } = await supabase.from("ledger").insert([{
           user_id: user.id, tx_date: settledAtForInsert,
-          description: `Selisih pelunasan ${entity}`,
+          description: `Short on finalize — ${entity}`,
           amount: reimbursable, amount_idr: reimbursable, currency: "IDR",
           tx_type: "expense",
           from_type: akunPiutang ? "account" : null, from_id: akunPiutang?.id || null,
@@ -689,8 +698,8 @@ export default function Receivables({
           user_id: user.id,
           tx_date: settledAtForInsert,
           description: pilih === "utility"
-            ? `Kelebihan penggantian listrik (${entity})`
-            : `Kelebihan pelunasan ${entity}`,
+            ? `Electricity margin (${entity})`
+            : `Over on finalize — ${entity}`,
           amount: surplus, amount_idr: surplus, currency: "IDR",
           tx_type: "income",
           from_type: "income_source", from_id: srcId,
@@ -707,9 +716,9 @@ export default function Receivables({
       await supabase.from("ledger").update({ reimburse_settlement_id: settlement.id }).in("id", allIds);
       setLedger(prev => prev.map(e => allIds.includes(e.id) ? { ...e, reimburse_settlement_id: settlement.id } : e));
       setSettlements(prev => [settlement, ...prev]);
-      const reLossLabel    = reimbursable > 0 ? ` · kurang ${fmtIDR(reimbursable)}`    : "";
-      const reSurplusLabel = surplus     > 0 ? ` · lebih ${fmtIDR(surplus)}`    : "";
-      showToast(`${entity} di-Finalize${reLossLabel}${reSurplusLabel}`);
+      const reLossLabel    = reimbursable > 0 ? ` · short ${fmtIDR(reimbursable)}`    : "";
+      const reSurplusLabel = surplus     > 0 ? ` · over ${fmtIDR(surplus)}`    : "";
+      showToast(`${entity} finalized${reLossLabel}${reSurplusLabel}`);
 
       setSelectedOut(prev => ({ ...prev, [acc.id]: new Set() }));
       setSelectedIn(prev =>  ({ ...prev, [acc.id]: new Set() }));
@@ -740,7 +749,7 @@ export default function Receivables({
         .select().single();
       if (error) throw new Error(error.message);
       setSettlements(prev => prev.map(x => x.id === editSItem.id ? updated : x));
-      showToast("Finalize diperbarui");
+      showToast("Finalize updated");
       setEditSModal(false);
     } catch (e) { showToast(e.message, "error"); }
     setEditSSaving(false);
@@ -769,7 +778,7 @@ export default function Receivables({
       // Delete the settlement record itself
       await supabase.from("reimburse_settlements").delete().eq("id", s.id);
       setSettlements(prev => prev.filter(x => x.id !== s.id));
-      showToast("Finalize dibatalkan — barisnya kembali terbuka");
+      showToast("Finalize removed — rows are open again");
     } catch (e) { showToast(e.message, "error"); }
   };
 
@@ -1045,7 +1054,7 @@ export default function Receivables({
                           {fmtIDR(Math.abs(outstanding))}
                         </div>
                         <div style={{ fontSize: 11, color: outstanding < 0 ? "#059669" : "#9ca3af", fontFamily: "Figtree, sans-serif", fontWeight: outstanding < 0 ? 700 : 400 }}>
-                          {outstanding < 0 ? "lebih bayar" : "outstanding"}
+                          {outstanding < 0 ? "overpaid" : "outstanding"}
                         </div>
                       </div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -1149,11 +1158,11 @@ export default function Receivables({
                     {(selOut.size > 0 || selIn.size > 0) && (
                       <div style={{ marginTop: 10, borderTop: "0.5px solid #f3f4f6", paddingTop: 10 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3, fontFamily: "Figtree, sans-serif" }}>
-                          <span style={{ color: "#9ca3af" }}>Tagihan dipilih</span>
+                          <span style={{ color: "#9ca3af" }}>Out selected</span>
                           <span style={{ fontWeight: 700, color: "#dc2626" }}>{fmtIDR(totalOutSel)}</span>
                         </div>
                         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 8, fontFamily: "Figtree, sans-serif" }}>
-                          <span style={{ color: "#9ca3af" }}>Penggantian dipilih</span>
+                          <span style={{ color: "#9ca3af" }}>In selected</span>
                           <span style={{ fontWeight: 700, color: "#059669" }}>+{fmtIDR(totalInSel)}</span>
                         </div>
                         <div style={{ borderTop: "0.5px solid #e5e7eb", paddingTop: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
@@ -1168,14 +1177,14 @@ export default function Receivables({
                               />
                             </div>
                             <div>
-                              <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>Kurang</div>
+                              <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>Short</div>
                               <div style={{ fontSize: 16, fontWeight: 900, fontFamily: "Figtree, sans-serif", color: reimbursable > 0 ? "#dc2626" : "#9ca3af" }}>
                                 {fmtIDR(Math.max(0, reimbursable))}
                               </div>
                             </div>
                             {surplus > 0 && (
                               <div>
-                                <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>Lebih</div>
+                                <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>Over</div>
                                 <div style={{ fontSize: 16, fontWeight: 900, fontFamily: "Figtree, sans-serif", color: "#059669" }}>
                                   +{fmtIDR(surplus)}
                                 </div>
@@ -1200,7 +1209,7 @@ export default function Receivables({
                                              fontSize: 12, fontFamily: "Figtree, sans-serif", background: "#fff", color: "#374151" }}
                                   >
                                     <option value="other">Other Income</option>
-                                    {adaListrik && <option value="utility">Utility Income (margin listrik)</option>}
+                                    {adaListrik && <option value="utility">Utility Income</option>}
                                   </select>
                                 </div>
                               );
@@ -1249,7 +1258,19 @@ export default function Receivables({
                           const sIsLoss   = sNet < 0;
                           const sIsSurp   = sNet > 0;
                           const sReColor  = sIsLoss ? "#dc2626" : sIsSurp ? "#059669" : "#6b7280";
-                          const sReLabel  = sIsLoss ? "kurang" : sIsSurp ? "lebih" : "pas";
+                          // Tampilkan TUJUAN sebenarnya selisih itu dibukukan, bukan label
+                          // generik. Kalau baris pembukuannya ada, pakai nama kategori /
+                          // sumber pendapatannya; kalau tidak ada (Finalize lama), jatuh ke
+                          // sebutan umum.
+                          const sDiffRow = ledger.find(e => e.reimburse_settlement_id === s.id &&
+                            (e.tx_type === "income" || e.category_name));
+                          const sReLabel = (() => {
+                            if (sNet === 0) return "balanced";
+                            if (sDiffRow?.tx_type === "income")
+                              return incomeSrcs.find(x => x.id === sDiffRow.from_id)?.name || "Other Income";
+                            if (sDiffRow?.category_name) return sDiffRow.category_name;
+                            return "unbooked";   // Finalize lama: selisihnya tidak pernah dibukukan
+                          })();
                           return (
                             <div key={s.id} style={{ border: "0.5px solid #f3f4f6", borderRadius: 8, marginBottom: 4, overflow: "hidden" }}>
                               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", background: "#fafafa" }}>
@@ -1258,12 +1279,25 @@ export default function Receivables({
                                   style={{ flex: 1, cursor: "pointer", minWidth: 0 }}
                                 >
                                   <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", fontFamily: "Figtree, sans-serif" }}>{date}</div>
-                                  <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1, fontFamily: "Figtree, sans-serif" }}>
-                                    Tagihan {fmtIDR(Number(s.total_out || 0))} · Diganti {fmtIDR(Number(s.total_in || 0))} ·{" "}
-                                    <span style={{ fontWeight: 700, color: sReColor }}>
+                                  {/* Kolom tetap: angka rata kanan dengan tabular-nums supaya
+                                      baris atas-bawah SEGARIS, tidak maju-mundur mengikuti
+                                      panjang teksnya. */}
+                                  <div style={{
+                                    display: "grid",
+                                    gridTemplateColumns: "26px 108px 20px 108px 20px 108px 1fr",
+                                    alignItems: "baseline", columnGap: 4, marginTop: 2,
+                                    fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif",
+                                    fontVariantNumeric: "tabular-nums",
+                                  }}>
+                                    <span>Out</span>
+                                    <span style={{ textAlign: "right", color: "#6b7280" }}>{fmtIDR(Number(s.total_out || 0))}</span>
+                                    <span style={{ textAlign: "center" }}>In</span>
+                                    <span style={{ textAlign: "right", color: "#6b7280" }}>{fmtIDR(Number(s.total_in || 0))}</span>
+                                    <span style={{ textAlign: "center" }}>·</span>
+                                    <span style={{ textAlign: "right", fontWeight: 700, color: sReColor }}>
                                       {sNet === 0 ? "Rp 0" : `${sIsSurp ? "+" : ""}${fmtIDR(Math.abs(sNet))}`}
-                                      {" "}({sReLabel})
                                     </span>
+                                    <span style={{ paddingLeft: 6, color: sReColor }}>{sReLabel}</span>
                                   </div>
                                 </div>
                                 <div style={{ display: "flex", alignItems: "center", gap: 2, flexShrink: 0 }}>
@@ -1741,6 +1775,7 @@ export default function Receivables({
                         ledger={ledger}
                         expanded={!!expandedSettlements[s.id]}
                         onToggle={() => toggleSettlement(s.id)}
+                                              incomeSrcs={incomeSrcs}
                       />
                     ))}
                   </div>

@@ -435,6 +435,9 @@ export default function TxVerticalBig({
   const sn   = v => { const n = Number(v); return (v === "" || v == null || isNaN(n)) ? 0 : n; };
 
   // ── Save ──────────────────────────────────────────────────────
+  // Baris yang sudah di-Finalize terkunci total: tidak bisa diubah maupun dihapus.
+  const terkunciFinalize = mode === "edit" && !!initialData?.reimburse_settlement_id;
+
   const save = async () => {
     // Basic validation
     if (type !== "fx_exchange" && (!form.amount || sn(form.amount) <= 0)) {
@@ -1495,8 +1498,19 @@ export default function TxVerticalBig({
 
   // ── Footer ────────────────────────────────────────────────────
   const footer = (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {terkunciFinalize && (
+        <div style={{
+          background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 10,
+          padding: "10px 12px", fontFamily: FF, fontSize: 12.5, color: "#78350f", lineHeight: 1.5,
+        }}>
+          <b>Terkunci — sudah di-Finalize.</b> Baris ini bagian dari kelompok
+          pencocokan piutang, jadi tidak bisa diubah atau dihapus. Untuk
+          mengubahnya, batalkan dulu Finalize-nya di halaman Receivables.
+        </div>
+      )}
     <div style={{ display: "flex", gap: 8 }}>
-      {mode === "edit" && onDelete && (
+      {mode === "edit" && onDelete && !terkunciFinalize && (
         <button
           type="button"
           onClick={() => setConfirm(true)}
@@ -1519,17 +1533,23 @@ export default function TxVerticalBig({
           fontFamily: FF, fontSize: 14, fontWeight: 600,
           cursor: saving ? "default" : "pointer", opacity: saving ? 0.6 : 1,
         }}>
-        Cancel
+        {terkunciFinalize ? "Tutup" : "Cancel"}
       </button>
-      <button type="button" onClick={save} disabled={saving}
-        style={{
-          flex: 2, height: 44, borderRadius: 10, border: "none",
-          background: "#111827", color: "#fff",
-          fontFamily: FF, fontSize: 14, fontWeight: 700,
-          cursor: saving ? "default" : "pointer", opacity: saving ? 0.6 : 1,
-        }}>
-        {saving ? "Saving…" : mode === "confirm" ? "✓ Confirm" : mode === "edit" ? "Save Changes" : "Add Transaction"}
-      </button>
+      {/* Baris yang sudah di-Finalize dikunci: mengubahnya merusak kelompok
+          Finalize-nya diam-diam. ledgerApi juga menolak, ini supaya terlihat
+          SEBELUM diklik, bukan berupa galat sesudahnya. */}
+      {!terkunciFinalize && (
+        <button type="button" onClick={save} disabled={saving}
+          style={{
+            flex: 2, height: 44, borderRadius: 10, border: "none",
+            background: "#111827", color: "#fff",
+            fontFamily: FF, fontSize: 14, fontWeight: 700,
+            cursor: saving ? "default" : "pointer", opacity: saving ? 0.6 : 1,
+          }}>
+          {saving ? "Saving…" : mode === "confirm" ? "✓ Confirm" : mode === "edit" ? "Save Changes" : "Add Transaction"}
+        </button>
+      )}
+    </div>
     </div>
   );
 
