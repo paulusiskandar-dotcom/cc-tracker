@@ -1260,7 +1260,108 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
     : (periodEnd ? pad(periodEnd, 1) : null);
   const ledgerWindow = (ledAll || []).filter((l: any) => (!winStart || l.tx_date >= winStart) && (!winEnd || l.tx_date <= winEnd));
 
-  const { match, missing, extra } = matchRowsSrv(stmtRows, ledgerWindow);
+  let { match, missing, extra } = matchRowsSrv(stmtRows, ledgerWindow);
+
+  // ── AUTO-CICILAN & AUTO-BIAYA DARI STATEMENT ──────────────────────────────
+  // Statement = sumber final. Dua golongan baris "hilang" yang TIDAK PERNAH
+  // punya email dibuat langsung dari statement, dengan bukti pola:
+  //  (a) angsuran n/m yang buku sudah punya (n−1)/m bernominal SAMA di kartu
+  //      yang sama — entity/kategori/tipe disalin dari angsuran sebelumnya.
+  //      n ≤ 1 TIDAK dibuat (konversi cicilan / wash — kasus Blibli-Lieche &
+  //      BRI CCL 0/12; salah tangan = dobel puluhan juta).
+  //  (b) biaya bulanan tetap dari daftar (materai, notifikasi, admin, e-billing,
+  //      e-statement) — regex + nominal ≤ 25.000 → Bank & Card Fees.
+  // Idempoten: baris yang dibuat akan match pada prepare berikutnya.
+  const autoCreated: any[] = [];
+  // Hanya akun IDR: insert di bawah menulis currency "IDR"; di kantong valas
+  // (BCA CHF punya draft juga) itu merusak. Valas dibuat manual saat reconcile.
+  try { if ((acc.currency || "IDR") !== "IDR") throw "akun valas — auto-create dilewati";
+    const BIAYA_RE = /BEA METERAI|BIAYA NOTIFIKASI|ADMINISTRATION FEE|E-?BILLING|E-?STATEMENT FEE|STAMP DUTY/i;
+    const CICIL_RE = /(\d{1,2})\s*\/\s*(\d{1,2})/;
+    const sisaMissing: any[] = [];
+    const inserts: any[] = [];
+    for (const m0 of missing) {
+      const desc = String(m0.description || "");
+      const amt = Math.round(Number(m0.amount || 0));
+      const isOut = (m0.direction || "out") !== "in";
+      // (b) biaya tetap
+      if (isOut && BIAYA_RE.test(desc) && amt > 0 && amt <= 25000) {
+        const { data: katB } = await serviceSupabase.from("expense_categories")
+          .select("id,name").eq("user_id", userId).eq("name", "Bank & Card Fees").maybeSingle();
+        inserts.push({
+          user_id: userId, tx_date: m0.date, description: desc.trim().slice(0, 80),
+          amount: amt, amount_idr: amt, currency: "IDR", tx_type: "expense",
+          from_type: "account", from_id: acc.id, to_type: "expense", to_id: null,
+          category_id: katB?.id || null, category_name: katB?.name || "Bank & Card Fees",
+          entity: "Personal", is_reimburse: false, source: "statement_auto",
+          notes: `Biaya bulanan kartu — dibuat otomatis dari statement ${filename}`,
+        });
+        autoCreated.push({ jenis: "biaya", date: m0.date, amount: amt, desc });
+        continue;
+      }
+      // (a) angsuran lanjutan
+      const cm = desc.match(CICIL_RE);
+      if (isOut && cm) {
+        const n = Number(cm[1]), tot = Number(cm[2]);
+        if (n >= 2 && tot >= n) {
+          const prevRe = new RegExp(`${n - 1}\\s*\\/\\s*${tot}\\b`);
+          const prev = (ledAll || [])
+            .filter((l: any) => l.from_id === acc.id
+              && Math.abs(Math.round(Number(l.amount_idr || l.amount || 0)) - amt) <= 1
+              && prevRe.test(String(l.description || "")))
+            .sort((p: any, q: any) => String(q.tx_date).localeCompare(String(p.tx_date)))[0];
+          if (prev) {
+            const { data: prevFull } = await serviceSupabase.from("ledger")
+              .select("tx_type, to_type, to_id, category_id, category_name, entity, merchant_name")
+              .eq("id", prev.id).maybeSingle();
+            inserts.push({
+              user_id: userId, tx_date: m0.date, description: desc.trim().slice(0, 80),
+              amount: amt, amount_idr: amt, currency: "IDR",
+              tx_type: prevFull?.tx_type || "expense",
+              from_type: "account", from_id: acc.id,
+              to_type: prevFull?.to_type || "expense", to_id: prevFull?.to_id || null,
+              category_id: prevFull?.category_id || null, category_name: prevFull?.category_name || null,
+              entity: prevFull?.entity || "Personal", is_reimburse: false, source: "statement_auto",
+              merchant_name: prevFull?.merchant_name || null,
+              notes: `Angsuran ${n}/${tot} — dibuat otomatis dari statement; entity/kategori disalin dari angsuran ${n - 1}/${tot}`,
+            });
+            autoCreated.push({ jenis: "cicilan", date: m0.date, amount: amt, desc: `${desc.slice(0, 40)} (${n}/${tot})` });
+            continue;
+          }
+        }
+      }
+      sisaMissing.push(m0);
+    }
+    if (inserts.length) {
+      const { data: madeRows, error: insErr } = await serviceSupabase.from("ledger").insert(inserts).select("id, tx_date, description, merchant_name, amount, amount_idr, from_id, to_id, reconciled_at, split_group_id");
+      if (insErr) { console.error("[prepare auto-create]", insErr.message); }
+      else if (madeRows?.length) {
+        (ledAll as any[]).push(...madeRows);
+        ledgerWindow.push(...madeRows);
+        const ulang = matchRowsSrv(stmtRows, ledgerWindow);
+        match = ulang.match; missing = ulang.missing; extra = ulang.extra;
+        // Baris baru belum menyentuh accounts.outstanding_amount (insert mentah,
+        // bukan lewat ledgerApi) — hitung ulang dari ledger supaya tak ada saldo
+        // basi (pelajaran HSBC 2026-08-28). Rumus = recalculateBalance app.
+        try {
+          const { data: semua } = await serviceSupabase.from("ledger")
+            .select("from_id, from_type, to_id, to_type, amount_idr, amount")
+            .eq("user_id", userId).or(`from_id.eq.${acc.id},to_id.eq.${acc.id}`);
+          let ch = 0, pay = 0;
+          for (const r of (semua || [])) {
+            const amt = Number(r.amount_idr || r.amount || 0);
+            if (r.from_id === acc.id && r.from_type === "account") ch += amt;
+            if (r.to_id === acc.id && r.to_type === "account") pay += amt;
+          }
+          const net = Number(acc.initial_balance || 0) + ch - pay;
+          await serviceSupabase.from("accounts").update({
+            outstanding_amount: net > 0 ? net : 0,
+            current_balance: net < 0 ? -net : 0,
+          }).eq("id", acc.id);
+        } catch (e) { console.error("[prepare recalc]", e); }
+      }
+    }
+  } catch (e) { console.error("[prepare auto-create]", e); }
 
   const stmtClosing = extraction.closing_balance != null ? Number(extraction.closing_balance) : null;
   const ledgerClosing = periodEnd ? ledgerClosingAt(acc, ledAll || [], periodEnd) : null;
@@ -1298,6 +1399,7 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
     });
     if (sesErr) console.error("[prepare] session insert:", sesErr.message);
   }
+  if (autoCreated.length) console.log(`[prepare] auto-created ${autoCreated.length}: ${autoCreated.map((x) => x.jenis + " " + x.amount).join(", ")}`);
 
   // ── Parked valas twins die HERE, at statement arrival (Paulus 2026-08-24:
   // "reconcile dan waiting for statement, langsung meniadakan aja, ga usah tanya").
