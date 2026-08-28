@@ -560,7 +560,11 @@ export const ledgerApi = {
   },
 
   update: async (id, d) => {
-    if (!d?._lewatiKuncianFinalize) await pastikanBelumFinalize(id, "diubah");
+    // Menempel tag tidak mengubah nominal, akun, tanggal, entitas, atau kategori —
+    // jadi baris ter-Finalize boleh ditandai (keputusan Paulus 2026-08-28).
+    // Kuncian tetap berlaku penuh untuk perubahan lain.
+    const kunciTag = Object.keys(d || {}).filter(k => !["tag_id", "updated_at"].includes(k));
+    if (!d?._lewatiKuncianFinalize && kunciTag.length) await pastikanBelumFinalize(id, "diubah");
     // Capture the previously-affected accounts BEFORE the write.
     const { data: old } = await supabase
       .from("ledger").select("user_id, from_id, to_id, from_type, to_type").eq("id", id).single();
@@ -681,6 +685,99 @@ export const ledgerApi = {
 // Recomputes current_balance from scratch.
 // Bank/cash: to_id=account → credit (+), from_id=account → debit (-)
 // Credit card: from_id=cc → charge/debt (+), to_id=cc → payment/debt (-)
+// ─── PEMECAHAN MANUAL SATU TRANSAKSI ──────────────────────────
+// Aturannya diturunkan dari Pass 0 pencocokan statement (matchRows di
+// ReconcileOverlay dan kembarannya matchRowsSrv di gmail-estatement): baris
+// yang berbagi split_group_id DIJUMLAHKAN dulu jadi satu, lalu dicocokkan ke
+// satu baris statement (toleransi Rp100, dalam 3 hari). Maka tiga hal ini wajib:
+//   1. semua bagian berbagi split_group_id yang sama
+//   2. jumlah bagian PERSIS sama dengan nominal asli
+//   3. semua bagian tetap di akun & tanggal yang sama
+// Dry run 2026-08-28 atas 4 statement bank sungguhan: 3, 5, dan 9 bagian tetap
+// kembali ke baris statement yang sama tanpa menggeser baris lain; tanpa
+// split_group_id, 5 bagian langsung gagal total (0/5 cocok, +5 "lebih").
+// Entitas dan kategori BOLEH berbeda antar bagian (keputusan Paulus).
+export const splitLedgerEntry = async (id, parts) => {
+  const { data: asli, error: eGet } = await supabase
+    .from("ledger").select("*").eq("id", id).single();
+  if (eGet || !asli) throw new Error(eGet?.message || "Transaksi tidak ditemukan");
+
+  if (asli.reimburse_settlement_id)
+    throw new Error("Baris ini sudah di-Finalize. Batalkan dulu Finalize-nya di halaman Receivables.");
+  if (asli.split_group_id)
+    throw new Error("Baris ini sudah bagian dari transaksi yang dipecah.");
+  if ((asli.currency || "IDR") !== "IDR")
+    throw new Error("Baru mendukung transaksi rupiah — nominal valuta asing punya dua angka yang harus ikut terbagi.");
+  if (!Array.isArray(parts) || parts.length < 2)
+    throw new Error("Pemecahan butuh minimal 2 bagian.");
+
+  const total = Math.round(Number(asli.amount_idr ?? asli.amount ?? 0));
+  const nilai = parts.map(p => Math.round(Number(p.amount) || 0));
+  if (nilai.some(v => v <= 0)) throw new Error("Tiap bagian harus lebih dari nol.");
+  const jumlah = nilai.reduce((s, v) => s + v, 0);
+  if (jumlah !== total)
+    throw new Error(`Jumlah bagian ${jumlah.toLocaleString("id-ID")} tidak sama dengan nominal aslinya ${total.toLocaleString("id-ID")}. Selisih ${(jumlah - total).toLocaleString("id-ID")}.`);
+
+  const gid = (typeof crypto !== "undefined" && crypto.randomUUID)
+    ? crypto.randomUUID() : null;
+  if (!gid) throw new Error("Browser ini tidak bisa membuat id grup — pemecahan dibatalkan supaya bagiannya tidak lepas satu sama lain.");
+
+  // Bagian pertama = baris ASLINYA, dikecilkan. Semua kaitan yang punya
+  // pembukuan sendiri (cicilan, pinjaman karyawan, template berulang, sinkron
+  // email) ikut tinggal di sini — kalau tersalin ke tiap bagian, hitungannya dobel.
+  const p0 = parts[0];
+  const { error: eUpd } = await supabase.from("ledger").update({
+    amount: nilai[0], amount_idr: nilai[0],
+    description:   p0.description || asli.description,
+    category_id:   p0.category_id ?? asli.category_id,
+    category_name: p0.category_name ?? asli.category_name,
+    entity:        p0.entity ?? asli.entity,
+    tag_id:        p0.tag_id ?? asli.tag_id ?? null,
+    split_group_id: gid,
+  }).eq("id", asli.id);
+  if (eUpd) throw new Error(eUpd.message);
+
+  const baru = parts.slice(1).map((p, i) => ({
+    user_id: asli.user_id,
+    tx_date: asli.tx_date,
+    tx_type: asli.tx_type,
+    amount: nilai[i + 1], amount_idr: nilai[i + 1], currency: "IDR",
+    description:   p.description || asli.description,
+    category_id:   p.category_id ?? asli.category_id,
+    category_name: p.category_name ?? asli.category_name,
+    entity:        p.entity ?? asli.entity,
+    tag_id:        p.tag_id ?? null,
+    from_type: asli.from_type, from_id: asli.from_id,
+    to_type:   asli.to_type,   to_id:   asli.to_id,
+    merchant_name: asli.merchant_name,
+    source: asli.source,
+    is_reimburse: asli.is_reimburse,
+    // Status rekonsiliasi ikut disalin: Pass 0 memang mencocokkan grup ini
+    // sebagai satu kesatuan, jadi bagiannya tidak boleh tampak belum tercocok.
+    reconciled_at: asli.reconciled_at,
+    split_group_id: gid,
+    notes: p.notes ?? null,
+  }));
+  const { data: hasil, error: eIns } = await supabase.from("ledger").insert(baru).select();
+  if (eIns) {
+    // Kembalikan baris aslinya supaya tidak tertinggal separuh terpecah.
+    await supabase.from("ledger").update({
+      amount: total, amount_idr: total, description: asli.description,
+      category_id: asli.category_id, category_name: asli.category_name,
+      entity: asli.entity, tag_id: asli.tag_id, split_group_id: null,
+    }).eq("id", asli.id);
+    throw new Error(eIns.message);
+  }
+
+  // Total tidak berubah dan semua bagian di akun yang sama, jadi saldo mestinya
+  // tetap. Dihitung ulang supaya kepastiannya datang dari ledger, bukan asumsi.
+  for (const accId of [...new Set([asli.from_id, asli.to_id].filter(Boolean))]) {
+    try { await recalculateBalance(accId, asli.user_id); }
+    catch (e) { console.error("[splitLedgerEntry recalc]", e?.message); }
+  }
+  return { gid, rows: [{ ...asli, amount: nilai[0], amount_idr: nilai[0], split_group_id: gid }, ...(hasil || [])] };
+};
+
 export const recalculateBalance = async (accountId, userId) => {
   if (!accountId || !userId) return null;
   const { data: acc } = await supabase

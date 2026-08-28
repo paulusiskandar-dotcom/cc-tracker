@@ -677,8 +677,12 @@ export default function Receivables({
     const [y, m] = ym.split("-");
     return `${NAMA_BULAN[Number(m) - 1]} ${y}`;
   };
-  const saringBulan = (baris, ym) =>
-    !ym ? baris : baris.filter(e => String(e.tx_date || "").slice(0, 7) === ym);
+  // Baris yang SUDAH dipilih selalu lolos filter. Tanpa ini, memilih di satu bulan
+  // lalu pindah bulan membuat "Out/In selected" memuat baris yang tidak kelihatan —
+  // totalnya benar tapi layarnya berbohong.
+  const saringBulan = (baris, ym, terpilih) =>
+    !ym ? baris : baris.filter(e =>
+      String(e.tx_date || "").slice(0, 7) === ym || terpilih?.has(e.id));
   const urutkan = (baris, nilai, urutanSaran) => {
     const i = String(nilai || "").lastIndexOf("_");
     const kunci = i > 0 ? nilai.slice(0, i) : "suggest";
@@ -1106,12 +1110,14 @@ export default function Receivables({
               const inRows  = allInRows.filter(e => !e.reimburse_settlement_id);
               // Suggested match: reorder both columns so likely pairs align at top + badge them
               const sugg = suggestMatch ? suggestReimbursePairs(outRows, inRows) : null;
+              const selOut = selectedOut[r.id] || new Set();
+              const selIn  = selectedIn[r.id]  || new Set();
               const nilaiUrut  = urutKolom[r.id] || "suggest_desc";
               const bulanDipilih = bulanKolom[r.id] || "";
               const bulanTersedia = [...new Set([...outRows, ...inRows]
                 .map(e => String(e.tx_date || "").slice(0, 7)).filter(Boolean))].sort().reverse();
-              const displayOut = urutkan(saringBulan(outRows, bulanDipilih), nilaiUrut, sugg ? sugg.orderedOut : null);
-              const displayIn  = urutkan(saringBulan(inRows,  bulanDipilih), nilaiUrut, sugg ? sugg.orderedIn  : null);
+              const displayOut = urutkan(saringBulan(outRows, bulanDipilih, selOut), nilaiUrut, sugg ? sugg.orderedOut : null);
+              const displayIn  = urutkan(saringBulan(inRows,  bulanDipilih, selIn),  nilaiUrut, sugg ? sugg.orderedIn  : null);
               const pairIdx = sugg ? sugg.pairIndex : {};
 
               // Urut menurut tanggal transaksinya (settled_at = tanggal uang masuk),
@@ -1121,8 +1127,6 @@ export default function Receivables({
                 .filter(s => s.entity === r.entity)
                 .sort((a, b) => String(b.settled_at || "").localeCompare(String(a.settled_at || "")));
 
-              const selOut = selectedOut[r.id] || new Set();
-              const selIn  = selectedIn[r.id]  || new Set();
               const selOutEntries = outRows.filter(e => selOut.has(e.id));
               const selInEntries  = inRows.filter(e => selIn.has(e.id));
               const totalOutSel  = selOutEntries.reduce((s, e) => s + Number(e.amount || 0), 0);
