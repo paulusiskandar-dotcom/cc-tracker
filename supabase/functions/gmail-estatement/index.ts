@@ -9,6 +9,7 @@
 // ─────────────────────────────────────────────────────────────────
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { buildPaperSplits, cariPecahan } from "../_shared/paperSplit.ts";
 import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
 const CORS = {
@@ -1334,6 +1335,26 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
       confidence: 1,
       _source: "statement", _stmt_id: m._id, _dup_hint: dupHint(m),
     }));
+    // Pecahan Paper juga dipasang di jalur STATEMENT, bukan cuma notifikasi email.
+    // Tagihan Paper yang lolos dari notifikasi akan tertangkap di rekonsiliasi
+    // statement — kalau di sini tidak dipecah, fee-nya masuk piutang lagi.
+    if (txs.length) {
+      try {
+        const tglTx = txs.map((t: any) => String(t.date || "").slice(0, 10)).filter(Boolean).sort();
+        const at = await getAccessToken(serviceSupabase, userId, Deno.env.get("GOOGLE_CLIENT_SECRET") || "");
+        if (at && tglTx.length) {
+          const geser = (d: string, n: number) => {
+            const x = new Date(d + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() + n);
+            return x.toISOString().slice(0, 10).replace(/-/g, "/");
+          };
+          const splits = await buildPaperSplits(at, geser(tglTx[0], -3), geser(tglTx[tglTx.length - 1], 3));
+          for (const t of txs) {
+            const p = cariPecahan(splits, Number(t.amount_idr || t.amount || 0));
+            if (p) t.paper_split = p;
+          }
+        }
+      } catch (e) { console.warn("[prepare] pecahan Paper gagal:", (e as any)?.message); }
+    }
     if (txs.length && pY && pM) {
       await serviceSupabase.from("email_sync").upsert({
         user_id: userId,

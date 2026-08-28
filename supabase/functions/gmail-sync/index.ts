@@ -1,4 +1,5 @@
 import { sweepLedgerGhosts, sweepWaitingStatement } from "../_shared/sweep.ts";
+import { buildPaperSplits, cariPecahan, type PaperSplit } from "../_shared/paperSplit.ts";
 // ─────────────────────────────────────────────────────────────────
 // gmail-sync/index.ts
 // Fetches new bank emails → AI extraction → saves to email_sync (pending)
@@ -125,90 +126,6 @@ async function buildOrderNotes(accessToken: string, afterDate: string, beforeDat
 function cariCatatan(peta: Map<number, string>, amount: number): string | null {
   if (!amount) return null;
   for (const [a, n] of peta) if (Math.abs(a - amount) <= 1500) return n;
-  return null;
-}
-
-// ── Pemecah fee Paper.id ────────────────────────────────────────────────────
-// Pembayaran vendor lewat Paper.id ditagihkan ke kartu sebagai SATU baris, padahal
-// isinya dua hal berbeda: uang yang benar-benar sampai ke vendor (Total harga —
-// inilah yang diganti Hamasa/SDC, jadi piutang) dan fee Paper + biaya platform
-// (ditanggung Paulus, TIDAK PERNAH jadi piutang). Email Blibli "Transaksi Berhasil:
-// E-invoicing" memuat rinciannya dalam teks polos, jadi pemecahan TIDAK perlu ditebak.
-// ⚠️ JANGAN hitung mundur dari tarif: 1,5122% (2023) → 1,5689% (2025) → 1,55% (2026).
-// Tanpa email pemecah, baris dibiarkan utuh — statement bulanan jadi jaring pengaman.
-export type PaperSplit = { kirim: number; fee: number; total: number; ke: string; ref: string };
-
-export function parsePaperSplit(subject: string, rawBody: string): PaperSplit | null {
-  // Blibli mengirim DUA email per pesanan: "Menunggu Pembayaran" lalu "Transaksi
-  // Berhasil". Hanya percayai yang berhasil — pesanan yang batal tak boleh jadi
-  // dasar pemecahan.
-  if (/Menunggu Pembayaran/i.test(subject || "")) return null;
-  // Badan email Blibli bertabel: label dan nominalnya terpisah pipa + baris baru
-  // ("Total harga | | Rp47.205.000") — ratakan dulu, kalau tidak regex tak pernah kena.
-  const body = (rawBody || "").replace(/[|\r\n]+/g, " ").replace(/\s+/g, " ");
-  // HANYA e-invoicing Paper. Blibli juga mengirim "Transaksi Berhasil: Angsuran
-  // Kredit" (cicilan BYD ~11,1jt) dengan format nyaris sama — kalau ikut terpecah,
-  // cicilan mobil berubah jadi piutang Hamasa. Penjaga ini wajib, sudah teruji
-  // menolak 3 email Angsuran Kredit.
-  if (!/Penyedia\s*Paper/i.test(body)) return null;
-  const angka = (s: string) => Number(String(s).replace(/[^\d]/g, "")) || 0;
-  const ambil = (label: string) => {
-    const m = body.match(new RegExp(label + String.raw`\s*Rp\s*([\d.,]+)`, "i"));
-    return m ? angka(m[1]) : 0;
-  };
-  const kirim = ambil("Total harga");
-  const total = ambil("Total pembayaran");
-  if (!kirim || !total || total <= kirim) return null;
-  // Fee = SELISIH, bukan penjumlahan Biaya admin + Biaya platform. "Total pembayaran"
-  // yang tercetak = nominal tagihan kartu sesungguhnya, kadang 1 rupiah di bawah
-  // penjumlahan komponen (mis. 18.279.999 dan 43.556.047 — dua-duanya terbukti cocok
-  // dengan statement). Statement = final.
-  const fee = total - kirim;
-  const ref = (body.match(/Nomor pembayaran\s*([A-Z0-9]+)/i) || [])[1] || "";
-  const ke = RINGKAS(((body.match(/Nama\s+([A-Za-z*][^|]*?)\s+Detail pembayaran/i) || [])[1] || "").trim(), 40);
-  return { kirim, fee, total, ke, ref };
-}
-
-async function buildPaperSplits(accessToken: string, afterDate: string, beforeDate?: string) {
-  const peta = new Map<number, PaperSplit>();
-  try {
-    // ⚠️ Email Blibli datang saat pembayaran DIBUAT, tagihan kartunya bisa muncul
-    // BERHARI-HARI kemudian (terbukti: bayar 1 Agu, tagihan CIMB baru 10 Agu — 9 hari).
-    // Kalau jendelanya disamakan dengan jendela sync, pecahannya tidak akan pernah
-    // ketemu. Mundurkan 60 hari; kunci petanya nominal, jadi entri berlebih tak
-    // berbahaya dan yang ganda otomatis diabaikan.
-    const mundur = (d: string, n: number) => {
-      const x = new Date(String(d).replace(/\//g, "-") + "T00:00:00Z");
-      if (isNaN(+x)) return d;
-      x.setUTCDate(x.getUTCDate() - n);
-      return x.toISOString().slice(0, 10).replace(/-/g, "/");
-    };
-    let q = `from:blibli.com subject:(E-invoicing) after:${mundur(afterDate, 60)}`;
-    if (beforeDate) q += ` before:${beforeDate}`;
-    const res = await fetch(`https://www.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(q)}&maxResults=60`,
-      { headers: { Authorization: `Bearer ${accessToken}` } });
-    if (!res.ok) return peta;
-    for (const m of ((await res.json()).messages || [])) {
-      const r = await fetch(`https://www.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=full`,
-        { headers: { Authorization: `Bearer ${accessToken}` } });
-      if (!r.ok) continue;
-      const d = await r.json();
-      const subj = (d.payload?.headers || []).find((h: any) => h.name === "Subject")?.value || "";
-      const hasil = parsePaperSplit(subj, decodeBodyPlain(d.payload));
-      if (hasil && !peta.has(hasil.total)) peta.set(hasil.total, hasil);
-    }
-  } catch (e) {
-    console.warn("[gmail-sync] buildPaperSplits gagal:", e);
-  }
-  console.log(`[gmail-sync] pecahan Paper terkumpul: ${peta.size}`);
-  return peta;
-}
-
-// Dicocokkan lewat Total pembayaran = nominal tagihan kartu. Toleransi sempit
-// (Rp2) — beda sedikit saja berarti transaksi lain, dan salah pecah = piutang salah.
-export function cariPecahan(peta: Map<number, PaperSplit>, amount: number): PaperSplit | null {
-  if (!amount) return null;
-  for (const [a, p] of peta) if (Math.abs(a - amount) <= 2) return p;
   return null;
 }
 
