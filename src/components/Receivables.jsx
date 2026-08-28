@@ -659,6 +659,33 @@ export default function Receivables({
   };
   const getSettleDate = (rId) => settleDate[rId] || tanggalUangMasuk(rId) || todayStr();
 
+  // Urutan tiap kolom, disimpan per entitas. "Suggest" = urutan pasangan yang
+  // ditawarkan pencocokan; kalau Suggested match dimatikan ia jatuh ke tanggal.
+  const PILIHAN_URUT = [
+    { key: "suggest", label: "Suggest", defaultDir: "desc" },
+    { key: "date",    label: "Date",    defaultDir: "desc" },
+    { key: "amount",  label: "Amount",  defaultDir: "desc" },
+  ];
+  const [urutOut, setUrutOut] = useState({});
+  const [urutIn,  setUrutIn]  = useState({});
+  const urutkan = (baris, nilai, urutanSaran) => {
+    const i = String(nilai || "").lastIndexOf("_");
+    const kunci = i > 0 ? nilai.slice(0, i) : "suggest";
+    const naik  = (i > 0 ? nilai.slice(i + 1) : "desc") === "asc";
+    if (kunci === "suggest") {
+      const dasar = urutanSaran || baris;
+      return naik ? [...dasar].reverse() : dasar;
+    }
+    const nilaiDari = (e) => kunci === "amount"
+      ? Number(e.amount_idr ?? e.amount ?? 0)
+      : String(e.tx_date || "");
+    return [...baris].sort((a, b) => {
+      const va = nilaiDari(a), vb = nilaiDari(b);
+      const c = va < vb ? -1 : va > vb ? 1 : 0;
+      return naik ? c : -c;
+    });
+  };
+
   // ── Toggle row selection ───────────────────────────────────────
   const toggleOutRow = (accId, entryId) => setSelectedOut(prev => {
     const s = new Set(prev[accId] || []);
@@ -1068,8 +1095,10 @@ export default function Receivables({
               const inRows  = allInRows.filter(e => !e.reimburse_settlement_id);
               // Suggested match: reorder both columns so likely pairs align at top + badge them
               const sugg = suggestMatch ? suggestReimbursePairs(outRows, inRows) : null;
-              const displayOut = sugg ? sugg.orderedOut : outRows;
-              const displayIn  = sugg ? sugg.orderedIn  : inRows;
+              const nilaiUrutOut = urutOut[r.id] || "suggest_desc";
+              const nilaiUrutIn  = urutIn[r.id]  || "suggest_desc";
+              const displayOut = urutkan(outRows, nilaiUrutOut, sugg ? sugg.orderedOut : null);
+              const displayIn  = urutkan(inRows,  nilaiUrutIn,  sugg ? sugg.orderedIn  : null);
               const pairIdx = sugg ? sugg.pairIndex : {};
 
               // Urut menurut tanggal transaksinya (settled_at = tanggal uang masuk),
@@ -1229,8 +1258,16 @@ export default function Receivables({
                     <div className="settle-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 10 }}>
                       {/* Left: Expenses OUT */}
                       <div>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "#dc2626", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif", marginBottom: 6 }}>
-                          Expenses (Out)
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: "#dc2626", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif" }}>
+                            Expenses (Out)
+                          </div>
+                          <SortDropdown
+                            storageKey={`sort_reim_out_${r.entity}`}
+                            options={PILIHAN_URUT}
+                            value={nilaiUrutOut}
+                            onChange={v => setUrutOut(prev => ({ ...prev, [r.id]: v }))}
+                          />
                         </div>
                         {displayOut.length === 0 ? (
                           <div style={{ fontSize: 11, color: "#9ca3af", padding: "6px 0" }}>No expenses recorded</div>
@@ -1271,8 +1308,16 @@ export default function Receivables({
 
                       {/* Right: Received IN */}
                       <div>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "#059669", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif", marginBottom: 6 }}>
-                          Received (In)
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: "#059669", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif" }}>
+                            Received (In)
+                          </div>
+                          <SortDropdown
+                            storageKey={`sort_reim_in_${r.entity}`}
+                            options={PILIHAN_URUT}
+                            value={nilaiUrutIn}
+                            onChange={v => setUrutIn(prev => ({ ...prev, [r.id]: v }))}
+                          />
                         </div>
                         {displayIn.length === 0 ? (
                           <div style={{ fontSize: 11, color: "#9ca3af", padding: "6px 0" }}>No payments received</div>
