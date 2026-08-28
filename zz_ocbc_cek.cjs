@@ -1,0 +1,23 @@
+const fs=require('fs');
+const load=f=>Object.fromEntries(fs.readFileSync(f,'utf8').split('\n').filter(l=>l.includes('=')).map(l=>{const i=l.indexOf('=');return[l.slice(0,i).trim(),l.slice(i+1).trim()];}));
+const env=load('.env.local'),sec=load('.secrets.local');for(const[k,v]of Object.entries(env))process.env[k]=v;
+const{supabase,accountsApi}=require('./app.headless.cjs');
+const rp=n=>Math.round(Number(n||0)).toLocaleString('id-ID');
+(async()=>{
+const{data:auth}=await supabase.auth.signInWithPassword({email:sec.APP_EMAIL,password:sec.APP_PASSWORD});const uid=auth.user.id;
+const accounts=await accountsApi.getAll(uid);const nm=id=>accounts.find(a=>a.id===id)?.name||'∅';
+const oc=accounts.find(a=>a.name==='OCBC 90N');
+console.log('OCBC 90N saldo sekarang:',rp(oc.current_balance),'| initial',rp(oc.initial_balance));
+console.log('\n=== pay_cc ke OCBC 90N (sisi bank), Jan–Apr ===');
+const{data:p}=await supabase.from('ledger').select('tx_date,amount_idr,from_id,description').eq('user_id',uid).eq('tx_type','pay_cc').eq('to_id',oc.id).gte('tx_date','2026-01-01').lte('tx_date','2026-04-30').order('tx_date');
+for(const r of p||[])console.log(`  ${r.tx_date} ${rp(r.amount_idr).padStart(12)} dari ${nm(r.from_id).padEnd(11)} | ${(r.description||'').slice(0,44)}`);
+console.log('  jumlah:',rp((p||[]).reduce((s,r)=>s+ +r.amount_idr,0)));
+console.log('\n  statement: 15/01 10jt, 21/01 70jt, 26/01 60jt, 12/02 5jt, 23/02 92.899.602');
+console.log('\n=== baris OCBC 90N yang SUDAH ada di ledger, 13 Jan – 12 Mar ===');
+const{data:l}=await supabase.from('ledger').select('tx_date,tx_type,amount_idr,entity,description').eq('user_id',uid).eq('from_id',oc.id).gte('tx_date','2026-01-13').lte('tx_date','2026-03-12').order('tx_date');
+console.log('  ada',(l||[]).length,'baris');
+for(const r of l||[])console.log(`  ${r.tx_date} ${rp(r.amount_idr).padStart(12)} ${r.tx_type} | ${(r.description||'').slice(0,44)}`);
+console.log('\n=== Charine 2.277.300 & Turkish ===');
+const{data:c}=await supabase.from('ledger').select('tx_date,tx_type,amount_idr,entity,from_id,to_id,description').eq('user_id',uid).eq('amount_idr',2277300);
+for(const r of c||[])console.log(`  ${r.tx_date} ${r.tx_type} ${r.entity} ${nm(r.from_id)}→${nm(r.to_id)} | ${(r.description||'').slice(0,60)}`);
+process.exit(0);})();
