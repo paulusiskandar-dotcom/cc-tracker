@@ -1119,95 +1119,9 @@ export default function Receivables({
                     </div>
 
                     {/* ── Two-column settle UI ── */}
-                    <div className="settle-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 10 }}>
-                      {/* Left: Expenses OUT */}
-                      <div>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "#dc2626", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif", marginBottom: 6 }}>
-                          Expenses (Out)
-                        </div>
-                        {displayOut.length === 0 ? (
-                          <div style={{ fontSize: 11, color: "#9ca3af", padding: "6px 0" }}>No expenses recorded</div>
-                        ) : displayOut.map(e => {
-                          const settled    = !!e.reimburse_settlement_id;
-                          const isSelected = !settled && selOut.has(e.id);
-                          const fromAcc    = accounts.find(a => a.id === e.from_id);
-                          const pidx       = pairIdx[e.id];
-                          return (
-                            <div
-                              key={e.id}
-                              onClick={settled ? undefined : () => toggleOutRow(r.id, e.id)}
-                              style={{
-                                cursor: settled ? "default" : "pointer",
-                                opacity: settled ? 0.45 : 1,
-                                border: isSelected ? "1.5px solid #dc2626" : pidx ? "1px solid #ddd6fe" : "1px solid #f3f4f6",
-                                borderRadius: 8, padding: "8px 10px", marginBottom: 4,
-                                background: isSelected ? "#fff5f5" : pidx ? "#faf5ff" : "#fafafa",
-                              }}
-                            >
-                              <div style={{ display: "flex", justifyContent: "space-between", gap: 4 }}>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "Figtree, sans-serif" }}>
-                                    {pidx && <span style={{ color: "#7c3aed", fontWeight: 800, marginRight: 4 }}>✦{pidx}</span>}
-                                    {e.description}
-                                  </div>
-                                  <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1 }}>
-                                    {e.tx_date} · {fromAcc?.name || "—"}
-                                    {settled && <span style={{ marginLeft: 4, color: "#d1d5db" }}>· settled</span>}
-                                  </div>
-                                </div>
-                                <div style={{ fontSize: 12, fontWeight: 700, color: "#dc2626", flexShrink: 0 }}>{fmtIDR(Number(e.amount || 0))}</div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {/* Right: Received IN */}
-                      <div>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: "#059669", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif", marginBottom: 6 }}>
-                          Received (In)
-                        </div>
-                        {displayIn.length === 0 ? (
-                          <div style={{ fontSize: 11, color: "#9ca3af", padding: "6px 0" }}>No payments received</div>
-                        ) : displayIn.map(e => {
-                          const settled    = !!e.reimburse_settlement_id;
-                          const isSelected = !settled && selIn.has(e.id);
-                          const toAcc      = accounts.find(a => a.id === e.to_id);
-                          const pidx       = pairIdx[e.id];
-                          return (
-                            <div
-                              key={e.id}
-                              onClick={settled ? undefined : () => toggleInRow(r.id, e.id)}
-                              style={{
-                                cursor: settled ? "default" : "pointer",
-                                opacity: settled ? 0.45 : 1,
-                                border: isSelected ? "1.5px solid #059669" : pidx ? "1px solid #ddd6fe" : "1px solid #f3f4f6",
-                                borderRadius: 8, padding: "8px 10px", marginBottom: 4,
-                                background: isSelected ? "#f0fdf4" : pidx ? "#faf5ff" : "#fafafa",
-                              }}
-                            >
-                              <div style={{ display: "flex", justifyContent: "space-between", gap: 4 }}>
-                                <div style={{ flex: 1, minWidth: 0 }}>
-                                  <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "Figtree, sans-serif" }}>
-                                    {pidx && <span style={{ color: "#7c3aed", fontWeight: 800, marginRight: 4 }}>✦{pidx}</span>}
-                                    {e.description}
-                                  </div>
-                                  <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1 }}>
-                                    {e.tx_date} · {toAcc?.name || "—"}
-                                    {settled && <span style={{ marginLeft: 4, color: "#d1d5db" }}>· settled</span>}
-                                  </div>
-                                </div>
-                                <div style={{ fontSize: 12, fontWeight: 700, color: "#059669", flexShrink: 0 }}>+{fmtIDR(Number(e.amount || 0))}</div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
                     {/* ── Summary + Settle ── */}
                     {(selOut.size > 0 || selIn.size > 0) && (
-                      <div style={{ marginTop: 10, borderTop: "0.5px solid #f3f4f6", paddingTop: 10 }}>
+                      <div style={{ marginBottom: 10, borderBottom: "0.5px solid #f3f4f6", paddingBottom: 10 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3, fontFamily: "Figtree, sans-serif" }}>
                           <span style={{ color: "#9ca3af" }}>Out selected</span>
                           <span style={{ fontWeight: 700, color: "#dc2626" }}>{fmtIDR(totalOutSel)}</span>
@@ -1312,6 +1226,91 @@ export default function Receivables({
                       </div>
                     )}
 
+                    <div className="settle-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 10 }}>
+                      {/* Left: Expenses OUT */}
+                      <div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#dc2626", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif", marginBottom: 6 }}>
+                          Expenses (Out)
+                        </div>
+                        {displayOut.length === 0 ? (
+                          <div style={{ fontSize: 11, color: "#9ca3af", padding: "6px 0" }}>No expenses recorded</div>
+                        ) : displayOut.map(e => {
+                          const settled    = !!e.reimburse_settlement_id;
+                          const isSelected = !settled && selOut.has(e.id);
+                          const fromAcc    = accounts.find(a => a.id === e.from_id);
+                          const pidx       = pairIdx[e.id];
+                          return (
+                            <div
+                              key={e.id}
+                              onClick={settled ? undefined : () => toggleOutRow(r.id, e.id)}
+                              style={{
+                                cursor: settled ? "default" : "pointer",
+                                opacity: settled ? 0.45 : 1,
+                                border: isSelected ? "1.5px solid #dc2626" : pidx ? "1px solid #ddd6fe" : "1px solid #f3f4f6",
+                                borderRadius: 8, padding: "8px 10px", marginBottom: 4,
+                                background: isSelected ? "#fff5f5" : pidx ? "#faf5ff" : "#fafafa",
+                              }}
+                            >
+                              <div style={{ display: "flex", justifyContent: "space-between", gap: 4 }}>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "Figtree, sans-serif" }}>
+                                    {pidx && <span style={{ color: "#7c3aed", fontWeight: 800, marginRight: 4 }}>✦{pidx}</span>}
+                                    {e.description}
+                                  </div>
+                                  <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1 }}>
+                                    {e.tx_date} · {fromAcc?.name || "—"}
+                                    {settled && <span style={{ marginLeft: 4, color: "#d1d5db" }}>· settled</span>}
+                                  </div>
+                                </div>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: "#dc2626", flexShrink: 0 }}>{fmtIDR(Number(e.amount || 0))}</div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Right: Received IN */}
+                      <div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "#059669", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif", marginBottom: 6 }}>
+                          Received (In)
+                        </div>
+                        {displayIn.length === 0 ? (
+                          <div style={{ fontSize: 11, color: "#9ca3af", padding: "6px 0" }}>No payments received</div>
+                        ) : displayIn.map(e => {
+                          const settled    = !!e.reimburse_settlement_id;
+                          const isSelected = !settled && selIn.has(e.id);
+                          const toAcc      = accounts.find(a => a.id === e.to_id);
+                          const pidx       = pairIdx[e.id];
+                          return (
+                            <div
+                              key={e.id}
+                              onClick={settled ? undefined : () => toggleInRow(r.id, e.id)}
+                              style={{
+                                cursor: settled ? "default" : "pointer",
+                                opacity: settled ? 0.45 : 1,
+                                border: isSelected ? "1.5px solid #059669" : pidx ? "1px solid #ddd6fe" : "1px solid #f3f4f6",
+                                borderRadius: 8, padding: "8px 10px", marginBottom: 4,
+                                background: isSelected ? "#f0fdf4" : pidx ? "#faf5ff" : "#fafafa",
+                              }}
+                            >
+                              <div style={{ display: "flex", justifyContent: "space-between", gap: 4 }}>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 12, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "Figtree, sans-serif" }}>
+                                    {pidx && <span style={{ color: "#7c3aed", fontWeight: 800, marginRight: 4 }}>✦{pidx}</span>}
+                                    {e.description}
+                                  </div>
+                                  <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1 }}>
+                                    {e.tx_date} · {toAcc?.name || "—"}
+                                    {settled && <span style={{ marginLeft: 4, color: "#d1d5db" }}>· settled</span>}
+                                  </div>
+                                </div>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: "#059669", flexShrink: 0 }}>+{fmtIDR(Number(e.amount || 0))}</div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
                     {/* ── Settlement history (hidden by default — click to expand) ── */}
                     {entitySettlements.length > 0 && (
                       <div style={{ marginTop: 14, borderTop: "0.5px solid #f3f4f6", paddingTop: 10 }}>
