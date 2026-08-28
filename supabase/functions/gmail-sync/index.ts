@@ -138,7 +138,11 @@ function cariCatatan(peta: Map<number, string>, amount: number): string | null {
 // Tanpa email pemecah, baris dibiarkan utuh — statement bulanan jadi jaring pengaman.
 export type PaperSplit = { kirim: number; fee: number; total: number; ke: string; ref: string };
 
-export function parsePaperSplit(_subject: string, rawBody: string): PaperSplit | null {
+export function parsePaperSplit(subject: string, rawBody: string): PaperSplit | null {
+  // Blibli mengirim DUA email per pesanan: "Menunggu Pembayaran" lalu "Transaksi
+  // Berhasil". Hanya percayai yang berhasil — pesanan yang batal tak boleh jadi
+  // dasar pemecahan.
+  if (/Menunggu Pembayaran/i.test(subject || "")) return null;
   // Badan email Blibli bertabel: label dan nominalnya terpisah pipa + baris baru
   // ("Total harga | | Rp47.205.000") — ratakan dulu, kalau tidak regex tak pernah kena.
   const body = (rawBody || "").replace(/[|\r\n]+/g, " ").replace(/\s+/g, " ");
@@ -168,7 +172,18 @@ export function parsePaperSplit(_subject: string, rawBody: string): PaperSplit |
 async function buildPaperSplits(accessToken: string, afterDate: string, beforeDate?: string) {
   const peta = new Map<number, PaperSplit>();
   try {
-    let q = `from:blibli.com subject:(E-invoicing) after:${afterDate}`;
+    // ⚠️ Email Blibli datang saat pembayaran DIBUAT, tagihan kartunya bisa muncul
+    // BERHARI-HARI kemudian (terbukti: bayar 1 Agu, tagihan CIMB baru 10 Agu — 9 hari).
+    // Kalau jendelanya disamakan dengan jendela sync, pecahannya tidak akan pernah
+    // ketemu. Mundurkan 60 hari; kunci petanya nominal, jadi entri berlebih tak
+    // berbahaya dan yang ganda otomatis diabaikan.
+    const mundur = (d: string, n: number) => {
+      const x = new Date(String(d).replace(/\//g, "-") + "T00:00:00Z");
+      if (isNaN(+x)) return d;
+      x.setUTCDate(x.getUTCDate() - n);
+      return x.toISOString().slice(0, 10).replace(/-/g, "/");
+    };
+    let q = `from:blibli.com subject:(E-invoicing) after:${mundur(afterDate, 60)}`;
     if (beforeDate) q += ` before:${beforeDate}`;
     const res = await fetch(`https://www.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(q)}&maxResults=60`,
       { headers: { Authorization: `Bearer ${accessToken}` } });
@@ -930,7 +945,7 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
 
 // Re-run AI extraction for specific email_sync rows (by ID).
 // Used by the "Re-Process" button in the Email Pending UI.
-async function reprocessEmails(supabase: any, userId: string, ids: string[], anthropicKey: string) {
+async function reprocessEmails(supabase: any, userId: string, ids: string[], anthropicKey: string, googleSecret?: string) {
   // Load accounts, merchant mappings, expense categories, income sources
   const [
     { data: accounts },
@@ -970,7 +985,38 @@ async function reprocessEmails(supabase: any, userId: string, ids: string[], ant
   const { data: rows } = await supabase.from("email_sync")
     .select("id,raw_body,subject,sender_email,received_at").eq("user_id", userId).in("id", ids);
 
-  let reprocessed = 0;
+  // Proses ulang HARUS ikut memasang pecahan Paper & catatan pesanan. Tanpa ini,
+  // memproses ulang satu baris akan diam-diam MENGHAPUS pecahannya — tagihan Paper
+  // kembali utuh dan fee-nya masuk piutang lagi.
+  let paperSplits = new Map<number, PaperSplit>();
+  let orderNotes  = new Map<number, string>();
+  try {
+    const tgl = (rows || []).map((r: any) => String(r.received_at || "").slice(0, 10)).filter(Boolean).sort();
+    if (tgl.length && googleSecret) {
+      const { data: tokenRow } = await supabase.from("gmail_tokens").select("*").eq("user_id", userId).single();
+      if (tokenRow) {
+        let accessToken = tokenRow.access_token;
+        if (tokenRow.token_expiry && new Date(tokenRow.token_expiry) < new Date(Date.now() + 60000)) {
+          const t = await refreshAccessToken(tokenRow, googleSecret);
+          if (t) accessToken = t;
+        }
+        const geser = (d: string, n: number) => {
+          const x = new Date(d + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() + n);
+          return x.toISOString().slice(0, 10).replace(/-/g, "/");
+        };
+        // buildPaperSplits sudah memundurkan 60 hari sendiri; di sini cukup beri
+        // ruang beberapa hari saja di kedua ujung.
+        const after = geser(tgl[0], -3), before = geser(tgl[tgl.length - 1], 3);
+        paperSplits = await buildPaperSplits(accessToken, after, before);
+        orderNotes  = await buildOrderNotes(accessToken, after, before);
+      }
+    }
+  } catch (e) {
+    console.warn("[gmail-sync] reprocess: gagal ambil pecahan/catatan:", e);
+  }
+  console.log(`[gmail-sync] reprocess: ${paperSplits.size} pecahan Paper, ${orderNotes.size} catatan pesanan`);
+
+  let reprocessed = 0, gagal = 0;
 
   for (const row of rows || []) {
     const plainBody = row.raw_body || "";
@@ -1006,14 +1052,23 @@ async function reprocessEmails(supabase: any, userId: string, ids: string[], ant
               ? { ...tx, category_id: mapping.category_id ?? tx.category_id, from_account_id: tx.from_account_id ?? mapping.account_id ?? null }
               : tx;
           });
+          for (const tx of aiResult) {
+            const amt = Number(tx.amount_idr || tx.amount || 0);
+            const n = cariCatatan(orderNotes, amt);
+            if (n) tx.item_note = n;
+            const pecah = cariPecahan(paperSplits, amt);
+            if (pecah) tx.paper_split = pecah;
+          }
           const rerunStatus = parkValasResult(aiResult);
-          await supabase.from("email_sync").update({
+          const { error: upErr } = await supabase.from("email_sync").update({
             ai_raw_result:   aiResult,
             extracted_count: aiResult.length,
             status:          rerunStatus,
-            error_message:   null,
           }).eq("id", row.id).eq("user_id", userId);
-          reprocessed++;
+          if (upErr) {
+            console.error("[gmail-sync] reprocess: update GAGAL untuk", row.id, upErr.message);
+            gagal++;
+          } else reprocessed++;
         }
       }
     } catch (e) {
@@ -1021,7 +1076,7 @@ async function reprocessEmails(supabase: any, userId: string, ids: string[], ant
     }
   }
 
-  return { reprocessed };
+  return { reprocessed, gagal };
 }
 
 Deno.serve(async (req: Request) => {
@@ -1049,7 +1104,7 @@ Deno.serve(async (req: Request) => {
   // Re-process specific emails by ID
   if (reprocessIds && targetUserId) {
     try {
-      const result = await reprocessEmails(supabase, targetUserId, reprocessIds, ANTHROPIC_KEY);
+      const result = await reprocessEmails(supabase, targetUserId, reprocessIds, ANTHROPIC_KEY, GOOGLE_SECRET);
       return new Response(JSON.stringify({ success: true, ...result }), {
         headers: { ...CORS, "Content-Type": "application/json" },
       });
