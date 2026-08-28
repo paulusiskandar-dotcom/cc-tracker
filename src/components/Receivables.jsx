@@ -1247,7 +1247,7 @@ export default function Receivables({
                               return (
                                 <div>
                                   <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>
-                                    Catat kelebihan sebagai
+                                    Record over as
                                   </div>
                                   <select
                                     value={nilai}
