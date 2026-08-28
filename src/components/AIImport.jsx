@@ -540,6 +540,9 @@ export default function AIImport({ user, accounts, categories = [], incomeSrcs =
       notes:          r.notes || "",
       source:         "ai_scan",
       scan_batch_id:  batchId || null,
+      // Pecahan Paper.id (dari email Blibli e-invoicing) diteruskan apa adanya;
+      // ledgerApi.create yang memecahnya jadi baris piutang + baris fee terpisah.
+      ...(r._paper_split ? { _paper_split: r._paper_split } : {}),
       recurring_template_id: r.recurring_template_id || null,
       ...(r.tx_type === "give_loan" && r.new_loan  ? { new_loan:  r.new_loan  } : {}),
       ...(r.tx_type === "buy_asset"  && r.new_asset ? { new_asset: r.new_asset } : {}),

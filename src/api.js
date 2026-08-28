@@ -275,9 +275,36 @@ export const ledgerApi = {
       new_loan,
       loan_auto_payment,
       loan_increment_principal,
+      _paper_split,
       ...insertEntry
     } = entry;
     let safeEntry = sanitizeUUIDs(insertEntry);
+
+    // ── Pecahan Paper.id: satu tagihan kartu → piutang + fee ─────────────────
+    // Pembayaran vendor lewat Paper.id ditagihkan sebagai SATU baris, padahal isinya
+    // dua hal: uang yang sampai ke vendor (diganti Hamasa/SDC → piutang) dan fee Paper
+    // (ditanggung sendiri, TIDAK PERNAH jadi piutang). Baris pokok dikecilkan ke
+    // "Jumlah Terkirim"; baris fee dibuat setelah insert, di kartu & tanggal yang sama,
+    // sehingga total beban kartu tidak berubah. Doktrin 2026-08-28 — menggantikan pola
+    // lama "Reimbursable Loss" yang bersisi tunggal dan tak pernah mengurangi piutang.
+    const pecahPaper = (() => {
+      if (!_paper_split) return null;
+      const kirim = Number(_paper_split.kirim || 0);
+      const fee   = Number(_paper_split.fee   || 0);
+      const total = Number(_paper_split.total || 0);
+      const amt   = Number(safeEntry.amount_idr || safeEntry.amount || 0);
+      // Jangan pecah kalau angkanya tak masuk akal atau tak sepadan dengan barisnya.
+      if (kirim <= 0 || fee <= 0 || Math.abs(kirim + fee - total) > 2) return null;
+      if (Math.abs(total - amt) > 2) return null;
+      if (safeEntry.currency && safeEntry.currency !== "IDR") return null;
+      if (!safeEntry.from_id) return null;
+      return { kirim, fee, ke: _paper_split.ke || "", ref: _paper_split.ref || "" };
+    })();
+    if (pecahPaper) {
+      safeEntry.amount     = pecahPaper.kirim;
+      safeEntry.amount_idr = pecahPaper.kirim;
+      safeEntry.description = `${safeEntry.description || ""}`.slice(0, 180);
+    }
 
     // ── Resolve category_name → category_id (DB lookup) when needed ──────
     // Triggered by callers that pass a name but no UUID (e.g. legacy slug input,
@@ -344,9 +371,53 @@ export const ledgerApi = {
       .single();
     if (error) throw new Error(error.message);
 
+    // ── Baris kedua pecahan Paper: fee, di kartu & tanggal yang sama ─────────
+    // Selalu entity Personal — fee adalah biaya Paulus sendiri, bukan tanggungan
+    // pihak yang di-reimburse (aturan "expense selalu Personal").
+    if (pecahPaper) {
+      try {
+        const { data: kat } = await supabase
+          .from("expense_categories").select("id, name")
+          .or(`user_id.is.null,user_id.eq.${userId}`)
+          .eq("name", "Bank & Card Fees").maybeSingle();
+        await supabase.from("ledger").insert([{
+          user_id:      userId,
+          tx_date:      safeEntry.tx_date,
+          tx_type:      "expense",
+          amount:       pecahPaper.fee,
+          amount_idr:   pecahPaper.fee,
+          currency:     "IDR",
+          entity:       "Personal",
+          from_type:    "account",
+          from_id:      safeEntry.from_id,
+          to_type:      "expense",
+          to_id:        null,
+          category_id:   kat?.id || null,
+          category_name: kat?.name || "Bank & Card Fees",
+          description:  `Fee Paper.id${pecahPaper.ke ? " — " + pecahPaper.ke : ""}`.slice(0, 180),
+          source:       "paper-split",
+          notes:        `pecahan fee dari tagihan Paper${pecahPaper.ref ? " (ref " + pecahPaper.ref + ")" : ""}; bukan piutang`,
+        }]);
+      } catch (e) {
+        // Baris pokok sudah masuk — jangan gagalkan impor, tapi harus terlihat:
+        // tanpa baris fee, saldo kartu akan kurang sebesar fee-nya.
+        console.error("[ledgerApi.create] baris fee Paper GAGAL dibuat — saldo kartu akan meleset:", e?.message);
+      }
+    }
+
     const amount  = Number(safeEntry.amount_idr || safeEntry.amount || 0);
     const fromAcc = localAccounts.find(a => a.id === safeEntry.from_id);
     const toAcc   = localAccounts.find(a => a.id === safeEntry.to_id);
+
+    // Delta fee dikenakan HANYA ke kartu, tidak ke sisi tujuan (piutang) — kalau
+    // ikut ditambahkan ke `amount`, piutang akan menggelembung sebesar fee, persis
+    // kesalahan yang sedang kita perbaiki.
+    if (pecahPaper && fromAcc) {
+      const dFee = getDeltas("expense", pecahPaper.fee);
+      if (dFee.from?.[fromAcc.type] !== undefined) {
+        await applyBalanceDelta(fromAcc.id, fromAcc.type, dFee.from[fromAcc.type]);
+      }
+    }
 
     if (safeEntry.tx_type === "fx_exchange") {
       // See convention header on applyBalanceDelta.
@@ -1587,6 +1658,11 @@ export function flattenEmailSync(rows) {
         // Isi belanja hasil parser email pesanan (gmail-sync) — masuk ke ledger.notes
         // saat disetujui, supaya Reports menampilkan barangnya, bukan cuma "TOKOPEDIA".
         notes:                   tx.item_note || null,
+        // Pecahan Paper.id dari email Blibli e-invoicing: satu tagihan kartu berisi
+        // uang vendor (piutang) + fee Paper (beban sendiri). Dipakai ledgerApi.create
+        // untuk membuat DUA baris. Nominal di antrean tetap total tagihan kartu —
+        // sama dengan notifikasi bank — pemecahan terjadi saat baris disetujui.
+        _paper_split:            tx.paper_split || null,
         amount:                  tx.amount,
         currency:                tx.currency || "IDR",
         amount_idr:              tx.amount_idr || tx.amount,

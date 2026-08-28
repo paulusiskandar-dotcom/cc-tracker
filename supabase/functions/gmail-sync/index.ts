@@ -128,6 +128,75 @@ function cariCatatan(peta: Map<number, string>, amount: number): string | null {
   return null;
 }
 
+// ── Pemecah fee Paper.id ────────────────────────────────────────────────────
+// Pembayaran vendor lewat Paper.id ditagihkan ke kartu sebagai SATU baris, padahal
+// isinya dua hal berbeda: uang yang benar-benar sampai ke vendor (Total harga —
+// inilah yang diganti Hamasa/SDC, jadi piutang) dan fee Paper + biaya platform
+// (ditanggung Paulus, TIDAK PERNAH jadi piutang). Email Blibli "Transaksi Berhasil:
+// E-invoicing" memuat rinciannya dalam teks polos, jadi pemecahan TIDAK perlu ditebak.
+// ⚠️ JANGAN hitung mundur dari tarif: 1,5122% (2023) → 1,5689% (2025) → 1,55% (2026).
+// Tanpa email pemecah, baris dibiarkan utuh — statement bulanan jadi jaring pengaman.
+export type PaperSplit = { kirim: number; fee: number; total: number; ke: string; ref: string };
+
+export function parsePaperSplit(_subject: string, rawBody: string): PaperSplit | null {
+  // Badan email Blibli bertabel: label dan nominalnya terpisah pipa + baris baru
+  // ("Total harga | | Rp47.205.000") — ratakan dulu, kalau tidak regex tak pernah kena.
+  const body = (rawBody || "").replace(/[|\r\n]+/g, " ").replace(/\s+/g, " ");
+  // HANYA e-invoicing Paper. Blibli juga mengirim "Transaksi Berhasil: Angsuran
+  // Kredit" (cicilan BYD ~11,1jt) dengan format nyaris sama — kalau ikut terpecah,
+  // cicilan mobil berubah jadi piutang Hamasa. Penjaga ini wajib, sudah teruji
+  // menolak 3 email Angsuran Kredit.
+  if (!/Penyedia\s*Paper/i.test(body)) return null;
+  const angka = (s: string) => Number(String(s).replace(/[^\d]/g, "")) || 0;
+  const ambil = (label: string) => {
+    const m = body.match(new RegExp(label + String.raw`\s*Rp\s*([\d.,]+)`, "i"));
+    return m ? angka(m[1]) : 0;
+  };
+  const kirim = ambil("Total harga");
+  const total = ambil("Total pembayaran");
+  if (!kirim || !total || total <= kirim) return null;
+  // Fee = SELISIH, bukan penjumlahan Biaya admin + Biaya platform. "Total pembayaran"
+  // yang tercetak = nominal tagihan kartu sesungguhnya, kadang 1 rupiah di bawah
+  // penjumlahan komponen (mis. 18.279.999 dan 43.556.047 — dua-duanya terbukti cocok
+  // dengan statement). Statement = final.
+  const fee = total - kirim;
+  const ref = (body.match(/Nomor pembayaran\s*([A-Z0-9]+)/i) || [])[1] || "";
+  const ke = RINGKAS(((body.match(/Nama\s+([A-Za-z*][^|]*?)\s+Detail pembayaran/i) || [])[1] || "").trim(), 40);
+  return { kirim, fee, total, ke, ref };
+}
+
+async function buildPaperSplits(accessToken: string, afterDate: string, beforeDate?: string) {
+  const peta = new Map<number, PaperSplit>();
+  try {
+    let q = `from:blibli.com subject:(E-invoicing) after:${afterDate}`;
+    if (beforeDate) q += ` before:${beforeDate}`;
+    const res = await fetch(`https://www.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(q)}&maxResults=60`,
+      { headers: { Authorization: `Bearer ${accessToken}` } });
+    if (!res.ok) return peta;
+    for (const m of ((await res.json()).messages || [])) {
+      const r = await fetch(`https://www.googleapis.com/gmail/v1/users/me/messages/${m.id}?format=full`,
+        { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!r.ok) continue;
+      const d = await r.json();
+      const subj = (d.payload?.headers || []).find((h: any) => h.name === "Subject")?.value || "";
+      const hasil = parsePaperSplit(subj, decodeBodyPlain(d.payload));
+      if (hasil && !peta.has(hasil.total)) peta.set(hasil.total, hasil);
+    }
+  } catch (e) {
+    console.warn("[gmail-sync] buildPaperSplits gagal:", e);
+  }
+  console.log(`[gmail-sync] pecahan Paper terkumpul: ${peta.size}`);
+  return peta;
+}
+
+// Dicocokkan lewat Total pembayaran = nominal tagihan kartu. Toleransi sempit
+// (Rp2) — beda sedikit saja berarti transaksi lain, dan salah pecah = piutang salah.
+export function cariPecahan(peta: Map<number, PaperSplit>, amount: number): PaperSplit | null {
+  if (!amount) return null;
+  for (const [a, p] of peta) if (Math.abs(a - amount) <= 2) return p;
+  return null;
+}
+
 const BANK_DOMAINS = [
   "klikbca.com", "bca.co.id",
   "bankmandiri.co.id", "mandiri.co.id",
@@ -567,7 +636,8 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
   const messages = listData.messages || [];
 
   // Peta nominal → deskripsi belanja, dari email pesanan/struk di jendela yang sama.
-  const orderNotes = await buildOrderNotes(accessToken, afterDate, beforeDate);
+  const orderNotes  = await buildOrderNotes(accessToken, afterDate, beforeDate);
+  const paperSplits = await buildPaperSplits(accessToken, afterDate, beforeDate);
 
   let processed = 0;
   let newTransactions = 0;
@@ -750,10 +820,17 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
     }
 
     // Tempelkan deskripsi belanja: cocokkan nominal transaksi ke struk/pesanan.
+    // Lalu tempelkan pecahan Paper: satu tagihan kartu = piutang + fee.
     if (Array.isArray(aiResult)) {
       for (const tx of aiResult) {
-        const n = cariCatatan(orderNotes, Number(tx.amount_idr || tx.amount || 0));
+        const amt = Number(tx.amount_idr || tx.amount || 0);
+        const n = cariCatatan(orderNotes, amt);
         if (n) tx.item_note = n;
+        const pecah = cariPecahan(paperSplits, amt);
+        if (pecah) {
+          tx.paper_split = pecah;
+          console.log(`[gmail-sync] Paper split ${amt} → kirim ${pecah.kirim} + fee ${pecah.fee} (${pecah.ke})`);
+        }
       }
     }
 
