@@ -1422,7 +1422,7 @@ async function executeSettle(entity: string, selOut: any[], selIn: any[], supaba
     notes: `Finalize: ${entity}`, reimburse_settlement_id: settlement.id,
   }]);
   if (surplus > 0) await supabase.from("ledger").insert([{
-    user_id: uid, tx_date: today, description: surplus <= 50000 ? `Payment difference — ${entity}` : `Over on finalize — ${entity}`,
+    user_id: uid, tx_date: today, description: surplus <= 10000 ? `Payment difference — ${entity}` : `Over on finalize — ${entity}`,
     amount: surplus, amount_idr: surplus, currency: "IDR",
     tx_type: "income",
     from_type: "income_source", from_id: srcOther?.id || null,

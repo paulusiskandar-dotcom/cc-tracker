@@ -641,7 +641,7 @@ export default function Receivables({
   // Selisih ≤ Rp50.000 dibukukan otomatis; di atas itu Paulus yang memilih.
   // Sebelumnya selisih apa pun diserap diam-diam ke Reimbursable Loss/Surplus —
   // itu yang menyembunyikan margin listrik 19jt selama berbulan-bulan.
-  const AMBANG_SELISIH = 50000;
+  const AMBANG_SELISIH = 10000;
   // Utility Income HANYA untuk listrik dua pelanggan ini. Di luar itu tidak
   // ditawarkan sama sekali (PLN pabrik Hamasa selalu diganti persis).
   const PLN_BERMARGIN = /SURYANTO SALIM|PAULUS ISKANDAR|545101427710|545103888558/i;
