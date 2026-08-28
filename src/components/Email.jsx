@@ -659,6 +659,24 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     setPendingSyncs(p => p.filter(s => s.id !== id));
   };
 
+  // ── PENJAGA PRA-ANCHOR (dry run 2026-08-28: BRI dobel tertahan 10/10,
+  // Skorcard 16/16, baris sah tertangkap 0). Email yang tanggal transaksinya
+  // lebih tua dari statement terakhir kartunya TIDAK ditulis — statement untuk
+  // masa itu sudah final; menulis dari email hanya bisa dobel (harga beli vs
+  // cicilan, kasus BRI) atau menabrak saldo awal terkalibrasi (kasus Skorcard).
+  // Batas KETAT `<`: baris TEPAT di hari cut diloloskan — siklusnya ambigu,
+  // statement yang memutuskan. Parkirannya waiting_statement, gugur otomatis
+  // saat statement tiba (mekanisme yang sama dengan valas).
+  const praAnchor = (r) => {
+    for (const id of [r.from_id, r.to_id]) {
+      if (!id) continue;
+      const k = accounts.find(a => a.id === id);
+      if (k?.type === "credit_card" && k.last_statement_date
+          && r.tx_date && r.tx_date < k.last_statement_date) return k;
+    }
+    return null;
+  };
+
   const buildEntry = (r) => {
     const desc   = r.description || r.subject || "Gmail transaction";
     const amount = Number(r.amount || 0);
@@ -753,6 +771,15 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
   const [splitRow, setSplitRow] = useState(null);
   const importSplit = async (r, parts) => {
     const gid = crypto.randomUUID();
+    const kAnchorSplit = praAnchor(r);
+    if (kAnchorSplit) {
+      try {
+        await gmailApi.markTxWaiting(r.email_sync_id, r.tx_index ?? 0);
+        updateRow(r._id, { _waiting_statement: true });
+      } catch (e) { console.warn("[markTxWaiting praAnchor split]", e?.message); }
+      showToast(`Pra-anchor — ${kAnchorSplit.name} sudah ber-statement; baris lama menunggu statement`, "info");
+      return;
+    }
     const createdIds = [];
     try {
       for (const p of parts) {
@@ -798,6 +825,17 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       } catch (e) { console.warn("[markTxWaiting]", e?.message); }
       showToast("Waiting for statement — kurs belum pasti (lihat tab Waiting)", "info");
       return;
+    }
+    {
+      const kAnchor = praAnchor(r);
+      if (kAnchor) {
+        try {
+          await gmailApi.markTxWaiting(r.email_sync_id, r.tx_index ?? 0);
+          updateRow(r._id, { _waiting_statement: true });
+        } catch (e) { console.warn("[markTxWaiting praAnchor]", e?.message); }
+        showToast(`Pra-anchor — ${kAnchor.name} sudah ber-statement ${kAnchor.last_statement_date}; baris lama menunggu statement`, "info");
+        return;
+      }
     }
     try {
       const entry = buildEntry(r);
@@ -878,7 +916,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
   const importAll = async (selectedRows) => {
     if (!selectedRows.length) return;
     setImporting(true);
-    let count = 0, skippedFx = 0, skippedDupe = 0;
+    let count = 0, skippedFx = 0, skippedDupe = 0, skippedAnchor = 0;
     const failures = [];
     const newLedgerIds = [];
     const matchedNames = [];
@@ -889,6 +927,12 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
         skippedFx++;
         try { await gmailApi.markTxWaiting(r.email_sync_id, r.tx_index ?? 0); updateRow(r._id, { _waiting_statement: true }); }
         catch (e) { console.warn("[markTxWaiting]", e?.message); }
+        continue;
+      }
+      if (praAnchor(r)) {
+        skippedAnchor++;
+        try { await gmailApi.markTxWaiting(r.email_sync_id, r.tx_index ?? 0); updateRow(r._id, { _waiting_statement: true }); }
+        catch (e) { console.warn("[markTxWaiting praAnchor]", e?.message); }
         continue;
       }
       try {
@@ -947,6 +991,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     }
     if (failures.length) showToast(`${failures.length} gagal: ${failures[0]}`, "error");
     if (skippedFx > 0) showToast(`${skippedFx} transaksi valas → Waiting for statement (kurs belum pasti)`, "info");
+    if (skippedAnchor > 0) showToast(`${skippedAnchor} baris pra-anchor → Waiting for statement (masanya sudah ber-statement)`, "info");
     if (matchedNames.length === 1) showToast(`✓ "${matchedNames[0]}" recurring linked and reminder confirmed`);
     else if (matchedNames.length > 1) showToast(`${matchedNames.length} recurring expenses linked`);
     if (newLedgerIds.length) undoManager.register({ type: "save_batch", ids: newLedgerIds, label: `Saved ${newLedgerIds.length} transaction${newLedgerIds.length !== 1 ? "s" : ""}` });
