@@ -4,6 +4,12 @@ import { supabase } from "../lib/supabase";
 import { fmtIDR } from "../utils";
 import { showToast } from "./shared/Card";
 import { Plane, Briefcase, CalendarDays, Tag as TagIcon } from "lucide-react";
+import { PieChart, Pie, Cell, Tooltip } from "recharts";
+
+// Palet sama dengan Reports supaya halaman ini terbaca sebagai keluarga yang sama.
+const PIE_COLORS = ["#dc2626","#d97706","#3b5bdb","#059669","#7c3aed","#0891b2","#e11d48","#ca8a04","#16a34a","#1d4ed8"];
+const KARTU = { background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 16, padding: "16px 18px" };
+const JUDUL = { fontSize: 12, fontWeight: 800, color: "#111827", fontFamily: FF, letterSpacing: "-0.01em" };
 
 const FF = "Figtree, system-ui, -apple-system, sans-serif";
 
@@ -493,6 +499,22 @@ function TagDetailView({ tag, user, ledger, onBack, onRefresh, onEdit, editTag, 
       .reduce((s, e) => s + Number(e.amount_idr || 0), 0);
   }, [taggedEntries]);
 
+  // Rincian per kategori, bentuknya mengikuti halaman Reports → Expense:
+  // donat + batang, diurut dari yang terbesar.
+  const kategori = useMemo(() => {
+    const m = {};
+    for (const e of taggedEntries) {
+      if (!["expense", "buy_asset"].includes(e.tx_type)) continue;
+      const k = e.category_name || "Uncategorised";
+      (m[k] = m[k] || { name: k, total: 0, count: 0 });
+      m[k].total += Number(e.amount_idr || e.amount || 0);
+      m[k].count += 1;
+    }
+    const arr = Object.values(m).sort((a, b) => b.total - a.total);
+    const tot = arr.reduce((s, c) => s + c.total, 0) || 1;
+    return arr.map(c => ({ ...c, pct: (c.total / tot) * 100 }));
+  }, [taggedEntries]);
+
   const visibleEntries = detailTab === "tagged" ? taggedEntries : untaggedCandidates;
   const selectedCount  = Object.values(selected).filter(Boolean).length;
   const allSelected    = visibleEntries.length > 0 && visibleEntries.every(e => selected[e.id]);
@@ -631,6 +653,49 @@ function TagDetailView({ tag, user, ledger, onBack, onRefresh, onEdit, editTag, 
         </div>
       )}
 
+      {/* Sebaran kategori — hanya di tab Tagged, karena inilah "belanja perjalanan ini".
+          Bentuknya mengikuti Reports → Expense supaya terbaca sebagai halaman sekeluarga. */}
+      {detailTab === "tagged" && kategori.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, alignItems: "start", marginBottom: 12 }}>
+          <div style={KARTU}>
+            <div style={JUDUL}>Spend Distribution</div>
+            <div style={{ display: "flex", justifyContent: "center", marginTop: 12 }}>
+              <PieChart width={220} height={220}>
+                <Pie data={kategori.filter(c => c.total > 0).slice(0, 8).map((c, i) => ({ name: c.name, value: c.total, color: PIE_COLORS[i % PIE_COLORS.length] }))}
+                     cx={110} cy={110} innerRadius={60} outerRadius={100} paddingAngle={2} dataKey="value">
+                  {kategori.slice(0, 8).map((c, i) => <Cell key={c.name} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                </Pie>
+                <Tooltip contentStyle={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, fontSize: 11, fontFamily: FF }}
+                         formatter={v => fmtIDR(v)} />
+              </PieChart>
+            </div>
+          </div>
+          <div style={KARTU}>
+            <div style={{ marginBottom: 10 }}>
+              <div style={JUDUL}>By Category</div>
+              <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2, fontFamily: FF }}>
+                Total: <strong style={{ color: "#111827" }}>{fmtIDR(totalSpend)}</strong>
+              </div>
+            </div>
+            {kategori.map((c, i) => (
+              <div key={c.name} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, padding: "4px 0" }}>
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: PIE_COLORS[i % PIE_COLORS.length], flexShrink: 0 }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ fontSize: 12, color: "#374151", fontFamily: FF }}>{c.name}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, fontFamily: FF }}>{fmtIDR(c.total)}</span>
+                  </div>
+                  <div style={{ background: "#f3f4f6", borderRadius: 3, height: 3, marginTop: 3 }}>
+                    <div style={{ width: `${Math.max(0, c.pct)}%`, height: "100%", background: PIE_COLORS[i % PIE_COLORS.length], borderRadius: 3 }} />
+                  </div>
+                </div>
+                <span style={{ fontSize: 10, color: "#9ca3af", flexShrink: 0, fontFamily: FF }}>{c.count} tx</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Bulk action bar */}
       {selectedCount > 0 && (
         <div style={{ background: "#eff6ff", border: "1px solid #93c5fd", borderRadius: 8, padding: 10, marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -653,14 +718,14 @@ function TagDetailView({ tag, user, ledger, onBack, onRefresh, onEdit, editTag, 
 
       {/* Entry list */}
       <div style={{ background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 12, overflow: "hidden" }}>
-        {/* Column header */}
+        {/* Kepala daftar: hanya "pilih semua" dan hitungan — kolom Date/Type
+            dipindah ke dalam barisnya, sama seperti daftar transaksi di Reports. */}
         {visibleEntries.length > 0 && (
-          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", background: "#fafafa", borderBottom: "1px solid #e5e7eb", fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: 0.5 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 16px", background: "#fafafa", borderBottom: "1px solid #e5e7eb" }}>
             <input type="checkbox" checked={allSelected} onChange={toggleAll} style={{ cursor: "pointer", margin: 0 }} />
-            <span style={{ width: 88 }}>Date</span>
-            <span style={{ flex: 1 }}>Description</span>
-            <span style={{ width: 100 }}>Type</span>
-            <span style={{ width: 120, textAlign: "right" }}>Amount</span>
+            <span style={{ fontSize: 11, color: "#9ca3af", fontFamily: FF }}>
+              {visibleEntries.length} transactions · {fmtIDR(visibleEntries.reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0))}
+            </span>
           </div>
         )}
 
@@ -675,7 +740,7 @@ function TagDetailView({ tag, user, ledger, onBack, onRefresh, onEdit, editTag, 
             <div
               key={e.id}
               onClick={() => toggleSelect(e.id)}
-              style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderBottom: "1px solid #f3f4f6", cursor: "pointer", background: selected[e.id] ? "#eff6ff" : "#fff", fontSize: 13 }}
+              style={{ display: "flex", alignItems: "flex-start", gap: 12, padding: "9px 16px", borderBottom: "1px solid #f3f4f6", cursor: "pointer", background: selected[e.id] ? "#eff6ff" : "#fff" }}
             >
               <input
                 type="checkbox"
@@ -684,16 +749,18 @@ function TagDetailView({ tag, user, ledger, onBack, onRefresh, onEdit, editTag, 
                 onClick={ev => ev.stopPropagation()}
                 style={{ cursor: "pointer", margin: 0 }}
               />
-              <span style={{ width: 88, color: "#6b7280", fontSize: 12 }}>{e.tx_date}</span>
-              <span style={{ flex: 1, color: "#111827", fontWeight: 500 }}>{e.description || "—"}</span>
-              <span style={{ width: 100 }}>
-                <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 4, background: e.tx_type === "expense" ? "#fef2f2" : "#f3f4f6", color: e.tx_type === "expense" ? "#dc2626" : "#6b7280", textTransform: "capitalize" }}>
-                  {(e.tx_type || "").replace(/_/g, " ")}
-                </span>
-              </span>
-              <span style={{ width: 120, textAlign: "right", fontWeight: 700, color: e.tx_type === "expense" ? "#dc2626" : "#111827" }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: "#111827", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontFamily: FF }}>
+                  {e.merchant_name || e.description || "—"}
+                </div>
+                <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 2, fontFamily: FF }}>
+                  {e.tx_date} · {e.category_name || "—"}
+                  {e.tx_type !== "expense" && ` · ${(e.tx_type || "").replace(/_/g, " ")}`}
+                </div>
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: e.tx_type === "expense" ? "#dc2626" : "#111827", flexShrink: 0, marginLeft: 12, fontFamily: FF }}>
                 {fmtIDR(Number(e.amount_idr || e.amount || 0))}
-              </span>
+              </div>
             </div>
           ))
         )}
