@@ -6,12 +6,14 @@ import { showToast } from "./shared/Card";
 import { Plane, Briefcase, CalendarDays, Tag as TagIcon } from "lucide-react";
 import { PieChart, Pie, Cell, Tooltip } from "recharts";
 
+const FF = "Figtree, system-ui, -apple-system, sans-serif";
+
 // Palet sama dengan Reports supaya halaman ini terbaca sebagai keluarga yang sama.
+// ⚠️ HARUS di bawah FF: JUDUL memakainya, dan const tidak boleh dibaca sebelum
+// diinisialisasi — kalau dibalik, modulnya gagal dimuat dan SELURUH aplikasi mati.
 const PIE_COLORS = ["#dc2626","#d97706","#3b5bdb","#059669","#7c3aed","#0891b2","#e11d48","#ca8a04","#16a34a","#1d4ed8"];
 const KARTU = { background: "#fff", border: "0.5px solid #e5e7eb", borderRadius: 16, padding: "16px 18px" };
 const JUDUL = { fontSize: 12, fontWeight: 800, color: "#111827", fontFamily: FF, letterSpacing: "-0.01em" };
-
-const FF = "Figtree, system-ui, -apple-system, sans-serif";
 
 const TAG_TYPES = [
   { value: "trip",    label: "Trip",    Icon: Plane },
