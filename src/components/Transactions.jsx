@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
-import { ledgerApi, gmailApi, getTxFromToTypes, recalculateBalance, recurringApi } from "../api";
+import { ledgerApi, gmailApi, getTxFromToTypes, recalculateBalance, recurringApi, tagsApi } from "../api";
 import { undoManager } from "../lib/undoManager";
 import { ENTITIES } from "../constants";
 import { fmtIDR, fmtCur, todayStr, ym, groupByDate, fmtDateLabel } from "../utils";
@@ -7,7 +7,8 @@ import { ConfirmModal } from "./shared/Modal";
 import { EmptyState, showToast } from "./shared/Card";
 import SortDropdown from "./shared/SortDropdown";
 import TxVerticalBig from "./shared/TxVerticalBig";
-import { Pencil, X, ArrowUp, ArrowDown, ArrowLeftRight, RotateCw, RotateCcw } from "lucide-react";
+import SplitModal from "./shared/SplitModal";
+import { Pencil, X, ArrowUp, ArrowDown, ArrowLeftRight, RotateCw, RotateCcw, Split } from "lucide-react";
 import { getCategoryVisual } from "../lib/categoryIcons";
 
 // ─── SUBTABS ─────────────────────────────────────────────────
@@ -38,6 +39,22 @@ export default function Transactions({
   const [subTab,  setSubTab]  = useState("all");
   const [txModal, setTxModal] = useState({ open: false, mode: "add", entry: null });
   const [deleteEntry, setDeleteEntry] = useState(null);
+  const [splitEntry,  setSplitEntry]  = useState(null);
+  const [tags, setTags] = useState([]);
+  useEffect(() => {
+    if (!user?.id) return;
+    tagsApi.list(user.id, { status: "active" })
+      .then(setTags)
+      .catch(e => console.error("[tags]", e?.message));
+  }, [user?.id]);
+
+  // Yang TIDAK boleh dipecah — alasannya di komentar splitLedgerEntry (src/api.js):
+  // baris ter-Finalize membuat total kelompok pelunasan jadi basi, baris yang sudah
+  // terpecah dikelola sebagai grup, dan valas punya dua angka yang harus ikut terbagi.
+  const bisaDipecah = (e) =>
+    !!e && !e.reimburse_settlement_id && !e.split_group_id
+    && (e.currency || "IDR") === "IDR"
+    && Math.round(Number(e.amount_idr ?? e.amount ?? 0)) >= 2;
 
   // ── Filters ──
   const [filterMonth,  setFilterMonth]  = useState("");
@@ -406,6 +423,7 @@ export default function Transactions({
                       categories={categories}
                       onEdit={() => openEdit(e)}
                       onDelete={() => setDeleteEntry(e)}
+                      onSplit={bisaDipecah(e) ? () => setSplitEntry(e) : null}
                     />
                   ))}
                 </div>
@@ -448,8 +466,19 @@ export default function Transactions({
         employeeLoans={employeeLoans}
         setEmployeeLoans={setEmployeeLoans}
         recurTemplates={recurTemplates}
+        tags={tags}
         setReminders={setReminders}
         onRefresh={onRefresh}
+      />
+
+      {/* ── SPLIT ── */}
+      <SplitModal
+        isOpen={!!splitEntry}
+        onClose={() => setSplitEntry(null)}
+        entry={splitEntry}
+        categories={categories}
+        tags={tags}
+        onDone={() => onRefresh?.()}
       />
 
       {/* ── DELETE CONFIRM ── */}
@@ -512,7 +541,7 @@ function getTxExpandedContent(e, fromAcc, toAcc) {
 }
 
 // ─── TRANSACTION ROW ─────────────────────────────────────────
-function TxRow({ entry: e, accounts, categories = [], onEdit, onDelete }) {
+function TxRow({ entry: e, accounts, categories = [], onEdit, onDelete, onSplit }) {
   const [expanded, setExpanded] = useState(false);
   const isTwoDir = TWO_DIR_TYPES.has(e.tx_type);
 
@@ -698,6 +727,9 @@ function TxRow({ entry: e, accounts, categories = [], onEdit, onDelete }) {
 
         {/* Actions */}
         <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
+          {onSplit && (
+            <button className="row-act" onClick={ev => { ev.stopPropagation(); onSplit(); }} style={ROW_BTN} title="Split"><Split size={13} strokeWidth={2} /></button>
+          )}
           <button className="row-act" onClick={ev => { ev.stopPropagation(); onEdit(); }} style={ROW_BTN} title="Edit"><Pencil size={13} strokeWidth={2} /></button>
           <button className="row-act" onClick={ev => { ev.stopPropagation(); onDelete(); }} style={{ ...ROW_BTN, color: "#dc2626", borderColor: "#fecaca" }} title="Hapus"><X size={13} strokeWidth={2} /></button>
         </div>

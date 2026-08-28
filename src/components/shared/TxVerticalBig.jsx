@@ -232,7 +232,7 @@ export default function TxVerticalBig({
   bankAccounts = [], creditCards = [], assets = [],
   liabilities = [], receivables = [], incomeSrcs = [],
   employeeLoans = [], setEmployeeLoans,
-  recurTemplates = [],
+  recurTemplates = [], tags = [],
   setReminders,
   onRefresh,
 }) {
@@ -437,6 +437,25 @@ export default function TxVerticalBig({
   // ── Save ──────────────────────────────────────────────────────
   // Baris yang sudah di-Finalize terkunci total: tidak bisa diubah maupun dihapus.
   const terkunciFinalize = mode === "edit" && !!initialData?.reimburse_settlement_id;
+  // Tag disimpan SEKETIKA lewat jalurnya sendiri, bukan ikut tombol Save. Alasannya
+  // dua: nilai tag tidak lewat di belasan titik payload per jenis transaksi, dan
+  // menempel tag boleh dilakukan pada baris ter-Finalize (ledgerApi.update
+  // mengecualikan perubahan yang isinya cuma tag_id).
+  const [tagId, setTagId] = useState(initialData?.tag_id || "");
+  const [simpanTag, setSimpanTag] = useState(false);
+  useEffect(() => { setTagId(initialData?.tag_id || ""); }, [initialData?.id, initialData?.tag_id]);
+  const ubahTag = async (nilai) => {
+    const dulu = tagId;
+    setTagId(nilai); setSimpanTag(true);
+    try {
+      await ledgerApi.update(initialData.id, { tag_id: nilai || null });
+      setLedger?.(p => p.map(e => e.id === initialData.id ? { ...e, tag_id: nilai || null } : e));
+      showToast(nilai ? `Tagged ${tags.find(t => t.id === nilai)?.name || ""}`.trim() : "Tag removed");
+    } catch (e) {
+      setTagId(dulu);
+      showToast(e.message || "Failed to save tag", "error");
+    } finally { setSimpanTag(false); }
+  };
 
   const save = async () => {
     // Basic validation
@@ -1499,14 +1518,32 @@ export default function TxVerticalBig({
   // ── Footer ────────────────────────────────────────────────────
   const footer = (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {mode === "edit" && initialData?.id && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontFamily: FF, fontSize: 12, fontWeight: 700, color: "#6b7280", flexShrink: 0 }}>Tag</span>
+          <select
+            value={tagId}
+            disabled={simpanTag}
+            onChange={e => ubahTag(e.target.value)}
+            style={{ height: 34, flex: 1, minWidth: 0, border: "1.5px solid #e5e7eb", borderRadius: 10,
+                     padding: "0 10px", fontFamily: FF, fontSize: 13, fontWeight: 500,
+                     color: "#111827", background: "#fff", cursor: "pointer" }}
+          >
+            <option value="">No tag</option>
+            {tags.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select>
+        </div>
+      )}
       {terkunciFinalize && (
         <div style={{
           background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 10,
           padding: "10px 12px", fontFamily: FF, fontSize: 12.5, color: "#78350f", lineHeight: 1.5,
         }}>
           <b>Terkunci — sudah di-Finalize.</b> Baris ini bagian dari kelompok
-          pencocokan piutang, jadi tidak bisa diubah atau dihapus. Untuk
-          mengubahnya, batalkan dulu Finalize-nya di halaman Receivables.
+          pencocokan piutang, jadi nominal, akun, tanggal, entitas, dan kategorinya
+          tidak bisa diubah dan barisnya tidak bisa dihapus. Untuk mengubahnya,
+          batalkan dulu Finalize-nya di halaman Receivables. Tag tetap bisa diganti —
+          menandai tidak mengubah angka apa pun.
         </div>
       )}
     <div style={{ display: "flex", gap: 8 }}>
