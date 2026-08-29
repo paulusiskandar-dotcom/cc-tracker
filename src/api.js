@@ -223,6 +223,28 @@ async function pastikanBelumFinalize(id, aksi) {
 }
 
 // ─── LEDGER ───────────────────────────────────────────────────
+/**
+ * Buang embel-embel hukum yang ditempelkan bank di belakang tiap baris
+ * statement — disclaimer OJK/LPS, nomor layanan, padding kolom. Dipotong dari
+ * pemisah sebelum disclaimer supaya nama banknya ikut terbuang, bukan
+ * meninggalkan ekor "| PT Bank SMBC Indonesia Tbk".
+ */
+const EKOR_BANK = [/\bberizin dan diawasi\b/i, /\bis licensed\s*&\s*supervised\b/i,
+  /\bmerupakan peserta penjaminan\b/i, /\bis a member of\b/i,
+  /\bdijamin oleh LPS\b/i, /\bSMBCI Care\b/i, /\bHalo BCA \d/i];
+
+export function rapikanDeskripsi(d) {
+  let s = String(d || "");
+  for (const re of EKOR_BANK) {
+    const m = s.match(re);
+    if (!m) continue;
+    const bar = s.lastIndexOf("|", m.index);
+    s = s.slice(0, bar >= 0 ? bar : m.index);
+  }
+  return s.replace(/[ \t]{2,}/g, " ").replace(/\s*\|(\s*\|)+\s*/g, " | ")
+          .replace(/^[\s|]+|[\s|]+$/g, "").trim();
+}
+
 export const ledgerApi = {
   getAll: async (userId, filters = {}) => {
     // Rebuildable query (supabase builders are single-use, so we reconstruct per page).
@@ -286,6 +308,7 @@ export const ledgerApi = {
   //               → increments existing loan.total_amount after insert (give_loan with existing loan)
   create: async (userId, entry, accounts = []) => {
     validateLedgerEntry(entry);
+    if (entry?.description) entry = { ...entry, description: rapikanDeskripsi(entry.description) };
 
     // Strip client-only and opt-in side-effect fields — none must reach Supabase.
     const {
