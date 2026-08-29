@@ -30,13 +30,13 @@ export default function ReconcileDraftBanner({ user, accounts, filterType, onCon
         display: "flex", alignItems: "center", gap: 8,
       }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: "#1d4ed8" }}>
-          {visible.length} reconcile belum selesai
+          {visible.length} unfinished reconciles
         </span>
         <span style={{ fontSize: 11, color: "#6b7280" }}>
           {visible.map(d => accounts.find(a => a.id === d.account_id)?.name).filter(Boolean).join(" · ")}
         </span>
         <span style={{ flex: 1 }} />
-        <span style={{ fontSize: 11, fontWeight: 600, color: "#3b5bdb" }}>Lihat</span>
+        <span style={{ fontSize: 11, fontWeight: 600, color: "#3b5bdb" }}>Show</span>
       </div>
     );
   }
@@ -49,7 +49,7 @@ export default function ReconcileDraftBanner({ user, accounts, filterType, onCon
         const ago = Math.round((Date.now() - new Date(d.updated_at).getTime()) / 60000);
         const jam = ago / 60;
         const timeText = ago < 1 ? "just now" : ago < 60 ? `${ago} min ago`
-          : jam < 48 ? `${Math.round(jam)}h ago` : `${Math.round(jam / 24)} hari lalu`;
+          : jam < 48 ? `${Math.round(jam)}h ago` : `${Math.round(jam / 24)}d ago`;
         const basi = jam > HARI_BASI * 24;
         return (
           <div key={d.id} style={{

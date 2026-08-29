@@ -219,25 +219,6 @@ export default function Reconcile({
     return days[Math.floor(days.length / 2)];
   }, [allSessions, activeAccounts]);
 
-  // Flat list of leftover statement rows across every prepared card in this month,
-  // recomputed against the live ledger so a row drops off the moment it is accepted.
-  // Live "ready to finalize": a prepared card whose statement rows ALL match the
-  // current ledger. Leftover rows themselves are reviewed in EMAIL PENDING (they
-  // are fed into email_sync by gmail-estatement prepare) — this page only needs
-  // to know when a card is done so Finalize can be offered on the spot.
-  const inboxReady = useMemo(() => {
-    const accById = Object.fromEntries((accounts || []).map(a => [a.id, a]));
-    const prepared = allSessions
-      .filter(s => s.period_year === month.y && s.period_month === month.m && s.status === "prepared");
-    const ready = [];
-    for (const s of prepared) {
-      const acc = accById[s.account_id];
-      const live = liveByAcc[s.account_id];
-      if (acc && live && live.missing === 0) ready.push({ acc, s });
-    }
-    return ready;
-  }, [liveByAcc, accounts, allSessions, month]);
-
   const isCurrentMonth = month.y === now.getFullYear() && month.m === now.getMonth() + 1;
   const monthLabel = new Date(month.y, month.m - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
   const navMonth = (d) => setMonth(({ y, m }) => {
@@ -277,7 +258,7 @@ export default function Reconcile({
       if (error) throw error;
       const { matched, missing } = matchRows(st.stmtRows, led || []);
       // Ignored rows (e.g. installment-conversion wash pairs) have no ledger
-      // counterpart by design — inboxReady skips them, so finalize must too.
+      // counterpart by design — the live re-match skips them, so finalize must too.
       const ignored = new Set(st.ignoredIds || []);
       const stillMissing = missing.filter(m => !ignored.has(m._id));
       if (stillMissing.length) { showToast(`${stillMissing.length} row(s) no longer match — use Review`, "warning"); return; }
@@ -320,13 +301,13 @@ export default function Reconcile({
         const selisih = Math.round(net - Number(st.stmtClosingBalance));
         if (Math.abs(selisih) > 2) {
           showToast(
-            `Uji penutupan gagal: buku ${fmtIDR(net)} vs statement ${fmtIDR(st.stmtClosingBalance)} ` +
-            `(selisih ${fmtIDR(selisih)}) — ada baris salah klasifikasi, pakai Review`,
+            `Closing check failed: book ${fmtIDR(net)} vs statement ${fmtIDR(st.stmtClosingBalance)} ` +
+            `(off by ${fmtIDR(selisih)}) — a row is on the wrong side, use Review`,
             "error");
           return;
         }
         if (geser.length) {
-          showToast(`${geser.length} transaksi ${awalSenggang.slice(5)}–${cutoff.slice(5)} belum dibukukan bank — masuk statement berikutnya`, "info");
+          showToast(`${geser.length} purchases on ${awalSenggang.slice(5)}–${cutoff.slice(5)} not yet posted — they land on next month\u2019s statement`, "info");
         }
       }
 
@@ -453,20 +434,6 @@ export default function Reconcile({
         <GlobalReconcileButton type="all" accounts={activeAccounts} user={user} onNavigate={navigateToAccount} />
       </div>
 
-      {/* READY TO FINALIZE — statements whose rows all match the live ledger */}
-      {inboxReady.length > 0 && (
-        <div style={{ border: "1px solid #a7f3d0", background: "#ecfdf5", borderRadius: 12, padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
-          {inboxReady.map(({ acc, s }) => (
-            <div key={acc.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <Check size={15} color="#059669" />
-              <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: "#065f46" }}>{acc.name} — semua baris cocok</span>
-              <button onClick={() => finalize({ acc, s })} style={BTN("#059669", "#fff")}>Finalize</button>
-            </div>
-          ))}
-        </div>
-      )}
-
-
       <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", margin: "14px 0 6px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button onClick={() => navMonth(-1)} style={{ ...BTN("#fff", "#6b7280", "1px solid #e5e7eb"), padding: "4px 9px" }}><ChevronLeft size={14} /></button>
@@ -511,7 +478,7 @@ export default function Reconcile({
                 <div style={{ flex: 1, minWidth: 150 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 700, color: "#111827" }}>{acc.name}</div>
                   <div style={{ fontSize: 11, color: "#6b7280", marginTop: 1, fontVariantNumeric: "tabular-nums" }}>
-                    Statement {fmtDate(s.period_end)}{s.closing_balance != null ? ` · closing ${fmtIDR(s.closing_balance)}` : ""}
+                    Statement {fmtDate(s.statement_date || s.period_end)}{s.closing_balance != null ? ` · closing ${fmtIDR(s.closing_balance)}` : ""}
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
@@ -522,7 +489,7 @@ export default function Reconcile({
                     <span style={CHIP("#f3f4f6", "#6b7280")}>closing matches</span>}
                   {live?.tutup && Math.abs(live.tutup.selisih) > 2 && (
                     <span style={CHIP("#fee2e2", "#dc2626")}>
-                      buku {fmtIDR(live.tutup.buku)} vs statement {fmtIDR(live.tutup.statement)}
+                      book {fmtIDR(live.tutup.buku)} vs statement {fmtIDR(live.tutup.statement)}
                     </span>
                   )}
                   {gap === null && <span style={CHIP("#f3f4f6", "#6b7280")}>no closing balance</span>}
@@ -554,15 +521,15 @@ export default function Reconcile({
                 <div style={{ flex: 1, minWidth: 150 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 700, color: "#111827" }}>{item.acc.name}</div>
                   <div style={{ fontSize: 11, color: "#6b7280", marginTop: 1, fontVariantNumeric: "tabular-nums" }}>
-                    Statement {fmtDate(item.s.period_end)}{item.s.closing_balance != null ? ` · closing ${fmtIDR(item.s.closing_balance)}` : ""}
+                    Statement {fmtDate(item.s.statement_date || item.s.period_end)}{item.s.closing_balance != null ? ` · closing ${fmtIDR(item.s.closing_balance)}` : ""}
                   </div>
                 </div>
                 <span style={CHIP("#dcfce7", "#059669")}>
                   <Check size={11} strokeWidth={2.5} />
-                  {(item.live ? item.live.matched : item.s.total_match) || 0} matched · closing cocok
+                  {(item.live ? item.live.matched : item.s.total_match) || 0} matched · closing OK
                 </span>
                 {item.live?.tutup?.geser > 0 && (
-                  <span style={CHIP("#f3f4f6", "#6b7280")}>{item.live.tutup.geser} belum dibukukan bank</span>
+                  <span style={CHIP("#f3f4f6", "#6b7280")}>{item.live.tutup.geser} not yet posted</span>
                 )}
                 <button onClick={() => finalize(item)} disabled={finalizing === item.acc.id} style={BTN("#059669", "#fff")}>
                   {finalizing === item.acc.id ? "Finalizing…" : "✓ Finalize"}
@@ -589,7 +556,7 @@ export default function Reconcile({
                 <span style={{ fontWeight: 600, color: "#111827", width: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{acc.name}</span>
                 <span style={{ fontVariantNumeric: "tabular-nums" }}>
                   reconciled {fmtDate((s.completed_at || "").slice(0, 10))} · {s.total_statement || 0} rows
-                  {(s.total_missing || 0) === 0 ? " · all matched" : ` · ${s.total_missing} imported at review`}
+                  {(s.total_missing || 0) === 0 ? " · all matched" : ` · ${s.total_missing} added here`}
                 </span>
               </div>
             ))}
