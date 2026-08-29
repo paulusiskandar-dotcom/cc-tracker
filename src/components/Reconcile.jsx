@@ -14,7 +14,7 @@ import { showToast } from "./shared/index";
 import GlobalReconcileButton from "./shared/GlobalReconcileButton";
 import {
   ChevronLeft, ChevronRight, CreditCard, Landmark, Clock, Check,
-  FileText, Eye, AlertTriangle,
+  FileText, Eye, AlertTriangle, X,
 } from "lucide-react";
 
 const FF = "Figtree, sans-serif";
@@ -67,6 +67,7 @@ export default function Reconcile({
   const [valasByAcc, setValasByAcc] = useState({});            // accountId → waiting-valas count
   const [queue, setQueue] = useState([]);
   const [processing, setProcessing] = useState(null);
+  const [bukaWaiting, setBukaWaiting] = useState(false);
 
   const allSessions = useMemo(() => sessions ?? reconSessions ?? [], [sessions, reconSessions]);
   const { drafts, reload: reloadDrafts } = useReconcileDrafts(user?.id);
@@ -472,16 +473,22 @@ export default function Reconcile({
               <div key={acc.id} style={{
                 background: "#fff", border: "1px solid #e5e7eb", borderRadius: 14,
                 borderLeft: `3px solid ${gap !== null && Math.abs(gap) >= 1 ? "#dc2626" : "#d97706"}`,
-                padding: "12px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+                padding: "12px 16px", display: "flex", alignItems: "center", gap: 12,
               }}>
                 <AccountTile type={acc.type} />
-                <div style={{ flex: 1, minWidth: 150 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 700, color: "#111827" }}>{acc.name}</div>
-                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 1, fontVariantNumeric: "tabular-nums" }}>
-                    Statement {fmtDate(s.statement_date || s.period_end)}{s.closing_balance != null ? ` · closing ${fmtIDR(s.closing_balance)}` : ""}
+                <div style={{ width: 150, flexShrink: 0, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{acc.name}</div>
+                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 1, whiteSpace: "nowrap" }}>
+                    Statement {fmtDate(s.statement_date || s.period_end)}
                   </div>
                 </div>
-                <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                {/* Kolom nominal berlebar tetap supaya angka antar-kartu sejajar,
+                    bukan mengalir di tengah kalimat dengan panjang berbeda-beda. */}
+                <div style={{ width: "14ch", flexShrink: 0, textAlign: "right", fontVariantNumeric: "tabular-nums",
+                              fontSize: 12, fontWeight: 700, color: "#111827", whiteSpace: "nowrap" }}>
+                  {s.closing_balance != null ? fmtIDR(s.closing_balance) : "—"}
+                </div>
+                <div style={{ flex: 1, minWidth: 0, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                   <span style={CHIP("#dcfce7", "#059669")}><Check size={11} strokeWidth={2.5} />{(live ? live.matched : s.total_match) || 0} matched</span>
                   {((live ? live.missing : s.total_missing) || 0) > 0 && <span style={CHIP("#fef3c7", "#b45309")}>{live ? live.missing : s.total_missing} not in ledger</span>}
                   {gap !== null && Math.abs(gap) >= 1 && <span style={CHIP("#fee2e2", "#dc2626")}>gap {fmtIDR(Math.abs(gap))}</span>}
@@ -515,22 +522,28 @@ export default function Reconcile({
             {monthData.ready.map((item) => (
               <div key={item.acc.id} style={{
                 background: "#fff", border: "1px solid #e5e7eb", borderRadius: 14, borderLeft: "3px solid #059669",
-                padding: "12px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+                padding: "12px 16px", display: "flex", alignItems: "center", gap: 12,
               }}>
                 <AccountTile type={item.acc.type} />
-                <div style={{ flex: 1, minWidth: 150 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 700, color: "#111827" }}>{item.acc.name}</div>
-                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 1, fontVariantNumeric: "tabular-nums" }}>
-                    Statement {fmtDate(item.s.statement_date || item.s.period_end)}{item.s.closing_balance != null ? ` · closing ${fmtIDR(item.s.closing_balance)}` : ""}
+                <div style={{ width: 150, flexShrink: 0, minWidth: 0 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.acc.name}</div>
+                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 1, whiteSpace: "nowrap" }}>
+                    Statement {fmtDate(item.s.statement_date || item.s.period_end)}
                   </div>
                 </div>
-                <span style={CHIP("#dcfce7", "#059669")}>
-                  <Check size={11} strokeWidth={2.5} />
-                  {(item.live ? item.live.matched : item.s.total_match) || 0} matched · closing OK
-                </span>
-                {item.live?.tutup?.geser > 0 && (
-                  <span style={CHIP("#f3f4f6", "#6b7280")}>{item.live.tutup.geser} not yet posted</span>
-                )}
+                <div style={{ width: "14ch", flexShrink: 0, textAlign: "right", fontVariantNumeric: "tabular-nums",
+                              fontSize: 12, fontWeight: 700, color: "#111827", whiteSpace: "nowrap" }}>
+                  {item.s.closing_balance != null ? fmtIDR(item.s.closing_balance) : "—"}
+                </div>
+                <div style={{ flex: 1, minWidth: 0, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={CHIP("#dcfce7", "#059669")}>
+                    <Check size={11} strokeWidth={2.5} />
+                    {(item.live ? item.live.matched : item.s.total_match) || 0} matched · closing OK
+                  </span>
+                  {item.live?.tutup?.geser > 0 && (
+                    <span style={CHIP("#f3f4f6", "#6b7280")}>{item.live.tutup.geser} not yet posted</span>
+                  )}
+                </div>
                 <button onClick={() => finalize(item)} disabled={finalizing === item.acc.id} style={BTN("#059669", "#fff")}>
                   {finalizing === item.acc.id ? "Finalizing…" : "✓ Finalize"}
                 </button>
@@ -567,11 +580,18 @@ export default function Reconcile({
       {/* WAITING */}
       {monthData.waiting.length > 0 && (
         <div style={{ marginBottom: 22 }}>
-          {sectionTitle("Waiting for statement", monthData.waiting.length, "#f3f4f6", "#6b7280")}
+          {sectionTitle("Waiting for statement", monthData.waiting.length, "#f3f4f6", "#6b7280",
+            <button onClick={() => setBukaWaiting(v => !v)} style={BTN("#fff", "#6b7280", "1px solid #e5e7eb")}>
+              {bukaWaiting ? "Hide" : "Show"}
+            </button>)}
+          {/* Diciutkan secara bawaan: ini daftar terpanjang di halaman dan tidak
+              ada yang bisa dikerjakan di sini. Yang sudah lewat tanggal biasanya
+              TETAP tampil — itu satu-satunya bagian yang perlu ditindaklanjuti. */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 8 }}>
             {monthData.waiting.map(({ acc }) => {
               const day = usualDay(acc.id);
               const late = isCurrentMonth && day && now.getDate() > day + 5;
+              if (!late && !bukaWaiting) return null;
               return (
                 <div key={acc.id} style={{
                   display: "flex", alignItems: "center", gap: 9, borderRadius: 11, padding: "9px 12px",
@@ -628,7 +648,7 @@ export default function Reconcile({
                   {isProc ? "Processing…" : "Process →"}
                 </button>
                 <button onClick={() => handleDeletePDF(item.id)} title="Remove from queue"
-                  style={{ background: "transparent", border: "none", color: "#d1d5db", fontSize: 14, cursor: "pointer", padding: 2, flexShrink: 0 }}>✕</button>
+                  style={{ background: "transparent", border: "none", color: "#d1d5db", cursor: "pointer", padding: 2, flexShrink: 0, display: "inline-flex", alignItems: "center" }}><X size={14} /></button>
               </div>
             );
           })}
