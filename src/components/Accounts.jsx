@@ -434,6 +434,9 @@ export default function Accounts({
         user={user}
         accounts={accounts}
         filterType="bank"
+        // Draf ini milik daftar rekening bank; di sub-tab Cash atau Asset ia
+        // cuma menutupi isi halaman yang sedang dilihat.
+        enabled={subTab === "bank" || subTab === "all"}
         onContinue={(acc, state) => {
           navigate(`/accounts/${acc.id}/statement`, { state: { reconcileSeeds: { fullState: state || null } } });
         }}
