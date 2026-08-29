@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { TrendingUp, TrendingDown, Wallet, PiggyBank, Sparkles, CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import SortDropdown from "./shared/SortDropdown";
+import TxVerticalBig from "./shared/TxVerticalBig";
 import { fmtIDR, mlShort } from "../utils";
 import { LIGHT, DARK } from "../theme";
 import { SectionHeader, EmptyState } from "./shared/index";
@@ -441,9 +442,35 @@ function HBar({ label, value, max, color, pct, count, onClick }) {
   );
 }
 
-export function DrillDownModal({ open, onClose, title, transactions }) {
+export function DrillDownModal({ open, onClose, title, transactions, onEdit }) {
   // Hooks harus dipanggil sebelum early-return apa pun.
   const [urut, setUrut] = useState("date_desc");
+  // Charge yang PUNYA refund pencocok dicoret dan diberi keterangan nilainya.
+  // Pencocokannya sama dengan groupByMerchant: nominal persis dulu, lalu charge
+  // terdekat yang ≥ nilai refund dan ≤110% (reversal sering menahan fee — Oakley
+  // ditagih 10.328.301, dikreditkan 10.262.701).
+  const petaRefund = useMemo(() => {
+    const m = new Map();
+    const belanja = (transactions || []).filter(t => !t._ccRefund);
+    const dipakai = new Set();
+    for (const r of (transactions || []).filter(t => t._ccRefund)) {
+      const amt = Number(r.amount_idr || 0);
+      if (!amt) continue;
+      const id = (t) => t.id || t._id;
+      let hit = belanja.find(t => !dipakai.has(id(t)) && Math.abs(Number(t.amount_idr || 0) - amt) < 1);
+      if (!hit) {
+        let best = Infinity;
+        for (const t of belanja) {
+          if (dipakai.has(id(t))) continue;
+          const v = Number(t.amount_idr || 0);
+          if (v < amt || v > amt * 1.1) continue;
+          if (v - amt < best) { best = v - amt; hit = t; }
+        }
+      }
+      if (hit) { dipakai.add(id(hit)); m.set(id(hit), amt); }
+    }
+    return m;
+  }, [transactions]);
   if (!open) return null;
   // Refund rows carry a minus here, so the modal total equals the bar it came from.
   const total = transactions.reduce((s, t) => s + (t._ccRefund ? -1 : 1) * Number(t.amount_idr || 0), 0);
@@ -499,10 +526,15 @@ export function DrillDownModal({ open, onClose, title, transactions }) {
                 const c = va < vb ? -1 : va > vb ? 1 : 0;
                 return naik ? c : -c;
               })
-              .map(t => (
-                <div key={t.id || t._id} style={{
+              .map(t => {
+                const dikembalikan = petaRefund.get(t.id || t._id);
+                return (
+                <div key={t.id || t._id}
+                  onClick={onEdit && t.id ? () => onEdit(t) : undefined}
+                  style={{
                   display: "flex", justifyContent: "space-between", alignItems: "flex-start",
                   padding: "10px 0", borderBottom: "1px solid #f3f4f6",
+                  cursor: onEdit && t.id ? "pointer" : "default",
                 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 500, color: "#111827", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
@@ -510,6 +542,11 @@ export function DrillDownModal({ open, onClose, title, transactions }) {
                     </div>
                     <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>
                       {t._cashDate || t.tx_date} · {t.category_name || "Uncategorized"}{t._ccRefund ? " · refund" : ""}
+                      {dikembalikan != null && (
+                        <span style={{ color: "#059669", fontWeight: 700 }}>
+                          {" · dikembalikan −"}{fmtIDR(dikembalikan)}
+                        </span>
+                      )}
                     </div>
                     {txNote(t) && (
                       <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3, lineHeight: 1.45 }}>
@@ -518,11 +555,13 @@ export function DrillDownModal({ open, onClose, title, transactions }) {
                     )}
                   </div>
                   <div style={{ fontSize: 13, fontWeight: 600, flexShrink: 0, marginLeft: 12,
-                    color: t._ccRefund || t.tx_type === "income" ? "#059669" : "#dc2626" }}>
+                    color: t._ccRefund || t.tx_type === "income" ? "#059669" : "#dc2626",
+                    textDecoration: dikembalikan != null ? "line-through" : "none",
+                    opacity: dikembalikan != null ? 0.55 : 1 }}>
                     {t._ccRefund ? "−" : ""}{fmtIDR(Number(t.amount_idr || 0))}
                   </div>
                 </div>
-              ))
+              );})
         }
       </div>
     </div>
@@ -531,7 +570,7 @@ export function DrillDownModal({ open, onClose, title, transactions }) {
 
 // ─── TAB 1: OVERVIEW ─────────────────────────────────────────
 
-function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeriod, dark }) {
+function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeriod, dark, onEdit }) {
   const T = dark ? DARK : LIGHT;
 
   const [drill, setDrill] = useState(null); // { title, transactions }
@@ -761,6 +800,7 @@ function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeri
         onClose={() => setDrill(null)}
         title={drill?.title || ""}
         transactions={drill?.transactions || []}
+        onEdit={onEdit}
       />
     </div>
   );
@@ -770,7 +810,7 @@ function OverviewTab({ ledger, accounts, categories, incomeSrcs, period, setPeri
 
 const PIE_COLORS = ["#dc2626","#d97706","#3b5bdb","#059669","#7c3aed","#0891b2","#e11d48","#ca8a04","#16a34a","#1d4ed8"];
 
-function ExpenseTab({ ledger, categories = [], period, dark }) {
+function ExpenseTab({ ledger, categories = [], period, dark, onEdit }) {
   const T = dark ? DARK : LIGHT;
   const range   = useMemo(() => getDateRange(period), [period]);
   // The whole window, refund rows included: filtering them out up front (as this
@@ -893,14 +933,14 @@ function ExpenseTab({ ledger, categories = [], period, dark }) {
         {filtered.length > 50 && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 8, textAlign: "center" }}>Showing 50 of {filtered.length} — export CSV for full list</div>}
       </div>
 
-      <DrillDownModal open={!!drill} onClose={() => setDrill(null)} title={drill?.title || ""} transactions={drill?.transactions || []} />
+      <DrillDownModal open={!!drill} onClose={() => setDrill(null)} title={drill?.title || ""} transactions={drill?.transactions || []} onEdit={onEdit} />
     </div>
   );
 }
 
 // ─── TAB 3: INCOME ────────────────────────────────────────────
 
-function IncomeTab({ ledger, incomeSrcs, period, dark }) {
+function IncomeTab({ ledger, incomeSrcs, period, dark, onEdit }) {
   const T = dark ? DARK : LIGHT;
   const range  = useMemo(() => getDateRange(period), [period]);
   const txs    = useMemo(() => filterByRange(ledger, range).filter(isIncomeRow), [ledger, range]);
@@ -985,7 +1025,7 @@ function IncomeTab({ ledger, incomeSrcs, period, dark }) {
         </div>
       </div>
 
-      <DrillDownModal open={!!drill} onClose={() => setDrill(null)} title={drill?.title || ""} transactions={drill?.transactions || []} />
+      <DrillDownModal open={!!drill} onClose={() => setDrill(null)} title={drill?.title || ""} transactions={drill?.transactions || []} onEdit={onEdit} />
     </div>
   );
 }
@@ -1122,10 +1162,20 @@ const TABS = [
   { id: "comparison",  label: "Comparison" },
 ];
 
-export default function Reports({ user, ledger = [], accounts = [], categories = [], incomeSrcs = [], recurTemplates = [], dark }) {
+export default function Reports({ user, ledger = [], accounts = [], categories = [], incomeSrcs = [], recurTemplates = [], dark, ...sisa }) {
   const T = dark ? DARK : LIGHT;
   const [period,    setPeriod]    = useState("this_month");
   const [activeTab, setActiveTab] = useState("overview");
+  // Edit langsung dari drill-down memakai formulir yang SAMA dengan halaman
+  // Transactions — TxVerticalBig sudah mandiri, jadi cukup dipipa propsnya.
+  // Baris turunan laporan (_ccRefund/_cashDate) dibersihkan dulu supaya yang
+  // dikirim ke formulir adalah baris ledger apa adanya.
+  const [editTx, setEditTx] = useState(null);
+  const bukaEdit = (t) => {
+    if (!t?.id) return;
+    const asli = (ledger || []).find(r => r.id === t.id);
+    if (asli) setEditTx(asli);
+  };
   // Salary re-dated to its attributed month (see attributeFixedIncome), and
   // income credited into a credit card flagged as _ccRefund (expense offset).
   const rLedger = useMemo(() => {
@@ -1195,17 +1245,34 @@ export default function Reports({ user, ledger = [], accounts = [], categories =
         <OverviewTab
           ledger={rLedger} accounts={accounts} categories={categories}
           incomeSrcs={incomeSrcs} period={period} setPeriod={setPeriod} dark={dark}
+          onEdit={bukaEdit}
         />
       )}
       {activeTab === "expense" && (
-        <ExpenseTab ledger={rLedger} categories={categories} period={period} dark={dark} />
+        <ExpenseTab ledger={rLedger} categories={categories} period={period} dark={dark} onEdit={bukaEdit} />
       )}
       {activeTab === "income" && (
-        <IncomeTab ledger={rLedger} incomeSrcs={incomeSrcs} period={period} dark={dark} />
+        <IncomeTab ledger={rLedger} incomeSrcs={incomeSrcs} period={period} dark={dark} onEdit={bukaEdit} />
       )}
       {activeTab === "comparison" && (
         <ComparisonTab ledger={rLedger} categories={categories} period={period} dark={dark} />
       )}
+
+      {/* Formulir edit YANG SAMA dengan halaman Transactions — bukan tiruan. */}
+      <TxVerticalBig
+        open={!!editTx}
+        mode="edit"
+        initialData={editTx}
+        onSave={() => setEditTx(null)}
+        onDelete={() => setEditTx(null)}
+        onClose={() => setEditTx(null)}
+        user={user}
+        accounts={accounts}
+        categories={categories}
+        incomeSrcs={incomeSrcs}
+        recurTemplates={recurTemplates}
+        {...sisa}
+      />
     </div>
   );
 }
