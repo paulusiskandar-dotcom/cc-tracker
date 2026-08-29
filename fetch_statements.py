@@ -38,13 +38,19 @@ BANK_SOURCES   = {"BCA-Bank", "Mandiri-Bank", "Sinarmas"}
 INVEST_SOURCES = {"KSEI", "Mirae"}
 
 
-def file_md5(path):
-    h = hashlib.md5()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
+def pdf_sig(path):
+    """Isi PDF tanpa /ID trailer.
 
+    qpdf menulis /ID acak setiap kali jalan, jadi dua hasil dekripsi dari
+    lampiran yang persis sama punya md5 berbeda. Pembanding lama memakai md5
+    mentah, gagal terus, lalu menambah salinan [2], [2-2], [2-3] ... setiap
+    penarikan — 311 salinan berlebih menumpuk sampai Agustus 2026.
+    """
+    try:
+        d = open(path, "rb").read()
+    except Exception:
+        return None
+    return hashlib.md5(RX_PDF_ID.sub(b"/ID[]", d)).hexdigest()
 
 def account_no_in_pdf(path):
     """Account number printed inside the statement, used to tell apart files that
@@ -92,13 +98,15 @@ def load_passwords(cfg):
         log("  (no passwords.txt:", e, ")")
     return pws
 
+RX_PDF_ID = re.compile(rb"/ID\s*\[\s*<[0-9a-fA-F]*>\s*<[0-9a-fA-F]*>\s*\]")
+
 def unlock(src, dst, passwords):
     """Decrypt PDF with qpdf, trying each candidate password. True on first success."""
     import shutil
     qpdf = shutil.which("qpdf") or next((p for p in ("/opt/homebrew/bin/qpdf", "/usr/local/bin/qpdf") if os.path.exists(p)), "qpdf")
     for pw in passwords:
         try:
-            cmd = [qpdf, "--decrypt"] + ([f"--password={pw}"] if pw else []) + [src, dst]
+            cmd = [qpdf, "--decrypt", "--deterministic-id"] + ([f"--password={pw}"] if pw else []) + [src, dst]
             r = subprocess.run(cmd, capture_output=True, text=True)
             if r.returncode in (0, 3) and os.path.exists(dst) and os.path.getsize(dst) > 0:
                 return True
@@ -160,14 +168,14 @@ def main():
                     # otherwise disambiguate by account number read from the PDF.
                     # (BCA sends every RDN account with an identical subject+filename;
                     #  the old "skip if exists" silently dropped 4 of 5 每 month.)
-                    if file_md5(scratch) == file_md5(out_path):
+                    if pdf_sig(scratch) == pdf_sig(out_path):
                         os.unlink(scratch); continue
                     acct = account_no_in_pdf(scratch)
                     stem, ext = os.path.splitext(safe)
                     tag = acct or "2"
                     out_path = os.path.join(out_dir, f"{stem} [{tag}]{ext}")
                     n = 2
-                    while os.path.exists(out_path) and file_md5(out_path) != file_md5(scratch):
+                    while os.path.exists(out_path) and pdf_sig(out_path) != pdf_sig(scratch):
                         out_path = os.path.join(out_dir, f"{stem} [{tag}-{n}]{ext}"); n += 1
                     if os.path.exists(out_path):
                         os.unlink(scratch); continue

@@ -1063,7 +1063,9 @@ export const installmentsApi = {
     if (txDate && paid > 1) {
       const d = new Date(txDate + "T00:00:00");
       d.setMonth(d.getMonth() - (paid - 1));
-      startDate = d.toISOString().slice(0, 10);
+      // toISOString() menggeser tanggal mundur satu hari di WIB (UTC+7): tengah
+      // malam lokal jatuh di 17:00 hari sebelumnya menurut UTC. Format lokal.
+      startDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     }
     const inst = await installmentsApi.create(userId, {
       description,
