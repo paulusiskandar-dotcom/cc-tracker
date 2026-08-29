@@ -412,6 +412,11 @@ export default function Reconcile({
   const nDone = monthData.completed.length, nReview = monthData.needsReview.length, nReady = monthData.ready.length;
   const pct = (n) => `${(n / total) * 100}%`;
 
+  const nTelat = monthData.waiting.filter(({ acc }) => {
+    const day = usualDay(acc.id);
+    return isCurrentMonth && day && now.getDate() > day + 5;
+  }).length;
+
   const sectionTitle = (label, count, bg, color, extra = null) => (
     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
       <div style={{ fontSize: 13, fontWeight: 800, color: "#111827", fontFamily: FF }}>{label}</div>
@@ -457,11 +462,18 @@ export default function Reconcile({
           </div>
         </div>
       </div>
+      {/* Keterangan yang nilainya nol tidak menjelaskan apa pun dan cuma
+          memanjangkan baris — hanya yang terisi yang ditampilkan. */}
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 11, color: "#6b7280", marginBottom: 20 }}>
-        <span><i style={{ display: "inline-block", width: 8, height: 8, borderRadius: 99, background: "#059669", marginRight: 5 }} />Completed {nDone}</span>
-        <span><i style={{ display: "inline-block", width: 8, height: 8, borderRadius: 99, background: "#34d399", marginRight: 5 }} />Ready to finalize {nReady}</span>
-        <span><i style={{ display: "inline-block", width: 8, height: 8, borderRadius: 99, background: "#d97706", marginRight: 5 }} />Needs review {nReview}</span>
-        <span><i style={{ display: "inline-block", width: 8, height: 8, borderRadius: 99, background: "#e5e7eb", marginRight: 5 }} />Waiting {monthData.waiting.length}</span>
+        {[["Completed", nDone, "#059669"], ["Ready to finalize", nReady, "#34d399"],
+          ["Needs review", nReview, "#d97706"], ["Waiting", monthData.waiting.length, "#e5e7eb"]]
+          .filter(([, n]) => n > 0)
+          .map(([label, n, warna]) => (
+            <span key={label}>
+              <i style={{ display: "inline-block", width: 8, height: 8, borderRadius: 99, background: warna, marginRight: 5 }} />
+              {label} {n}
+            </span>
+          ))}
       </div>
 
       {/* NEEDS REVIEW */}
@@ -558,18 +570,38 @@ export default function Reconcile({
       {monthData.completed.length > 0 && (
         <div style={{ marginBottom: 22 }}>
           {sectionTitle("Completed this month", monthData.completed.length, "#f3f4f6", "#6b7280")}
+          {/* Kolom tetap, bukan satu kalimat panjang: tanggal, jumlah baris, dan
+              nilai penutupan berdiri di kolomnya masing-masing supaya bisa
+              dibandingkan antar-baris dengan sekali lihat. Kata "reconciled"
+              dibuang — seluruh bagian ini memang sudah reconciled. */}
           <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 14, padding: "4px 0" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 16px 8px",
+                          fontSize: 9.5, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px",
+                          borderBottom: "1px solid #f3f4f6" }}>
+              <span style={{ width: 14, flexShrink: 0 }} />
+              <span style={{ width: 160, flexShrink: 0 }}>Account</span>
+              <span style={{ width: "6ch", flexShrink: 0 }}>Done</span>
+              <span style={{ width: "5ch", flexShrink: 0, textAlign: "right" }}>Rows</span>
+              <span style={{ width: "14ch", flexShrink: 0, textAlign: "right" }}>Closing</span>
+              <span style={{ flex: 1, minWidth: 0 }} />
+            </div>
             {monthData.completed.map(({ acc, s }, i) => (
               <div key={acc.id} style={{
                 display: "flex", alignItems: "center", gap: 10, padding: "8px 16px",
-                fontSize: 12, color: "#6b7280",
+                fontSize: 12, color: "#6b7280", fontVariantNumeric: "tabular-nums",
                 borderBottom: i < monthData.completed.length - 1 ? "1px solid #f3f4f6" : "none",
               }}>
-                <Check size={14} strokeWidth={2.5} color="#059669" />
-                <span style={{ fontWeight: 600, color: "#111827", width: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{acc.name}</span>
-                <span style={{ fontVariantNumeric: "tabular-nums" }}>
-                  reconciled {fmtDate((s.completed_at || "").slice(0, 10))} · {s.total_statement || 0} rows
-                  {(s.total_missing || 0) === 0 ? " · all matched" : ` · ${s.total_missing} added here`}
+                <Check size={14} strokeWidth={2.5} color="#059669" style={{ flexShrink: 0 }} />
+                <span style={{ fontWeight: 600, color: "#111827", width: 160, flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{acc.name}</span>
+                <span style={{ width: "6ch", flexShrink: 0, whiteSpace: "nowrap" }}>{fmtDate((s.completed_at || "").slice(0, 10))}</span>
+                <span style={{ width: "5ch", flexShrink: 0, textAlign: "right" }}>{s.total_statement || 0}</span>
+                <span style={{ width: "14ch", flexShrink: 0, textAlign: "right", color: "#111827", fontWeight: 600 }}>
+                  {s.closing_balance != null ? fmtIDR(s.closing_balance) : "—"}
+                </span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  {(s.total_missing || 0) > 0 && (
+                    <span style={CHIP("#eff6ff", "#1d4ed8")}>{s.total_missing} added here</span>
+                  )}
                 </span>
               </div>
             ))}
@@ -581,9 +613,14 @@ export default function Reconcile({
       {monthData.waiting.length > 0 && (
         <div style={{ marginBottom: 22 }}>
           {sectionTitle("Waiting for statement", monthData.waiting.length, "#f3f4f6", "#6b7280",
-            <button onClick={() => setBukaWaiting(v => !v)} style={BTN("#fff", "#6b7280", "1px solid #e5e7eb")}>
-              {bukaWaiting ? "Hide" : "Show"}
-            </button>)}
+            <>
+              {!bukaWaiting && nTelat > 0 && (
+                <span style={{ fontSize: 11, color: "#9ca3af" }}>showing {nTelat} past their usual day</span>
+              )}
+              <button onClick={() => setBukaWaiting(v => !v)} style={BTN("#fff", "#6b7280", "1px solid #e5e7eb")}>
+                {bukaWaiting ? "Hide" : "Show all"}
+              </button>
+            </>)}
           {/* Diciutkan secara bawaan: ini daftar terpanjang di halaman dan tidak
               ada yang bisa dikerjakan di sini. Yang sudah lewat tanggal biasanya
               TETAP tampil — itu satu-satunya bagian yang perlu ditindaklanjuti. */}
@@ -658,9 +695,8 @@ export default function Reconcile({
       {/* HOW IT WORKS */}
       <div style={{ padding: "10px 14px", background: "#f9fafb", borderRadius: 10, fontSize: 11, color: "#6b7280", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <Eye size={13} color="#9ca3af" />
-        Statements are fetched from email every 12 hours, parsed and diffed against your ledger automatically.
-        You only review what's flagged — or hit <b style={{ color: "#374151" }}>Finalize</b> when everything already matches.
-        Manual upload stays available via the button top-right.
+        Statements arrive from email every 12 hours and diff themselves. Review what is flagged, or
+        <b style={{ color: "#374151" }}> Finalize</b> when it already matches.
       </div>
     </div>
   );
