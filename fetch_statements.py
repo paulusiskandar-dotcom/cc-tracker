@@ -98,6 +98,13 @@ def load_passwords(cfg):
         log("  (no passwords.txt:", e, ")")
     return pws
 
+# Lampiran yang ikut terkirim bersama statement tapi bukan statement: syarat &
+# ketentuan, selebaran promo, halaman belakang tagihan. Semuanya "akun tak
+# dikenali" tiap penarikan dan cuma jadi derau di laporan Telegram.
+BUKAN_STATEMENT = re.compile(
+    r"(term[s_ ]*&?[_ ]*condition|syarat[_ ]*dan[_ ]*ketentuan|promotion|promo[_ ]|"
+    r"backbilling|back[_ ]billing|tnc|disclaimer|newsletter)", re.I)
+
 RX_PDF_ID = re.compile(rb"/ID\s*\[\s*<[0-9a-fA-F]*>\s*<[0-9a-fA-F]*>\s*\]")
 
 def unlock(src, dst, passwords):
@@ -151,6 +158,8 @@ def main():
                 if part.get_content_maintype() == "multipart": continue
                 fn = decode_str(part.get_filename())
                 if not fn or not fn.lower().endswith(".pdf"): continue
+                if BUKAN_STATEMENT.search(fn):
+                    log(f"  lewati (bukan statement): {fn}"); continue
                 out_dir = month_folder(base, dt, classify_kind(src["name"], fn))
                 safe = re.sub(r"[^A-Za-z0-9._ -]", "_", f'{src["name"]} - {fn}')
                 out_path = os.path.join(out_dir, safe)
