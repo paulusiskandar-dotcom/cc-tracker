@@ -103,9 +103,26 @@ export default function Reconcile({
       .then(({ data }) => setQueue(data || []));
   }, [user?.id]);
 
-  const activeAccounts = useMemo(
-    () => (accounts || []).filter(a => a.is_active && (a.type === "bank" || a.type === "credit_card")),
-    [accounts]);
+  // Hanya rekening yang MEMANG menerbitkan statement. Sebelumnya seluruh
+  // rekening bank aktif ikut dihitung — termasuk dompet kas (JPY Cash, IDR
+  // Cash) yang tidak pernah punya statement. Akibatnya penyebut jadi 74 dan
+  // "13 selesai" terbaca 18% padahal 13 dari 22 kartu sudah beres, dan
+  // daftar Waiting terisi 51 rekening yang tidak menunggu apa pun.
+  const activeAccounts = useMemo(() => {
+    const pernah = new Set((reconSessions || []).map(x => x.account_id));
+    return (accounts || []).filter(a => {
+      if (!a.is_active) return false;
+      if (a.type === "credit_card") return true;
+      if (a.type !== "bank") return false;
+      if (a.subtype === "cash" || a.subtype === "pocket") return false;
+      if (pernah.has(a.id) || a.last_statement_date) return true;
+      // Kantong valas (BCA JPY, Jenius SGD, …) adalah sub-dompet dari rekening
+      // induknya dan tidak pernah menerima statement sendiri. Rekening rupiah
+      // yang belum pernah direkonsiliasi TETAP dihitung — itu justru pekerjaan
+      // yang belum tersentuh, bukan sesuatu yang boleh disembunyikan.
+      return (a.currency || "IDR") === "IDR";
+    });
+  }, [accounts, reconSessions]);
 
   // Live per-card re-match: the stored session totals (total_match/total_missing/
   // calculated_balance) are PREPARE-TIME snapshots and go stale the moment rows
@@ -466,6 +483,9 @@ export default function Reconcile({
             <span style={{ width: pct(nDone), background: "#059669" }} />
             <span style={{ width: pct(nReady), background: "#34d399" }} />
             <span style={{ width: pct(nReview), background: "#d97706" }} />
+            {/* Sisa bilah = yang statement-nya belum datang. Tanpa segmen ini
+                bilahnya tidak pernah penuh dan terlihat seperti tertinggal. */}
+            <span style={{ width: pct(monthData.waiting.length), background: "#e5e7eb" }} />
           </div>
         </div>
       </div>
