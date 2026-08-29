@@ -250,14 +250,28 @@ export default function Reconcile({
         const cutoff = statementAnchorDate(st.stmtRows, st.stmtStatementDate)
           || dates[dates.length - 1];
         const { data: semua, error: eAll } = await supabase.from("ledger")
-          .select("tx_date, amount_idr, amount, from_id, from_type, to_id, to_type")
+          .select("id, tx_date, description, amount_idr, amount, from_id, from_type, to_id, to_type")
           .eq("user_id", user.id)
           .or(`from_id.eq.${acc.id},to_id.eq.${acc.id}`);
         if (eAll) throw eAll;
+        // Belanja di hari-hari terakhir siklus sudah ada di buku tapi belum
+        // dibukukan bank — ia terbit di statement berikutnya. Baris seperti itu
+        // membuat buku lebih tinggi dari penutupan padahal tidak ada yang salah:
+        // CIMB ALL 24 Agu tertahan oleh tiga belanja 23–24 Agu (5.940.268), dan
+        // Jenius oleh dua belanja 25–26 Agu (285.015). Yang menandainya: baris
+        // TIDAK tercocokkan ke statement DAN bertanggal di ujung siklus.
+        const SENGGANG_POSTING = 3;
+        const batasGeser = new Date(cutoff + "T00:00:00");
+        batasGeser.setDate(batasGeser.getDate() - SENGGANG_POSTING);
+        const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        const awalSenggang = ymd(batasGeser);
+
         let net = Number(acc.initial_balance || 0);
+        const geser = [];
         for (const r of (semua || [])) {
           if (r.tx_date > cutoff) continue;
           const amt = Number(r.amount_idr || r.amount || 0);
+          if (!matched.has(r.id) && r.tx_date >= awalSenggang) { geser.push(r); continue; }
           if (r.from_id === acc.id && r.from_type === "account") net += amt;
           if (r.to_id === acc.id && r.to_type === "account") net -= amt;
         }
@@ -268,6 +282,9 @@ export default function Reconcile({
             `(selisih ${fmtIDR(selisih)}) — ada baris salah klasifikasi, pakai Review`,
             "error");
           return;
+        }
+        if (geser.length) {
+          showToast(`${geser.length} transaksi ${awalSenggang.slice(5)}–${cutoff.slice(5)} belum dibukukan bank — masuk statement berikutnya`, "info");
         }
       }
 
