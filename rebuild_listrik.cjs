@@ -82,4 +82,51 @@ for(const [k,v] of Object.entries(kena)){
 }
 console.log(`\n${pindah.length} baris pindah · ${lepas.length} dilepas · ${marginBaru.length} margin diperbarui`);
 if(!apply) return console.log('\ndry run — belum ada yang diubah');
+
+// ── TERAPKAN ──────────────────────────────────────────────────────────────
+const fs=require('fs');
+const kenaId=new Set([...lepas,...pindah].map(x=>x.id).concat(marginBaru.map(m=>m.id)));
+fs.writeFileSync(`.backups/listrik-${Date.now()}.json`,JSON.stringify({
+  ledger:led.filter(l=>kenaId.has(l.id)), settlements:sets.filter(x=>
+    RENCANA.some(R=>x.id.startsWith(R.grup)) || x.id.startsWith('71b23617'))},null,1));
+
+const gagal=[];
+const tulis=async(t,q)=>{const {error}=await q; if(error) gagal.push(`${t}: ${error.message}`);};
+
+// 1. Lepaskan baris yang salah tempat
+for(const m of lepas)
+  await tulis(`lepas ${m.id}`, sb.from('ledger').update({reimburse_settlement_id:null}).eq('id',m.id));
+
+// 2. Pindahkan tagihan PLN ke kelompok yang benar
+for(const m of pindah)
+  await tulis(`pindah ${m.id}`, sb.from('ledger').update({reimburse_settlement_id:m.ke}).eq('id',m.id));
+
+// 3. Perbaiki nilai margin
+for(const m of marginBaru){
+  if(!m.id){gagal.push(`margin ${m.grup}: baris income tidak ada`);continue;}
+  await tulis(`margin ${m.grup}`, sb.from('ledger').update({amount:m.baru,amount_idr:m.baru}).eq('id',m.id));
+}
+
+// 4. Susun ulang out_ledger_ids & total_out tiap kelompok.
+//    Receivables membaca keanggotaan dari larik ini, bukan dari kunci asing —
+//    kalau tidak ikut diperbarui, layarnya menampilkan susunan lama.
+for(const R of RENCANA){
+  const s0=cari(R.grup);
+  const ids=plnBulan(R.tagihan).map(x=>x.id);
+  const tot=plnBulan(R.tagihan).reduce((t,x)=>t+nil(x),0);
+  await tulis(`settlement ${R.grup}`, sb.from('reimburse_settlements')
+    .update({out_ledger_ids:ids,total_out:tot}).eq('id',s0.id));
+}
+// 71b23617 kehilangan tagihan Maret; selisihnya sengaja dibiarkan menganga
+// supaya lubangnya kelihatan, bukan ditutup diam-diam.
+{
+  const s0=cari('71b23617');
+  const buang=new Set(pindah.filter(m=>(m.reimburse_settlement_id||'').startsWith('71b23617')).map(m=>m.id));
+  const ids=(s0.out_ledger_ids||[]).filter(i=>!buang.has(i));
+  const tot=led.filter(l=>ids.includes(l.id)).reduce((t,x)=>t+nil(x),0);
+  await tulis('settlement 71b23617', sb.from('reimburse_settlements')
+    .update({out_ledger_ids:ids,total_out:tot}).eq('id',s0.id));
+}
+
+console.log(gagal.length?`\nGAGAL:\n  ${gagal.join('\n  ')}`:'\nselesai, semua tertulis');
 })();
