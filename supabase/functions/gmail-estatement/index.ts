@@ -1219,8 +1219,31 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
       closing_balance: extraction.closing_balance ?? null,
     };
   }
-  // Empty statement (e.g. dormant HSBC card) — nothing to review, don't leave a draft
+  // Statement tanpa transaksi (kartu tidur: BNI 18 Agu — PEMBELANJAAN 0,
+  // PEMBAYARAN 0, tagihan tetap 17.500). Dulu langsung dibuang, akibatnya
+  // kartunya berdiri selamanya di "menunggu statement" padahal statement-nya
+  // sudah datang dan berbunyi "tidak ada apa-apa". Catat sesinya supaya bulan
+  // itu tercatat selesai; tidak ada draft karena memang tidak ada yang direview.
   if (!txs.length) {
+    const tgl = normStmtDate(extraction.statement_date);
+    const tutup = extraction.closing_balance ?? null;
+    if (tgl && tutup != null) {
+      const [y, m] = tgl.split("-").map(Number);
+      await serviceSupabase.from("reconcile_sessions").delete()
+        .eq("user_id", userId).eq("account_id", acc.id)
+        .eq("period_year", y).eq("period_month", m).eq("status", "prepared");
+      await serviceSupabase.from("reconcile_sessions").insert({
+        user_id: userId, account_id: acc.id,
+        period_year: y, period_month: m, period_start: tgl, period_end: tgl,
+        opening_balance: extraction.opening_balance ?? null, closing_balance: tutup,
+        statement_date: tgl, due_date: normStmtDate(extraction.due_date),
+        calculated_balance: tutup, status: "prepared", pdf_filename: filename,
+        total_statement: 0, total_match: 0, total_missing: 0, total_extra: 0,
+        notes: "Statement tanpa transaksi — tagihan dibawa dari bulan sebelumnya",
+      });
+      return { prepared: true, empty: true, account_name: acc.name,
+               statement_date: tgl, closing_balance: tutup, stats: { match: 0, missing: 0 }, gap: 0 };
+    }
     return { prepared: false, reason: "empty_statement", account_name: acc.name };
   }
 
@@ -1228,7 +1251,13 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
   const dates = txs.map((t) => String(t.date || "")).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
   const periodStart = dates[0] || null;
   const periodEnd = dates[dates.length - 1] || null;
-  const [pY, pM] = (periodEnd || "").split("-").map(Number);
+  // Bulan sesi diambil dari TANGGAL STATEMENT, bukan dari transaksi terakhir.
+  // Kartu yang sepi bisa punya satu-satunya transaksi bertanggal bulan lalu —
+  // UOB (statement 18 Agu, transaksi 23 Jul) dan Maybank VP (statement 22 Agu,
+  // transaksi 21 Jul) keduanya terarsip ke Juli dan hilang dari halaman
+  // Agustus, tampak seperti statement-nya belum datang padahal sudah diproses.
+  const bulanDari = normStmtDate(extraction.statement_date) || periodEnd || "";
+  const [pY, pM] = bulanDari.split("-").map(Number);
 
   // stmtRows in the exact shape the app's draft loader expects
   const stmtRows = txs.map((t: any, i: number) => ({ ...t, _id: t._id || `stmt-prep-${i}`, _sourceFile: filename }));

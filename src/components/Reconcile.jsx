@@ -13,7 +13,7 @@ import { fmtIDR } from "../utils";
 import { showToast } from "./shared/index";
 import GlobalReconcileButton from "./shared/GlobalReconcileButton";
 import {
-  ChevronLeft, ChevronRight, CreditCard, Landmark, Clock, Check,
+  ChevronLeft, ChevronRight, CreditCard, Landmark, Check,
   FileText, Eye, AlertTriangle, X,
 } from "lucide-react";
 
@@ -37,16 +37,16 @@ const BTN = (bg, color, border = "none") => ({
   border, background: bg, color, cursor: "pointer", fontFamily: FF, flexShrink: 0,
 });
 
-function AccountTile({ type }) {
+function AccountTile({ type, size = 34 }) {
   const isCC = type === "credit_card";
   const Icon = isCC ? CreditCard : Landmark;
   return (
     <span style={{
-      width: 34, height: 34, borderRadius: 10, flexShrink: 0,
+      width: size, height: size, borderRadius: size * 0.3, flexShrink: 0,
       background: isCC ? "#fde8e8" : "#dbeafe", color: isCC ? "#dc2626" : "#3b5bdb",
       display: "inline-flex", alignItems: "center", justifyContent: "center",
     }}>
-      <Icon size={17} strokeWidth={2} />
+      <Icon size={Math.round(size * 0.5)} strokeWidth={2} />
     </span>
   );
 }
@@ -204,6 +204,10 @@ export default function Reconcile({
     // gap issues first
     needsReview.sort((a, b) => (Math.abs(b.gap || 0)) - (Math.abs(a.gap || 0)));
     completed.sort((a, b) => new Date(b.s.completed_at || 0) - new Date(a.s.completed_at || 0));
+    // Kartu kredit dulu (punya jatuh tempo, jadi lebih mendesak), lalu nama.
+    waiting.sort((a, b) =>
+      (a.acc.type === b.acc.type ? 0 : a.acc.type === "credit_card" ? -1 : 1)
+      || String(a.acc.name).localeCompare(String(b.acc.name)));
     return { needsReview, ready, completed, waiting };
   }, [allSessions, activeAccounts, month, valasByAcc, liveByAcc]);
 
@@ -635,13 +639,17 @@ export default function Reconcile({
                   border: late ? "1px solid #fde68a" : "1px dashed #e5e7eb",
                   background: late ? "#fffbeb" : "transparent", fontSize: 12, color: "#6b7280",
                 }}>
-                  {late ? <AlertTriangle size={14} color="#d97706" /> : <Clock size={14} color="#9ca3af" />}
-                  <div style={{ minWidth: 0 }}>
+                  {/* Ubin yang sama dengan bagian lain halaman ini: merah kartu
+                      kredit, biru bank. Sebelumnya semua kotak identik, jadi
+                      "Maybank" (bank) dan "Maybank VP" (kartu) tak terbedakan. */}
+                  <AccountTile type={acc.type} size={26} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ fontSize: 12, color: "#111827", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{acc.name}</div>
                     <div style={{ fontSize: 10.5, color: late ? "#b45309" : "#9ca3af", fontVariantNumeric: "tabular-nums" }}>
                       {late ? `late — usually ~day ${day}` : day ? `usually ~day ${day}` : "no history yet"}
                     </div>
                   </div>
+                  {late && <AlertTriangle size={13} color="#d97706" style={{ flexShrink: 0 }} />}
                 </div>
               );
             })}
