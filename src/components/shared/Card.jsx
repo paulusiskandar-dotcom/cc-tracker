@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Inbox } from "lucide-react";
 import { fmtIDR } from "../../utils";
 
@@ -322,53 +322,69 @@ export function Spinner({ size = 24, color = "#3b5bdb" }) {
 let _toastFn = null;
 export const showToast = (msg, type = "success") => _toastFn?.(msg, type);
 
+const NADA_TOAST = {
+  error:   { bg: "#fee2e2", fg: "#b91c1c", br: "#fecaca" },
+  warning: { bg: "#fef3c7", fg: "#b45309", br: "#fde68a" },
+  info:    { bg: "#e0edff", fg: "#1d4ed8", br: "#bfdbfe" },
+  success: { bg: "#dcfce7", fg: "#047857", br: "#bbf7d0" },
+};
+
 export function ToastContainer() {
   const [toasts, setToasts] = useState([]);
 
-  _toastFn = (msg, type) => {
-    const id = Date.now();
-    setToasts(prev => [...prev, { id, msg, type }]);
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
-  };
+  // Dipasang di efek, bukan di badan render: React boleh menjalankan render
+  // dua kali, dan menugaskan _toastFn di sana membuat pesan datang ke salinan
+  // komponen yang sudah dibuang.
+  useEffect(() => {
+    _toastFn = (msg, type) => {
+      const id = Date.now() + Math.random();
+      setToasts(prev => [...prev, { id, msg, type }]);
+      // Pesan galat biasanya satu kalimat penuh — tiga detik tidak cukup dibaca.
+      const umur = type === "error" ? 8000 : type === "warning" ? 6000 : 3500;
+      setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), umur);
+    };
+    return () => { _toastFn = null; };
+  }, []);
 
   if (!toasts.length) return null;
 
   return (
     <div style={{
       position:       "fixed",
-      bottom:         80,
+      bottom:         24,
       left:           "50%",
       transform:      "translateX(-50%)",
       zIndex:         9999,
       display:        "flex",
       flexDirection:  "column",
+      alignItems:     "center",
       gap:            8,
+      width:          "min(560px, calc(100vw - 32px))",
       pointerEvents:  "none",
     }}>
-      {toasts.map(t => (
-        <div key={t.id} style={{
-          background:   t.type === "error"   ? "#fee2e2"
-                      : t.type === "warning" ? "#fef3c7"
-                      :                        "#dcfce7",
-          color:        t.type === "error"   ? "#dc2626"
-                      : t.type === "warning" ? "#d97706"
-                      :                        "#059669",
-          border:       `1px solid ${
-                          t.type === "error"   ? "#fecaca"
-                        : t.type === "warning" ? "#fde68a"
-                        :                        "#bbf7d0"
-                      }`,
-          borderRadius: 10,
-          padding:      "10px 16px",
-          fontSize:     13,
-          fontWeight:   600,
-          fontFamily:   "Figtree, sans-serif",
-          whiteSpace:   "nowrap",
-          boxShadow:    "0 4px 16px rgba(0,0,0,0.12)",
-        }}>
-          {t.msg}
-        </div>
-      ))}
+      {toasts.map(t => {
+        const n = NADA_TOAST[t.type] || NADA_TOAST.success;
+        return (
+          <div key={t.id} style={{
+            background:   n.bg,
+            color:        n.fg,
+            border:       `1px solid ${n.br}`,
+            borderRadius: 10,
+            padding:      "10px 16px",
+            fontSize:     13,
+            fontWeight:   600,
+            fontFamily:   "Figtree, sans-serif",
+            // Kalimat panjang dibungkus jadi blok terbaca, bukan pita selebar
+            // halaman yang menutupi daftar di belakangnya.
+            lineHeight:   1.45,
+            maxWidth:     "100%",
+            textAlign:    "center",
+            boxShadow:    "0 4px 16px rgba(0,0,0,0.12)",
+          }}>
+            {t.msg}
+          </div>
+        );
+      })}
     </div>
   );
 }

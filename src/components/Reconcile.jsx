@@ -120,14 +120,38 @@ export default function Reconcile({
       const { matched, missing } = matchRows(st.stmtRows, led);
       const ignored = new Set(st.ignoredIds || []);
       const open = missing.filter(m => !ignored.has(m._id));
+      // Uji penutupan yang sama dengan yang dipakai Finalize, dihitung di muka.
+      // Tanpa ini kartu bisa berbunyi "gap Rp0 · siap difinalize" lalu ditolak
+      // saat tombolnya ditekan — persis yang terjadi pada Jenius dan CIMB ALL.
+      const acc = (accounts || []).find(a => a.id === d.account_id);
+      let tutup = null;
+      if (acc?.type === "credit_card" && st.stmtClosingBalance != null) {
+        const cutoff = statementAnchorDate(st.stmtRows, st.stmtStatementDate);
+        if (cutoff) {
+          const b = new Date(cutoff + "T00:00:00");
+          b.setDate(b.getDate() - 3);
+          const awal = `${b.getFullYear()}-${String(b.getMonth() + 1).padStart(2, "0")}-${String(b.getDate()).padStart(2, "0")}`;
+          let net = Number(acc.initial_balance || 0), geser = 0;
+          for (const r of led) {
+            if (r.tx_date > cutoff) continue;
+            if (!matched.has(r.id) && r.tx_date >= awal) { geser++; continue; }
+            const amt = Number(r.amount_idr || r.amount || 0);
+            if (r.from_id === acc.id && r.from_type === "account") net += amt;
+            if (r.to_id === acc.id && r.to_type === "account") net -= amt;
+          }
+          tutup = { buku: net, statement: Number(st.stmtClosingBalance),
+                    selisih: Math.round(net - Number(st.stmtClosingBalance)), geser };
+        }
+      }
       out[d.account_id] = {
         matched: matched.size,
         missing: open.length,
         missingSum: open.reduce((sum, m) => sum + Math.abs(Number(m.amount || 0)), 0),
+        tutup,
       };
     }
     return out;
-  }, [drafts, ledger]);
+  }, [drafts, ledger, accounts]);
 
   // ── Derive per-account status for the selected month ─────────
   const monthData = useMemo(() => {
@@ -155,7 +179,8 @@ export default function Reconcile({
         : ((s.closing_balance != null && s.calculated_balance != null)
             ? Math.round(Number(s.closing_balance) - Number(s.calculated_balance)) : null);
       const item = { acc, s, gap, live, valas: valasByAcc[acc.id] || 0 };
-      if (missingN > 0 || gap === null || Math.abs(gap) >= 1) needsReview.push(item);
+      const tutupGagal = live?.tutup && Math.abs(live.tutup.selisih) > 2;
+      if (missingN > 0 || gap === null || Math.abs(gap) >= 1 || tutupGagal) needsReview.push(item);
       else ready.push(item);
     }
     // gap issues first
@@ -473,7 +498,13 @@ export default function Reconcile({
                   <span style={CHIP("#dcfce7", "#059669")}><Check size={11} strokeWidth={2.5} />{(live ? live.matched : s.total_match) || 0} matched</span>
                   {((live ? live.missing : s.total_missing) || 0) > 0 && <span style={CHIP("#fef3c7", "#b45309")}>{live ? live.missing : s.total_missing} not in ledger</span>}
                   {gap !== null && Math.abs(gap) >= 1 && <span style={CHIP("#fee2e2", "#dc2626")}>gap {fmtIDR(Math.abs(gap))}</span>}
-                  {gap !== null && Math.abs(gap) < 1 && <span style={CHIP("#f3f4f6", "#6b7280")}>closing matches</span>}
+                  {gap !== null && Math.abs(gap) < 1 && !(live?.tutup && Math.abs(live.tutup.selisih) > 2) &&
+                    <span style={CHIP("#f3f4f6", "#6b7280")}>closing matches</span>}
+                  {live?.tutup && Math.abs(live.tutup.selisih) > 2 && (
+                    <span style={CHIP("#fee2e2", "#dc2626")}>
+                      buku {fmtIDR(live.tutup.buku)} vs statement {fmtIDR(live.tutup.statement)}
+                    </span>
+                  )}
                   {gap === null && <span style={CHIP("#f3f4f6", "#6b7280")}>no closing balance</span>}
                   {valas > 0 && <span style={CHIP("#ede9fe", "#6d28d9")}>{valas} FX waiting → resolves here</span>}
                 </div>
@@ -508,8 +539,11 @@ export default function Reconcile({
                 </div>
                 <span style={CHIP("#dcfce7", "#059669")}>
                   <Check size={11} strokeWidth={2.5} />
-                  {item.s.total_match || 0} matched · 0 missing · gap Rp0
+                  {(item.live ? item.live.matched : item.s.total_match) || 0} matched · closing cocok
                 </span>
+                {item.live?.tutup?.geser > 0 && (
+                  <span style={CHIP("#f3f4f6", "#6b7280")}>{item.live.tutup.geser} belum dibukukan bank</span>
+                )}
                 <button onClick={() => finalize(item)} disabled={finalizing === item.acc.id} style={BTN("#059669", "#fff")}>
                   {finalizing === item.acc.id ? "Finalizing…" : "✓ Finalize"}
                 </button>
