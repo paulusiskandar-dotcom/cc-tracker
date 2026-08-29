@@ -625,31 +625,49 @@ export default function Reconcile({
                 {bukaWaiting ? "Hide" : "Show all"}
               </button>
             </>)}
-          {/* Diciutkan secara bawaan: ini daftar terpanjang di halaman dan tidak
-              ada yang bisa dikerjakan di sini. Yang sudah lewat tanggal biasanya
-              TETAP tampil — itu satu-satunya bagian yang perlu ditindaklanjuti. */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 8 }}>
-            {monthData.waiting.map(({ acc }) => {
-              const day = usualDay(acc.id);
-              const late = isCurrentMonth && day && now.getDate() > day + 5;
-              if (!late && !bukaWaiting) return null;
+          {/* Daftar satu baris, bukan grid kotak: tiap item cuma punya satu
+              baris keterangan ("usually ~day 31"), jadi kotak dua baris
+              memaksa 27 item memakan layar lebih tinggi daripada Completed
+              yang jauh lebih penting. Kolomnya sejajar dengan tabel di atas.
+              Yang lewat tanggal biasanya tetap tampil walau diciutkan. */}
+          <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 14, padding: "4px 0" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 16px 8px",
+                          fontSize: 9.5, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px",
+                          borderBottom: "1px solid #f3f4f6" }}>
+              <span style={{ width: 22, flexShrink: 0 }} />
+              <span style={{ width: 160, flexShrink: 0 }}>Account</span>
+              <span style={{ width: "5ch", flexShrink: 0 }}>Type</span>
+              <span style={{ width: "9ch", flexShrink: 0, textAlign: "right" }}>Usual day</span>
+              <span style={{ flex: 1, minWidth: 0 }} />
+            </div>
+            {monthData.waiting
+              .map(({ acc }) => {
+                const day = usualDay(acc.id);
+                return { acc, day, late: isCurrentMonth && day && now.getDate() > day + 5 };
+              })
+              // Disaring DULU: kalau baris tersembunyi masih ikut terhitung,
+              // garis pemisah muncul di bawah baris terakhir yang terlihat.
+              .filter(r => bukaWaiting || r.late)
+              .map(({ acc, day, late }, i, arr) => {
+              const isCC = acc.type === "credit_card";
               return (
                 <div key={acc.id} style={{
-                  display: "flex", alignItems: "center", gap: 9, borderRadius: 11, padding: "9px 12px",
-                  border: late ? "1px solid #fde68a" : "1px dashed #e5e7eb",
-                  background: late ? "#fffbeb" : "transparent", fontSize: 12, color: "#6b7280",
+                  display: "flex", alignItems: "center", gap: 10, padding: "7px 16px",
+                  fontSize: 12, color: "#6b7280", fontVariantNumeric: "tabular-nums",
+                  background: late ? "#fffbeb" : "transparent",
+                  borderBottom: i < arr.length - 1 ? "1px solid #f3f4f6" : "none",
                 }}>
-                  {/* Ubin yang sama dengan bagian lain halaman ini: merah kartu
-                      kredit, biru bank. Sebelumnya semua kotak identik, jadi
-                      "Maybank" (bank) dan "Maybank VP" (kartu) tak terbedakan. */}
-                  <AccountTile type={acc.type} size={26} />
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: 12, color: "#111827", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{acc.name}</div>
-                    <div style={{ fontSize: 10.5, color: late ? "#b45309" : "#9ca3af", fontVariantNumeric: "tabular-nums" }}>
-                      {late ? `late — usually ~day ${day}` : day ? `usually ~day ${day}` : "no history yet"}
-                    </div>
-                  </div>
-                  {late && <AlertTriangle size={13} color="#d97706" style={{ flexShrink: 0 }} />}
+                  <AccountTile type={acc.type} size={22} />
+                  <span style={{ width: 160, flexShrink: 0, fontWeight: 600, color: "#111827",
+                                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{acc.name}</span>
+                  <span style={{ width: "5ch", flexShrink: 0, fontSize: 10.5, fontWeight: 700,
+                                 color: isCC ? "#dc2626" : "#3b5bdb" }}>{isCC ? "Card" : "Bank"}</span>
+                  <span style={{ width: "9ch", flexShrink: 0, textAlign: "right" }}>{day ? day : "—"}</span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    {late
+                      ? <span style={CHIP("#fef3c7", "#b45309")}><AlertTriangle size={10} strokeWidth={2.5} />late</span>
+                      : !day && <span style={{ fontSize: 10.5, color: "#d1d5db" }}>no history yet</span>}
+                  </span>
                 </div>
               );
             })}
