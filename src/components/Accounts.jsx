@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { Pencil } from "lucide-react";
+import CurrencyFlag from "./shared/CurrencyFlag";
 import { useNavigate } from "react-router-dom";
 import { accountsApi, ledgerApi, getTxFromToTypes, recalculateBalance } from "../api";
 import {
@@ -953,9 +954,7 @@ function CashAccountCard({ account: a, fxRates = {}, CURRENCIES: C = [], ledger,
       <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12, flex: 1, minWidth: 0 }}>
         {/* Flag + Name + edit */}
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 8, background: (color || "#059669") + "22", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>
-            {cur?.code || ""}
-          </div>
+          <CurrencyFlag code={cur?.code || a.currency} size={36} warna={color} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {a.name}
