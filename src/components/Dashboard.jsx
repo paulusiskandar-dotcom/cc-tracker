@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useCallback } from "react";
-import { Bell, Mail, Camera, Scale, Plus } from "lucide-react";
+import { Bell, Mail, Camera, Scale, Plus, Pencil } from "lucide-react";
 import { CategoryIcon } from "../lib/categoryIcons";
 import { ledgerApi, recurringApi, reimburseSettlementsApi, loanPaymentsApi, employeeLoanApi } from "../api";
 import { fmtIDR, ym, mlShort, getGreeting, todayStr, groupByDate, checkDuplicateTransaction } from "../utils";
@@ -1605,7 +1605,7 @@ function UpcomingRow({ item, onConfirm, onEdit, onSkip }) {
       {!isInfo && (
         <div style={{ display: "flex", gap: 4, flexShrink: 0, alignItems: "center" }}>
           {onEdit && (
-            <button onClick={e => { e.stopPropagation(); onEdit(e); }} style={RUPT_GHOST} title="Edit">✏️</button>
+            <button onClick={e => { e.stopPropagation(); onEdit(e); }} style={RUPT_GHOST} title="Edit"><Pencil size={13} strokeWidth={2.2} /></button>
           )}
           {onConfirm && (
             <button onClick={e => { e.stopPropagation(); onConfirm(e); }} style={confirmBtnStyle} title="Confirm">
@@ -1632,6 +1632,7 @@ const RUPT_GHOST = {
   border: "1px solid #e5e7eb", background: "#f9fafb",
   color: "#9ca3af", fontSize: 11, cursor: "pointer",
   fontFamily: "Figtree, sans-serif",
+  display: "inline-flex", alignItems: "center", justifyContent: "center",
   display: "flex", alignItems: "center", justifyContent: "center",
 };
 

@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import { Pencil } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { accountsApi, ledgerApi, getTxFromToTypes, recalculateBalance } from "../api";
 import {
@@ -792,6 +793,9 @@ const ACCT_BTN = {
   height: 32, padding: "0 12px", borderRadius: 8, border: "1px solid #e5e7eb",
   background: "#f9fafb", color: "#374151", fontSize: 12, fontWeight: 600,
   cursor: "pointer", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap",
+  // Isinya sekarang ikon + teks: tanpa flex, keduanya duduk di garis dasar
+  // yang berbeda dan tingginya tidak lagi sama dengan tombol sebelahnya.
+  display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6,
 };
 
 // ─── DISTRIBUTION BAR (Bank page) ────────────────────────────
@@ -903,7 +907,7 @@ function BankAccountCard({ account: a, ledger, fxRates = {}, CURRENCIES: C = [],
           </div>
           <button onClick={onEdit} title="Edit account" style={{ border: "none", background: "none", cursor: "pointer", padding: 2, color: "#d1d5db", lineHeight: 1, fontSize: 13, flexShrink: 0 }}
             onMouseEnter={e => e.currentTarget.style.color = "#6b7280"}
-            onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}>✏️</button>
+            onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}><Pencil size={13} strokeWidth={2.2} /></button>
         </div>
 
         {/* Balance */}
@@ -927,7 +931,7 @@ function BankAccountCard({ account: a, ledger, fxRates = {}, CURRENCIES: C = [],
         {/* Actions */}
         <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
           <button onClick={() => onStatement && onStatement(a)} style={ACCT_BTN}>Statement</button>
-          <button onClick={onEdit}                              style={{ ...ACCT_BTN, flex: 1 }}>✏️ Edit</button>
+          <button onClick={onEdit}                              style={{ ...ACCT_BTN, flex: 1 }}><Pencil size={12} strokeWidth={2.2} /> Edit</button>
         </div>
       </div>
     </div>
@@ -962,7 +966,7 @@ function CashAccountCard({ account: a, fxRates = {}, CURRENCIES: C = [], ledger,
           </div>
           <button onClick={onEdit} title="Edit account" style={{ border: "none", background: "none", cursor: "pointer", padding: 2, color: "#d1d5db", lineHeight: 1, fontSize: 13, flexShrink: 0 }}
             onMouseEnter={e => e.currentTarget.style.color = "#6b7280"}
-            onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}>✏️</button>
+            onMouseLeave={e => e.currentTarget.style.color = "#d1d5db"}><Pencil size={13} strokeWidth={2.2} /></button>
         </div>
 
         {/* Balance */}
@@ -986,7 +990,7 @@ function CashAccountCard({ account: a, fxRates = {}, CURRENCIES: C = [], ledger,
         {/* Actions */}
         <div style={{ display: "flex", gap: 6, marginTop: "auto" }}>
           <button onClick={() => onStatement && onStatement(a)} style={ACCT_BTN}>Statement</button>
-          <button onClick={onEdit}                              style={{ ...ACCT_BTN, flex: 1 }}>✏️ Edit</button>
+          <button onClick={onEdit}                              style={{ ...ACCT_BTN, flex: 1 }}><Pencil size={12} strokeWidth={2.2} /> Edit</button>
         </div>
       </div>
     </div>
@@ -1485,7 +1489,7 @@ function AccountCard({ account: a, ledger, accounts, fxRates = {}, onEdit, onDel
           </button>
         )}
         <button onClick={onEdit} style={ACTION_BTN}>
-          ✏️ Edit
+          <Pencil size={12} strokeWidth={2.2} /> Edit
         </button>
         <button onClick={onDelete} style={{ ...ACTION_BTN, background: "#fee2e2", color: "#dc2626", border: "1px solid #fecaca" }}>
           ✕

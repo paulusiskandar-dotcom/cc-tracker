@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { Pencil } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { ledgerApi, installmentsApi, recurringApi, getTxFromToTypes, accountsApi, recalculateBalance } from "../api";
 import { supabase } from "../lib/supabase";
@@ -1481,7 +1482,7 @@ function CCCard({ cc, color, onPay, onHistory, onInstallments, onBill, onEdit })
           }}
           onMouseEnter={e => e.currentTarget.style.background = "rgba(0,0,0,0.5)"}
           onMouseLeave={e => e.currentTarget.style.background = "rgba(0,0,0,0.28)"}
-        >✏️</button>
+        ><Pencil size={13} strokeWidth={2.2} /></button>
         {/* Network logo — bottom right */}
         <div style={{ position: "absolute", bottom: 8, right: 12, display: "flex", alignItems: "center" }}>
           <NetworkLogo network={cc.network} />
@@ -1633,7 +1634,7 @@ function WalletCard({ cc, color, isActive, onPay, onTransactions, onInstallments
           }}
           onMouseEnter={e => e.currentTarget.style.background = "rgba(0,0,0,0.55)"}
           onMouseLeave={e => e.currentTarget.style.background = "rgba(0,0,0,0.30)"}
-        >✏️</button>
+        ><Pencil size={13} strokeWidth={2.2} /></button>
 
         {/* Last4 — bottom left, only visible when image fully shows */}
         {cc.card_last4 && (
