@@ -582,8 +582,9 @@ export default function Reconcile({
             <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 16px 8px",
                           fontSize: 9.5, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.4px",
                           borderBottom: "1px solid #f3f4f6" }}>
-              <span style={{ width: 14, flexShrink: 0 }} />
+              <span style={{ width: 22, flexShrink: 0 }} />
               <span style={{ width: 160, flexShrink: 0 }}>Account</span>
+              <span style={{ width: "5ch", flexShrink: 0 }}>Type</span>
               <span style={{ width: "6ch", flexShrink: 0 }}>Done</span>
               <span style={{ width: "5ch", flexShrink: 0, textAlign: "right" }}>Rows</span>
               <span style={{ width: "14ch", flexShrink: 0, textAlign: "right" }}>Closing</span>
@@ -595,8 +596,15 @@ export default function Reconcile({
                 fontSize: 12, color: "#6b7280", fontVariantNumeric: "tabular-nums",
                 borderBottom: i < monthData.completed.length - 1 ? "1px solid #f3f4f6" : "none",
               }}>
-                <Check size={14} strokeWidth={2.5} color="#059669" style={{ flexShrink: 0 }} />
+                {/* Ubin akun menggantikan centang hijau: seluruh bagian ini
+                    memang sudah selesai, jadi centang tidak menambah apa pun —
+                    sedangkan kartu vs bank tidak terlihat sama sekali. */}
+                <AccountTile type={acc.type} size={22} />
                 <span style={{ fontWeight: 600, color: "#111827", width: 160, flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{acc.name}</span>
+                <span style={{ width: "5ch", flexShrink: 0, fontSize: 10.5, fontWeight: 700,
+                               color: acc.type === "credit_card" ? "#dc2626" : "#3b5bdb" }}>
+                  {acc.type === "credit_card" ? "Card" : "Bank"}
+                </span>
                 <span style={{ width: "6ch", flexShrink: 0, whiteSpace: "nowrap" }}>{fmtDate((s.completed_at || "").slice(0, 10))}</span>
                 <span style={{ width: "5ch", flexShrink: 0, textAlign: "right" }}>{s.total_statement || 0}</span>
                 <span style={{ width: "14ch", flexShrink: 0, textAlign: "right", color: "#111827", fontWeight: 600 }}>
