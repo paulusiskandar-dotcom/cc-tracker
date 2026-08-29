@@ -175,7 +175,7 @@ function CicilanSection({ enabled, onToggle, form, set }) {
         }}
       >
         <span style={{ fontSize: 13, fontWeight: 600, color: enabled ? "#3b5bdb" : "#374151" }}>
-          Cicilan (Installment)
+          Installment
         </span>
         <span style={{
           width: 36, height: 20, borderRadius: 10,
@@ -194,7 +194,7 @@ function CicilanSection({ enabled, onToggle, form, set }) {
       {enabled && (
         <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-            <Field label="Jumlah Cicilan" style={{ flex: 1 }}>
+            <Field label="Number of months" style={{ flex: 1 }}>
               <input
                 type="number" min="2" max="60" step="1"
                 value={form.cicilan_count || ""}
@@ -205,7 +205,7 @@ function CicilanSection({ enabled, onToggle, form, set }) {
             </Field>
             {monthly && (
               <div style={{ paddingBottom: 2, textAlign: "right" }}>
-                <div style={{ fontSize: 9, color: "#9ca3af", fontWeight: 700, textTransform: "uppercase", fontFamily: FF }}>Per bulan</div>
+                <div style={{ fontSize: 9, color: "#9ca3af", fontWeight: 700, textTransform: "uppercase", fontFamily: FF }}>Per month</div>
                 <div style={{ fontSize: 14, fontWeight: 800, color: "#3b5bdb", fontFamily: FF }}>{fmtIDR(monthly)}</div>
               </div>
             )}
@@ -963,7 +963,7 @@ export default function TxVerticalBig({
               <button key={ent} type="button"
                 onClick={() => set("entity", ent)}
                 style={{
-                  flex: 1, height: 36, borderRadius: 8,
+                  flex: 1, height: 38, borderRadius: 8,
                   border: `1.5px solid ${active ? entColor : "#e5e7eb"}`,
                   background: active ? entColor + "15" : "#f9fafb",
                   color: active ? entColor : "#6b7280",
@@ -1130,7 +1130,7 @@ export default function TxVerticalBig({
               <button key={m} type="button"
                 onClick={() => { set("asset_mode", m); set("asset_id", null); set("asset_name", ""); }}
                 style={{
-                  flex: 1, height: 36, borderRadius: 8, border: "1.5px solid",
+                  flex: 1, height: 38, borderRadius: 8, border: "1.5px solid",
                   borderColor: modeVal === m ? "#3b5bdb" : "#e5e7eb",
                   background:  modeVal === m ? "#eff3ff" : "#fff",
                   color:       modeVal === m ? "#3b5bdb" : "#6b7280",
@@ -1233,7 +1233,7 @@ export default function TxVerticalBig({
       const autoMonthly  = newAmtTotal > 0 && prevMonths > 0 ? Math.round(newAmtTotal / prevMonths) : null;
       const pill = (active, onClick, label, color = "#3b5bdb", bg = "#eff3ff") => (
         <button type="button" onClick={onClick} style={{
-          flex: 1, height: 34, borderRadius: 8, border: "1.5px solid",
+          flex: 1, height: 38, borderRadius: 8, border: "1.5px solid",
           borderColor: active ? color : "#e5e7eb",
           background:  active ? bg    : "#fff",
           color:       active ? color : "#6b7280",
@@ -1319,7 +1319,7 @@ export default function TxVerticalBig({
       const loanToAccs  = loanAccTab === "bank" ? bankAccs : cashAccs;
       const pill = (active, onClick, label) => (
         <button type="button" onClick={onClick} style={{
-          flex: 1, height: 34, borderRadius: 8, border: "1.5px solid",
+          flex: 1, height: 38, borderRadius: 8, border: "1.5px solid",
           borderColor: active ? "#059669" : "#e5e7eb",
           background:  active ? "#f0fdf4" : "#fff",
           color:       active ? "#059669" : "#6b7280",
@@ -1525,7 +1525,7 @@ export default function TxVerticalBig({
             value={tagId}
             disabled={simpanTag}
             onChange={e => ubahTag(e.target.value)}
-            style={{ height: 34, flex: 1, minWidth: 0, border: "1.5px solid #e5e7eb", borderRadius: 10,
+            style={{ height: 44, flex: 1, minWidth: 0, border: "1.5px solid #e5e7eb", borderRadius: 10,
                      padding: "0 10px", fontFamily: FF, fontSize: 13, fontWeight: 500,
                      color: "#111827", background: "#fff", cursor: "pointer" }}
           >
@@ -1633,8 +1633,8 @@ export default function TxVerticalBig({
             <div style={{ fontSize: 16, fontWeight: 700, color: "#111827", marginBottom: 8 }}>Delete transaction?</div>
             <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 20 }}>This will reverse the balance impact. This cannot be undone.</div>
             <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => setConfirm(false)} style={{ flex: 1, height: 40, borderRadius: 8, border: "1.5px solid #e5e7eb", background: "#fff", color: "#374151", fontFamily: FF, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
-              <button onClick={handleDelete} disabled={saving} style={{ flex: 1, height: 40, borderRadius: 8, border: "none", background: "#fee2e2", color: "#dc2626", fontFamily: FF, fontSize: 13, fontWeight: 700, cursor: saving ? "default" : "pointer", opacity: saving ? 0.6 : 1 }}>
+              <button onClick={() => setConfirm(false)} style={{ flex: 1, height: 44, borderRadius: 8, border: "1.5px solid #e5e7eb", background: "#fff", color: "#374151", fontFamily: FF, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Cancel</button>
+              <button onClick={handleDelete} disabled={saving} style={{ flex: 1, height: 44, borderRadius: 8, border: "none", background: "#fee2e2", color: "#dc2626", fontFamily: FF, fontSize: 13, fontWeight: 700, cursor: saving ? "default" : "pointer", opacity: saving ? 0.6 : 1 }}>
                 {saving ? "Deleting…" : "Delete"}
               </button>
             </div>
