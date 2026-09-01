@@ -416,9 +416,27 @@ export default function Reconcile({
   const nDone = monthData.completed.length, nReview = monthData.needsReview.length, nReady = monthData.ready.length;
   const pct = (n) => `${(n / total) * 100}%`;
 
+  // Bank & kartu TIDAK mengirim statement kalau tidak ada transaksi (Paulus,
+  // 2026-09-01). Jadi rekening tanpa aktivitas sejak anchor-nya BUKAN terlambat —
+  // memang tidak ada yang perlu dikirim. Menandainya "late" membuat Danamon JCB,
+  // Mega Metro, CIMB JCB, dan DBS berteriak tiap bulan tanpa sebab.
+  const adaGerak = useMemo(() => {
+    const map = {};
+    for (const r of (ledger || [])) {
+      for (const id of [r.from_id, r.to_id]) {
+        if (!id) continue;
+        const a = (accounts || []).find(x => x.id === id);
+        if (!a?.last_statement_date) continue;
+        if (String(r.tx_date) > String(a.last_statement_date)) map[id] = true;
+      }
+    }
+    return map;
+  }, [ledger, accounts]);
+
   const nTelat = monthData.waiting.filter(({ acc }) => {
     const day = usualDay(acc.id);
-    return isCurrentMonth && day && now.getDate() > day + 5;
+    return isCurrentMonth && day && now.getDate() > day + 5
+      && (adaGerak[acc.id] || !acc.last_statement_date);
   }).length;
 
   const sectionTitle = (label, count, bg, color, extra = null) => (
@@ -651,12 +669,16 @@ export default function Reconcile({
             {monthData.waiting
               .map(({ acc }) => {
                 const day = usualDay(acc.id);
-                return { acc, day, late: isCurrentMonth && day && now.getDate() > day + 5 };
+                // Telat HANYA kalau ada transaksi sejak statement terakhir —
+                // tanpa transaksi, bank memang tidak mengirim apa pun.
+                const gerak = adaGerak[acc.id] || !acc.last_statement_date;
+                return { acc, day, gerak,
+                  late: isCurrentMonth && day && now.getDate() > day + 5 && gerak };
               })
               // Disaring DULU: kalau baris tersembunyi masih ikut terhitung,
               // garis pemisah muncul di bawah baris terakhir yang terlihat.
               .filter(r => bukaWaiting || r.late)
-              .map(({ acc, day, late }, i, arr) => {
+              .map(({ acc, day, late, gerak }, i, arr) => {
               const isCC = acc.type === "credit_card";
               return (
                 <div key={acc.id} style={{
@@ -674,7 +696,9 @@ export default function Reconcile({
                   <span style={{ flex: 1, minWidth: 0 }}>
                     {late
                       ? <span style={CHIP("#fef3c7", "#b45309")}><AlertTriangle size={10} strokeWidth={2.5} />late</span>
-                      : !day && <span style={{ fontSize: 10.5, color: "#d1d5db" }}>no history yet</span>}
+                      : !gerak && acc.last_statement_date
+                        ? <span style={{ fontSize: 10.5, color: "#9ca3af" }}>no activity — no statement due</span>
+                        : !day && <span style={{ fontSize: 10.5, color: "#d1d5db" }}>no history yet</span>}
                   </span>
                 </div>
               );
