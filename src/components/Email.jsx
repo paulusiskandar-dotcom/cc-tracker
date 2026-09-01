@@ -742,6 +742,12 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       source:        "gmail",
       email_sync_id: r.email_sync_id || r._id,
       recurring_template_id: r.recurring_template_id || null,
+      // Pecahan Paper.id HARUS ikut diteruskan. buildEntry menyusun objek baru,
+      // jadi field yang tidak disebut di sini hilang — dan `ledgerApi.create`
+      // membaca `_paper_split` untuk memisahkan uang vendor dari fee Paper.
+      // Tanpa baris ini pemecahnya tidak pernah menyala sekali pun: tiga tagihan
+      // PT. GLOBAL DIGITAL 31 Agu 2026 masuk utuh, fee-nya ikut jadi piutang.
+      _paper_split:  r._paper_split || null,
     };
   };
 
