@@ -10,6 +10,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildPaperSplits, cariPecahan } from "../_shared/paperSplit.ts";
+import { buildOrderNotes, cariCatatan } from "../_shared/orderNote.ts";
 import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
 const CORS = {
@@ -1527,13 +1528,22 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
             const x = new Date(d + "T00:00:00Z"); x.setUTCDate(x.getUTCDate() + n);
             return x.toISOString().slice(0, 10).replace(/-/g, "/");
           };
-          const splits = await buildPaperSplits(at, geser(tglTx[0], -3), geser(tglTx[tglTx.length - 1], 3));
-          for (const t of txs) {
-            const p = cariPecahan(splits, Number(t.amount_idr || t.amount || 0));
+          const dari = geser(tglTx[0], -3), sampai = geser(tglTx[tglTx.length - 1], 3);
+          const splits = await buildPaperSplits(at, dari, sampai);
+          // Isi belanja dari email pesanan Tokopedia/Blibli/Lazada. Statement kartu
+          // cuma menyebut salurannya ("TOKOPEDIA JAKARTA ID"); tanpa ini setiap baris
+          // yang masuk lewat statement kehilangan nama barangnya, dan piutang jadi
+          // tidak bisa dicocokkan tanpa membuka email satu per satu.
+          const notes = await buildOrderNotes(at, dari, sampai);
+          for (const t of txs as any[]) {
+            const amt = Number(t.amount_idr || t.amount || 0);
+            const p = cariPecahan(splits, amt);
             if (p) t.paper_split = p;
+            const n = cariCatatan(notes, amt);
+            if (n) t.item_note = n;
           }
         }
-      } catch (e) { console.warn("[prepare] pecahan Paper gagal:", (e as any)?.message); }
+      } catch (e) { console.warn("[prepare] pecahan Paper / catatan pesanan gagal:", (e as any)?.message); }
     }
     if (txs.length && pY && pM) {
       await serviceSupabase.from("email_sync").upsert({
