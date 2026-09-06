@@ -2387,7 +2387,8 @@ async function importPending(supabase: any, uid: string, token?: string, chatId?
     } else if (r.ty === "income") {
       ins.push({ ...base, tx_type: "income", from_type: "income_source", from_id: srcId(INCOME_SRC.includes(r.cat) ? r.cat : "Other Income"), to_type: "account", to_id: (r.toA || r.fromA).id });
     } else if (r.ty === "reimburse_in") {
-      ins.push({ ...base, tx_type: "reimburse_in", from_type: "expense", from_id: null, to_type: "account", to_id: (r.toA || r.fromA).id, entity: r.entity, is_reimburse: true });
+      // from = Piutang<entity> supaya uang masuk MENGURANGI piutang (audit 6 Sep 2026).
+      ins.push({ ...base, tx_type: "reimburse_in", from_type: PIU[r.entity] ? "account" : "expense", from_id: PIU[r.entity] || null, to_type: "account", to_id: (r.toA || r.fromA).id, entity: r.entity, is_reimburse: true });
     } else if (r.ty === "reimburse_out") {
       // Tanpa akun piutangnya, baris ini dulu diam-diam turun jadi expense Personal
       // lewat cabang terakhir — piutangnya lenyap tanpa suara. Ditahan saja, seperti
@@ -2619,7 +2620,9 @@ async function buildFinancialContext(supabase: any, uid: string): Promise<string
   const topCats = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([c, v]) => `${c} ${idr(v)}`).join(", ");
 
   // reimburse per entity
-  const { data: rLed } = await supabase.from("ledger").select("tx_type, amount_idr, entity").eq("user_id", uid).in("tx_type", ["reimburse_out", "reimburse_in"]);
+  // Hanya baris yang belum di-Match — sama dengan /piutang dan web (audit 6 Sep 2026;
+  // dulu semua baris dijumlahkan tanpa baris selisih → Hamasa tampak MINUS 19,5 jt).
+  const { data: rLed } = await supabase.from("ledger").select("tx_type, amount_idr, entity").eq("user_id", uid).in("tx_type", ["reimburse_out", "reimburse_in"]).is("reimburse_settlement_id", null);
   const ent: Record<string, { out: number; in: number }> = {};
   for (const e of rLed || []) { const k = e.entity || "?"; ent[k] = ent[k] || { out: 0, in: 0 }; if (e.tx_type === "reimburse_out") ent[k].out += Number(e.amount_idr) || 0; else ent[k].in += Number(e.amount_idr) || 0; }
 

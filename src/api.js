@@ -33,21 +33,34 @@ export const getTxFromToTypes = (txType) => {
 // (itu bukan rekening bank), jadi `to_account_id` selalu kosong, dan tidak ada
 // yang mengisinya sesudah itu. Sekarang diisi di sini — satu gerbang yang
 // dilewati SEMUA jalur (gmail, statement, telegram, manual, skrip).
-const cariAkunPiutang = async (userId, entity) => {
+const daftarAkunPiutang = async (userId) => {
   const { data } = await supabase
     .from("accounts").select("id, name")
     .eq("user_id", userId).eq("type", "receivable").eq("is_active", true);
-  if (!data?.length) return null;
+  return data || [];
+};
+const pilihAkunPiutang = (daftar, entity) => {
   const e = String(entity || "Personal").toLowerCase();
-  return (data.find(a => (a.name || "").toLowerCase().includes(e)) || null)?.id || null;
+  return (daftar.find(a => (a.name || "").toLowerCase().includes(e)) || null)?.id || null;
 };
 
-// Melengkapi baris reimburse yang belum menunjuk akun piutang. Dipanggil sebelum
-// validasi, di create maupun update, supaya tidak ada jalur yang bisa melewatinya.
+// Membetulkan sisi piutang baris reimburse, di create maupun update:
+//   reimburse_out → to   = Piutang<entity>
+//   reimburse_in  → from = Piutang<entity>   (sejak 6 Sep 2026; dulu from kosong)
+// Kalau sisi itu kosong ATAU menunjuk akun yang bukan piutang (GPS.id 4 Sep 2026
+// menunjuk OCBC dan lolos karena validasi cuma mengecek "tidak kosong"), diganti.
 const lengkapiPiutang = async (userId, entry) => {
-  if (entry?.tx_type !== "reimburse_out" || entry?.to_id) return entry;
-  const id = await cariAkunPiutang(userId, entry.entity);
-  return id ? { ...entry, to_type: "account", to_id: id } : entry;
+  if (entry?.tx_type !== "reimburse_out" && entry?.tx_type !== "reimburse_in") return entry;
+  const daftar = await daftarAkunPiutang(userId);
+  const ids = new Set(daftar.map(a => a.id));
+  const id = pilihAkunPiutang(daftar, entry.entity);
+  if (!id) return entry;
+  if (entry.tx_type === "reimburse_out") {
+    if (entry.to_id && ids.has(entry.to_id)) return entry;
+    return { ...entry, to_type: "account", to_id: id };
+  }
+  if (entry.from_id && ids.has(entry.from_id)) return entry;
+  return { ...entry, from_type: "account", from_id: id };
 };
 
 // ─── LEDGER VALIDATION ────────────────────────────────────────
@@ -72,6 +85,9 @@ const validateLedgerEntry = (entry) => {
   // Tanpa ini, uang yang ditalangi tidak pernah menaikkan saldo piutang siapa pun.
   if (entry.tx_type === "reimburse_out" && !entry.to_id) {
     throw new Error("Reimburse out needs a receivable account (To) — pilih Piutang Hamasa / SDC / Personal");
+  }
+  if (entry.tx_type === "reimburse_in" && !entry.from_id) {
+    throw new Error("Reimburse in needs a receivable account (From) — Piutang Hamasa / SDC / Personal");
   }
   return true;
 };
@@ -113,7 +129,10 @@ const getDeltas = (txType, amount) => {
     sell_asset:      { from: { asset: -a }, to: { bank: +a } },
     pay_liability:   { from: { bank: -a }, to: { liability: -a } },
     reimburse_out:   { from: { bank: -a, credit_card: +a }, to: { receivable: +a } },
-    reimburse_in:    { from: null,               to: { bank: +a } },
+    // reimburse_in MENGURANGI piutang (from = Piutang<entity>) dan, kalau retur vendor
+    // mendarat di kartu, mengurangi outstanding kartu. Sebelum 6 Sep 2026 baris ini
+    // cuma menambah bank, sehingga saldo Piutang tak pernah turun (audit).
+    reimburse_in:    { from: { receivable: -a }, to: { bank: +a, credit_card: -a } },
     give_loan:       { from: { bank: -a }, to: { receivable: +a } },
     collect_loan:    { from: { receivable: -a }, to: { bank: +a } },
     fx_exchange:     { from: { bank: -a }, to: { bank: +a } },
@@ -629,8 +648,16 @@ export const ledgerApi = {
     if (d?.tx_type && old?.tx_type && d.tx_type !== old.tx_type) {
       const bentuk = getTxFromToTypes(d.tx_type);
       d = { from_type: bentuk.from_type, to_type: bentuk.to_type, ...d };
-      if (d.tx_type === "reimburse_out" && !d.to_id && !old.to_id) {
-        d = await lengkapiPiutang(old.user_id, { ...d, entity: d.entity ?? old.entity });
+    }
+    // Sisi piutang dibetulkan setiap kali baris reimburse disentuh (jenis, entitas,
+    // atau akunnya berubah), bukan hanya saat jenisnya berganti.
+    {
+      const jenis = d?.tx_type ?? old?.tx_type;
+      if (old && (jenis === "reimburse_out" || jenis === "reimburse_in")) {
+        const gabung = { ...old, ...d, tx_type: jenis, entity: d?.entity ?? old?.entity };
+        const rapi = await lengkapiPiutang(old.user_id, gabung);
+        if (jenis === "reimburse_out" && rapi.to_id !== gabung.to_id) d = { ...d, to_type: "account", to_id: rapi.to_id };
+        if (jenis === "reimburse_in"  && rapi.from_id !== gabung.from_id) d = { ...d, from_type: "account", from_id: rapi.from_id };
       }
     }
     const { data, error } = await supabase

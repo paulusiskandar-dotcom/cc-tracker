@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { Pencil, Trash2, ChevronUp, ChevronDown } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { ledgerApi, employeeLoanApi, loanPaymentsApi, recalculateBalance } from "../api";
+import { hitungPiutang } from "../lib/piutang";
 import { supabase } from "../lib/supabase";
 import { fmtIDR, todayStr, agingLabel } from "../utils";
 import SortDropdown from "./shared/SortDropdown";
@@ -434,6 +435,7 @@ export default function Receivables({
       .sort((a, b) => b.tx_date.localeCompare(a.tx_date))
   , [ledger]);
 
+  const piutangSemua = useMemo(() => hitungPiutang(ledger), [ledger]);
   // Per-entity reimburse totals — unsettled entries only (settled items don't count toward outstanding)
   const reimburseStats = useMemo(() => {
     const map = {};
@@ -719,6 +721,18 @@ export default function Receivables({
     const inIds  = Array.from(selectedIn[acc.id]  || []);
     if (!outIds.length || !inIds.length)
       return showToast("Select at least one Out and one In", "error");
+    // Selisih di atas ambang WAJIB dipilih — tidak ada default diam-diam. Default
+    // "Other Income" dulu melahirkan 6,4 jt penghasilan palsu dari salah pasang
+    // (audit 6 Sep 2026).
+    {
+      const cek = ledger.filter(e => outIds.includes(e.id) || inIds.includes(e.id));
+      const o = cek.filter(e => outIds.includes(e.id)).reduce((s, e) => s + Number(e.amount || 0), 0);
+      const i = cek.filter(e => inIds.includes(e.id)).reduce((s, e) => s + Number(e.amount || 0), 0);
+      if (o - i > AMBANG_SELISIH && !pilihanKurang[acc.id])
+        return showToast("Pilih dulu: kekurangan mau dibukukan sebagai apa", "error");
+      if (i - o > AMBANG_SELISIH && !pilihanSelisih[acc.id])
+        return showToast("Pilih dulu: kelebihan mau dibukukan sebagai apa", "error");
+    }
 
     const settledAtForInsert = settleDate[acc.id] || (() => {
       const tgl = ledger.filter(e => inIds.includes(e.id)).map(e => e.tx_date).filter(Boolean).sort();
@@ -800,13 +814,16 @@ export default function Receivables({
         if (sErr) throw new Error(sErr.message);
       }
 
+      // Baris selisih ditulis langsung (tanpa ledgerApi.create), jadi saldo akun
+      // Piutang dihitung ulang dari ledger supaya ikut bergerak (audit 6 Sep 2026).
+      if (akunPiutang) { try { await recalculateBalance(akunPiutang.id, user.id); } catch (e) { /* noop */ } }
       const allIds = [...outIds, ...inIds];
       await supabase.from("ledger").update({ reimburse_settlement_id: settlement.id }).in("id", allIds);
       setLedger(prev => prev.map(e => allIds.includes(e.id) ? { ...e, reimburse_settlement_id: settlement.id } : e));
       setSettlements(prev => [settlement, ...prev]);
       const reLossLabel    = reimbursable > 0 ? ` · short ${fmtIDR(reimbursable)}`    : "";
       const reSurplusLabel = surplus     > 0 ? ` · over ${fmtIDR(surplus)}`    : "";
-      showToast(`${entity} finalized${reLossLabel}${reSurplusLabel}`);
+      showToast(`${entity} matched${reLossLabel}${reSurplusLabel}`);
 
       setSelectedOut(prev => ({ ...prev, [acc.id]: new Set() }));
       setSelectedIn(prev =>  ({ ...prev, [acc.id]: new Set() }));
@@ -837,7 +854,7 @@ export default function Receivables({
         .select().single();
       if (error) throw new Error(error.message);
       setSettlements(prev => prev.map(x => x.id === editSItem.id ? updated : x));
-      showToast("Finalize updated");
+      showToast("Match updated");
       setEditSModal(false);
     } catch (e) { showToast(e.message, "error"); }
     setEditSSaving(false);
@@ -866,7 +883,7 @@ export default function Receivables({
       // Delete the settlement record itself
       await supabase.from("reimburse_settlements").delete().eq("id", s.id);
       setSettlements(prev => prev.filter(x => x.id !== s.id));
-      showToast("Finalize removed — rows are open again");
+      showToast("Match removed — rows are open again");
     } catch (e) { showToast(e.message, "error"); }
   };
 
@@ -1093,9 +1110,10 @@ export default function Receivables({
                   default:                return bNet - aNet;
                 }
               }).map(r => {
-              // Compute outstanding dynamically from ledger
+              // Saldo piutang = rumus akuntansi bersama (src/lib/piutang.js):
+              // Σ out − Σ in − Σ kurang + Σ lebih. Boleh negatif (entitas kelebihan bayar).
               const entStats   = reimburseStats[r.entity] || { out: 0, in: 0 };
-              const outstanding = entStats.out - entStats.in; // may be negative (overpaid)
+              const outstanding = piutangSemua.perEntity[r.entity]?.saldo ?? (entStats.out - entStats.in);
               const entCol      = ENT_COL[r.entity] || T.ac;
               const entBg       = ENT_BG[r.entity]  || T.sur2;
 
@@ -1232,44 +1250,39 @@ export default function Receivables({
                                   Record short as
                                 </div>
                                 <select
-                                  value={pilihanKurang[r.id] || SELISIH_PELUNASAN_CATEGORY_ID}
+                                  value={pilihanKurang[r.id] || ""}
                                   onChange={ev => setPilihanKurang(prev => ({ ...prev, [r.id]: ev.target.value }))}
                                   style={{ height: 30, border: "1px solid #e5e7eb", borderRadius: 6, padding: "0 8px",
                                            fontSize: 12, fontFamily: "Figtree, sans-serif", background: "#fff", color: "#374151" }}
                                 >
+                                  <option value="">— pilih —</option>
                                   {[...(categories || [])].sort((a, b) => a.name.localeCompare(b.name))
                                     .map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                                 </select>
                               </div>
                             )}
                             {surplus > AMBANG_SELISIH && (() => {
-                              const barisPilih = ledger.filter(e => selOut.has(e.id) || selIn.has(e.id));
-                              const adaListrik = barisPilih.some(e => PLN_BERMARGIN.test(e.description || ""));
-                              const nilai = pilihanSelisih[r.id] || "other";
+                              const nilai = pilihanSelisih[r.id] || "";
                               return (
                                 <div>
                                   <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Figtree, sans-serif", marginBottom: 2 }}>
                                     Record over as
                                   </div>
-                                  {/* Utility Income hanya ditawarkan kalau baris terpilih memang
-                                      listrik Suryanto/Paulus. Selain itu pilihannya cuma satu —
-                                      tampilkan sebagai teks, jangan dropdown berisi satu isi. */}
-                                  {adaListrik ? (
-                                    <select
-                                      value={nilai}
-                                      onChange={ev => setPilihanSelisih(prev => ({ ...prev, [r.id]: ev.target.value }))}
-                                      style={{ height: 30, border: "1px solid #e5e7eb", borderRadius: 6, padding: "0 8px",
-                                               fontSize: 12, fontFamily: "Figtree, sans-serif", background: "#fff", color: "#374151" }}
-                                    >
-                                      <option value="other">Other Income</option>
-                                      <option value="utility">Utility Income</option>
-                                    </select>
-                                  ) : (
-                                    <div style={{ height: 30, display: "flex", alignItems: "center",
-                                                  fontSize: 12, fontWeight: 700, fontFamily: "Figtree, sans-serif", color: "#374151" }}>
-                                      Other Income
-                                    </div>
-                                  )}
+                                  {/* Wajib dipilih, tanpa default. Utility Income = margin yang memang
+                                      disengaja (listrik Paulus/Suryanto, Biznet, DigitalOcean, Telkomsel
+                                      — keputusan Paulus 6 Sep 2026); Other Income = kelebihan lain yang
+                                      memang mau diakui sebagai penghasilan. Kalau ragu, jangan Match:
+                                      kelebihan yang tak terjelaskan hampir selalu baris yang belum masuk. */}
+                                  <select
+                                    value={nilai}
+                                    onChange={ev => setPilihanSelisih(prev => ({ ...prev, [r.id]: ev.target.value }))}
+                                    style={{ height: 30, border: "1px solid #e5e7eb", borderRadius: 6, padding: "0 8px",
+                                             fontSize: 12, fontFamily: "Figtree, sans-serif", background: "#fff", color: "#374151" }}
+                                  >
+                                    <option value="">— pilih —</option>
+                                    <option value="utility">Utility Income (margin listrik/Biznet/dll)</option>
+                                    <option value="other">Other Income</option>
+                                  </select>
                                 </div>
                               );
                             })()}
@@ -1286,7 +1299,7 @@ export default function Receivables({
                               opacity: settling ? 0.6 : 1, flexShrink: 0,
                             }}
                           >
-                            {settling ? "Finalizing…" : "Finalize →"}
+                            {settling ? "Matching…" : "Match →"}
                           </button>
                         </div>
                       </div>
@@ -1391,7 +1404,7 @@ export default function Receivables({
                           style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", marginBottom: openSettHist.has(r.entity) ? 6 : 0 }}
                         >
                           <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.5px", fontFamily: "Figtree, sans-serif" }}>
-                            Finalized ({entitySettlements.length})
+                            Matched ({entitySettlements.length})
                           </div>
                           <div style={{ fontSize: 10, fontWeight: 700, color: "#3b5bdb", fontFamily: "Figtree, sans-serif" }}>
                             {openSettHist.has(r.entity) ? "Hide ▲" : "Show ▼"}

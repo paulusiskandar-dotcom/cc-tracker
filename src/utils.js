@@ -1,3 +1,4 @@
+import { hitungPiutang } from "./lib/piutang";
 // ─── NUMBER FORMATTING ────────────────────────────────────────
 // Always use dot as thousand separator (Indonesian locale)
 // e.g. Rp 1.250.750.000
@@ -173,17 +174,13 @@ export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], 
       return sum + Math.max(0, Number(l.total_amount || 0) - paid);
     }, 0);
 
-  // Reimburse receivable = UNSETTLED ledger (reimburse_out − reimburse_in) per
-  // entity, positive only. This is what an entity still owes Paulus. Source of
-  // truth = the ledger (matches Telegram /piutang), not the receivable accounts
-  // or the settlements table (which double-counted / overstated).
-  const ent = {};
-  for (const t of ledger) {
-    if (t.reimburse_settlement_id) continue;             // settled = already repaid
-    if (t.tx_type === "reimburse_out") { const e = t.entity || "?"; ent[e] = ent[e] || { out: 0, in: 0 }; ent[e].out += Number(t.amount_idr || 0); }
-    else if (t.tx_type === "reimburse_in") { const e = t.entity || "?"; ent[e] = ent[e] || { out: 0, in: 0 }; ent[e].in += Number(t.amount_idr || 0); }
-  }
-  const reimburseOutstanding = Object.values(ent).reduce((s, v) => s + Math.max(0, v.out - v.in), 0);
+  // Reimburse receivable = SALDO AKUNTANSI per entitas dari ledger:
+  // Σ out − Σ in − Σ kurang (expense Match) + Σ lebih (income Match), boleh negatif
+  // (entitas kelebihan bayar = Paulus berutang, mengurangi net worth). Satu rumus
+  // bersama halaman Receivables & Telegram (src/lib/piutang.js, audit 6 Sep 2026).
+  // Sebelumnya: out lepas − in lepas dipotong nol — uang masuk yang belum di-Match
+  // (83,8 jt pada 6 Sep 2026) tidak pernah mengurangi piutang.
+  const reimburseOutstanding = hitungPiutang(ledger).saldoTotal;
   const receivables = reimburseOutstanding;
 
   const total = bank + cash + assets + receivables + employeeLoanTotal - ccBalance - liabilities;
