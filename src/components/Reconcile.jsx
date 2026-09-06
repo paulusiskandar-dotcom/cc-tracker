@@ -345,7 +345,7 @@ export default function Reconcile({
       await reloadDrafts();
       showToast(`${acc.name} reconciled — ${matched.size} rows ✓`);
     } catch (e) {
-      showToast(e.message || "Finalize failed", "error");
+      showToast(e.message || "Reconcile failed", "error");
     } finally {
       setFinalizing(null);
     }
@@ -487,7 +487,7 @@ export default function Reconcile({
       {/* Keterangan yang nilainya nol tidak menjelaskan apa pun dan cuma
           memanjangkan baris — hanya yang terisi yang ditampilkan. */}
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 11, color: "#6b7280", marginBottom: 20 }}>
-        {[["Completed", nDone, "#059669"], ["Ready to finalize", nReady, "#34d399"],
+        {[["Completed", nDone, "#059669"], ["Ready to reconcile", nReady, "#34d399"],
           ["Needs review", nReview, "#d97706"], ["Waiting", monthData.waiting.length, "#e5e7eb"]]
           .filter(([, n]) => n > 0)
           .map(([label, n, warna]) => (
@@ -546,10 +546,10 @@ export default function Reconcile({
       {/* READY TO FINALIZE */}
       {monthData.ready.length > 0 && (
         <div style={{ marginBottom: 22 }}>
-          {sectionTitle("All matched — ready to finalize", monthData.ready.length, "#dcfce7", "#059669",
+          {sectionTitle("All matched — ready to reconcile", monthData.ready.length, "#dcfce7", "#059669",
             monthData.ready.length > 1 && (
               <button onClick={finalizeAll} disabled={!!finalizing} style={BTN("#059669", "#fff")}>
-                Finalize all ({monthData.ready.length})
+                Reconcile all ({monthData.ready.length})
               </button>
             ))}
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -579,7 +579,7 @@ export default function Reconcile({
                   )}
                 </div>
                 <button onClick={() => finalize(item)} disabled={finalizing === item.acc.id} style={BTN("#059669", "#fff")}>
-                  {finalizing === item.acc.id ? "Finalizing…" : "✓ Finalize"}
+                  {finalizing === item.acc.id ? "Reconciling…" : "✓ Reconcile"}
                 </button>
                 <button onClick={() => openReview(item.acc)} style={BTN("#fff", "#6b7280", "1px solid #e5e7eb")}>View</button>
               </div>
@@ -754,7 +754,7 @@ export default function Reconcile({
       <div style={{ padding: "10px 14px", background: "#f9fafb", borderRadius: 10, fontSize: 11, color: "#6b7280", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <Eye size={13} color="#9ca3af" />
         Statements arrive from email every 12 hours and diff themselves. Review what is flagged, or
-        <b style={{ color: "#374151" }}> Finalize</b> when it already matches.
+        <b style={{ color: "#374151" }}> Reconcile</b> when it already matches.
       </div>
     </div>
   );

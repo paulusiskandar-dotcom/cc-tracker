@@ -266,8 +266,8 @@ async function pastikanBelumFinalize(id, aksi) {
     .from("ledger").select("reimburse_settlement_id, description").eq("id", id).single();
   if (data?.reimburse_settlement_id) {
     throw new Error(
-      `Baris ini sudah di-Finalize, jadi tidak bisa ${aksi}. ` +
-      `Batalkan dulu Finalize-nya di halaman Receivables.`
+      `Baris ini sudah di-Match, jadi tidak bisa ${aksi}. ` +
+      `Batalkan dulu Match-nya di halaman Receivables.`
     );
   }
 }
@@ -801,7 +801,7 @@ export const splitLedgerEntry = async (id, parts) => {
   if (eGet || !asli) throw new Error(eGet?.message || "Transaksi tidak ditemukan");
 
   if (asli.reimburse_settlement_id)
-    throw new Error("Baris ini sudah di-Finalize. Batalkan dulu Finalize-nya di halaman Receivables.");
+    throw new Error("Baris ini sudah di-Match. Batalkan dulu Match-nya di halaman Receivables.");
   if (asli.split_group_id)
     throw new Error("Baris ini sudah bagian dari transaksi yang dipecah.");
   if ((asli.currency || "IDR") !== "IDR")

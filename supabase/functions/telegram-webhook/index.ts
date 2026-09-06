@@ -227,7 +227,7 @@ Deno.serve(async (req: Request) => {
     // one-time webhook maintenance: ?wh=info | ?wh=fix (re-register webhook incl. callback_query)
     const url = new URL(req.url);
     const wh = url.searchParams.get("wh");
-    const token = Deno.env.get("TELEGRAM_BOT_TOKEN");
+    const token = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
     if (wh && token) {
       if (wh === "info") {
         const r = await fetch(`${TELEGRAM_API}/bot${token}/getWebhookInfo`);
@@ -250,7 +250,7 @@ Deno.serve(async (req: Request) => {
           { command: "cek", description: "🩺 Health check (anomali)" },
           { command: "trend", description: "📈 Trend 4 bulan + net worth" },
           { command: "reimburse", description: "🔄 Sisa piutang Hamasa/SDC" },
-          { command: "settle", description: "🧾 Cocokin & settle reimburse" },
+          { command: "settle", description: "🧾 Cocokin & Match reimburse" },
           { command: "statements", description: "📄 Status statement & tagihan kartu" },
           { command: "hutang", description: "🏛 Hutang, kartu & cicilan" },
           { command: "kartu", description: "💳 Kartu terbaik utk belanja (miles)" },
@@ -312,12 +312,12 @@ Deno.serve(async (req: Request) => {
     return new Response("Method not allowed", { status: 405 });
   }
 
-  const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN");
+  const TELEGRAM_BOT_TOKEN = Deno.env.get("TELEGRAM_BOT_TOKEN") ?? "";
   const AUTHORIZED_CHAT_ID = Number(Deno.env.get("TELEGRAM_AUTHORIZED_CHAT_ID"));
-  const AUTHORIZED_USER_ID = Deno.env.get("TELEGRAM_AUTHORIZED_USER_ID");
-  const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY");
-  const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
-  const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  const AUTHORIZED_USER_ID = Deno.env.get("TELEGRAM_AUTHORIZED_USER_ID") ?? "";
+  const ANTHROPIC_API_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
+  const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
+  const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
   const missing: string[] = [];
   if (!TELEGRAM_BOT_TOKEN) missing.push("TELEGRAM_BOT_TOKEN");
@@ -1000,10 +1000,10 @@ function cmdKartu(arg: string): string {
   const label = grp === "fx" ? `luar negeri${cor ? " (" + cor + ")" : ""}` : grp;
   const fmt = (x: any) => {
     const rate = x.r.cb ? `${x.r.cb}% cashback` : `Rp ${x.r.rpm.toLocaleString("id-ID")}/mile`;
-    const est = amt && x.r.rpm ? ` ≈ ${Math.round(amt / x.r.rpm).toLocaleString("id-ID")} miles` : amt && x.r.cb ? ` ≈ cashback ${fmtIDR(amt * x.r.cb / 100)}` : "";
+    const est = amt && x.r.rpm ? ` ≈ ${Math.round(amt / x.r.rpm).toLocaleString("id-ID")} miles` : amt && x.r.cb ? ` ≈ cashback ${idr(amt * x.r.cb / 100)}` : "";
     return `${rate}${est}${x.r.note ? ` — ${x.r.note}` : ""}`;
   };
-  let out = `💳 <b>Belanja ${label}${amt ? " " + fmtIDR(amt) : ""}</b>\n\n`;
+  let out = `💳 <b>Belanja ${label}${amt ? " " + idr(amt) : ""}</b>\n\n`;
   out += `1️⃣ <b>${top[0].card}</b>\n     ${fmt(top[0])}\n`;
   if (top[1]) out += `2️⃣ ${top[1].card} — ${fmt(top[1])}\n`;
   if (top[2]) out += `3️⃣ ${top[2].card} — ${fmt(top[2])}\n`;
@@ -1087,7 +1087,7 @@ function cmdMenu(): string {
     "/valas — transaksi valas nunggu statement",
     "",
     "<b>🛠 Aksi</b>",
-    "/settle hamasa — cocokin & settle reimburse",
+    "/settle hamasa — cocokin & Match reimburse",
     "<i>hapus grab</i> — hapus transaksi",
     "<i>ubah grab jadi transport</i> — ubah kategori",
     "<i>grafik pengeluaran 6 bulan</i> — kirim chart",
@@ -1351,7 +1351,7 @@ function parseSel(str: string, max: number): number[] {
 // Numbered list — user picks which out/in to match.
 async function handleSettlePreview(entity: string, supabase: any, uid: string, token: string, chatId: number) {
   const { outR, inR } = await unsettledFor(supabase, uid, entity);
-  if (!outR.length && !inR.length) { await sendTelegramHTML(token, chatId, `✅ <b>${esc(entity)}</b> — ga ada reimburse yang belum di-settle.`); return; }
+  if (!outR.length && !inR.length) { await sendTelegramHTML(token, chatId, `✅ <b>${esc(entity)}</b> — ga ada reimburse yang belum di-Match.`); return; }
   let out = `🧾 <b>SETTLE ${esc(entity)}</b>\n\n<b>OUT (talangin):</b>\n`;
   out += outR.length ? outR.map((r: any, i: number) => `${i + 1}. ${d2date(r.tx_date)} ${esc(settleName(r))} — <b>${idr(settleAmt(r))}</b>`).join("\n") : "(belum ada)";
   out += `\n\n<b>IN (dibalikin):</b>\n`;
@@ -1382,7 +1382,7 @@ async function handlePartialSettle(entity: string, outStr: string, inStr: string
   let out = `🧾 <b>SETTLE ${esc(entity)} — pilihan</b>\n\n`;
   out += `OUT (${selOut.length}): ${selOut.map((r: any) => idr(settleAmt(r))).join(" + ") || "-"} = <b>${idr(to)}</b>\n`;
   out += `IN (${selIn.length}): ${selIn.map((r: any) => idr(settleAmt(r))).join(" + ") || "-"} = <b>${idr(ti)}</b>\n`;
-  out += net > 0 ? `\n<b>Short on finalize: ${idr(net)}</b>` : net < 0 ? `\n<b>Over on finalize: ${idr(-net)}</b>` : `\n<b>Balanced</b>`;
+  out += net > 0 ? `\n<b>Short on match: ${idr(net)}</b>` : net < 0 ? `\n<b>Over on match: ${idr(-net)}</b>` : `\n<b>Balanced</b>`;
   await sendTelegramHTML(token, chatId, out, { inline_keyboard: [[{ text: "✅ Settle ini", callback_data: `psettle:${entity}:${outSel.join(",") || "0"}:${inSel.join(",") || "0"}` }, { text: "❌ Batal", callback_data: "noop:x" }]] });
 }
 
@@ -1400,7 +1400,7 @@ async function executeSettle(entity: string, selOut: any[], selIn: any[], supaba
   // = muncul di Reports tapi tak pernah menyentuh piutang.
   const { data: akunPiutang } = await supabase.from("accounts")
     .select("id").eq("user_id", uid).eq("name", `Piutang ${entity}`).maybeSingle();
-  if (!selOut.length && !selIn.length) { await sendTelegramHTML(token, chatId, `⚠️ Ga ada yang dipilih buat settle.`); return; }
+  if (!selOut.length && !selIn.length) { await sendTelegramHTML(token, chatId, `⚠️ Ga ada yang dipilih buat Match.`); return; }
   const outIds = selOut.map((r) => r.id), inIds = selIn.map((r) => r.id);
   const totalOut = selOut.reduce((s: number, r: any) => s + settleAmt(r), 0);
   const totalIn = selIn.reduce((s: number, r: any) => s + settleAmt(r), 0);
@@ -1418,7 +1418,7 @@ async function executeSettle(entity: string, selOut: any[], selIn: any[], supaba
     total_out: totalOut, total_in: totalIn, reimbursable_expense: reimbursable,
     re_category_id: LOSS_CAT, status: "settled", notes: "via Telegram",
   }]).select().single();
-  if (error) { await sendTelegramHTML(token, chatId, "❌ Gagal settle: " + esc(error.message)); return; }
+  if (error) { await sendTelegramHTML(token, chatId, "❌ Gagal Match: " + esc(error.message)); return; }
   if (reimbursable > 0) await supabase.from("ledger").insert([{
     user_id: uid, tx_date: today, description: `Payment difference — ${entity}`,
     amount: reimbursable, amount_idr: reimbursable, currency: "IDR",
@@ -1438,9 +1438,9 @@ async function executeSettle(entity: string, selOut: any[], selIn: any[], supaba
     notes: `Finalize: ${entity}`, reimburse_settlement_id: settlement.id,
   }]);
   await supabase.from("ledger").update({ reimburse_settlement_id: settlement.id }).in("id", [...outIds, ...inIds]);
-  let msg = `✅ <b>${esc(entity)} settled</b>\nOut ${idr(totalOut)} (${outIds.length}) · In ${idr(totalIn)} (${inIds.length})`;
-  if (reimbursable > 0) msg += `\nShort on finalize: <b>${idr(reimbursable)}</b>`;
-  if (surplus > 0) msg += `\nOver on finalize: <b>${idr(surplus)}</b>`;
+  let msg = `✅ <b>${esc(entity)} matched</b>\nOut ${idr(totalOut)} (${outIds.length}) · In ${idr(totalIn)} (${inIds.length})`;
+  if (reimbursable > 0) msg += `\nShort on match: <b>${idr(reimbursable)}</b>`;
+  if (surplus > 0) msg += `\nOver on match: <b>${idr(surplus)}</b>`;
   await sendTelegramHTML(token, chatId, msg);
 }
 

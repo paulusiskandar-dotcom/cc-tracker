@@ -644,9 +644,8 @@ export default function Receivables({
   // Sebelumnya selisih apa pun diserap diam-diam ke Reimbursable Loss/Surplus —
   // itu yang menyembunyikan margin listrik 19jt selama berbulan-bulan.
   const AMBANG_SELISIH = 10000;
-  // Utility Income HANYA untuk listrik dua pelanggan ini. Di luar itu tidak
-  // ditawarkan sama sekali (PLN pabrik Hamasa selalu diganti persis).
-  const PLN_BERMARGIN = /SURYANTO SALIM|PAULUS ISKANDAR|545101427710|545103888558/i;
+  // Utility Income ditawarkan untuk semua kelompok sejak 6 Sep 2026 (margin listrik,
+  // Biznet, DigitalOcean, Telkomsel), pilihannya tetap wajib eksplisit.
   const [pilihanSelisih, setPilihanSelisih] = useState({});   // per-akun, sisi LEBIH
   const [pilihanKurang,  setPilihanKurang]  = useState({});   // per-akun, sisi KURANG
 
