@@ -1405,6 +1405,13 @@ async function executeSettle(entity: string, selOut: any[], selIn: any[], supaba
   const totalOut = selOut.reduce((s: number, r: any) => s + settleAmt(r), 0);
   const totalIn = selIn.reduce((s: number, r: any) => s + settleAmt(r), 0);
   const reimbursable = Math.max(0, totalOut - totalIn), surplus = Math.max(0, totalIn - totalOut);
+  // Selisih di atas ambang 10.000 tidak boleh diserap diam-diam (default Other Income /
+  // Bank & Card Fees melahirkan income palsu — audit 6 Sep 2026). Lewat Telegram tidak ada
+  // pemilih sumbernya, jadi diarahkan ke web.
+  if (reimbursable > 10000 || surplus > 10000) {
+    await sendTelegramHTML(token, chatId, `⚠️ Selisih <b>${idr(reimbursable || surplus)}</b> di atas ambang 10.000 (Out ${idr(totalOut)} · In ${idr(totalIn)}).\nMatch lewat web dan pilih sendiri: kelebihan → Utility Income / Other Income, kekurangan → kategorinya. Kalau selisihnya tak terjelaskan, biasanya ada baris yang belum masuk — jangan di-Match dulu.`);
+    return;
+  }
   const today = ymd(jakartaNow());
   const { data: settlement, error } = await supabase.from("reimburse_settlements").insert([{
     user_id: uid, entity, settled_at: today, out_ledger_ids: outIds, in_ledger_ids: inIds,
