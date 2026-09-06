@@ -2388,7 +2388,11 @@ async function importPending(supabase: any, uid: string, token?: string, chatId?
       ins.push({ ...base, tx_type: "income", from_type: "income_source", from_id: srcId(INCOME_SRC.includes(r.cat) ? r.cat : "Other Income"), to_type: "account", to_id: (r.toA || r.fromA).id });
     } else if (r.ty === "reimburse_in") {
       ins.push({ ...base, tx_type: "reimburse_in", from_type: "expense", from_id: null, to_type: "account", to_id: (r.toA || r.fromA).id, entity: r.entity, is_reimburse: true });
-    } else if (r.ty === "reimburse_out" && PIU[r.entity]) {
+    } else if (r.ty === "reimburse_out") {
+      // Tanpa akun piutangnya, baris ini dulu diam-diam turun jadi expense Personal
+      // lewat cabang terakhir — piutangnya lenyap tanpa suara. Ditahan saja, seperti
+      // collect_loan tanpa pinjaman yang cocok: lebih baik tertunda daripada hilang.
+      if (!PIU[r.entity]) { it.drop = "no-account"; handled.delete(it); continue; }
       ins.push({ ...base, tx_type: "reimburse_out", from_type: "account", from_id: r.fromA.id, to_type: "account", to_id: PIU[r.entity], entity: r.entity, is_reimburse: true });
     } else {
       const finalCat = mapCat(r.desc) || r.cat || "Other";

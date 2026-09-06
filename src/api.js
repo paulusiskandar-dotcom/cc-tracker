@@ -23,6 +23,33 @@ export const getTxFromToTypes = (txType) => {
   return map[txType] || { from_type: "account", to_type: "account" };
 };
 
+
+// ─── AKUN PIUTANG: WAJIB DITUNJUK ─────────────────────────────
+// `getDeltas` menaikkan saldo piutang lewat `to: { receivable: +a }`. Kalau
+// `to_id` kosong, kenaikan itu tidak pernah terjadi dan barisnya jadi piutang
+// tanpa pemilik. Audit 6 Sep 2026 menemukan 86 baris seperti itu senilai
+// 1.019.466.631 — semuanya April 2026 ke atas, jadi ini regresi, bukan warisan.
+// Penyebabnya: parser email tidak pernah tahu akun piutang mana yang dimaksud
+// (itu bukan rekening bank), jadi `to_account_id` selalu kosong, dan tidak ada
+// yang mengisinya sesudah itu. Sekarang diisi di sini — satu gerbang yang
+// dilewati SEMUA jalur (gmail, statement, telegram, manual, skrip).
+const cariAkunPiutang = async (userId, entity) => {
+  const { data } = await supabase
+    .from("accounts").select("id, name")
+    .eq("user_id", userId).eq("type", "receivable").eq("is_active", true);
+  if (!data?.length) return null;
+  const e = String(entity || "Personal").toLowerCase();
+  return (data.find(a => (a.name || "").toLowerCase().includes(e)) || null)?.id || null;
+};
+
+// Melengkapi baris reimburse yang belum menunjuk akun piutang. Dipanggil sebelum
+// validasi, di create maupun update, supaya tidak ada jalur yang bisa melewatinya.
+const lengkapiPiutang = async (userId, entry) => {
+  if (entry?.tx_type !== "reimburse_out" || entry?.to_id) return entry;
+  const id = await cariAkunPiutang(userId, entry.entity);
+  return id ? { ...entry, to_type: "account", to_id: id } : entry;
+};
+
 // ─── LEDGER VALIDATION ────────────────────────────────────────
 const validateLedgerEntry = (entry) => {
   if (!entry.from_type) throw new Error("from_type is required");
@@ -41,6 +68,10 @@ const validateLedgerEntry = (entry) => {
   }
   if (entry.tx_type === "expense" && !entry.from_id) {
     throw new Error("Expense needs a source account (From)");
+  }
+  // Tanpa ini, uang yang ditalangi tidak pernah menaikkan saldo piutang siapa pun.
+  if (entry.tx_type === "reimburse_out" && !entry.to_id) {
+    throw new Error("Reimburse out needs a receivable account (To) — pilih Piutang Hamasa / SDC / Personal");
   }
   return true;
 };
@@ -307,6 +338,7 @@ export const ledgerApi = {
   //   loan_increment_principal  true
   //               → increments existing loan.total_amount after insert (give_loan with existing loan)
   create: async (userId, entry, accounts = []) => {
+    entry = await lengkapiPiutang(userId, entry);
     validateLedgerEntry(entry);
     if (entry?.description) entry = { ...entry, description: rapikanDeskripsi(entry.description) };
 
@@ -590,7 +622,17 @@ export const ledgerApi = {
     if (!d?._lewatiKuncianFinalize && kunciTag.length) await pastikanBelumFinalize(id, "diubah");
     // Capture the previously-affected accounts BEFORE the write.
     const { data: old } = await supabase
-      .from("ledger").select("user_id, from_id, to_id, from_type, to_type").eq("id", id).single();
+      .from("ledger").select("user_id, from_id, to_id, from_type, to_type, tx_type, entity").eq("id", id).single();
+    // Mengubah tx_type TIDAK otomatis mengubah from_type/to_type — dan itulah yang
+    // membuat 35 baris berakhir sebagai reimburse_out ber-to_type "expense" dengan
+    // to_id kosong (audit 6 Sep 2026). Begitu jenisnya berubah, bentuknya ikut.
+    if (d?.tx_type && old?.tx_type && d.tx_type !== old.tx_type) {
+      const bentuk = getTxFromToTypes(d.tx_type);
+      d = { from_type: bentuk.from_type, to_type: bentuk.to_type, ...d };
+      if (d.tx_type === "reimburse_out" && !d.to_id && !old.to_id) {
+        d = await lengkapiPiutang(old.user_id, { ...d, entity: d.entity ?? old.entity });
+      }
+    }
     const { data, error } = await supabase
       .from("ledger")
       .update(sanitizeUUIDs(d))

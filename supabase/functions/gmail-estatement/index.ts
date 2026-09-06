@@ -1356,9 +1356,19 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
             inserts.push({
               user_id: userId, tx_date: m0.date, description: desc.trim().slice(0, 80),
               amount: amt, amount_idr: amt, currency: "IDR",
-              tx_type: prevFull?.tx_type || "expense",
+              // Cicilan lanjutan mewarisi bentuk dari angsuran sebelumnya. Kalau baris
+              // acuannya reimburse_out TANPA akun piutang, mewarisinya berarti menyalin
+              // kerusakan: audit 6 Sep 2026 menemukan 121 baris seperti itu, dan tiap
+              // angsuran berikutnya menambah satu lagi. Kalau acuannya cacat, turunkan
+              // ke expense biasa — salah kategori masih bisa dibetulkan, piutang tanpa
+              // pemilik tidak kelihatan sama sekali.
+              tx_type: (prevFull?.tx_type === "reimburse_out" && !prevFull?.to_id)
+                ? "expense" : (prevFull?.tx_type || "expense"),
               from_type: "account", from_id: acc.id,
-              to_type: prevFull?.to_type || "expense", to_id: prevFull?.to_id || null,
+              to_type: (prevFull?.tx_type === "reimburse_out" && !prevFull?.to_id)
+                ? "expense" : (prevFull?.to_type || "expense"),
+              to_id: (prevFull?.tx_type === "reimburse_out" && !prevFull?.to_id)
+                ? null : (prevFull?.to_id || null),
               category_id: prevFull?.category_id || null, category_name: prevFull?.category_name || null,
               entity: prevFull?.entity || "Personal", is_reimburse: false, source: "statement_auto",
               merchant_name: prevFull?.merchant_name || null,
