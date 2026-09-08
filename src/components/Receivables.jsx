@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
-import { Pencil, Trash2, ChevronUp, ChevronDown } from "lucide-react";
+import { Pencil, Trash2, ChevronUp, ChevronDown, Scissors } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { ledgerApi, employeeLoanApi, loanPaymentsApi, recalculateBalance } from "../api";
+import { ledgerApi, employeeLoanApi, loanPaymentsApi, recalculateBalance, tagsApi } from "../api";
 import { hitungPiutang } from "../lib/piutang";
 import { supabase } from "../lib/supabase";
 import { fmtIDR, todayStr, agingLabel } from "../utils";
@@ -15,6 +15,12 @@ import {
 } from "./shared/index";
 import { REIMBURSE_ENTITIES } from "../constants";
 import TxVerticalBig from "./shared/TxVerticalBig";
+import SplitModal from "./shared/SplitModal";
+
+const IKON_BTN = {
+  background: "transparent", border: "none", padding: 2, cursor: "pointer",
+  color: "#9ca3af", display: "flex", alignItems: "center", borderRadius: 4,
+};
 
 // ─── PROGRESS BAR ─────────────────────────────────────────────
 function ProgressBar({ value, max, color = "#059669", height = 6 }) {
@@ -407,6 +413,28 @@ export default function Receivables({
   const navigate = useNavigate();
 
   // TransactionModal for + Payment
+  // ── Edit & Split baris Out ────────────────────────────────────
+  // Hanya untuk baris yang BELUM di-Match. Yang sudah masuk settlement dikunci
+  // di tiga tempat: tombolnya tidak dirender, bisaDipecahOut() menolak, dan
+  // pastikanBelumFinalize() di ledgerApi.update/delete menolak penyimpanannya.
+  // Kolom In sengaja dibiarkan — memecah setoran tidak ada gunanya (Paulus, 6 Sep 2026).
+  const [editOutEntry,  setEditOutEntry]  = useState(null);
+  const [splitOutEntry, setSplitOutEntry] = useState(null);
+  // `shared` di App.js tidak memuat tags; SplitModal membutuhkannya, jadi diambil
+  // sendiri di sini — pola yang sama dengan Transactions.jsx.
+  const [tags, setTags] = useState([]);
+  useEffect(() => {
+    if (!user?.id) return;
+    tagsApi.list(user.id, { status: "active" })
+      .then(setTags)
+      .catch(e => console.error("[tags]", e?.message));
+  }, [user?.id]);
+
+  const bisaDipecahOut = (e) =>
+    !!e && !e.reimburse_settlement_id && !e.split_group_id
+    && (e.currency || "IDR") === "IDR"
+    && Math.round(Number(e.amount_idr ?? e.amount ?? 0)) >= 2;
+
   const [txModalOpen, setTxModalOpen] = useState(false);
   const [txModalLoan, setTxModalLoan] = useState(null);
 
@@ -1340,7 +1368,31 @@ export default function Receivables({
                                     {settled && <span style={{ marginLeft: 4, color: "#d1d5db" }}>· settled</span>}
                                   </div>
                                 </div>
-                                <div style={{ fontSize: 12, fontWeight: 700, color: "#dc2626", flexShrink: 0 }}>{fmtIDR(Number(e.amount || 0))}</div>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                                  {/* stopPropagation WAJIB: seluruh baris ini tombol pemilih Match.
+                                      Tanpa itu satu klik akan mengedit sekaligus memilih barisnya. */}
+                                  {!settled && (
+                                    <>
+                                      <button
+                                        title="Edit transaksi"
+                                        onClick={(ev) => { ev.stopPropagation(); setEditOutEntry(e); }}
+                                        style={IKON_BTN}
+                                      >
+                                        <Pencil size={13} />
+                                      </button>
+                                      {bisaDipecahOut(e) && (
+                                        <button
+                                          title="Pecah transaksi"
+                                          onClick={(ev) => { ev.stopPropagation(); setSplitOutEntry(e); }}
+                                          style={IKON_BTN}
+                                        >
+                                          <Scissors size={13} />
+                                        </button>
+                                      )}
+                                    </>
+                                  )}
+                                  <div style={{ fontSize: 12, fontWeight: 700, color: "#dc2626" }}>{fmtIDR(Number(e.amount || 0))}</div>
+                                </div>
                               </div>
                             </div>
                           );
@@ -2057,6 +2109,47 @@ export default function Receivables({
       </Modal>
 
       {/* Loan Statement → /loans/:id/statement */}
+
+      {/* ── EDIT baris Out ─────────────────────────────────────── */}
+      {/* Baris yang sudah di-Match tidak pernah sampai sini (tombolnya tidak
+          dirender), dan kalaupun lolos, pastikanBelumFinalize() di ledgerApi
+          menolak penyimpanannya dengan pesan yang jelas. */}
+      <TxVerticalBig
+        open={!!editOutEntry}
+        mode="edit"
+        initialData={editOutEntry}
+        onSave={() => { setEditOutEntry(null); onRefresh?.(); }}
+        onDelete={() => { setEditOutEntry(null); onRefresh?.(); }}
+        onClose={() => setEditOutEntry(null)}
+        user={user}
+        accounts={accounts}
+        setLedger={setLedger}
+        categories={categories || []}
+        fxRates={fxRates}
+        allCurrencies={CURRENCIES}
+        bankAccounts={allBankCashAccounts}
+        creditCards={creditCards}
+        assets={assets}
+        liabilities={liabilities}
+        receivables={accounts.filter(a => a.type === "receivable")}
+        incomeSrcs={incomeSrcs}
+        employeeLoans={employeeLoans}
+        setEmployeeLoans={setEmployeeLoans}
+        tags={tags}
+        onRefresh={onRefresh}
+      />
+
+      {/* ── SPLIT baris Out ────────────────────────────────────── */}
+      {/* Satu tagihan kartu sering memuat bagian Hamasa dan bagian pribadi —
+          persis kasus order Tokopedia yang dulu harus dibongkar manual. */}
+      <SplitModal
+        isOpen={!!splitOutEntry}
+        onClose={() => setSplitOutEntry(null)}
+        entry={splitOutEntry}
+        categories={categories || []}
+        tags={tags}
+        onDone={() => { setSplitOutEntry(null); onRefresh?.(); }}
+      />
 
       {/* ── TRANSACTION MODAL (+ Payment) ─────────────────────── */}
       <TxVerticalBig
