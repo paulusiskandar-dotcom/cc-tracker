@@ -199,23 +199,37 @@ function KPITile({ label, value, color, showSign = false, sublabel = null }) {
 // pencarinya menyambar baris anggota pertama yang kebetulan berkategori — itulah
 // asal tanda "Travel" (Airbnb) dan "Electronics & Gadgets" (Tokopedia) yang salah.
 function cariBarisSelisih(ledger, s) {
-  const beda = Math.abs(Number(s.total_in || 0) - Number(s.total_out || 0));
-  if (beda === 0) return null;
+  const beda = Number(s.total_in || 0) - Number(s.total_out || 0);
+  if (beda === 0) return [];
   const anggota = new Set([...(s.out_ledger_ids || []), ...(s.in_ledger_ids || [])]);
-  return ledger.find(e =>
+  const baris = ledger.filter(e =>
     e.reimburse_settlement_id === s.id &&
     !anggota.has(e.id) &&
-    e.tx_type !== "reimburse_out" && e.tx_type !== "reimburse_in" &&
-    Math.abs(Number(e.amount_idr ?? e.amount ?? 0) - beda) <= 2
-  ) || null;
+    e.tx_type !== "reimburse_out" && e.tx_type !== "reimburse_in"
+  );
+  if (!baris.length) return [];
+  // income menambah (lebih bayar), expense mengurangi (kurang bayar)
+  const jumlah = baris.reduce((a, e) =>
+    a + (e.tx_type === "income" ? 1 : -1) * Number(e.amount_idr ?? e.amount ?? 0), 0);
+  return Math.abs(jumlah - beda) <= 2 ? baris : [];
 }
 
 // Selisih pelunasan yang dibukukan ke Bank & Card Fees disebut "Payment difference"
 // — istilah Paulus untuk kasus ini (setoran tunai dibulatkan ke bawah). Nama kategori
 // mentahnya dipakai apa adanya untuk pilihan lain.
 const KAT_SELISIH = "6cc50f51-b1fc-4dbd-8f1f-32010b60dfb3"; // Bank & Card Fees
-function labelSelisih(row, incomeSrcs) {
-  if (!row) return "not recorded";
+function labelSelisih(baris, incomeSrcs) {
+  // Terima SATU baris atau BANYAK. Selisih boleh dipecah menurut jenisnya —
+  // "Electricity margin" + "Biznet margin" untuk satu setoran yang sama. Versi
+  // lama mencari satu baris seharga seluruh selisih, jadi grup yang dipecah
+  // selalu terbaca "not recorded" padahal bukunya lengkap.
+  const daftar = Array.isArray(baris) ? baris : (baris ? [baris] : []);
+  if (!daftar.length) return "not recorded";
+  if (daftar.length > 1) {
+    const nama = [...new Set(daftar.map(r => labelSelisih(r, incomeSrcs)))];
+    return nama.length === 1 ? nama[0] : nama.join(" + ");
+  }
+  const row = daftar[0];
   // Pembulatan setoran namanya sama di kedua sisi — kurang maupun lebih. Label
   // ikut deskripsi barisnya, bukan menebak dari ambang atau kategori.
   if (/^Payment difference/i.test(row.description || "")) return "Payment difference";
