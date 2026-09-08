@@ -17,9 +17,13 @@ import { REIMBURSE_ENTITIES } from "../constants";
 import TxVerticalBig from "./shared/TxVerticalBig";
 import SplitModal from "./shared/SplitModal";
 
-const IKON_BTN = {
-  background: "transparent", border: "none", padding: 2, cursor: "pointer",
-  color: "#9ca3af", display: "flex", alignItems: "center", borderRadius: 4,
+// Tinggi 32 dan padding 0 12px: SAMA dengan pemilih bulan, SortDropdown, dan
+// tombol Statement di baris yang sama. Kontrol sebaris harus seukuran.
+const TOMBOL_TOOLBAR = {
+  height: 32, padding: "0 12px", borderRadius: 8,
+  border: "1px solid #e5e7eb", background: "#fff", color: "#374151",
+  fontSize: 11, fontWeight: 600, fontFamily: "Figtree, sans-serif",
+  cursor: "pointer", display: "flex", alignItems: "center", gap: 5,
 };
 
 // ─── PROGRESS BAR ─────────────────────────────────────────────
@@ -1156,6 +1160,13 @@ export default function Receivables({
               // Suggested match: reorder both columns so likely pairs align at top + badge them
               const sugg = suggestMatch ? suggestReimbursePairs(outRows, inRows) : null;
               const selOut = selectedOut[r.id] || new Set();
+              // Edit & Split hidup di toolbar, bukan di tiap baris — ikon per baris
+              // membuat nominal antarbaris tidak pernah sejajar (Paulus, 6 Sep 2026).
+              // Hanya muncul saat TEPAT SATU baris Out dipilih: dua baris tidak bisa
+              // diedit bersama, dan nol baris tidak menunjuk apa pun.
+              const sorotOut = selOut.size === 1
+                ? outRows.find(x => selOut.has(x.id)) || null
+                : null;
               const selIn  = selectedIn[r.id]  || new Set();
               const nilaiUrut  = urutKolom[r.id] || "suggest_desc";
               const bulanDipilih = bulanKolom[r.id] || "";
@@ -1200,6 +1211,25 @@ export default function Receivables({
                         </div>
                       </div>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                        {sorotOut && (
+                          <>
+                            <button
+                              onClick={() => setEditOutEntry(sorotOut)}
+                              style={TOMBOL_TOOLBAR}
+                            >
+                              <Pencil size={13} /> Edit
+                            </button>
+                            {bisaDipecahOut(sorotOut) && (
+                              <button
+                                onClick={() => setSplitOutEntry(sorotOut)}
+                                style={TOMBOL_TOOLBAR}
+                              >
+                                <Scissors size={13} /> Split
+                              </button>
+                            )}
+                            <span style={{ width: 1, height: 20, background: "#e5e7eb" }} />
+                          </>
+                        )}
                         <select
                           value={bulanDipilih}
                           onChange={e => setBulanKolom(prev => ({ ...prev, [r.id]: e.target.value }))}
@@ -1368,31 +1398,7 @@ export default function Receivables({
                                     {settled && <span style={{ marginLeft: 4, color: "#d1d5db" }}>· settled</span>}
                                   </div>
                                 </div>
-                                <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                                  {/* stopPropagation WAJIB: seluruh baris ini tombol pemilih Match.
-                                      Tanpa itu satu klik akan mengedit sekaligus memilih barisnya. */}
-                                  {!settled && (
-                                    <>
-                                      <button
-                                        title="Edit transaksi"
-                                        onClick={(ev) => { ev.stopPropagation(); setEditOutEntry(e); }}
-                                        style={IKON_BTN}
-                                      >
-                                        <Pencil size={13} />
-                                      </button>
-                                      {bisaDipecahOut(e) && (
-                                        <button
-                                          title="Pecah transaksi"
-                                          onClick={(ev) => { ev.stopPropagation(); setSplitOutEntry(e); }}
-                                          style={IKON_BTN}
-                                        >
-                                          <Scissors size={13} />
-                                        </button>
-                                      )}
-                                    </>
-                                  )}
-                                  <div style={{ fontSize: 12, fontWeight: 700, color: "#dc2626" }}>{fmtIDR(Number(e.amount || 0))}</div>
-                                </div>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: "#dc2626", flexShrink: 0 }}>{fmtIDR(Number(e.amount || 0))}</div>
                               </div>
                             </div>
                           );

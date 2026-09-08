@@ -736,8 +736,13 @@ function TxRow({ entry: e, accounts, categories = [], onEdit, onDelete, onSplit 
 
         {/* Actions */}
         <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
-          {onSplit && (
+          {/* Slotnya SELALU ada, tombolnya belum tentu. Kalau baris tak bisa dipecah
+              dan slot ini ikut hilang, seluruh baris menggeser 30px dan nominal
+              antarbaris tidak pernah sejajar. */}
+          {onSplit ? (
             <button className="row-act" onClick={ev => { ev.stopPropagation(); onSplit(); }} style={ROW_BTN} title="Split"><Split size={13} strokeWidth={2} /></button>
+          ) : (
+            <span aria-hidden style={{ width: 26, height: 26, flexShrink: 0 }} />
           )}
           <button className="row-act" onClick={ev => { ev.stopPropagation(); onEdit(); }} style={ROW_BTN} title="Edit"><Pencil size={13} strokeWidth={2} /></button>
           <button className="row-act" onClick={ev => { ev.stopPropagation(); onDelete(); }} style={{ ...ROW_BTN, color: "#dc2626", borderColor: "#fecaca" }} title="Hapus"><X size={13} strokeWidth={2} /></button>
