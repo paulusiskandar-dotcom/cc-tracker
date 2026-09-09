@@ -1522,7 +1522,15 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
       amount: Math.abs(Number(m.amount || 0)), amount_idr: Math.abs(Number(m.amount || 0)),
       currency: "IDR",
       suggested_tx_type: m.direction === "in" ? "income" : "expense",
-      from_account_id: acc.id, card_last4: m.card_last4 || null,
+      // Baris kredit di statement (bunga, cashback, koreksi biaya) MENDARAT di
+      // rekening ini — jadi rekeningnya tujuan, bukan asal. Kalau dipasang di
+      // from_account_id, antrean menampilkan "To Account…" kosong dan tidak bisa
+      // disetujui, sekaligus menimpa slot yang seharusnya diisi income source.
+      // Sisi klien (ReconcileOverlay.jsx) sudah memakai aturan ini sejak awal.
+      ...(m.direction === "in"
+        ? { from_account_id: null, to_account_id: acc.id }
+        : { from_account_id: acc.id, to_account_id: null }),
+      card_last4: m.card_last4 || null,
       confidence: 1,
       _source: "statement", _stmt_id: m._id, _dup_hint: dupHint(m),
     }));
