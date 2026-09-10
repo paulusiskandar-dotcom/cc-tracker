@@ -1382,6 +1382,12 @@ export default function TxVerticalBig({
     const showCat     = type === "expense" || type === "income";
     const showEntity  = ["reimburse_out","reimburse_in"].includes(type);
     const showCicilan = type === "expense";
+    // Recurring TIDAK boleh ikut gerbang Cicilan. Template berulang juga ada untuk
+    // reimburse_out (Telkomsel) dan income (Gaji, Freelance); selama blok ini dipaku
+    // ke expense, reminder mereka tidak pernah bisa ditutup dari mana pun.
+    // Baris yang sudah di-Finalize tidak menampilkannya — tombol Save-nya disembunyikan,
+    // jadi pilihan di sana tak akan pernah tersimpan.
+    const showRecurring = ["expense", "reimburse_out", "income"].includes(type) && !terkunciFinalize;
 
     return (
       <>
@@ -1448,8 +1454,8 @@ export default function TxVerticalBig({
         {showCicilan && (
           <CicilanSection enabled={cicilan} onToggle={() => setCicilan(v => !v)} form={form} set={set} />
         )}
-        {/* 11b. Mark as Recurring (Expense only) */}
-        {showCicilan && (
+        {/* 11b. Mark as Recurring (expense · reimburse_out · income) */}
+        {showRecurring && (
           <Field label="Mark as Recurring (optional)">
             <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>
               <input
@@ -1457,11 +1463,11 @@ export default function TxVerticalBig({
                 checked={!!form.recurring_template_id}
                 onChange={e => {
                   if (e.target.checked) {
-                    const first = (recurTemplates || []).find(t => t.tx_type === "expense" && t.is_active !== false);
+                    const first = (recurTemplates || []).find(t => t.tx_type === type && t.is_active !== false);
                     setFormState(f => {
                       const patch = { ...f, recurring_template_id: first?.id || null };
                       if (first) {
-                        if (first.category_id) patch.category_id = first.category_id;
+                        if (first.category_id && showCat) patch.category_id = first.category_id;
                         if (first.from_id)     patch.from_id     = first.from_id;
                         if (first.from_type)   patch.from_type   = first.from_type;
                       }
@@ -1485,7 +1491,7 @@ export default function TxVerticalBig({
                     if (templateId) {
                       const tpl = (recurTemplates || []).find(t => t.id === templateId);
                       if (tpl) {
-                        if (tpl.category_id) patch.category_id = tpl.category_id;
+                        if (tpl.category_id && showCat) patch.category_id = tpl.category_id;
                         if (tpl.from_id)     patch.from_id     = tpl.from_id;
                         if (tpl.from_type)   patch.from_type   = tpl.from_type;
                       }
@@ -1497,7 +1503,7 @@ export default function TxVerticalBig({
               >
                 <option value="">— Select template —</option>
                 {(recurTemplates || [])
-                  .filter(t => t.tx_type === "expense" && t.is_active !== false)
+                  .filter(t => t.tx_type === type && t.is_active !== false)
                   .map(t => (
                     <option key={t.id} value={t.id}>{t.name}</option>
                   ))}

@@ -800,7 +800,7 @@ function TxHorizontalCard({
       {isNotesOpen && (
         <div style={{ borderTop: `1px solid ${T.border}`, background: T.sur2, padding: "6px 10px 8px 32px", display: "flex", gap: 12, alignItems: "center" }}>
           {/* Notes — narrower when bill picker is shown */}
-          <div style={{ display: "flex", gap: 6, alignItems: "center", flex: r.tx_type === "expense" ? "0 0 55%" : "1" }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", flex: ["expense", "reimburse_out", "income"].includes(r.tx_type) ? "0 0 55%" : "1" }}>
             <span style={{ fontSize: 10, fontWeight: 700, color: T.text3, textTransform: "uppercase", letterSpacing: "0.04em", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>Notes</span>
             <input
               style={{ ...inSel(T), flex: 1, border: `1px solid ${T.border}`, padding: "3px 5px" }}
@@ -809,8 +809,8 @@ function TxHorizontalCard({
               placeholder="Optional notes…"
             />
           </div>
-          {/* Bill picker — expense only */}
-          {r.tx_type === "expense" && (
+          {/* Bill picker — expense · reimburse_out · income (sejalan dgn TxVerticalBig) */}
+          {["expense", "reimburse_out", "income"].includes(r.tx_type) && (
             <div style={{ display: "flex", gap: 6, alignItems: "center", flex: "0 0 40%" }}>
               <span style={{ fontSize: 10, fontWeight: 700, color: T.text3, textTransform: "uppercase", letterSpacing: "0.04em", fontFamily: "Figtree, sans-serif", whiteSpace: "nowrap" }}>Recurring</span>
               <select
@@ -822,7 +822,8 @@ function TxHorizontalCard({
                   if (templateId) {
                     const tpl = (recurTemplates || []).find(t => t.id === templateId);
                     if (tpl) {
-                      if (tpl.category_id) patch.category_id = tpl.category_id;
+                      // reimburse_out & income tidak berkategori — jangan ditempeli
+                      if (tpl.category_id && r.tx_type === "expense") patch.category_id = tpl.category_id;
                       if (tpl.from_id)     patch.from_id     = tpl.from_id;
                       if (tpl.from_type)   patch.from_type   = tpl.from_type;
                     }
@@ -832,7 +833,7 @@ function TxHorizontalCard({
               >
                 <option value="">— Not recurring —</option>
                 {(recurTemplates || [])
-                  .filter(t => t.tx_type === "expense" && t.is_active !== false)
+                  .filter(t => t.tx_type === r.tx_type && t.is_active !== false)
                   .map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
             </div>
