@@ -1301,8 +1301,14 @@ async function cmdStatements(supabase: any, uid: string): Promise<string> {
     .eq("user_id", uid).eq("type", "credit_card");
   const cards = (cc || []).filter((c: any) => c.is_active !== false);
   const ids = cards.map((c: any) => c.id);
+  // Batas bawah query pembayaran HARUS mengikuti statement tertua yang dipegang kartu,
+  // bukan tanggal tetap. Kartu tidur (DBS: statement terakhir 17 Feb 2026, lunas 28 Feb)
+  // kehilangan seluruh pembayarannya kalau batasnya dipaku 2026-05-01 → tampil "belum
+  // dibayar" padahal sudah lunas.
+  const stmtDates = cards.map((c: any) => c.last_statement_date).filter(Boolean).sort();
+  const sejak = stmtDates.length ? stmtDates[0] : "2026-05-01";
   const { data: pays } = await supabase.from("ledger")
-    .select("to_id, amount_idr, tx_date").in("to_id", ids).eq("to_type", "account").gte("tx_date", "2026-05-01");
+    .select("to_id, amount_idr, tx_date").in("to_id", ids).eq("to_type", "account").gte("tx_date", sejak);
   const paidSince = (c: any) => (pays || [])
     .filter((p: any) => p.to_id === c.id && p.tx_date >= c.last_statement_date)
     .reduce((s: number, p: any) => s + Number(p.amount_idr || 0), 0);
