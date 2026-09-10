@@ -1312,18 +1312,43 @@ async function cmdStatements(supabase: any, uid: string): Promise<string> {
   const paidSince = (c: any) => (pays || [])
     .filter((p: any) => p.to_id === c.id && p.tx_date >= c.last_statement_date)
     .reduce((s: number, p: any) => s + Number(p.amount_idr || 0), 0);
+  // Pembayaran yang SUDAH terdeteksi dari email tapi belum di-approve belum masuk ledger,
+  // jadi status melapor "belum dibayar" untuk tagihan yang sebenarnya sudah dibayar — bisa
+  // meleset sehari penuh. Kejadian nyata: CIMB ALL 9 Sep 2026 dibayar 21 jt, barisnya baru
+  // mendarat di ledger 10 Sep 10:35 WIB, sementara notifikasi pagi sudah bilang belum dibayar.
+  const { data: antrean } = await supabase.from("email_sync")
+    .select("ai_raw_result")
+    .eq("user_id", uid).in("status", ["pending", "waiting_statement"]).not("ai_raw_result", "is", null);
+  const menunggu: Record<string, number> = {};
+  for (const e of (antrean || [])) {
+    const arr = Array.isArray(e.ai_raw_result) ? e.ai_raw_result : [];
+    for (const t of arr) {
+      if (!t || t.confirmed || t.skipped || t._imported) continue;
+      const id = t.to_account_id;
+      if (!id || !ids.includes(id)) continue;
+      menunggu[id] = (menunggu[id] || 0) + Number(t.amount_idr || t.amount || 0);
+    }
+  }
   const d2 = (s: string) => { const p = String(s || "").split("-"); return p.length === 3 ? `${p[2]}/${p[1]}` : s; };
-  const lunas: any[] = [], belum: any[] = [], noStmt: any[] = [];
+  const lunas: any[] = [], belum: any[] = [], noStmt: any[] = [], approve: any[] = [];
   for (const c of cards) {
     if (c.last_statement_amount == null || !c.last_statement_date) { noStmt.push(c); continue; }
     const pending = Math.max(0, Number(c.last_statement_amount) - paidSince(c));
-    if (pending <= 25000) lunas.push(c); else belum.push({ c, pending });
+    if (pending <= 25000) { lunas.push(c); continue; }
+    const antre = menunggu[c.id] || 0;
+    if (antre >= pending - 25000) approve.push({ c, pending, antre });
+    else belum.push({ c, pending, antre });
   }
   belum.sort((a, b) => b.pending - a.pending);
+  approve.sort((a, b) => b.pending - a.pending);
   let out = `📄 <b>STATUS STATEMENT & TAGIHAN</b>\n`;
   if (belum.length) {
     out += `\n🔴 <b>Belum dibayar (${belum.length})</b>\n`;
-    out += belum.map((x) => `${esc(x.c.name)} · stmt ${d2(x.c.last_statement_date)}\n<b>${idr(x.pending)}</b>${x.c.due_day ? ` — JT tgl ${x.c.due_day}` : ""}`).join("\n") + "\n";
+    out += belum.map((x) => `${esc(x.c.name)} · stmt ${d2(x.c.last_statement_date)}\n<b>${idr(x.pending)}</b>${x.c.due_day ? ` — JT tgl ${x.c.due_day}` : ""}${x.antre ? `\n<i>(${idr(x.antre)} sudah terdeteksi, tunggu approve)</i>` : ""}`).join("\n") + "\n";
+  }
+  if (approve.length) {
+    out += `\n🟡 <b>Sudah dibayar — tinggal approve (${approve.length})</b>\n`;
+    out += approve.map((x) => `${esc(x.c.name)} · stmt ${d2(x.c.last_statement_date)}\n<b>${idr(x.pending)}</b> — pembayaran ${idr(x.antre)} nunggu di antrean email`).join("\n") + "\n";
   }
   if (lunas.length) out += `\n✅ <b>Lunas (${lunas.length})</b>\n${lunas.map((c) => esc(c.name)).join(" · ")}\n`;
   if (noStmt.length) out += `\n⚪ <b>Statement belum masuk (${noStmt.length})</b>\n${noStmt.map((c) => esc(c.name)).join(" · ")}\n`;
