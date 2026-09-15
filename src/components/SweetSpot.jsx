@@ -32,7 +32,9 @@ const EXC_ROWS = [
   ["qris", "QRIS", "Scan to pay in a bank app", /qris/i],
   ["pajak", "Tax & government", "Tax, PBB, state payments", /pajak|penerimaan negara|\bpbb\b|\btax\b/i],
   ["paper", "Paper.id", "Business invoice payments", /paper\.?id|invoic|tagihan bisnis|pembayaran bisnis/i],
-  ["ewallet_topup", "E-wallet top-up", "OVO, GoPay, DANA", /e-?wallet|top ?up|dompet/i],
+  ["ewallet_topup", "E-wallet top-up", "Adding balance to OVO, GoPay, DANA", /e-?wallet|dompet|ovo|gopay/i],
+  ["emoney_topup", "E-money top-up", "Flazz, e-money, Brizzi, TapCash", /flazz|e-?money|uang elektronik|brizzi|tapcash/i],
+  ["bayar_ewallet", "Pay via e-wallet", "Card linked to DANA, GoPay, ShopeePay", /e-?wallet|dompet digital|shopee ?pay|gopay|\bdana\b/i],
   ["spbu", "Fuel", "Petrol stations", /spbu|bensin|fuel/i],
 ];
 const LIM_ROWS = [
@@ -366,7 +368,7 @@ function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mc
                     <Mark status={r.status} />
                     <span className="ss-cname">{r.c.name}<small>{r.c.bank}</small>
                       {r.c.bonus && <small className="ss-bonus">{r.c.bonus.nama}: {r.c.bonus.label_bank}</small>}
-                      {cautions(r, isEarn).length > 0 && <span className="ss-caution"><AlertTriangle size={12} aria-hidden="true" /><span>{cautions(r, isEarn).join(" · ")}</span></span>}
+                      {cautions(r, isEarn, key).length > 0 && <span className="ss-caution"><AlertTriangle size={12} aria-hidden="true" /><span>{cautions(r, isEarn, key).join(" · ")}</span></span>}
                     </span>
                     <span className="ss-verdict">{verdict(r, isEarn)}</span>
                     <ChevronDown size={16} className="ss-chev" aria-hidden="true" />
@@ -388,8 +390,12 @@ function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mc
 }
 
 // Short caps shown right under the card name, straight from the source fields.
-function cautions(r, isEarn) {
-  if (!isEarn || r.status === "unknown") return [];
+function cautions(r, isEarn, spendKey) {
+  if (!isEarn) {
+    if (spendKey === "paper" && r.status === "no" && r.kr?.paper_via_blibli_tokopedia === "dapat") return ["May earn if paid through a Blibli or Tokopedia e-invoice"];
+    return [];
+  }
+  if (r.status === "unknown") return [];
   const out = []; const v = r.v || {}; const kr = r.kr || {};
   if (v.batas_bulanan) {
     const n = Number(v.batas_bulanan);
