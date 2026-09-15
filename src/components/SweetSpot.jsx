@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { settingsApi } from "../api";
+import { Check, X, HelpCircle, AlertTriangle, Minus, ChevronDown } from "lucide-react";
 import SweetSpotSpending from "./SweetSpotSpending";
 
 // SweetSpot — earn rates, exclusions, promos and miles news for the cards Paulus
@@ -68,10 +69,9 @@ async function fetchAll(table, build) {
 export default function SweetSpot({ user, ledger = [], accounts = [] }) {
   const [tab, setTab] = useState("compare");
   const [prog, setProg] = useState("krisflyer");
-  const [cat, setCat] = useState("everyday");
+  const [spend, setSpend] = useState("e:everyday");
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
-  const [cell, setCell] = useState(null);
   const [matching, setMatching] = useState(false);
   const [prefs, setPrefs] = useState(DEFAULT_PREFS);
   const [scope, setScope] = useState("mine");
@@ -122,7 +122,6 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
 
   const progName = PROGRAMS.find(p => p[0] === prog)[1];
   const latestSync = [...data.kartu, ...data.earn, ...data.promo, ...data.news].map(r => r.updated_at).sort().pop();
-  const withExclusions = cols.filter(c => EXC_ROWS.some(([k]) => { const v = kartuByName[c.catalog]?.[`pengecualian_${k}`]; return v && v !== "tidak_disebut"; })).length;
 
   /* ── promos ── */
   const myBankTokens = [...new Set(creditCards.flatMap(a => {
@@ -152,7 +151,7 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
     .filter(b => !(BANK_ALIAS[b.toLowerCase()] || [b.toLowerCase()]).some(t => [...coveredBanks].some(c => c.startsWith(t))));
   const newsRelevant = data.news.filter(n => n.relevan_miles && (n.status || "ok") === "ok");
 
-  const tabs = [["compare", "Compare cards"], ["pick", "Which card"], ["promo", "Promos", shownPromos.length], ["news", "Miles news", newsRelevant.length], ["spending", "My spending"]];
+  const tabs = [["compare", "Compare cards"], ["promo", "Promos", shownPromos.length], ["news", "Miles news", newsRelevant.length], ["spending", "My spending"]];
 
   return (
     <Frame>
@@ -164,7 +163,7 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
         {tab !== "promo" && tab !== "news" && tab !== "spending" && (
           <div>
             <div className="ss-label" id="ss-prog-l">Collecting</div>
-            <Seg labelledBy="ss-prog-l" items={PROGRAMS} value={prog} onChange={v => { setProg(v); setCell(null); }} />
+            <Seg labelledBy="ss-prog-l" items={PROGRAMS} value={prog} onChange={setProg} />
           </div>
         )}
       </header>
@@ -184,83 +183,7 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
       </nav>
 
       {tab === "compare" && (
-        <section className="ss-view">
-          <div className="ss-head"><div><h2>Compare cards</h2><div className="ss-sub">Rp per mile where a card earns, a plain answer where it does not. Tap a cell for the source text.</div></div></div>
-          {withExclusions < cols.length && (
-            <div className="ss-callout"><b>Exclusion data is still thin.</b> {cols.length - withExclusions} of {cols.length} matched cards have no structured exclusions yet, so those cells read <i>Not stated</i> or <i>See terms</i> instead of a guess.</div>
-          )}
-          {cols.length === 0 ? <div className="ss-empty"><b>No cards matched yet.</b> Use Match cards above to link your cards to the catalog.</div> : (
-            <div className="ss-tablebox">
-              <table className="ss-cmp">
-                <thead><tr><th className="ss-rowh" scope="col">Spending</th>{cols.map(c => <th key={c.name} scope="col">{c.name}<span className="ss-bank">{c.bank}</span></th>)}</tr></thead>
-                <tbody>
-                  <tr className="ss-group"><th colSpan={cols.length + 1} scope="colgroup">Earns {progName} miles</th></tr>
-                  {CATS.map(([k, l]) => {
-                    const vals = cols.map(c => earnFor(c.catalog, k));
-                    const clean = vals.filter(v => v && !v.flagged).map(v => Number(v.rupiah_per_mile));
-                    const best = clean.length ? Math.min(...clean) : null;
-                    return (
-                      <tr key={k}><th className="ss-rowh" scope="row">{l}</th>
-                        {cols.map((c, i) => {
-                          const v = vals[i]; const id = `e|${c.name}|${k}`;
-                          return <Cell key={id} id={id} cell={cell} setCell={setCell} best={v && !v.flagged && Number(v.rupiah_per_mile) === best}>
-                            {v ? <><span className="ss-rate"><b>{rpn(v.rupiah_per_mile)}</b> <small>per mile</small></span>{v.flagged && <span className="ss-chip warn">Needs check</span>}</> : <span className="ss-na">Not stated</span>}
-                          </Cell>;
-                        })}
-                      </tr>
-                    );
-                  })}
-                  <tr className="ss-group"><th colSpan={cols.length + 1} scope="colgroup">Often excluded</th></tr>
-                  {EXC_ROWS.map(([k, l, s, re]) => (
-                    <tr key={k}><th className="ss-rowh" scope="row">{l}<small>{s}</small></th>
-                      {cols.map(c => {
-                        const kr = kartuByName[c.catalog] || {}; const v = kr[`pengecualian_${k}`]; const id = `x|${c.name}|${k}`;
-                        const mentioned = (!v || v === "tidak_disebut") && re.test(kr.kategori_dikecualikan || "");
-                        return <Cell key={id} id={id} cell={cell} setCell={setCell}>
-                          {v === "tidak_dapat" ? <span className="ss-no">No points</span>
-                            : v === "terbatas" ? <span className="ss-lim">Limited</span>
-                            : v === "dapat" ? <span className="ss-yes">Earns</span>
-                            : mentioned ? <span className="ss-lim">See terms</span>
-                            : <span className="ss-na">Not stated</span>}
-                        </Cell>;
-                      })}
-                    </tr>
-                  ))}
-                  <tr className="ss-group"><th colSpan={cols.length + 1} scope="colgroup">Minimum and maximum</th></tr>
-                  {LIM_ROWS.map(([k, l, get]) => (
-                    <tr key={k}><th className="ss-rowh" scope="row">{l}</th>
-                      {cols.map(c => {
-                        const v = get(kartuByName[c.catalog] || {}); const id = `l|${c.name}|${k}`;
-                        return <Cell key={id} id={id} cell={cell} setCell={setCell}>
-                          {v != null && v !== "" ? <span className="ss-text">{k === "fee" ? feeText(v) : v}</span> : <span className="ss-na">Not stated</span>}
-                        </Cell>;
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-          {cell && <Detail cell={cell} cols={cols} kartuByName={kartuByName} earnFor={earnFor} progName={progName} onClose={() => setCell(null)} />}
-          <div className="ss-legend">
-            <span><i className="ss-sw" />Best in the row</span>
-            <span><b className="ss-no">No points</b> excluded in the card's terms</span>
-            <span><b className="ss-lim">Limited</b> restricted by the terms</span>
-            <span><b className="ss-lim">See terms</b> mentioned in free-text terms, not yet classified</span>
-            <span><b className="ss-na">Not stated</b> source says nothing</span>
-            <span><span className="ss-chip warn">Needs check</span> figure outside the normal range</span>
-          </div>
-        </section>
-      )}
-
-      {tab === "pick" && (
-        <section className="ss-view">
-          <div className="ss-head">
-            <div><h2>Which card should I use?</h2><div className="ss-sub">One answer for one kind of spending. Airline miles only.</div></div>
-            <Seg label="Spending type" items={CATS} value={cat} onChange={setCat} />
-          </div>
-          <Picker cols={cols} cat={cat} earnFor={earnFor} progName={progName} />
-        </section>
+        <CompareView cols={cols} kartuByName={kartuByName} earnFor={earnFor} progName={progName} spend={spend} setSpend={setSpend} />
       )}
 
       {tab === "promo" && (
@@ -360,83 +283,127 @@ function Seg({ items, value, onChange, label, labelledBy }) {
   );
 }
 
-function Cell({ id, cell, setCell, best, children }) {
-  return (
-    <td className={best ? "ss-best" : ""}>
-      <button type="button" aria-pressed={cell === id} onClick={() => setCell(cell === id ? null : id)}>{children}</button>
-    </td>
-  );
-}
+// Left: what you are about to pay for. Right: your cards, best first, as a checklist.
+function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend }) {
+  const [open, setOpen] = useState(null);
+  const [type, key] = spend.split(":");
+  const isEarn = type === "e";
+  const label = isEarn ? CATS.find(c => c[0] === key)[1] : EXC_ROWS.find(r => r[0] === key)[1];
 
-function Detail({ cell, cols, kartuByName, earnFor, progName, onClose }) {
-  const [t, name, k] = cell.split("|");
-  const col = cols.find(c => c.name === name); if (!col) return null;
-  const kr = kartuByName[col.catalog] || {};
-  let title, body, src = null, asof = null, extra = null;
-  if (t === "e") {
-    const v = earnFor(col.catalog, k); const l = CATS.find(x => x[0] === k)[1];
-    title = `${name} · ${l}`;
-    if (!v) body = `No ${l.toLowerCase()} figure for this card in ${progName}. That does not mean it earns nothing; the source does not say.`;
-    else {
-      body = cleanNote(v.catatan) || "No conditions stated in the source."; src = v.sumber_url; asof = v.per_tanggal;
-      extra = <>
-        <span>Rp {rpn(v.rupiah_per_mile)} per mile · Rp 1.000.000 earns about {Math.floor(1000000 / v.rupiah_per_mile).toLocaleString("id-ID")} miles</span>
-        {v.batas_bulanan && <span>Monthly cap: {v.batas_bulanan}</span>}
-        {v.min_transaksi && <span>Minimum: {v.min_transaksi}</span>}
-        {v.alt.length > 0 && <span>Another source says Rp {v.alt.map(rpn).join(", Rp ")}</span>}
-      </>;
+  const ORDER = { best: 0, yes: 1, check: 2, limited: 3, see: 4, unknown: 5, no: 6 };
+  const rows = cols.map(c => {
+    const kr = kartuByName[c.catalog] || {};
+    if (isEarn) {
+      const v = earnFor(c.catalog, key);
+      return { c, kr, v, status: !v ? "unknown" : v.flagged ? "check" : "yes", rpm: v ? Number(v.rupiah_per_mile) : Infinity };
     }
-  } else if (t === "x") {
-    const row = EXC_ROWS.find(r => r[0] === k); title = `${name} · ${row[1]}`;
-    const q = kr.pengecualian_kutipan?.[k];
-    if (q) { body = q.kutipan; src = q.sumber_url; asof = q.per_tanggal; }
-    else if (kr.kategori_dikecualikan) { body = `Catalog note on exclusions: "${kr.kategori_dikecualikan}"`; src = kr.sumber_url; asof = kr.per_tanggal; }
-    else body = "The catalog has nothing on this for this card. It needs checking against the official terms before it can read Yes or No.";
-  } else {
-    const row = LIM_ROWS.find(r => r[0] === k); title = `${name} · ${row[1]}`;
-    const v = row[2](kr); body = v != null && v !== "" ? String(k === "fee" ? feeText(v) : v) : "Not stated in the catalog.";
-    src = kr.sumber_url; asof = kr.per_tanggal;
-  }
-  return (
-    <div className="ss-detail" role="region" aria-live="polite">
-      <h3>{title}</h3><button className="ss-btn small" onClick={onClose}>Close</button>
-      <p>{body}</p>
-      <div className="ss-src">{extra}{asof && <span>As of {asof}</span>}{src && <a href={src} target="_blank" rel="noopener noreferrer">{host(src)}</a>}</div>
+    const val = kr[`pengecualian_${key}`];
+    const re = EXC_ROWS.find(r => r[0] === key)[3];
+    const status = val === "dapat" ? "yes" : val === "terbatas" ? "limited" : val === "tidak_dapat" ? "no"
+      : re.test(kr.kategori_dikecualikan || "") ? "see" : "unknown";
+    return { c, kr, status, rpm: Infinity };
+  }).sort((a, b) => (ORDER[a.status] - ORDER[b.status]) || (a.rpm - b.rpm) || a.c.name.localeCompare(b.c.name));
+  if (isEarn && rows[0]?.status === "yes") rows[0] = { ...rows[0], status: "best" };
+
+  const count = s => rows.filter(r => r.status === s).length;
+  const best = rows[0]?.status === "best" ? rows[0] : null;
+  let summary;
+  if (isEarn) summary = best
+    ? <>Best for {label.toLowerCase()}: <b>{best.c.name}</b> at <b>Rp {rpn(best.rpm)}</b> per {progName} mile. Rp 1.000.000 earns about <b>{Math.floor(1000000 / best.rpm).toLocaleString("id-ID")} miles</b>.</>
+    : <>None of your matched cards has a {label.toLowerCase()} figure in {progName}.</>;
+  else summary = <>{count("no") ? <><b>{count("no")}</b> {count("no") === 1 ? "card earns" : "cards earn"} nothing here. </> : null}
+    {count("yes") ? <><b>{count("yes")}</b> confirmed to earn. </> : null}
+    {count("unknown") + count("see") ? <><b>{count("unknown") + count("see")}</b> not classified yet, so they are not marked either way.</> : null}</>;
+
+  const Pick = ({ items, group }) => (
+    <div className="ss-spendgroup">
+      <div className="ss-label">{group}</div>
+      {items.map(([k, l, sub]) => {
+        const id = `${group === "Earn miles" ? "e" : "x"}:${k}`;
+        return <button key={id} type="button" className="ss-spend" aria-pressed={spend === id} onClick={() => { setSpend(id); setOpen(null); }}>
+          {l}{sub && <small>{sub}</small>}
+        </button>;
+      })}
     </div>
   );
+
+  if (!cols.length) return <section className="ss-view"><div className="ss-empty"><b>No cards matched yet.</b> Use Match cards above to link your cards to the catalog.</div></section>;
+
+  return (
+    <section className="ss-view">
+      <div className="ss-head"><div><h2>Compare cards</h2><div className="ss-sub">Pick what you are paying for. Your cards line up best first.</div></div></div>
+      <div className="ss-cmpgrid">
+        <nav className="ss-spendnav" aria-label="Spending type">
+          <Pick group="Earn miles" items={CATS.map(([k, l]) => [k, l])} />
+          <Pick group="Often excluded" items={EXC_ROWS.map(([k, l, sub]) => [k, l, sub])} />
+        </nav>
+        <div className="ss-ranked">
+          <div className="ss-summary">{summary}</div>
+          <ol className="ss-cards">
+            {rows.map(r => {
+              const id = r.c.name; const isOpen = open === id;
+              return (
+                <li key={id} className={`ss-cardrow st-${r.status}`}>
+                  <button type="button" className="ss-cardbtn" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : id)}>
+                    <Mark status={r.status} />
+                    <span className="ss-cname">{r.c.name}<small>{r.c.bank}</small></span>
+                    <span className="ss-verdict">{verdict(r, isEarn)}</span>
+                    <ChevronDown size={16} className="ss-chev" aria-hidden="true" />
+                  </button>
+                  {isOpen && <CardDetail r={r} isEarn={isEarn} spendKey={key} />}
+                </li>
+              );
+            })}
+          </ol>
+          <div className="ss-legend">
+            <span><Mark status="yes" /> earns</span><span><Mark status="no" /> no points</span>
+            <span><Mark status="limited" /> limited or see terms</span><span><Mark status="check" /> figure needs checking</span>
+            <span><Mark status="unknown" /> not stated, not assumed</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
 }
 
-function Picker({ cols, cat, earnFor, progName }) {
-  const list = cols.map(c => ({ c, v: earnFor(c.catalog, cat) })).filter(x => x.v)
-    .map(x => ({ ...x.v, card: x.c.name })).sort((a, b) => (a.flagged - b.flagged) || (a.rupiah_per_mile - b.rupiah_per_mile));
-  const catName = CATS.find(c => c[0] === cat)[1];
-  if (!list.length) return <div className="ss-empty"><b>No {catName.toLowerCase()} figure for your matched cards in {progName}.</b> Try Everyday, or another program.</div>;
-  const best = list[0]; const maxMiles = Math.max(...list.map(r => 1000000 / r.rupiah_per_mile));
+function Mark({ status }) {
+  const m = { best: [Check, "yes"], yes: [Check, "yes"], no: [X, "no"], limited: [Minus, "lim"], see: [Minus, "lim"], check: [AlertTriangle, "lim"], unknown: [HelpCircle, "na"] }[status];
+  const Icon = m[0];
+  return <span className={`ss-mark ${m[1]}`} aria-hidden="true"><Icon size={14} strokeWidth={2.6} /></span>;
+}
+
+function verdict(r, isEarn) {
+  if (r.status === "unknown") return <span className="ss-na">Not stated</span>;
+  if (!isEarn) return { yes: <span className="ss-yes">Earns</span>, no: <span className="ss-no">No points</span>, limited: <span className="ss-lim">Limited</span>, see: <span className="ss-lim">See terms</span> }[r.status];
+  return <span className="ss-rate">
+    {r.status === "best" && <span className="ss-chip acc">Best</span>}
+    <b>Rp {rpn(r.rpm)}</b><small> per mile</small>
+    {r.status === "check" && <span className="ss-chip warn">Needs check</span>}
+  </span>;
+}
+
+function CardDetail({ r, isEarn, spendKey }) {
+  const kr = r.kr; const v = r.v;
+  const facts = [];
+  if (isEarn && v) {
+    facts.push(["Conditions", cleanNote(v.catatan) || "None stated in the source"]);
+    facts.push(["Rp 1.000.000 earns", `about ${Math.floor(1000000 / r.rpm).toLocaleString("id-ID")} miles`]);
+    if (v.batas_bulanan) facts.push(["Monthly cap on this rate", v.batas_bulanan]);
+    if (v.min_transaksi) facts.push(["Minimum", v.min_transaksi]);
+    if (v.alt.length) facts.push(["Other source says", `Rp ${v.alt.map(rpn).join(", Rp ")} per mile`]);
+  }
+  if (!isEarn) {
+    const q = kr.pengecualian_kutipan?.[spendKey];
+    facts.push(["From the terms", q?.kutipan || (kr.kategori_dikecualikan ? `Catalog note: "${kr.kategori_dikecualikan}"` : "The catalog has nothing on this for this card yet.")]);
+  }
+  LIM_ROWS.forEach(([k, l, get]) => { const val = get(kr); if (val != null && val !== "") facts.push([l, k === "fee" ? feeText(val) : String(val)]); });
+  const src = isEarn && v ? v.sumber_url : (kr.pengecualian_kutipan?.[spendKey]?.sumber_url || kr.sumber_url);
+  const asof = isEarn && v ? v.per_tanggal : (kr.pengecualian_kutipan?.[spendKey]?.per_tanggal || kr.per_tanggal);
   return (
-    <div className="ss-picker">
-      <article className="ss-winner">
-        <div><div className="ss-label">Use this card</div><div className="ss-card">{best.card}</div><div className="ss-muted small">{best.kartu}</div></div>
-        <div className="ss-ratebig"><span className="big">Rp {rpn(best.rupiah_per_mile)}</span><span className="unit">per {progName} mile</span>{best.flagged && <span className="ss-chip warn">Needs check</span>}</div>
-        <div className="ss-plain">Spending <b>Rp 1.000.000</b> earns about <b>{Math.floor(1000000 / best.rupiah_per_mile).toLocaleString("id-ID")} miles</b>.</div>
-        <dl className="ss-facts">
-          <dt>Conditions</dt><dd>{cleanNote(best.catatan) || "None stated in the source"}</dd>
-          {best.batas_bulanan && <><dt>Monthly cap</dt><dd>{best.batas_bulanan}</dd></>}
-          {best.alt.length > 0 && <><dt>Other figure</dt><dd>Rp {best.alt.map(rpn).join(", Rp ")} per mile in another source</dd></>}
-        </dl>
-        <div className="ss-src">{best.per_tanggal && <span>As of {best.per_tanggal}</span>}{best.sumber_url && <a href={best.sumber_url} target="_blank" rel="noopener noreferrer">{host(best.sumber_url)}</a>}</div>
-      </article>
-      <div className="ss-others">
-        <div className="ss-label">All your cards, {catName.toLowerCase()}</div>
-        <ol>{list.map((r, i) => (
-          <li key={r.kunci_baris} className={`ss-row${i === 0 ? " is-best" : ""}${r.flagged ? " is-flag" : ""}`}>
-            <span className="name">{r.card}{r.flagged && <span className="ss-chip warn">Needs check</span>}</span>
-            <span className="rpm">Rp {rpn(r.rupiah_per_mile)}</span>
-            <span className="track" aria-hidden="true"><i style={{ width: `${Math.max(4, (1000000 / r.rupiah_per_mile) / maxMiles * 100)}%` }} /></span>
-            <span className="meta">{cleanNote(r.catatan) || "No conditions stated"}</span>
-          </li>
-        ))}</ol>
-        <div className="ss-muted small" style={{ paddingTop: 8 }}>Longer bar = more miles for the same spend.</div>
-      </div>
+    <div className="ss-carddetail">
+      <div className="ss-muted small">{kr.kartu}</div>
+      <dl className="ss-facts">{facts.map(([k, val]) => <Fragment key={k}><dt>{k}</dt><dd>{val}</dd></Fragment>)}</dl>
+      <div className="ss-src">{asof && <span>As of {asof}</span>}{src && <a href={src} target="_blank" rel="noopener noreferrer">{host(src)}</a>}</div>
     </div>
   );
 }
@@ -518,42 +485,47 @@ const CSS = `
 .ss-linkbtn{all:unset;cursor:pointer;color:var(--accent-ink);font-weight:600;text-decoration:underline;text-underline-offset:2px}
 .ss-callout{font-size:13px;color:var(--muted);background:var(--sunk);border-radius:10px;padding:10px 14px} .ss-callout b{color:var(--ink)}
 .ss-empty{border:1px dashed var(--line);border-radius:14px;padding:20px;color:var(--muted);background:var(--surface)} .ss-empty b{color:var(--ink)}
-.ss-tablebox{background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow-x:auto}
-.ss-cmp{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%;font-size:13px}
-.ss-cmp th,.ss-cmp td{border-bottom:1px solid var(--line);padding:0}
-.ss-cmp thead th{background:var(--surface);font-weight:700;text-align:left;padding:12px 10px;vertical-align:bottom;min-width:120px;max-width:180px}
-.ss-bank{display:block;font-size:11px;font-weight:600;color:var(--faint)}
-.ss-rowh{position:sticky;left:0;z-index:2;background:var(--surface);text-align:left;font-weight:600;padding:10px 14px!important;min-width:168px;border-right:1px solid var(--line)}
-.ss-rowh small{display:block;font-weight:400;color:var(--muted);font-size:12px}
-.ss-group th{background:var(--sunk);text-align:left;padding:7px 14px!important;font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
-.ss-cmp td button{all:unset;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;gap:2px;width:100%;min-height:52px;padding:8px 10px;cursor:pointer;max-width:180px}
-.ss-cmp td button:hover{background:var(--sunk)}
-.ss-cmp td button[aria-pressed="true"]{box-shadow:inset 0 0 0 2px var(--accent)}
-.ss-best{background:var(--accent-soft)} .ss-best b{color:var(--accent-ink)}
-.ss-rate b{font-weight:700;font-size:14px;font-variant-numeric:tabular-nums} .ss-rate small{font-size:11px;color:var(--muted)}
+.ss-rate{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap} .ss-rate b{font-weight:700;font-size:14.5px;font-variant-numeric:tabular-nums} .ss-rate small{font-size:12px;color:var(--muted)}
 .ss-no{color:var(--hot);font-weight:700} .ss-lim{color:var(--warn);font-weight:700} .ss-yes{color:var(--good);font-weight:700} .ss-na{color:var(--faint)}
-.ss-text{font-size:12.5px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-.ss-detail{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 16px}
-.ss-detail h3{font-size:15px} .ss-detail p{margin:0;grid-column:1/-1;max-width:80ch;white-space:pre-wrap}
-.ss-src{grid-column:1/-1;font-size:12.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 14px}
+.ss-src{font-size:12.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 14px}
+.ss-facts{display:grid;grid-template-columns:minmax(120px,auto) 1fr;gap:6px 14px;font-size:13px;margin:0} .ss-facts dt{color:var(--muted)} .ss-facts dd{margin:0;overflow-wrap:anywhere}
+.ss-cmpgrid{display:grid;grid-template-columns:220px minmax(0,1fr);gap:18px;align-items:start}
+.ss-spendnav{display:flex;flex-direction:column;gap:14px;position:sticky;top:12px}
+.ss-spendgroup{display:flex;flex-direction:column;gap:2px}
+.ss-spendgroup .ss-label{padding:0 10px 4px}
+.ss-spend{all:unset;box-sizing:border-box;display:flex;flex-direction:column;padding:8px 10px;border-radius:8px;cursor:pointer;font-weight:600;font-size:13.5px;color:var(--ink)}
+.ss-spend small{font-weight:400;font-size:12px;color:var(--muted)}
+.ss-spend:hover{background:var(--sunk)}
+.ss-spend[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent-ink);box-shadow:inset 3px 0 0 var(--accent)}
+.ss-spend:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.ss-ranked{display:flex;flex-direction:column;gap:12px;min-width:0}
+.ss-summary{font-size:14px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px}
+.ss-cards{list-style:none;margin:0;padding:0;background:var(--surface);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.ss-cardrow{border-top:1px solid var(--line)} .ss-cardrow:first-child{border-top:0}
+.ss-cardrow.st-best{background:var(--accent-soft)}
+.ss-cardbtn{all:unset;box-sizing:border-box;width:100%;display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:12px;align-items:center;padding:12px 14px;cursor:pointer}
+.ss-cardbtn:hover{background:rgba(59,91,219,.04)} .ss-cardbtn:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.ss-cname{font-weight:600;display:flex;flex-direction:column;min-width:0} .ss-cname small{font-weight:500;font-size:12px;color:var(--faint)}
+.ss-verdict{text-align:right}
+.ss-chev{color:var(--faint);transition:transform .15s} .ss-cardbtn[aria-expanded="true"] .ss-chev{transform:rotate(180deg)}
+.ss-mark{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:999px;flex-shrink:0}
+.ss-mark.yes{background:#dcf5ea;color:var(--good)} .ss-mark.no{background:var(--hot-soft);color:var(--hot)}
+.ss-mark.lim{background:var(--warn-soft);color:var(--warn)} .ss-mark.na{background:var(--sunk);color:var(--faint)}
+.ss-carddetail{padding:0 14px 14px 50px;display:flex;flex-direction:column;gap:8px}
+@media (max-width:760px){
+  .ss-cmpgrid{grid-template-columns:1fr}
+  .ss-spendnav{position:static;flex-direction:row;flex-wrap:wrap;gap:10px}
+  .ss-spendgroup{flex-direction:row;flex-wrap:wrap;gap:6px;align-items:center}
+  .ss-spendgroup .ss-label{width:100%;padding:0}
+  .ss-spend{flex-direction:row;padding:6px 10px;border:1px solid var(--line);font-size:13px}
+  .ss-spend small{display:none}
+  .ss-spend[aria-pressed="true"]{box-shadow:none;border-color:var(--accent)}
+  .ss-carddetail{padding-left:14px}
+  .ss-facts{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){.ss-chev{transition:none}}
 .ss-legend{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:12.5px;color:var(--muted)} .ss-legend span{display:inline-flex;gap:8px;align-items:center}
 .ss-sw{display:inline-block;width:14px;height:14px;border-radius:4px;background:var(--accent-soft);border:1px solid var(--accent)}
-.ss-picker{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:16px}
-.ss-winner{background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:0 1px 2px rgba(16,24,40,.04),0 8px 24px -12px rgba(59,91,219,.18);padding:22px;display:flex;flex-direction:column;gap:14px}
-.ss-card{font-size:26px;font-weight:800;letter-spacing:-.01em;margin-top:6px}
-.ss-ratebig{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
-.ss-ratebig .big{font-size:38px;font-weight:800;letter-spacing:-.02em;color:var(--accent-ink);font-variant-numeric:tabular-nums}
-.ss-ratebig .unit{font-size:15px;color:var(--muted);font-weight:600}
-.ss-plain{background:var(--accent-soft);color:var(--accent-ink);border-radius:10px;padding:10px 12px;font-size:13.5px}
-.ss-facts{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:13px;margin:0} .ss-facts dt{color:var(--muted)} .ss-facts dd{margin:0}
-.ss-others{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:18px 18px 12px}
-.ss-others ol{list-style:none;margin:6px 0 0;padding:0}
-.ss-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:10px 0;border-top:1px solid var(--line);align-items:center}
-.ss-row:first-child{border-top:0}
-.ss-row .name{font-weight:600;display:flex;align-items:center;gap:8px;flex-wrap:wrap} .ss-row .rpm{font-weight:700;font-variant-numeric:tabular-nums}
-.ss-row .meta{grid-column:1/-1;color:var(--muted);font-size:12.5px}
-.ss-row .track{grid-column:1/-1;height:6px;border-radius:4px;background:var(--sunk);overflow:hidden} .ss-row .track i{display:block;height:100%;background:var(--bar);border-radius:4px}
-.ss-row.is-best .track i{background:var(--accent)} .ss-row.is-flag .track i{background:repeating-linear-gradient(90deg,var(--warn) 0 4px,transparent 4px 7px)}
 .ss-filterbar,.ss-match{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:12px}
 .ss-frow{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center} .ss-frow>.ss-label{min-width:92px}
 .ss-toggle{height:32px;padding:0 12px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--muted);font:600 12.5px/1 ${FF};cursor:pointer}
@@ -579,6 +551,6 @@ const CSS = `
 .ss-match th{text-align:left;font-weight:600;color:var(--muted);padding:6px 8px;border-bottom:1px solid var(--line)}
 .ss-match td{padding:6px 8px;border-bottom:1px solid var(--line)}
 .ss-match select{height:34px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font:500 13px ${FF};padding:0 8px;width:100%;max-width:360px}
-@media (max-width:880px){.ss-picker{grid-template-columns:1fr}}
+
 @media (max-width:560px){.ss-promo{grid-template-columns:1fr;gap:6px}.ss-when{flex-direction:row;gap:8px;align-items:baseline}.ss-ratebig .big{font-size:32px}}
 `;
