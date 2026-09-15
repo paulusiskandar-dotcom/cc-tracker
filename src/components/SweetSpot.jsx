@@ -66,7 +66,8 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 
 // "Bank Mega" / "PT Bank ..." → "mega", so issuer names match the account's bank.
 const bankNorm = b => String(b || "").toLowerCase().replace(/^(pt\.?\s+)?bank\s+/, "").trim();
-const progKey = p => String(p || "").toLowerCase().replace(/[^a-z]/g, "");
+const PROG_ALIAS = { united: "unitedmileageplus" };
+const progKey = p => { const k = String(p || "").toLowerCase().replace(/[^a-z]/g, ""); return PROG_ALIAS[k] || k; };
 const rpn = n => Math.round(Number(n)).toLocaleString("id-ID");
 const host = u => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return "source"; } };
 const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
@@ -158,7 +159,17 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
   if (error) return <Frame><div className="ss-empty"><b>Could not load SweetSpot data.</b> {error} <button className="ss-btn" onClick={load}>Try again</button></div></Frame>;
   if (!data) return <Frame><div className="ss-empty">Loading earn rates, promos and news…</div></Frame>;
 
-  const progName = PROGRAMS.find(p => p[0] === prog)[1];
+  // other airline programmes your matched cards can reach (Flying Blue via ALL Accor, JAL via D-Point, ...)
+  const PROG_LABEL = { flyingblue: "Flying Blue", qatarprivilegeclub: "Qatar Privilege Club", britishairwaysexecutiveclub: "British Airways Club",
+    emiratesskywards: "Emirates Skywards", etihadguest: "Etihad Guest", turkishmilessmiles: "Turkish Miles&Smiles", thairoyalorchidplus: "Thai Royal Orchid Plus",
+    koreanskypass: "Korean SKYPASS", unitedmileageplus: "United MileagePlus", qantasfrequentflyer: "Qantas Frequent Flyer",
+    vietnamlotusmiles: "Vietnam Lotusmiles", iberiaplus: "Iberia Plus", finnairplus: "Finnair Plus", virginaustraliavelocity: "Virgin Australia Velocity",
+    airasia: "AirAsia rewards", linkmiles: "LinkMiles", jal: "JAL Mileage Bank", ana: "ANA Mileage Club", lifemiles: "LifeMiles" };
+  const mainKeys = new Set(PROGRAMS.map(p => p[0]));
+  const otherProgs = [...new Set((data.earn || []).filter(r => cols.some(c => c.catalog === r.kartu) && !isBankPoints(r) && r.rupiah_per_mile != null)
+    .map(r => progKey(r.program)).filter(k => k && !mainKeys.has(k) && PROG_LABEL[k]))]
+    .map(k => [k, PROG_LABEL[k]]).sort((a, b) => a[1].localeCompare(b[1]));
+  const progName = (PROGRAMS.find(p => p[0] === prog) || otherProgs.find(p => p[0] === prog) || [prog, prog])[1];
   const latestSync = [...data.kartu, ...data.earn, ...data.promo, ...data.news].map(r => r.updated_at).sort().pop();
 
   /* ── promos ── */
@@ -202,7 +213,15 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
         {tab === "compare" && (
           <div>
             <div className="ss-label" id="ss-prog-l">Collecting</div>
-            <Seg labelledBy="ss-prog-l" items={PROGRAMS} value={prog} onChange={setProg} />
+            <div className="ss-frow" style={{ gap: 8 }}>
+              <Seg labelledBy="ss-prog-l" items={PROGRAMS} value={prog} onChange={setProg} />
+              {otherProgs.length > 0 && (
+                <select id="ss-prog-other" className="ss-select" aria-label="Other airline programme" value={mainKeys.has(prog) ? "" : prog} onChange={e => e.target.value && setProg(e.target.value)}>
+                  <option value="">Other programmes…</option>
+                  {otherProgs.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                </select>
+              )}
+            </div>
           </div>
         )}
       </header>
@@ -750,6 +769,7 @@ const CSS = `
 .ss-btn{height:34px;padding:0 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:600 13px/1 ${FF};cursor:pointer;white-space:nowrap}
 .ss-btn:hover{border-color:var(--accent);color:var(--accent-ink)} .ss-btn.small{height:28px;padding:0 10px;font-size:12px}
 .ss-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff} .ss-btn:disabled{opacity:.6;cursor:default}
+.ss-select{height:42px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font:600 13px/1 ${FF};padding:0 10px}
 .ss-linkbtn{all:unset;cursor:pointer;color:var(--accent-ink);font-weight:600;text-decoration:underline;text-underline-offset:2px}
 .ss-callout{font-size:13px;color:var(--muted);background:var(--sunk);border-radius:10px;padding:10px 14px} .ss-callout b{color:var(--ink)}
 .ss-empty{border:1px dashed var(--line);border-radius:14px;padding:20px;color:var(--muted);background:var(--surface)} .ss-empty b{color:var(--ink)}
