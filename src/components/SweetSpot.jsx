@@ -17,14 +17,21 @@ import SweetSpotSpending from "./SweetSpotSpending";
 
 const FF = "Figtree, system-ui, -apple-system, sans-serif";
 const PROGRAMS = [["krisflyer", "KrisFlyer"], ["asiamiles", "Asia Miles"], ["garudamiles", "GarudaMiles"]];
-const CATS = [["everyday", "Everyday"], ["dining", "Dining"], ["travel", "Travel"], ["online", "Online"], ["overseas", "Overseas"]];
-const CAT_OF = { general: "everyday", dining: "dining", travel: "travel", online: "online", ecommerce: "online", fx: "overseas" };
+const CATS = [["everyday", "Everyday"], ["dining", "Dining"], ["groceries", "Groceries"], ["travel", "Travel"], ["online", "Online"], ["overseas", "Overseas"]];
+const CAT_OF = { general: "everyday", dining: "dining", groceries: "groceries", travel: "travel", online: "online", ecommerce: "online", fx: "overseas" };
+// Bonus categories the cardholder picks (not in the public catalog). Catalog rows whose
+// note names the bonus follow the holder's choice instead of their catalog category.
+const BONUS_CHOICES = [{
+  match: /jenius/i, nama: "Double Yay", re: /double yay/i, sumber: "https://www.jenius.com/pages/yaypoints",
+  options: [["groceries", "Belanja Bulanan"], ["dining", "Makanan & Minuman"], ["travel", "Perjalanan & Hiburan"], ["fashion", "Kecantikan & Fashion"]],
+}];
 const EXC_ROWS = [
   ["utilitas", "Utilities", "Electricity, water, internet", /utilit|listrik|\bpln\b|\bair\b|internet/i],
   ["cicilan", "Instalments", "Converted to cicilan", /cicilan|instal/i],
   ["asuransi", "Insurance", "Premiums", /asuransi|insuran|premi/i],
   ["qris", "QRIS", "Scan to pay in a bank app", /qris/i],
   ["pajak", "Tax & government", "Tax, PBB, state payments", /pajak|penerimaan negara|\bpbb\b|\btax\b/i],
+  ["paper", "Paper.id", "Business invoice payments", /paper\.?id|invoic|tagihan bisnis|pembayaran bisnis/i],
   ["ewallet_topup", "E-wallet top-up", "OVO, GoPay, DANA", /e-?wallet|top ?up|dompet/i],
   ["spbu", "Fuel", "Petrol stations", /spbu|bensin|fuel/i],
 ];
@@ -81,14 +88,15 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [kartu, earn, promo, news, pemetaan] = await Promise.all([
+      const [kartu, earn, promo, news, pemetaan, mcc] = await Promise.all([
         fetchAll("kartu_miles", q => q.order("kartu")),
         fetchAll("earn_rate_kartu", q => q.order("kartu")),
         fetchAll("promo_bank", q => q.order("periode_akhir", { ascending: true, nullsFirst: false })),
         fetchAll("miles_update", q => q.order("terbit", { ascending: false })),
         fetchAll("pemetaan_kartu", q => q),
+        fetchAll("mcc_merchant", q => q.order("merchant")),
       ]);
-      setData({ kartu, earn, promo, news, pemetaan });
+      setData({ kartu, earn, promo, news, pemetaan, mcc });
     } catch (e) { setError(e.message); }
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -104,13 +112,18 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
   const cols = useMemo(() => creditCards
     .map(a => ({ account: a, map: mapByAccount[a.id] }))
     .filter(x => x.map?.status === "matched" && kartuByName[x.map.kartu_katalog])
-    .map(x => ({ name: x.account.name, catalog: x.map.kartu_katalog, bank: x.account.bank_name || kartuByName[x.map.kartu_katalog]?.bank || "" })),
+    .map(x => {
+      const b = x.map.pengaturan?.bonus_pilihan; const def = b && BONUS_CHOICES.find(d => d.nama === b.nama);
+      return { name: x.account.name, catalog: x.map.kartu_katalog, bank: x.account.bank_name || kartuByName[x.map.kartu_katalog]?.bank || "",
+        bonus: b && def ? { ...b, re: def.re } : null };
+    }),
   [creditCards, mapByAccount, kartuByName]);
   const unmatched = creditCards.filter(a => !mapByAccount[a.id]);
 
   // lowest clean airline-miles figure per card × category × program
-  const earnFor = useCallback((catalog, c) => {
-    const rs = (data?.earn || []).filter(r => r.kartu === catalog && CAT_OF[r.kategori] === c && progKey(r.program) === prog && !isBankPoints(r) && r.rupiah_per_mile != null)
+  const earnFor = useCallback((col, c) => {
+    const catOf = r => (col.bonus && col.bonus.re.test(r.catatan || "")) ? col.bonus.kategori : CAT_OF[r.kategori];
+    const rs = (data?.earn || []).filter(r => r.kartu === col.catalog && catOf(r) === c && progKey(r.program) === prog && !isBankPoints(r) && r.rupiah_per_mile != null)
       .sort((a, b) => a.rupiah_per_mile - b.rupiah_per_mile);
     if (!rs.length) return null;
     const clean = rs.filter(r => !needsCheck(r)); const pick = clean[0] || rs[0];
@@ -183,7 +196,7 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
       </nav>
 
       {tab === "compare" && (
-        <CompareView cols={cols} kartuByName={kartuByName} earnFor={earnFor} progName={progName} spend={spend} setSpend={setSpend} />
+        <CompareView cols={cols} kartuByName={kartuByName} earnFor={earnFor} progName={progName} spend={spend} setSpend={setSpend} mcc={data.mcc} />
       )}
 
       {tab === "promo" && (
@@ -284,7 +297,7 @@ function Seg({ items, value, onChange, label, labelledBy }) {
 }
 
 // Left: what you are about to pay for. Right: your cards, best first, as a checklist.
-function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend }) {
+function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mcc = [] }) {
   const [open, setOpen] = useState(null);
   const [type, key] = spend.split(":");
   const isEarn = type === "e";
@@ -294,7 +307,7 @@ function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend }) 
   const rows = cols.map(c => {
     const kr = kartuByName[c.catalog] || {};
     if (isEarn) {
-      const v = earnFor(c.catalog, key);
+      const v = earnFor(c, key);
       return { c, kr, v, status: !v ? "unknown" : v.flagged ? "check" : "yes", rpm: v ? Number(v.rupiah_per_mile) : Infinity };
     }
     const val = kr[`pengecualian_${key}`];
@@ -339,6 +352,11 @@ function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend }) 
         </nav>
         <div className="ss-ranked">
           <div className="ss-summary">{summary}</div>
+          <MerchantTips tips={mcc.filter(t => {
+            const mine = cols.some(c => c.catalog === t.kartu) || cols.some(c => t.bank && c.bank && c.bank.toLowerCase().startsWith(String(t.bank).toLowerCase()));
+            const here = t.kategori_spending === key || (key === "utilitas" && /listrik|\bpln\b|tagihan/i.test(t.dampak || ""));
+            return mine && here;
+          })} />
           <ol className="ss-cards">
             {rows.map(r => {
               const id = r.c.name; const isOpen = open === id;
@@ -346,7 +364,10 @@ function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend }) 
                 <li key={id} className={`ss-cardrow st-${r.status}`}>
                   <button type="button" className="ss-cardbtn" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : id)}>
                     <Mark status={r.status} />
-                    <span className="ss-cname">{r.c.name}<small>{r.c.bank}</small></span>
+                    <span className="ss-cname">{r.c.name}<small>{r.c.bank}</small>
+                      {r.c.bonus && <small className="ss-bonus">{r.c.bonus.nama}: {r.c.bonus.label_bank}</small>}
+                      {cautions(r, isEarn).length > 0 && <span className="ss-caution"><AlertTriangle size={12} aria-hidden="true" /><span>{cautions(r, isEarn).join(" · ")}</span></span>}
+                    </span>
                     <span className="ss-verdict">{verdict(r, isEarn)}</span>
                     <ChevronDown size={16} className="ss-chev" aria-hidden="true" />
                   </button>
@@ -363,6 +384,52 @@ function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend }) 
         </div>
       </div>
     </section>
+  );
+}
+
+// Short caps shown right under the card name, straight from the source fields.
+function cautions(r, isEarn) {
+  if (!isEarn || r.status === "unknown") return [];
+  const out = []; const v = r.v || {}; const kr = r.kr || {};
+  if (v.batas_bulanan) {
+    const n = Number(v.batas_bulanan);
+    out.push(`Cap on this rate: ${Number.isFinite(n) ? (/spend/i.test(v.catatan || "") ? `spend Rp ${rpn(n)} a month` : rpn(n)) : v.batas_bulanan}`);
+  }
+  const cap = kr.batas_perolehan_bulanan || kr.batas_perolehan; if (cap) out.push(`Earn cap: ${cap}`);
+  if (kr.batas_konversi) out.push(`Conversion cap: ${kr.batas_konversi}`);
+  return out;
+}
+
+function MerchantTips({ tips }) {
+  const [open, setOpen] = useState(null);
+  if (!tips.length) return null;
+  const STATUS = { terverifikasi: ["acc", "Verified"], belum_diverifikasi: ["warn", "Not verified"], bertentangan: ["hot", "Conflicts with official terms"], kedaluwarsa: ["soft", "Outdated"] };
+  const SRC = { resmi: "Official", komunitas: "Community tip", pribadi: "Your note" };
+  return (
+    <div className="ss-tips">
+      <div className="ss-label">Merchant tips (MCC)</div>
+      {tips.map(t => {
+        const st = STATUS[t.status_verifikasi] || ["soft", t.status_verifikasi || "Unknown status"]; const isOpen = open === t.kunci;
+        return (
+          <div key={t.kunci} className="ss-tip">
+            <button type="button" className="ss-tipbtn" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : t.kunci)}>
+              <span><b>{t.merchant}</b>{t.kartu ? ` · ${t.kartu}` : t.bank ? ` · ${t.bank}` : ""}<br /><span className="ss-muted">{t.dampak}</span></span>
+              <span className="ss-tipchips"><span className="ss-chip soft">{SRC[t.sumber_jenis] || t.sumber_jenis}</span><span className={`ss-chip ${st[0]}`}>{st[1]}</span></span>
+            </button>
+            {isOpen && (
+              <dl className="ss-facts ss-tipdetail">
+                {t.mcc_kode && <><dt>MCC</dt><dd>{t.mcc_kode}{t.kategori_mcc ? ` · ${t.kategori_mcc}` : ""}</dd></>}
+                {!t.mcc_kode && t.kategori_mcc && <><dt>MCC category</dt><dd>{t.kategori_mcc} (code not recorded)</dd></>}
+                {t.bukti && <><dt>Evidence</dt><dd>{t.bukti}</dd></>}
+                {t.bertentangan_dengan && <><dt>Official terms say</dt><dd>{t.bertentangan_dengan}</dd></>}
+                {t.catatan && <><dt>Note</dt><dd>{t.catatan}</dd></>}
+                <dt>Source</dt><dd>{t.per_tanggal && `As of ${t.per_tanggal} · `}{t.sumber_url ? <a href={t.sumber_url} target="_blank" rel="noopener noreferrer">{host(t.sumber_url)}</a> : "No link"}</dd>
+              </dl>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -385,6 +452,7 @@ function verdict(r, isEarn) {
 function CardDetail({ r, isEarn, spendKey }) {
   const kr = r.kr; const v = r.v;
   const facts = [];
+  if (r.c.bonus) facts.push([`Your ${r.c.bonus.nama}`, `${r.c.bonus.label_bank} (set ${r.c.bonus.diatur_pada || "by you"}). ${r.c.bonus.nama} rates follow this choice, not the catalog category.`]);
   if (isEarn && v) {
     facts.push(["Conditions", cleanNote(v.catatan) || "None stated in the source"]);
     facts.push(["Rp 1.000.000 earns", `about ${Math.floor(1000000 / r.rpm).toLocaleString("id-ID")} miles`]);
@@ -412,9 +480,11 @@ function MatchPanel({ user, cards, kartu, mapByAccount, onSaved }) {
   const [draft, setDraft] = useState(() => Object.fromEntries(cards.map(a => {
     const m = mapByAccount[a.id]; return [a.id, m ? (m.status === "not_in_catalog" ? "__none" : m.kartu_katalog) : ""];
   })));
+  const [bonusDraft, setBonusDraft] = useState(() => Object.fromEntries(cards.map(a => [a.id, mapByAccount[a.id]?.pengaturan?.bonus_pilihan?.kategori || ""])));
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
   const names = kartu.map(k => k.kartu).sort();
+  const choiceFor = id => { const v = draft[id]; return v && v !== "__none" ? BONUS_CHOICES.find(d => d.match.test(v)) : null; };
   const save = async () => {
     setSaving(true); setMsg(null);
     try {
@@ -422,8 +492,18 @@ function MatchPanel({ user, cards, kartu, mapByAccount, onSaved }) {
       cards.forEach(a => {
         const v = draft[a.id];
         if (!v) { if (mapByAccount[a.id]) deletes.push(a.id); return; }
+        // every object carries `pengaturan`: supabase-js upserts the union of keys,
+        // so leaving it out on one row would wipe that card's saved settings.
+        const def = choiceFor(a.id); const pick = bonusDraft[a.id];
+        const prev = mapByAccount[a.id]?.pengaturan || {};
+        let pengaturan = prev;
+        if (def) {
+          const opt = def.options.find(o => o[0] === pick);
+          pengaturan = { ...prev, bonus_pilihan: opt ? { nama: def.nama, kategori: opt[0], label_bank: opt[1], diatur_pada: todayISO(), sumber: "Paulus" } : undefined };
+          if (!opt) delete pengaturan.bonus_pilihan;
+        }
         upserts.push({ user_id: user.id, account_id: a.id, status: v === "__none" ? "not_in_catalog" : "matched",
-          kartu_katalog: v === "__none" ? null : v, updated_at: new Date().toISOString() });
+          kartu_katalog: v === "__none" ? null : v, pengaturan, updated_at: new Date().toISOString() });
       });
       if (upserts.length) { const { error } = await supabase.from("pemetaan_kartu").upsert(upserts, { onConflict: "user_id,account_id" }); if (error) throw error; }
       if (deletes.length) { const { error } = await supabase.from("pemetaan_kartu").delete().in("account_id", deletes); if (error) throw error; }
@@ -436,7 +516,7 @@ function MatchPanel({ user, cards, kartu, mapByAccount, onSaved }) {
       <div className="ss-head"><div><h2 style={{ fontSize: 16 }}>Match your cards</h2>
         <div className="ss-sub">Pick the exact product for each card. Names that only look alike are never matched automatically.</div></div></div>
       <div className="ss-scroll"><table>
-        <thead><tr><th scope="col">Your card</th><th scope="col">Catalog product</th></tr></thead>
+        <thead><tr><th scope="col">Your card</th><th scope="col">Catalog product</th><th scope="col">Your bonus category</th></tr></thead>
         <tbody>{cards.map(a => (
           <tr key={a.id}><td><b>{a.name}</b></td><td>
             <select id={`ss-match-${a.id}`} aria-label={`Catalog product for ${a.name}`} value={draft[a.id]} onChange={e => setDraft(d => ({ ...d, [a.id]: e.target.value }))}>
@@ -444,6 +524,11 @@ function MatchPanel({ user, cards, kartu, mapByAccount, onSaved }) {
               <option value="__none">Not in catalog</option>
               {names.map(n => <option key={n} value={n}>{n}</option>)}
             </select>
+          </td><td>{choiceFor(a.id) ? (
+            <select id={`ss-bonus-${a.id}`} aria-label={`${choiceFor(a.id).nama} category for ${a.name}`} value={bonusDraft[a.id]} onChange={e => setBonusDraft(d => ({ ...d, [a.id]: e.target.value }))}>
+              <option value="">Not set</option>
+              {choiceFor(a.id).options.map(([k, l]) => <option key={k} value={k}>{choiceFor(a.id).nama}: {l}</option>)}
+            </select>) : <span className="ss-muted small">None</span>}
           </td></tr>
         ))}</tbody>
       </table></div>
@@ -507,6 +592,16 @@ const CSS = `
 .ss-cardbtn:hover{background:rgba(59,91,219,.04)} .ss-cardbtn:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .ss-cname{font-weight:600;display:flex;flex-direction:column;min-width:0} .ss-cname small{font-weight:500;font-size:12px;color:var(--faint)}
 .ss-verdict{text-align:right}
+.ss-bonus{color:var(--accent-ink)!important;font-weight:600!important}
+.ss-caution{display:flex;gap:5px;align-items:flex-start;margin-top:3px;font-size:12px;font-weight:500;color:var(--warn);line-height:1.35}
+.ss-caution svg{flex-shrink:0;margin-top:2px}
+.ss-caution>span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ss-tips{display:flex;flex-direction:column;gap:6px}
+.ss-tip{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.ss-tipbtn{all:unset;box-sizing:border-box;width:100%;display:flex;justify-content:space-between;gap:12px;padding:10px 14px;cursor:pointer;font-size:13px;flex-wrap:wrap}
+.ss-tipbtn:hover{background:var(--sunk)} .ss-tipbtn:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.ss-tipchips{display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap}
+.ss-tipdetail{padding:0 14px 12px}
 .ss-chev{color:var(--faint);transition:transform .15s} .ss-cardbtn[aria-expanded="true"] .ss-chev{transform:rotate(180deg)}
 .ss-mark{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:999px;flex-shrink:0}
 .ss-mark.yes{background:#dcf5ea;color:var(--good)} .ss-mark.no{background:var(--hot-soft);color:var(--hot)}

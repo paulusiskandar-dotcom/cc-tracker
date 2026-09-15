@@ -7,6 +7,8 @@
 //   TELEGRAM_AUTHORIZED_USER_ID (Ryūsei satu pengguna).
 // - Kolom yang tidak dikenal → seluruh permintaan ditolak, tidak ada yang ditulis.
 // - Nilai kosong ("") disimpan NULL; angka dan boolean dikonversi, teks apa adanya.
+// - Kolom yang TIDAK dikirim untuk suatu baris dibiarkan apa adanya di database
+//   (pembaruan sebagian aman, juga kalau baris dalam satu kiriman berbeda kolom).
 // - earn_rate_kartu: `kunci` dari n8n tidak unik (29 kembar per 15 Sep 2026),
 //   jadi kunci upsert = `kunci_baris`. Kalau tidak dikirim, diturunkan dari
 //   kunci + varian, atau kunci + hash isi baris.
@@ -34,7 +36,7 @@ const TABLES: Record<string, Spec> = {
         "batas_konversi", "min_konversi", "biaya_konversi", "masa_berlaku_poin", "konversi_otomatis", "diperkaya_pada",
         "status_pengayaan", "hash_sumber", "pengecualian_utilitas", "pengecualian_cicilan", "pengecualian_asuransi",
         "pengecualian_qris", "pengecualian_pajak", "pengecualian_ewallet_topup", "pengecualian_spbu",
-        "pengecualian_pendidikan", "pengecualian_virtual_account", "batas_perolehan_bulanan", "asal"]),
+        "pengecualian_pendidikan", "pengecualian_virtual_account", "pengecualian_paper", "batas_perolehan_bulanan", "asal"]),
       ...t(["keyakinan", "kelipatan_transaksi_rp", "biaya_konversi_rp", "iuran_tahunan_utama_rp"], "num"),
       pengecualian_kutipan: "json",
     },
@@ -57,6 +59,11 @@ const TABLES: Record<string, Spec> = {
       ...t(["miles_poin", "butuh_status_prioritas", "detail_kosong"], "bool"),
       kartu_berlaku: "json",
     },
+  },
+  mcc_merchant: {
+    key: "kunci", prunable: false,
+    cols: t(["kunci", "merchant", "mcc_kode", "kategori_mcc", "kategori_spending", "kartu", "bank", "dampak", "sumber_jenis",
+      "sumber_url", "bukti", "status_verifikasi", "bertentangan_dengan", "per_tanggal", "catatan", "asal"]),
   },
   miles_update: {
     key: "url", prunable: false,
@@ -187,10 +194,25 @@ Deno.serve(async (req) => {
     (data ?? []).forEach((d: Record<string, unknown>) => existing.add(String(d[spec.key])));
   }
 
-  // 4) upsert
-  for (let i = 0; i < rows.length; i += 500) {
-    const { error } = await sb.from(table).upsert(rows.slice(i, i + 500), { onConflict: `user_id,${spec.key}` });
-    if (error) return json(500, { ok: false, error: `Gagal menulis ${table}: ${error.message}`, sudah_ditulis_sebelum_gagal: i });
+  // 4) upsert — dikelompokkan per susunan kolom. supabase-js memakai gabungan
+  //    kolom semua objek dalam satu upsert, jadi baris yang tidak menyebut suatu
+  //    kolom akan menimpanya dengan NULL. Kejadian 15 Sep 2026: baris Jenius
+  //    (utilitas/cicilan/qris/pajak/min_konversi) + baris Bonvoy (tanpa kolom
+  //    itu) dalam satu kiriman → lima kolom Bonvoy jadi NULL. Satu kelompok =
+  //    kolom identik, jadi kolom yang tidak dikirim tetap utuh.
+  const groups = new Map<string, Record<string, unknown>[]>();
+  for (const r of rows) {
+    const sig = Object.keys(r).sort().join(",");
+    if (!groups.has(sig)) groups.set(sig, []);
+    groups.get(sig)!.push(r);
+  }
+  let written = 0;
+  for (const g of groups.values()) {
+    for (let i = 0; i < g.length; i += 500) {
+      const { error } = await sb.from(table).upsert(g.slice(i, i + 500), { onConflict: `user_id,${spec.key}` });
+      if (error) return json(500, { ok: false, error: `Gagal menulis ${table}: ${error.message}`, sudah_ditulis_sebelum_gagal: written });
+      written += Math.min(500, g.length - i);
+    }
   }
 
   // 5) pangkas baris katalog yang tak ikut sinkronisasi ini

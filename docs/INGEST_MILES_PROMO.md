@@ -32,6 +32,7 @@ x-ingest-key: <nilai secret RYUSEI_INGEST_KEY>
 - Nilai `""` disimpan sebagai NULL. Kolom angka menerima angka atau teks angka; kolom boolean menerima `true/false/1/0`. Nilai yang tidak bisa dikonversi = seluruh permintaan ditolak dengan nomor baris dan kolomnya.
 - Teks disimpan apa adanya: `[PERLU CEK …]`, `[POIN BANK/HOTEL …]`, dan `per_tanggal` seperti `2026-01 approx` tidak diubah.
 - Kunci sama dua kali dalam satu batch: baris terakhir yang dipakai.
+- **Pembaruan sebagian aman.** Kolom yang tidak dikirim untuk suatu baris dibiarkan apa adanya di database, juga kalau baris-baris dalam satu kiriman membawa kolom yang berbeda (endpoint mengelompokkannya per susunan kolom). Sebelum 15 Sep 2026 sore ini tidak benar: kiriman campuran menimpa kolom yang tidak disebut dengan NULL.
 
 ## Tabel dan kunci upsert
 
@@ -42,6 +43,7 @@ x-ingest-key: <nilai secret RYUSEI_INGEST_KEY>
 | `kartu_miles` | `kartu` | ya |
 | `program_miles` | `program_id` | ya |
 | `earn_rate_kartu` | `kunci_baris` | ya |
+| `mcc_merchant` | `kunci` | tidak |
 
 ### earn_rate_kartu: kenapa bukan `kunci`
 
@@ -69,12 +71,14 @@ Jangan kirim `prune: true` kalau salah satu batch sebelumnya gagal: baris yang b
 **program_miles**: program_id, nama, jenis, kedaluwarsa_tipe, kedaluwarsa_bulan, catatan, sumber_url, per_tanggal, status_verifikasi, asal
 
 **kartu_miles**: kartu, bank, jaringan, jenis, program, iuran_tahunan, iuran_bisa_dihapus, hold_dana, welcome_bonus, fitur, catatan, sumber_url, per_tanggal, keyakinan (angka), kategori_dikecualikan, batas_perolehan, batas_konversi, min_konversi, biaya_konversi, masa_berlaku_poin, konversi_otomatis, diperkaya_pada, status_pengayaan, hash_sumber, asal
-pengayaan: pengecualian_utilitas, pengecualian_cicilan, pengecualian_asuransi, pengecualian_qris, pengecualian_pajak, pengecualian_ewallet_topup, pengecualian_spbu, pengecualian_pendidikan, pengecualian_virtual_account (masing-masing hanya `tidak_dapat` | `terbatas` | `dapat` | `tidak_disebut`; nilai lain ditolak database), pengecualian_kutipan (JSON `{kategori: {kutipan, sumber_url, per_tanggal}}`, kunci kategori tanpa awalan `pengecualian_`), kelipatan_transaksi_rp (angka), batas_perolehan_bulanan, biaya_konversi_rp (angka), iuran_tahunan_utama_rp (angka)
+pengayaan: pengecualian_utilitas, pengecualian_cicilan, pengecualian_asuransi, pengecualian_qris, pengecualian_pajak, pengecualian_ewallet_topup, pengecualian_spbu, pengecualian_pendidikan, pengecualian_virtual_account, pengecualian_paper (Paper.id / platform tagihan bisnis) (masing-masing hanya `tidak_dapat` | `terbatas` | `dapat` | `tidak_disebut`; nilai lain ditolak database), pengecualian_kutipan (JSON `{kategori: {kutipan, sumber_url, per_tanggal}}`, kunci kategori tanpa awalan `pengecualian_`), kelipatan_transaksi_rp (angka), batas_perolehan_bulanan, biaya_konversi_rp (angka), iuran_tahunan_utama_rp (angka)
 
 **earn_rate_kartu**: kunci_baris, kunci, varian, kartu, bank, kategori, program, rupiah_per_mile (angka), cashback_pct (angka), min_transaksi, batas_bulanan, satuan (`miles_maskapai` | `poin_bank` | `poin_hotel` | `cashback`), perlu_cek (boolean), catatan, sumber_url, per_tanggal, asal
 
 **promo_bank**: url, bank, judul, kategori, merchant, benefit, minimal_transaksi, kartu_atau_produk, periode_mulai, periode_akhir, kode_promo, syarat_penting, miles_poin (boolean), ditemukan, status
 pengayaan: jenis_produk, bank_penerbit_kartu, kartu_berlaku (JSON), jenis_reward, program, butuh_status_prioritas (boolean), detail_kosong (boolean)
+
+**mcc_merchant**: kunci (`merchant|kartu_atau_bank|kategori_spending`), merchant, mcc_kode (kosongkan kalau kode tidak diketahui; jangan ditebak), kategori_mcc, kategori_spending (`everyday` | `dining` | `groceries` | `travel` | `online` | `overseas` | `utilitas` | `cicilan` | `asuransi` | `qris` | `pajak` | `paper` …), kartu, bank, dampak, sumber_jenis (`resmi` | `komunitas` | `pribadi`), sumber_url, bukti, status_verifikasi (`terverifikasi` | `belum_diverifikasi` | `bertentangan` | `kedaluwarsa`), bertentangan_dengan (kutipan resmi yang berlawanan), per_tanggal, catatan, asal
 
 **miles_update**: url, judul, terbit, jenis, relevan_miles (boolean), program, bank, kartu, rate_lama, rate_baru, berlaku_mulai, berlaku_akhir, ringkasan, aksi, sumber, ditemukan, status
 
@@ -132,6 +136,10 @@ Node **HTTP Request** di akhir tiap alur: method POST, URL di atas, header `x-in
 - klien login (anon + RLS) tidak bisa INSERT ke `promo_bank`, tetapi bisa membaca
 - isi awal dari n8n: program_miles 20, kartu_miles 57, earn_rate_kartu 319, promo_bank 85, miles_update 10 (sync_id katalog `awal-20260915`)
 
+## Kenapa mcc_merchant ada
+
+Kartu tidak melihat "belanja online" atau "bayar listrik"; kartu melihat MCC yang dikirim bank acquiring. Jenius menulisnya resmi: kategori Double Yay *"mengikuti Merchant Category Code (MCC) Visa yang ditentukan oleh bank acquiring penyedia EDC"*. Karena itu tips seperti "Lazada tercatat sebagai groceries" (dari grup Telegram) disimpan sebagai baris data dengan sumber, bukti, dan pernyataan resmi yang bertentangan — bukan diubah jadi aturan kartu.
+
 ## Tabel pendamping: pemetaan_kartu
 
-Keputusan Paulus kartu Ryūsei ↔ produk katalog (`account_id` → `kartu_katalog`, `status` `matched` | `not_in_catalog`). Diisi dari tombol **Match cards** di SweetSpot, bukan dari n8n. Nama yang hanya mirip tidak pernah dipetakan otomatis.
+Keputusan Paulus kartu Ryūsei ↔ produk katalog (`account_id` → `kartu_katalog`, `status` `matched` | `not_in_catalog`). Diisi dari tombol **Match cards** di SweetSpot, bukan dari n8n. Kolom `pengaturan` (jsonb) menyimpan pilihan pribadi, mis. `{"bonus_pilihan": {"nama": "Double Yay", "kategori": "groceries", "label_bank": "Belanja Bulanan"}}`; baris katalog yang catatannya menyebut bonus itu dipindah ke kategori pilihan. Nama yang hanya mirip tidak pernah dipetakan otomatis.
