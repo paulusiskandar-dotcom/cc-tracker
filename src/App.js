@@ -440,7 +440,7 @@ function Finance({ user, signOut }) {
       case "reports":      return <Reports      {...shared} />;
       case "budget":       return <Budget       {...shared} />;
       case "tags":         return <Tags         user={user} ledger={ledger} onRefresh={loadData} />;
-      case "sweetspot":    return <SweetSpot    ledger={ledger} accounts={accounts} />;
+      case "sweetspot":    return <SweetSpot    user={user} ledger={ledger} accounts={accounts} />;
       case "calendar":     return <Calendar     {...shared} />;
       case "billing":      return <Billing      {...shared} />;
       case "settings":     return <Settings     {...shared} signOut={signOut} initialTab={settingsInitialTab} />;
