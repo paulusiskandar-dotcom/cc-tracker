@@ -64,6 +64,8 @@ const BANK_ALIAS = { jenius: ["jenius", "smbc", "btpn"], cimb: ["cimb"], skorcar
 const DEFAULT_PREFS = { interests: ["kuliner", "travel", "belanja", "hiburan"], hidden: [], hideWealth: true };
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+// "Bank Mega" / "PT Bank ..." → "mega", so issuer names match the account's bank.
+const bankNorm = b => String(b || "").toLowerCase().replace(/^(pt\.?\s+)?bank\s+/, "").trim();
 const progKey = p => String(p || "").toLowerCase().replace(/[^a-z]/g, "");
 const rpn = n => Math.round(Number(n)).toLocaleString("id-ID");
 const host = u => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return "source"; } };
@@ -154,7 +156,7 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
   const myBankTokens = [...new Set(creditCards.flatMap(a => {
     const t = String(a.bank_name || a.name.split(" ")[0]).toLowerCase(); return BANK_ALIAS[t] || [t];
   }))];
-  const promoBankMine = p => { const b = String(p.bank_penerbit_kartu || p.bank || "").toLowerCase(); return myBankTokens.some(t => b.startsWith(t)); };
+  const promoBankMine = p => { const b = bankNorm(p.bank_penerbit_kartu || p.bank); return myBankTokens.some(t => b.startsWith(t)); };
   const today = todayISO();
   const active = data.promo.filter(p => (p.status || "ok") === "ok" && (!p.periode_akhir || p.periode_akhir >= today));
   const why = { banking: 0, notcard: 0, interest: 0, wealth: 0, later: 0, hidden: 0 };
@@ -173,7 +175,7 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
     if (soon && !(p.periode_akhir && daysLeft(p.periode_akhir) <= 30)) { why.later++; return; }
     shownPromos.push(p);
   });
-  const coveredBanks = new Set(data.promo.map(p => String(p.bank_penerbit_kartu || p.bank || "").toLowerCase()));
+  const coveredBanks = new Set(data.promo.map(p => bankNorm(p.bank_penerbit_kartu || p.bank)));
   const uncovered = [...new Set(creditCards.map(a => a.bank_name || a.name.split(" ")[0]))]
     .filter(b => !(BANK_ALIAS[b.toLowerCase()] || [b.toLowerCase()]).some(t => [...coveredBanks].some(c => c.startsWith(t))));
   const newsRelevant = data.news.filter(n => n.relevan_miles && (n.status || "ok") === "ok");
