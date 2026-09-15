@@ -143,3 +143,18 @@ Kartu tidak melihat "belanja online" atau "bayar listrik"; kartu melihat MCC yan
 ## Tabel pendamping: pemetaan_kartu
 
 Keputusan Paulus kartu Ryūsei ↔ produk katalog (`account_id` → `kartu_katalog`, `status` `matched` | `not_in_catalog`). Diisi dari tombol **Match cards** di SweetSpot, bukan dari n8n. Kolom `pengaturan` (jsonb) menyimpan pilihan pribadi, mis. `{"bonus_pilihan": {"nama": "Double Yay", "kategori": "groceries", "label_bank": "Belanja Bulanan"}}`; baris katalog yang catatannya menyebut bonus itu dipindah ke kategori pilihan. Nama yang hanya mirip tidak pernah dipetakan otomatis.
+
+
+## jalur_transaksi_kartu & trik_miles (laporan grup Telegram, 15 Sep 2026)
+
+Sumber komunitas, bukan S&K bank. Tanpa nama anggota; kutipan bukti pendek.
+
+**jalur_transaksi_kartu** — kunci `kunci` (kalau kosong diturunkan: `topik|kartu_atau_bank|kanal|jenis_transaksi`), boleh dipangkas (sync_id + prune).
+Kolom: topik (`qris_dompet` | `topup_emoney`), kartu_atau_bank, **kartu_katalog** (JSON array nama persis `kartu_miles.kartu` yang dicakup baris; `[]` untuk baris umum/kanal — app memakai ini untuk menandai "Your card", tidak menebak dari teks), kanal, jenis_transaksi, dapat_poin (`dapat` | `terbatas` | `tidak_dapat` | `berubah`), biaya_admin, mcc_dilaporkan, detail, pertama_dilaporkan, terakhir_dilaporkan, jumlah_laporan (angka), status_dugaan (`masih_berlaku` | `tidak_jelas` | `sudah_ditutup`), bertentangan_dengan_resmi (boolean), keyakinan (`tinggi` | `sedang` | `rendah`), catatan, bukti (JSON array `{grup, id, tanggal, kutipan}`), sumber, per_tanggal.
+
+**trik_miles** — kunci `kode`, boleh dipangkas. Jangan kirim baris kategori `dikecualikan`.
+Kolom: kode, kategori, skor_manfaat (angka), judul, ringkasan, langkah (JSON array teks), syarat, manfaat_perkiraan, risiko, relevan_paulus (`ya` | `sebagian` | `tidak`), alasan_relevansi, pertama_dibahas, terakhir_dibahas, status_dugaan, keyakinan, bukti (JSON), sumber, per_tanggal.
+
+## Mengosongkan kolom
+
+n8n tidak mengirim nilai kosong supaya isian lama tidak tertimpa. Untuk sengaja mengosongkan kolom, kirim string `"__kosongkan__"`; disimpan sebagai NULL.

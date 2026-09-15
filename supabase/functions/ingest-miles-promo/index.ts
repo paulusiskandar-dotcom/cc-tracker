@@ -9,6 +9,7 @@
 // - Nilai kosong ("") disimpan NULL; angka dan boolean dikonversi, teks apa adanya.
 // - Kolom yang TIDAK dikirim untuk suatu baris dibiarkan apa adanya di database
 //   (pembaruan sebagian aman, juga kalau baris dalam satu kiriman berbeda kolom).
+// - Nilai "__kosongkan__" = kosongkan kolom itu (n8n tidak mengirim NULL).
 // - earn_rate_kartu: `kunci` dari n8n tidak unik (29 kembar per 15 Sep 2026),
 //   jadi kunci upsert = `kunci_baris`. Kalau tidak dikirim, diturunkan dari
 //   kunci + varian, atau kunci + hash isi baris.
@@ -70,6 +71,25 @@ const TABLES: Record<string, Spec> = {
     cols: t(["kunci", "merchant", "mcc_kode", "kategori_mcc", "kategori_spending", "kartu", "bank", "dampak", "sumber_jenis",
       "sumber_url", "bukti", "status_verifikasi", "bertentangan_dengan", "per_tanggal", "catatan", "asal"]),
   },
+  jalur_transaksi_kartu: {
+    key: "kunci", prunable: true,
+    cols: {
+      ...t(["kunci", "topik", "kartu_atau_bank", "kanal", "jenis_transaksi", "dapat_poin", "biaya_admin", "mcc_dilaporkan",
+        "detail", "pertama_dilaporkan", "terakhir_dilaporkan", "status_dugaan", "keyakinan", "catatan", "sumber", "per_tanggal"]),
+      jumlah_laporan: "num",
+      bertentangan_dengan_resmi: "bool",
+      ...t(["kartu_katalog", "bukti"], "json"),
+    },
+  },
+  trik_miles: {
+    key: "kode", prunable: true,
+    cols: {
+      ...t(["kode", "kategori", "judul", "ringkasan", "syarat", "manfaat_perkiraan", "risiko", "relevan_paulus",
+        "alasan_relevansi", "pertama_dibahas", "terakhir_dibahas", "status_dugaan", "keyakinan", "sumber", "per_tanggal"]),
+      skor_manfaat: "num",
+      ...t(["langkah", "bukti"], "json"),
+    },
+  },
   miles_update: {
     key: "url", prunable: false,
     cols: {
@@ -97,8 +117,12 @@ async function sameSecret(a: string, b: string): Promise<boolean> {
   return diff === 0 && a.length > 0;
 }
 
+// n8n tidak mengirim nilai kosong (supaya isian lama tak tertimpa), jadi
+// pengosongan kolom harus eksplisit dengan penanda ini.
+const CLEAR = "__kosongkan__";
+
 function coerce(kind: Kind, v: unknown): { ok: true; value: unknown } | { ok: false } {
-  if (v === undefined || v === null) return { ok: true, value: null };
+  if (v === undefined || v === null || v === CLEAR) return { ok: true, value: null };
   if (typeof v === "string" && v.trim() === "") return { ok: true, value: null };
   switch (kind) {
     case "text":
@@ -178,6 +202,10 @@ Deno.serve(async (req) => {
           : `${row.kunci}|h:${(await sha256([row.rupiah_per_mile, row.cashback_pct, row.catatan, row.sumber_url, row.min_transaksi, row.batas_bulanan].map((x) => x ?? "").join("|"))).slice(0, 12)}`;
         derived++;
       }
+    }
+    if (table === "jalur_transaksi_kartu" && !row.kunci && row.topik && row.kartu_atau_bank && row.kanal) {
+      row.kunci = [row.topik, row.kartu_atau_bank, row.kanal, row.jenis_transaksi ?? ""].join("|");
+      derived++;
     }
     const k = row[spec.key];
     if (k == null || k === "") { errors.push(`baris ${i}: kunci ${spec.key} kosong`); continue; }

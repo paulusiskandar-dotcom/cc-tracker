@@ -37,6 +37,16 @@ const EXC_ROWS = [
   ["bayar_ewallet", "Pay via e-wallet", "Card linked to DANA, GoPay, ShopeePay", /e-?wallet|dompet digital|shopee ?pay|gopay|\bdana\b/i],
   ["spbu", "Fuel", "Petrol stations", /spbu|bensin|fuel/i],
 ];
+// Community route reports (jalur_transaksi_kartu) shown under these rows.
+const ROUTE_TOPIC = { emoney_topup: "topup_emoney", bayar_ewallet: "qris_dompet" };
+const ROUTE_STATUS = [["masih_berlaku", "Still works"], ["tidak_jelas", "Unclear"], ["sudah_ditutup", "Closed"]];
+const ROUTE_POINTS = { dapat: ["yes", "Earns"], terbatas: ["limited", "Partly"], tidak_dapat: ["no", "No points"], berubah: ["check", "Keeps changing"] };
+const TRICK_CAT = { sweet_spot_penukaran: "Redemption sweet spot", promo_penukaran: "Redemption sale", optimasi_kartu: "Card strategy",
+  bayar_tagihan_vendor_pajak: "Bills, vendors & tax", promo_bank: "Bank bonus", hotel: "Hotels", status: "Elite status", trik_booking: "Booking",
+  program_bank: "Bank programme", beli_miles: "Buying miles", shopping_portal: "Shopping portal", kompensasi: "Compensation", manufactured_spending: "Manufactured spend" };
+const LEVEL = { tinggi: "High", sedang: "Medium", rendah: "Low" };
+const asList = v => { if (Array.isArray(v)) return v; if (typeof v === "string") { try { const j = JSON.parse(v); return Array.isArray(j) ? j : [v]; } catch { return [v]; } } return []; };
+
 const LIM_ROWS = [
   ["cap", "Monthly earn cap", r => r.batas_perolehan_bulanan || r.batas_perolehan],
   ["minconv", "Minimum to convert", r => r.min_konversi],
@@ -90,15 +100,17 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const [kartu, earn, promo, news, pemetaan, mcc] = await Promise.all([
+      const [kartu, earn, promo, news, pemetaan, mcc, routes, tricks] = await Promise.all([
         fetchAll("kartu_miles", q => q.order("kartu")),
         fetchAll("earn_rate_kartu", q => q.order("kartu")),
         fetchAll("promo_bank", q => q.order("periode_akhir", { ascending: true, nullsFirst: false })),
         fetchAll("miles_update", q => q.order("terbit", { ascending: false })),
         fetchAll("pemetaan_kartu", q => q),
         fetchAll("mcc_merchant", q => q.order("merchant")),
+        fetchAll("jalur_transaksi_kartu", q => q.order("terakhir_dilaporkan", { ascending: false, nullsFirst: false })),
+        fetchAll("trik_miles", q => q.order("skor_manfaat", { ascending: false })),
       ]);
-      setData({ kartu, earn, promo, news, pemetaan, mcc });
+      setData({ kartu, earn, promo, news, pemetaan, mcc, routes, tricks });
     } catch (e) { setError(e.message); }
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -166,7 +178,8 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
     .filter(b => !(BANK_ALIAS[b.toLowerCase()] || [b.toLowerCase()]).some(t => [...coveredBanks].some(c => c.startsWith(t))));
   const newsRelevant = data.news.filter(n => n.relevan_miles && (n.status || "ok") === "ok");
 
-  const tabs = [["compare", "Compare cards"], ["promo", "Promos", shownPromos.length], ["news", "Miles news", newsRelevant.length], ["spending", "My spending"]];
+  const tricksWorking = data.tricks.filter(t => t.status_dugaan === "masih_berlaku").length;
+  const tabs = [["compare", "Compare cards"], ["promo", "Promos", shownPromos.length], ["news", "Miles news", newsRelevant.length], ["tricks", "Tricks", tricksWorking], ["spending", "My spending"]];
 
   return (
     <Frame>
@@ -175,7 +188,7 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
           <h1>SweetSpot</h1>
           <p>What each card earns, where it earns nothing, and which promos are worth your time. Public sources only.</p>
         </div>
-        {tab !== "promo" && tab !== "news" && tab !== "spending" && (
+        {tab === "compare" && (
           <div>
             <div className="ss-label" id="ss-prog-l">Collecting</div>
             <Seg labelledBy="ss-prog-l" items={PROGRAMS} value={prog} onChange={setProg} />
@@ -198,7 +211,7 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
       </nav>
 
       {tab === "compare" && (
-        <CompareView cols={cols} kartuByName={kartuByName} earnFor={earnFor} progName={progName} spend={spend} setSpend={setSpend} mcc={data.mcc} />
+        <CompareView cols={cols} kartuByName={kartuByName} earnFor={earnFor} progName={progName} spend={spend} setSpend={setSpend} mcc={data.mcc} routes={data.routes} />
       )}
 
       {tab === "promo" && (
@@ -281,6 +294,8 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
         </section>
       )}
 
+      {tab === "tricks" && <TricksView tricks={data.tricks} />}
+
       {tab === "spending" && <SweetSpotSpending ledger={ledger} accounts={accounts} />}
     </Frame>
   );
@@ -299,7 +314,7 @@ function Seg({ items, value, onChange, label, labelledBy }) {
 }
 
 // Left: what you are about to pay for. Right: your cards, best first, as a checklist.
-function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mcc = [] }) {
+function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mcc = [], routes = [] }) {
   const [open, setOpen] = useState(null);
   const [type, key] = spend.split(":");
   const isEarn = type === "e";
@@ -383,6 +398,7 @@ function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mc
             <span><Mark status="limited" /> limited or see terms</span><span><Mark status="check" /> figure needs checking</span>
             <span><Mark status="unknown" /> not stated, not assumed</span>
           </div>
+          {ROUTE_TOPIC[key] && <RouteReports key={key} topic={ROUTE_TOPIC[key]} routes={routes} cols={cols} />}
         </div>
       </div>
     </section>
@@ -543,6 +559,152 @@ function MatchPanel({ user, cards, kartu, mapByAccount, onSaved }) {
   );
 }
 
+// What Telegram members report for e-money top-ups and paying through e-wallets.
+// These are field reports, not bank terms: kept visually apart from the checklist.
+function RouteReports({ topic, routes, cols }) {
+  const [open, setOpen] = useState(null);
+  const [showClosed, setShowClosed] = useState(false);
+  const catalogs = new Set(cols.map(c => c.catalog));
+  const own = r => {
+    const k = asList(r.kartu_katalog);
+    if (k.length) return k.some(n => catalogs.has(n)) ? "yours" : "other";
+    return /milik paulus/i.test(r.kartu_atau_bank || "") ? "yours" : /kandidat/i.test(r.kartu_atau_bank || "") ? "other" : "route";
+  };
+  const label = r => String(r.kartu_atau_bank || "").replace(/\s*-\s*(milik paulus|kandidat).*$/i, "").replace(/\s*\(kandidat\)/i, "");
+  const rank = { yours: 0, route: 1, other: 2 };
+  const all = routes.filter(r => r.topik === topic)
+    .sort((a, b) => (rank[own(a)] - rank[own(b)]) || String(b.terakhir_dilaporkan || "").localeCompare(String(a.terakhir_dilaporkan || "")));
+  if (!all.length) return null;
+  const closed = all.filter(r => r.status_dugaan === "sudah_ditutup");
+  return (
+    <section className="ss-routes" aria-labelledby={`ss-routes-${topic}`}>
+      <div>
+        <h3 id={`ss-routes-${topic}`}>What members report</h3>
+        <p className="ss-muted small">From Telegram miles groups, analysed by n8n. Not bank terms: points can be clawed back and routes close without notice. Test a small amount and check the statement first.</p>
+      </div>
+      {ROUTE_STATUS.map(([st, stLabel]) => {
+        const rs = all.filter(r => r.status_dugaan === st);
+        if (!rs.length || (st === "sudah_ditutup" && !showClosed)) return null;
+        return (
+          <div key={st} className="ss-routegroup">
+            <div className="ss-label">{stLabel} · {rs.length}</div>
+            <ul className="ss-cards">
+              {rs.map(r => {
+                const pts = ROUTE_POINTS[r.dapat_poin] || ["unknown", "No answer yet"]; const isOpen = open === r.kunci; const o = own(r);
+                const evidence = asList(r.bukti).filter(b => b && typeof b === "object");
+                return (
+                  <li key={r.kunci} className="ss-cardrow">
+                    <button type="button" className="ss-cardbtn" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : r.kunci)}>
+                      <Mark status={pts[0]} />
+                      <span className="ss-cname">{label(r)}<small>{r.kanal}</small>
+                        <span className="ss-routemeta">
+                          {o === "yours" && <span className="ss-chip acc">Your card</span>}
+                          {o === "other" && <span className="ss-chip soft">Not a card you hold</span>}
+                          {r.bertentangan_dengan_resmi && <span className="ss-chip hot">Against bank terms</span>}
+                          {r.keyakinan && <span className="ss-chip soft">{LEVEL[r.keyakinan] || r.keyakinan} confidence</span>}
+                          {r.terakhir_dilaporkan && <span>Last report {fmtDate(r.terakhir_dilaporkan)}</span>}
+                          {r.biaya_admin && <span>Fee: {r.biaya_admin}</span>}
+                        </span>
+                      </span>
+                      <span className="ss-verdict"><span className={`ss-${{ yes: "yes", no: "no", limited: "lim", check: "lim", unknown: "na" }[pts[0]]}`}>{pts[1]}</span></span>
+                      <ChevronDown size={16} className="ss-chev" aria-hidden="true" />
+                    </button>
+                    {isOpen && (
+                      <div className="ss-carddetail">
+                        {r.detail && <p className="ss-routep">{r.detail}</p>}
+                        <dl className="ss-facts">
+                          {r.catatan && <><dt>Bank terms</dt><dd>{r.catatan}</dd></>}
+                          {r.jenis_transaksi && <><dt>Transaction</dt><dd>{r.jenis_transaksi.replace(/_/g, " ")}</dd></>}
+                          {r.mcc_dilaporkan && <><dt>Shows up as</dt><dd>{r.mcc_dilaporkan}</dd></>}
+                          <dt>Reports</dt><dd>{r.jumlah_laporan != null ? `${rpn(r.jumlah_laporan)} messages` : "Not counted"}{r.pertama_dilaporkan && `, first ${fmtDate(r.pertama_dilaporkan)}`}{r.terakhir_dilaporkan && `, last ${fmtDate(r.terakhir_dilaporkan)}`}</dd>
+                        </dl>
+                        {evidence.length > 0 && <Evidence items={evidence} />}
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        );
+      })}
+      {closed.length > 0 && <button type="button" className="ss-linkbtn" onClick={() => setShowClosed(s => !s)}>{showClosed ? "Hide closed routes" : `Show ${closed.length} closed ${closed.length === 1 ? "route" : "routes"}`}</button>}
+    </section>
+  );
+}
+
+function Evidence({ items }) {
+  return (
+    <div className="ss-evidence">
+      <div className="ss-label">Messages quoted ({items.length})</div>
+      <ul>
+        {items.slice(0, 6).map((b, i) => (
+          <li key={i}><span className="ss-muted">{b.tanggal ? fmtDate(String(b.tanggal).slice(0, 10)) : "Undated"}{b.grup ? ` · ${String(b.grup).split("(")[0].trim()}` : ""}</span>{b.kutipan && <q>{b.kutipan}</q>}</li>
+        ))}
+      </ul>
+      {items.length > 6 && <div className="ss-muted small">{items.length - 6} more in n8n.</div>}
+    </div>
+  );
+}
+
+function TricksView({ tricks }) {
+  const [status, setStatus] = useState("masih_berlaku");
+  const [mineOnly, setMineOnly] = useState(true);
+  const [open, setOpen] = useState(null);
+  // closed tricks are listed as "already dead" whatever the relevance filter says
+  const keep = t => !mineOnly || t.status_dugaan === "sudah_ditutup" || t.relevan_paulus !== "tidak";
+  const count = st => tricks.filter(t => t.status_dugaan === st && keep(t)).length;
+  const shown = tricks.filter(t => t.status_dugaan === status && keep(t))
+    .sort((a, b) => (Number(b.skor_manfaat) || 0) - (Number(a.skor_manfaat) || 0));
+  return (
+    <section className="ss-view">
+      <div className="ss-head"><div><h2>Tricks</h2><div className="ss-sub">Sweet spots and routes shared in Telegram miles groups over the last 12 months, ranked by how much they could save you. Member claims, not verified with the programmes.</div></div></div>
+      <div className="ss-filterbar">
+        <div className="ss-frow"><span className="ss-label" id="ss-trk-l">Status</span>
+          <Seg labelledBy="ss-trk-l" items={ROUTE_STATUS.map(([v, l]) => [v, `${l} (${count(v)})`])} value={status} onChange={v => { setStatus(v); setOpen(null); }} /></div>
+        <div className="ss-frow"><span className="ss-label">Also</span>
+          <label className="ss-check"><input id="ss-trk-mine" type="checkbox" checked={mineOnly} onChange={e => setMineOnly(e.target.checked)} /> Only tricks that use cards or programmes you have</label></div>
+      </div>
+      {shown.length === 0 ? <div className="ss-empty">Nothing here with these filters.</div> : (
+        <ol className="ss-cards">
+          {shown.map(t => {
+            const isOpen = open === t.kode; const steps = asList(t.langkah); const evidence = asList(t.bukti).filter(b => b && typeof b === "object");
+            return (
+              <li key={t.kode} className="ss-cardrow">
+                <button type="button" className="ss-cardbtn ss-trickbtn" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : t.kode)}>
+                  <span className="ss-cname">{t.judul}
+                    {t.manfaat_perkiraan && <span className="ss-gain">{t.manfaat_perkiraan}</span>}
+                    <span className="ss-routemeta">
+                      {t.kategori && <span className="ss-chip soft">{TRICK_CAT[t.kategori] || t.kategori.replace(/_/g, " ")}</span>}
+                      {t.relevan_paulus === "ya" && <span className="ss-chip acc">Uses your cards</span>}
+                      {t.relevan_paulus === "sebagian" && <span className="ss-chip soft">Partly relevant</span>}
+                      {LEVEL[t.keyakinan] && <span className="ss-chip soft">{LEVEL[t.keyakinan]} confidence</span>}
+                      {t.terakhir_dibahas && <span>Last discussed {fmtDate(String(t.terakhir_dibahas).slice(0, 10))}</span>}
+                    </span>
+                  </span>
+                  <ChevronDown size={16} className="ss-chev" aria-hidden="true" />
+                </button>
+                {isOpen && (
+                  <div className="ss-carddetail ss-trickdetail">
+                    {t.ringkasan && <p className="ss-routep">{t.ringkasan}</p>}
+                    {steps.length > 0 && <div><div className="ss-label">How</div><ol className="ss-steps">{steps.map((x, i) => <li key={i}>{typeof x === "string" ? x : JSON.stringify(x)}</li>)}</ol></div>}
+                    <dl className="ss-facts">
+                      {t.syarat && <><dt>You need</dt><dd>{t.syarat}</dd></>}
+                      {t.risiko && <><dt>Risk</dt><dd>{t.risiko}</dd></>}
+                      {t.alasan_relevansi && <><dt>Why it fits you</dt><dd>{t.alasan_relevansi}</dd></>}
+                    </dl>
+                    {evidence.length > 0 && <Evidence items={evidence} />}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </section>
+  );
+}
+
 const CSS = `
 .ss{--ink:#111827;--muted:#667085;--faint:#98a2b3;--line:#e4e7ec;--sunk:#f0f2f6;--surface:#fff;--accent:#3b5bdb;--accent-soft:#eef1fd;--accent-ink:#2f47b3;--warn:#b45309;--warn-soft:#fdf3e4;--hot:#b42318;--hot-soft:#fdecea;--good:#047857;--bar:#c9d3f6;
   display:flex;flex-direction:column;gap:18px;color:var(--ink);font-size:14px;line-height:1.5}
@@ -625,6 +787,17 @@ const CSS = `
   .ss-facts{grid-template-columns:1fr}
 }
 @media (prefers-reduced-motion:reduce){.ss-chev{transition:none}}
+.ss-routes{display:flex;flex-direction:column;gap:10px;margin-top:6px;padding-top:14px;border-top:1px dashed var(--line)}
+.ss-routes h3{font-size:15px;font-weight:700} .ss-routes p{margin:2px 0 0;max-width:70ch}
+.ss-routegroup{display:flex;flex-direction:column;gap:6px}
+.ss-routemeta{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;margin-top:5px;font-size:12px;font-weight:500;color:var(--muted)}
+.ss-routep{margin:0;font-size:13px;max-width:75ch}
+.ss-evidence{display:flex;flex-direction:column;gap:4px} .ss-evidence ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px;font-size:12.5px}
+.ss-evidence q{display:block;color:var(--ink)}
+.ss-trickbtn{grid-template-columns:minmax(0,1fr) auto}
+.ss-gain{font-weight:500;font-size:13px;color:var(--good);margin-top:3px}
+.ss-trickdetail{padding-left:14px}
+.ss-steps{margin:4px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:3px;font-size:13px}
 .ss-legend{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:12.5px;color:var(--muted)} .ss-legend span{display:inline-flex;gap:8px;align-items:center}
 .ss-sw{display:inline-block;width:14px;height:14px;border-radius:4px;background:var(--accent-soft);border:1px solid var(--accent)}
 .ss-filterbar,.ss-match{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:12px}
