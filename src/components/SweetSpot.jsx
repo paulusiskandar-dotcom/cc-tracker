@@ -424,6 +424,8 @@ function cautions(r, isEarn, spendKey) {
   }
   if (r.status === "unknown") return [];
   const out = []; const v = r.v || {}; const kr = r.kr || {};
+  // conditional variants ("efektif spend Rp20 juta/statement", "s.d. 200.000 per maskapai") can be the lowest figure; say so up front
+  if (v.varian && !/^(dasar|resmi)$/i.test(String(v.varian).trim())) out.push(`Only when: ${v.varian}`);
   if (v.batas_bulanan) {
     const n = Number(v.batas_bulanan);
     out.push(`Cap on this rate: ${Number.isFinite(n) ? (/spend/i.test(v.catatan || "") ? `spend Rp ${rpn(n)} a month` : rpn(n)) : v.batas_bulanan}`);
