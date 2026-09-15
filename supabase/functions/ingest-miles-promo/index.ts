@@ -220,11 +220,16 @@ Deno.serve(async (req) => {
   const keys = [...byKey.keys()];
 
   // 3) hitung baru vs diperbarui
+  //    Semua kunci milik pemilik dibaca lalu dicocokkan di memori. Filter .in()
+  //    salah membaca kunci yang berisi koma/kurung (kunci jalur_transaksi_kartu),
+  //    sehingga 15 Sep 2026 baris yang sebenarnya diperbarui terhitung "baru".
   const existing = new Set<string>();
-  for (let i = 0; i < keys.length; i += 200) {
-    const { data, error } = await sb.from(table).select(spec.key).eq("user_id", OWNER).in(spec.key, keys.slice(i, i + 200));
+  const wanted = new Set(keys);
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await sb.from(table).select(spec.key).eq("user_id", OWNER).range(from, from + 999);
     if (error) return json(500, { ok: false, error: `Gagal membaca ${table}: ${error.message}` });
-    (data ?? []).forEach((d: Record<string, unknown>) => existing.add(String(d[spec.key])));
+    (data ?? []).forEach((d: Record<string, unknown>) => { const k = String(d[spec.key]); if (wanted.has(k)) existing.add(k); });
+    if (!data || data.length < 1000) break;
   }
 
   // 4) upsert — dikelompokkan per susunan kolom. supabase-js memakai gabungan
