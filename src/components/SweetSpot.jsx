@@ -136,14 +136,23 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
   [creditCards, mapByAccount, kartuByName]);
   const unmatched = creditCards.filter(a => !mapByAccount[a.id]);
 
-  // lowest clean airline-miles figure per card × category × program
+  // lowest clean airline-miles figure per card × category × program.
+  // A card with no separate rate for a category earns its everyday rate there
+  // (bank terms give the base rate "for every transaction"); that fallback is
+  // labelled, and categories the bank excludes are handled by the exclusion rows.
   const earnFor = useCallback((col, c) => {
     const catOf = r => (col.bonus && col.bonus.re.test(r.catatan || "")) ? col.bonus.kategori : CAT_OF[r.kategori];
-    const rs = (data?.earn || []).filter(r => r.kartu === col.catalog && catOf(r) === c && progKey(r.program) === prog && !isBankPoints(r) && r.rupiah_per_mile != null)
-      .sort((a, b) => a.rupiah_per_mile - b.rupiah_per_mile);
-    if (!rs.length) return null;
-    const clean = rs.filter(r => !needsCheck(r)); const pick = clean[0] || rs[0];
-    return { ...pick, flagged: !clean.length, alt: [...new Set(rs.filter(r => r !== pick && Number(r.rupiah_per_mile) !== Number(pick.rupiah_per_mile)).map(r => Number(r.rupiah_per_mile)))] };
+    const pickFor = cat => {
+      const rs = (data?.earn || []).filter(r => r.kartu === col.catalog && catOf(r) === cat && progKey(r.program) === prog && !isBankPoints(r) && r.rupiah_per_mile != null)
+        .sort((a, b) => a.rupiah_per_mile - b.rupiah_per_mile);
+      if (!rs.length) return null;
+      const clean = rs.filter(r => !needsCheck(r)); const pick = clean[0] || rs[0];
+      return { ...pick, flagged: !clean.length, alt: [...new Set(rs.filter(r => r !== pick && Number(r.rupiah_per_mile) !== Number(pick.rupiah_per_mile)).map(r => Number(r.rupiah_per_mile)))] };
+    };
+    const own = pickFor(c);
+    if (own || c === "everyday") return own;
+    const base = pickFor("everyday");
+    return base ? { ...base, fallback: true } : null;
   }, [data, prog]);
 
   if (error) return <Frame><div className="ss-empty"><b>Could not load SweetSpot data.</b> {error} <button className="ss-btn" onClick={load}>Try again</button></div></Frame>;
@@ -341,7 +350,7 @@ function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mc
   const best = rows[0]?.status === "best" ? rows[0] : null;
   let summary;
   if (isEarn) summary = best
-    ? <>Best for {label.toLowerCase()}: <b>{best.c.name}</b> at <b>Rp {rpn(best.rpm)}</b> per {progName} mile. Rp 1.000.000 earns about <b>{Math.floor(1000000 / best.rpm).toLocaleString("id-ID")} miles</b>.</>
+    ? <>Best for {label.toLowerCase()}: <b>{best.c.name}</b> at <b>Rp {rpn(best.rpm)}</b> per {progName} mile{best.v?.fallback ? " (its everyday rate)" : ""}. Rp 1.000.000 earns about <b>{Math.floor(1000000 / best.rpm).toLocaleString("id-ID")} miles</b>.</>
     : <>None of your matched cards has a {label.toLowerCase()} figure in {progName}.</>;
   else summary = <>{count("no") ? <><b>{count("no")}</b> {count("no") === 1 ? "card earns" : "cards earn"} nothing here. </> : null}
     {count("yes") ? <><b>{count("yes")}</b> confirmed to earn. </> : null}
@@ -469,6 +478,7 @@ function verdict(r, isEarn) {
   return <span className="ss-rate">
     {r.status === "best" && <span className="ss-chip acc">Best</span>}
     <b>Rp {rpn(r.rpm)}</b><small> per mile</small>
+    {r.v?.fallback && <span className="ss-chip soft">Everyday rate</span>}
     {r.status === "check" && <span className="ss-chip warn">Needs check</span>}
   </span>;
 }
@@ -478,6 +488,7 @@ function CardDetail({ r, isEarn, spendKey }) {
   const facts = [];
   if (r.c.bonus) facts.push([`Your ${r.c.bonus.nama}`, `${r.c.bonus.label_bank} (set ${r.c.bonus.diatur_pada || "by you"}). ${r.c.bonus.nama} rates follow this choice, not the catalog category.`]);
   if (isEarn && v) {
+    if (v.fallback) facts.push(["Rate used", "No separate rate for this kind of spending in the source, so the everyday rate is shown."]);
     facts.push(["Conditions", cleanNote(v.catatan) || "None stated in the source"]);
     facts.push(["Rp 1.000.000 earns", `about ${Math.floor(1000000 / r.rpm).toLocaleString("id-ID")} miles`]);
     if (v.batas_bulanan) facts.push(["Monthly cap on this rate", v.batas_bulanan]);
