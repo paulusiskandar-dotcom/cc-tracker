@@ -361,7 +361,7 @@ function Seg({ items, value, onChange, label, labelledBy }) {
 }
 
 // Left: what you are about to pay for. Right: your cards, best first, as a checklist.
-const TOP = 10;
+const TOP = 5;
 
 function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mcc = [], routes = [], blocked = new Set() }) {
   const [open, setOpen] = useState(null);
