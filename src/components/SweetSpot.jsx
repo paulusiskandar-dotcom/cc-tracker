@@ -752,7 +752,8 @@ const CSS = `
 .ss-seg{display:inline-flex;flex-wrap:wrap;gap:2px;background:var(--sunk);border:1px solid var(--line);border-radius:10px;padding:3px}
 .ss-seg button{height:34px;padding:0 14px;border:0;border-radius:8px;background:transparent;color:var(--muted);font:600 13px/1 ${FF};cursor:pointer}
 .ss-seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgba(16,24,40,.08)}
-.ss-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);overflow-x:auto}
+.ss-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+.ss-tabs::-webkit-scrollbar,.ss-legend::-webkit-scrollbar{display:none}
 .ss-tabs button{height:42px;padding:0 16px;border:0;background:transparent;color:var(--muted);font:600 14px/1 ${FF};cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
 .ss-tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
 .ss-count{font-weight:600;color:var(--faint);margin-left:6px}
@@ -821,7 +822,7 @@ const CSS = `
 .ss-gain{font-weight:500;font-size:13px;color:var(--good);margin-top:3px}
 .ss-trickdetail{padding-left:14px}
 .ss-steps{margin:4px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:3px;font-size:13px}
-.ss-legend{display:flex;flex-wrap:nowrap;gap:16px;font-size:12.5px;color:var(--muted);overflow-x:auto}
+.ss-legend{display:flex;flex-wrap:nowrap;gap:16px;font-size:12.5px;color:var(--muted);overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
 .ss-legend span{display:inline-flex;gap:6px;align-items:center;white-space:nowrap}
 .ss-sw{display:inline-block;width:14px;height:14px;border-radius:4px;background:var(--accent-soft);border:1px solid var(--accent)}
 .ss-filterbar,.ss-match{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px 18px;display:flex;flex-direction:column;gap:12px}
@@ -845,7 +846,7 @@ const CSS = `
 .ss-act{font-size:13px;border-left:2px solid var(--accent);padding-left:10px}
 .ss-act span{display:block;font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin-bottom:2px}
 .ss-mine{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px;color:var(--muted)}
-.ss-scroll{overflow-x:auto} .ss-match table{width:100%;border-collapse:collapse;font-size:13px}
+.ss-scroll{overflow-x:auto;overflow-y:hidden} .ss-match table{width:100%;border-collapse:collapse;font-size:13px}
 .ss-match th{text-align:left;font-weight:600;color:var(--muted);padding:6px 8px;border-bottom:1px solid var(--line)}
 .ss-match td{padding:6px 8px;border-bottom:1px solid var(--line)}
 .ss-match select{height:34px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font:500 13px ${FF};padding:0 8px;width:100%;max-width:360px}
