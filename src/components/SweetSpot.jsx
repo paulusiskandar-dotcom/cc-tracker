@@ -54,7 +54,7 @@ const LIM_ROWS = [
   ["fee", "Annual fee", r => r.iuran_tahunan_utama_rp ?? r.iuran_tahunan],
 ];
 const PROMO_INT = [["kuliner", "Dining"], ["travel", "Travel"], ["belanja", "Shopping"], ["hiburan", "Entertainment"],
-  ["kesehatan", "Health"], ["transportasi", "Transport"], ["cicilan", "Instalments"], ["lainnya", "Other"]];
+  ["kesehatan", "Health"], ["transportasi", "Transport"], ["cicilan", "Instalments"], ["tagihan", "Bills"], ["lainnya", "Other"]];
 const BANKING_CAT = ["simpanan", "investasi", "pinjaman"];
 const BANKING_PRODUCT = ["tabungan", "deposito", "investasi", "pinjaman"];
 const WEALTH_RE = /dana kelolaan|privilege|prioritas|penempatan dana|priority/i;
