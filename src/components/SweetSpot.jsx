@@ -505,7 +505,6 @@ function verdict(r, isEarn) {
   return <span className="ss-rate">
     {r.status === "best" && <span className="ss-chip acc">Best</span>}
     <b>Rp {rpn(r.rpm)}</b><small> per mile</small>
-    {r.v?.fallback && <span className="ss-chip soft">Everyday rate</span>}
     {r.status === "check" && <span className="ss-chip warn">Needs check</span>}
   </span>;
 }
