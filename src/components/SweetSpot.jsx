@@ -461,7 +461,7 @@ function MerchantTips({ tips }) {
         return (
           <div key={t.kunci} className="ss-tip">
             <button type="button" className="ss-tipbtn" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : t.kunci)}>
-              <span><b>{t.merchant}</b>{t.kartu ? ` · ${t.kartu}` : t.bank ? ` · ${t.bank}` : ""}<br /><span className="ss-muted">{t.dampak}</span></span>
+              <span><b>{t.merchant}</b>{t.kartu ? ` · ${t.kartu}` : t.bank ? ` · ${t.bank}` : ""}<br /><span className="ss-muted ss-clamp">{t.dampak || t.catatan || "No summary in the source"}</span></span>
               <ChevronDown size={16} className="ss-chev" aria-hidden="true" />
             </button>
             {isOpen && (
@@ -471,7 +471,8 @@ function MerchantTips({ tips }) {
                 {!t.mcc_kode && t.kategori_mcc && <><dt>MCC category</dt><dd>{t.kategori_mcc} (code not recorded)</dd></>}
                 {t.bukti && <><dt>Evidence</dt><dd>{t.bukti}</dd></>}
                 {t.bertentangan_dengan && <><dt>Official terms say</dt><dd>{t.bertentangan_dengan}</dd></>}
-                {t.catatan && <><dt>Note</dt><dd>{t.catatan}</dd></>}
+                {t.dampak && t.catatan && <><dt>Note</dt><dd>{t.catatan}</dd></>}
+                {!t.dampak && t.catatan && <><dt>Summary</dt><dd>{t.catatan}</dd></>}
                 <dt>Source</dt><dd>{t.per_tanggal && `As of ${t.per_tanggal} · `}{t.sumber_url ? <a href={t.sumber_url} target="_blank" rel="noopener noreferrer">{host(t.sumber_url)}</a> : "No link"}</dd>
               </dl>
             )}
@@ -794,6 +795,7 @@ const CSS = `
 .ss-tipbtn:hover{background:var(--sunk)} .ss-tipbtn:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .ss-tipchips{display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap}
 .ss-tipdetail{padding:0 14px 12px}
+.ss-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .ss-chev{color:var(--faint);transition:transform .15s} .ss-cardbtn[aria-expanded="true"] .ss-chev{transform:rotate(180deg)}
 .ss-mark{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:999px;flex-shrink:0}
 .ss-mark.yes{background:var(--good-soft);color:var(--good)} .ss-mark.no{background:var(--hot-soft);color:var(--hot)}
