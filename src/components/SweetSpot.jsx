@@ -430,9 +430,6 @@ function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mc
                     <Mark status={r.status} />
                     <span className="ss-cname">{r.c.name}<small>{r.c.bank}</small>
                       {r.c.bonus && <small className="ss-bonus">{r.c.bonus.nama}: {r.c.bonus.label_bank}</small>}
-                      {cautions(r, isEarn, key).length > 0 && (
-                        <span className="ss-notes">{cautions(r, isEarn, key).map(c => <span key={c} className="ss-note">{c}</span>)}</span>
-                      )}
                     </span>
                     <span className="ss-verdict">{verdict(r, isEarn)}</span>
                     <ChevronDown size={16} className="ss-chev" aria-hidden="true" />
@@ -452,40 +449,6 @@ function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mc
       </div>
     </section>
   );
-}
-
-// Short labels under the card name. Only figures, never the source's own
-// sentences: some of those say "no cap at all", which reads as a warning here.
-// Full wording stays in the detail panel.
-const PER = { bulan: "a month", tahun: "a year", hari: "a day", statement: "a statement" };
-const unit = u => (u === "poin" ? "pts" : u === "miles" ? "miles" : u || "");
-// A variant label is source text: drop the "dasar" prefix, keep it to one line.
-const shortCond = v => {
-  const parts = String(v).split("|").map(x => x.trim()).filter(x => x && !/^dasar$/i.test(x));
-  let t = parts.join(" — ") || String(v).trim();
-  if (/usang/i.test(t)) return "Figure outdated in source";
-  if (t.length > 42) t = t.slice(0, 41).replace(/[\s,;(]+\S*$/, "") + "…";
-  return t;
-};
-function cautions(r, isEarn, spendKey) {
-  if (!isEarn) {
-    if (spendKey === "paper" && r.status === "no" && r.kr?.paper_via_blibli_tokopedia === "dapat") return ["Blibli or Tokopedia e-invoice may still earn"];
-    return [];
-  }
-  if (r.status === "unknown") return [];
-  if (r.status === "no") return ["No airline transfer for your account"];
-  const out = []; const v = r.v || {}; const kr = r.kr || {};
-  if (v.varian && !/^(dasar|resmi)$/i.test(String(v.varian).trim())) {
-    const c = shortCond(v.varian);
-    out.push(/outdated/.test(c) ? c : `Only: ${c}`);
-  }
-  const rate = Number(v.batas_bulanan);
-  if (Number.isFinite(rate) && rate > 0) out.push(/spend/i.test(v.catatan || "") ? `This rate up to Rp ${rpn(rate)} a month` : `This rate up to ${rpn(rate)} a month`);
-  const cap = Number(kr.batas_perolehan_bulanan_angka);
-  if (Number.isFinite(cap) && cap > 0) out.push(`Earn cap ${rpn(cap)} ${unit(kr.batas_perolehan_bulanan_satuan)} a month`);
-  const conv = Number(kr.batas_konversi_angka);
-  if (Number.isFinite(conv) && conv > 0) out.push(`Transfer cap ${rpn(conv)} ${unit(kr.batas_konversi_satuan)} ${PER[kr.batas_konversi_periode] || ""}`.trim());
-  return out.slice(0, 2); // the rest stays in the detail panel
 }
 
 function MerchantTips({ tips }) {
@@ -546,6 +509,7 @@ function CardDetail({ r, isEarn, spendKey }) {
   if (isEarn && !v && r.status === "no") facts.push(["Miles", "The card earns bank points, but they cannot be transferred to an airline programme with your account."]);
   if (isEarn && v) {
     if (v.fallback) facts.push(["Rate used", "No separate rate for this kind of spending in the source, so the everyday rate is shown."]);
+    if (v.varian && !/^(dasar|resmi)$/i.test(String(v.varian).trim())) facts.push(["Only when", v.varian]);
     facts.push(["Conditions", cleanNote(v.catatan) || "None stated in the source"]);
     facts.push(["Rp 1.000.000 earns", `about ${Math.floor(1000000 / r.rpm).toLocaleString("id-ID")} miles`]);
     if (v.batas_bulanan) facts.push(["Monthly cap on this rate", v.batas_bulanan]);
@@ -553,6 +517,7 @@ function CardDetail({ r, isEarn, spendKey }) {
     if (v.alt.length) facts.push(["Other source says", `Rp ${v.alt.map(rpn).join(", Rp ")} per mile`]);
   }
   if (!isEarn) {
+    if (spendKey === "paper" && r.status === "no" && kr.paper_via_blibli_tokopedia === "dapat") facts.push(["Still worth trying", "Paid through a Blibli or Tokopedia e-invoice, this card may still earn."]);
     const q = kr.pengecualian_kutipan?.[spendKey];
     facts.push(["From the terms", q?.kutipan || (kr.kategori_dikecualikan ? `Catalog note: "${kr.kategori_dikecualikan}"` : "The catalog has nothing on this for this card yet.")]);
   }
@@ -833,9 +798,6 @@ const CSS = `
 .ss-cname{font-weight:600;display:flex;flex-direction:column;min-width:0} .ss-cname small{font-weight:500;font-size:12px;color:var(--faint)}
 .ss-verdict{text-align:right}
 .ss-bonus{color:var(--accent-ink)!important;font-weight:600!important}
-.ss-notes{display:flex;flex-wrap:wrap;gap:4px 6px;margin-top:5px;min-width:0}
-.ss-note{display:inline-block;max-width:100%;padding:2px 7px;border-radius:6px;background:var(--warn-soft);color:var(--warn);
-  font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ss-tips{display:flex;flex-direction:column;gap:6px}
 .ss-tip{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
 .ss-tipbtn{all:unset;box-sizing:border-box;width:100%;display:flex;justify-content:space-between;gap:12px;padding:10px 14px;cursor:pointer;font-size:13px;flex-wrap:wrap}
