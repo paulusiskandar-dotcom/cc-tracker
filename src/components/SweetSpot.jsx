@@ -216,7 +216,7 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
       <header className="ss-top">
         <div>
           <h1>SweetSpot</h1>
-          <p>What each card earns, where it earns nothing, and which promos are worth your time. Public sources only.</p>
+          <p>What your cards earn, and where they earn nothing.</p>
         </div>
         {tab === "compare" && (
           <div>
@@ -409,11 +409,10 @@ function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mc
 
   return (
     <section className="ss-view">
-      <div className="ss-head"><div><h2>Compare cards</h2><div className="ss-sub">Pick what you are paying for. Your cards line up best first.</div></div></div>
       <div className="ss-cmpgrid">
         <nav className="ss-spendnav" aria-label="Spending type">
           <Pick group="Earn miles" items={CATS.map(([k, l]) => [k, l])} />
-          <Pick group="Often excluded" items={EXC_ROWS.map(([k, l, sub]) => [k, l, sub])} />
+          <Pick group="Often excluded" items={EXC_ROWS.map(([k, l]) => [k, l])} />
         </nav>
         <div className="ss-ranked">
           <div className="ss-summary">{summary}</div>
@@ -431,7 +430,9 @@ function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mc
                     <Mark status={r.status} />
                     <span className="ss-cname">{r.c.name}<small>{r.c.bank}</small>
                       {r.c.bonus && <small className="ss-bonus">{r.c.bonus.nama}: {r.c.bonus.label_bank}</small>}
-                      {cautions(r, isEarn, key).length > 0 && <span className="ss-caution"><AlertTriangle size={12} aria-hidden="true" /><span>{cautions(r, isEarn, key).join(" · ")}</span></span>}
+                      {cautions(r, isEarn, key).length > 0 && (
+                        <span className="ss-notes">{cautions(r, isEarn, key).map(c => <span key={c} className="ss-note">{c}</span>)}</span>
+                      )}
                     </span>
                     <span className="ss-verdict">{verdict(r, isEarn)}</span>
                     <ChevronDown size={16} className="ss-chev" aria-hidden="true" />
@@ -453,24 +454,38 @@ function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mc
   );
 }
 
-// Short caps shown right under the card name, straight from the source fields.
+// Short labels under the card name. Only figures, never the source's own
+// sentences: some of those say "no cap at all", which reads as a warning here.
+// Full wording stays in the detail panel.
+const PER = { bulan: "a month", tahun: "a year", hari: "a day", statement: "a statement" };
+const unit = u => (u === "poin" ? "pts" : u === "miles" ? "miles" : u || "");
+// A variant label is source text: drop the "dasar" prefix, keep it to one line.
+const shortCond = v => {
+  const parts = String(v).split("|").map(x => x.trim()).filter(x => x && !/^dasar$/i.test(x));
+  let t = parts.join(" — ") || String(v).trim();
+  if (/usang/i.test(t)) return "Figure outdated in source";
+  if (t.length > 42) t = t.slice(0, 41).replace(/[\s,;(]+\S*$/, "") + "…";
+  return t;
+};
 function cautions(r, isEarn, spendKey) {
   if (!isEarn) {
-    if (spendKey === "paper" && r.status === "no" && r.kr?.paper_via_blibli_tokopedia === "dapat") return ["May earn if paid through a Blibli or Tokopedia e-invoice"];
+    if (spendKey === "paper" && r.status === "no" && r.kr?.paper_via_blibli_tokopedia === "dapat") return ["Blibli or Tokopedia e-invoice may still earn"];
     return [];
   }
   if (r.status === "unknown") return [];
-  if (r.status === "no") return ["Its points have no airline transfer for you (checked in the bank app)"];
+  if (r.status === "no") return ["No airline transfer for your account"];
   const out = []; const v = r.v || {}; const kr = r.kr || {};
-  // conditional variants ("efektif spend Rp20 juta/statement", "s.d. 200.000 per maskapai") can be the lowest figure; say so up front
-  if (v.varian && !/^(dasar|resmi)$/i.test(String(v.varian).trim())) out.push(`Only when: ${v.varian}`);
-  if (v.batas_bulanan) {
-    const n = Number(v.batas_bulanan);
-    out.push(`Cap on this rate: ${Number.isFinite(n) ? (/spend/i.test(v.catatan || "") ? `spend Rp ${rpn(n)} a month` : rpn(n)) : v.batas_bulanan}`);
+  if (v.varian && !/^(dasar|resmi)$/i.test(String(v.varian).trim())) {
+    const c = shortCond(v.varian);
+    out.push(/outdated/.test(c) ? c : `Only: ${c}`);
   }
-  const cap = kr.batas_perolehan_bulanan || kr.batas_perolehan; if (cap) out.push(`Earn cap: ${cap}`);
-  if (kr.batas_konversi) out.push(`Conversion cap: ${kr.batas_konversi}`);
-  return out;
+  const rate = Number(v.batas_bulanan);
+  if (Number.isFinite(rate) && rate > 0) out.push(/spend/i.test(v.catatan || "") ? `This rate up to Rp ${rpn(rate)} a month` : `This rate up to ${rpn(rate)} a month`);
+  const cap = Number(kr.batas_perolehan_bulanan_angka);
+  if (Number.isFinite(cap) && cap > 0) out.push(`Earn cap ${rpn(cap)} ${unit(kr.batas_perolehan_bulanan_satuan)} a month`);
+  const conv = Number(kr.batas_konversi_angka);
+  if (Number.isFinite(conv) && conv > 0) out.push(`Transfer cap ${rpn(conv)} ${unit(kr.batas_konversi_satuan)} ${PER[kr.batas_konversi_periode] || ""}`.trim());
+  return out.slice(0, 2); // the rest stays in the detail panel
 }
 
 function MerchantTips({ tips }) {
@@ -818,9 +833,9 @@ const CSS = `
 .ss-cname{font-weight:600;display:flex;flex-direction:column;min-width:0} .ss-cname small{font-weight:500;font-size:12px;color:var(--faint)}
 .ss-verdict{text-align:right}
 .ss-bonus{color:var(--accent-ink)!important;font-weight:600!important}
-.ss-caution{display:flex;gap:5px;align-items:flex-start;margin-top:3px;font-size:12px;font-weight:500;color:var(--warn);line-height:1.35}
-.ss-caution svg{flex-shrink:0;margin-top:2px}
-.ss-caution>span{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ss-notes{display:flex;flex-wrap:wrap;gap:4px 6px;margin-top:5px;min-width:0}
+.ss-note{display:inline-block;max-width:100%;padding:2px 7px;border-radius:6px;background:var(--warn-soft);color:var(--warn);
+  font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ss-tips{display:flex;flex-direction:column;gap:6px}
 .ss-tip{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
 .ss-tipbtn{all:unset;box-sizing:border-box;width:100%;display:flex;justify-content:space-between;gap:12px;padding:10px 14px;cursor:pointer;font-size:13px;flex-wrap:wrap}
