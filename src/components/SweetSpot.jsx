@@ -30,11 +30,11 @@ const EXC_ROWS = [
   ["cicilan", "Instalments", "Converted to cicilan", /cicilan|instal/i],
   ["asuransi", "Insurance", "Premiums", /asuransi|insuran|premi/i],
   ["qris", "QRIS", "Scan to pay in a bank app", /qris/i],
-  ["pajak", "Tax & government", "Tax, PBB, state payments", /pajak|penerimaan negara|\bpbb\b|\btax\b/i],
+  ["pajak", "Tax", "Tax, PBB, state payments", /pajak|penerimaan negara|\bpbb\b|\btax\b/i],
   ["paper", "Paper.id", "Business invoice payments", /paper\.?id|invoic|tagihan bisnis|pembayaran bisnis/i],
-  ["ewallet_topup", "E-wallet top-up", "Adding balance to OVO, GoPay, DANA", /e-?wallet|dompet|ovo|gopay/i],
-  ["emoney_topup", "E-money top-up", "Flazz, e-money, Brizzi, TapCash", /flazz|e-?money|uang elektronik|brizzi|tapcash/i],
-  ["bayar_ewallet", "Pay via e-wallet", "Card linked to DANA, GoPay, ShopeePay", /e-?wallet|dompet digital|shopee ?pay|gopay|\bdana\b/i],
+  ["ewallet_topup", "E-wallet", "Adding balance to OVO, GoPay, DANA", /e-?wallet|dompet|ovo|gopay/i],
+  ["emoney_topup", "E-money", "Flazz, e-money, Brizzi, TapCash", /flazz|e-?money|uang elektronik|brizzi|tapcash/i],
+  ["bayar_ewallet", "Via wallet", "Card linked to DANA, GoPay, ShopeePay", /e-?wallet|dompet digital|shopee ?pay|gopay|\bdana\b/i],
   ["spbu", "Fuel", "Petrol stations", /spbu|bensin|fuel/i],
 ];
 // Community route reports (jalur_transaksi_kartu) shown under these rows.
@@ -361,8 +361,11 @@ function Seg({ items, value, onChange, label, labelledBy }) {
 }
 
 // Left: what you are about to pay for. Right: your cards, best first, as a checklist.
+const TOP = 10;
+
 function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mcc = [], routes = [], blocked = new Set() }) {
   const [open, setOpen] = useState(null);
+  const [all, setAll] = useState(false);
   const [type, key] = spend.split(":");
   const isEarn = type === "e";
   const label = isEarn ? CATS.find(c => c[0] === key)[1] : EXC_ROWS.find(r => r[0] === key)[1];
@@ -398,7 +401,7 @@ function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mc
       <div className="ss-label">{group}</div>
       {items.map(([k, l, sub]) => {
         const id = `${group === "Earn miles" ? "e" : "x"}:${k}`;
-        return <button key={id} type="button" className="ss-spend" aria-pressed={spend === id} onClick={() => { setSpend(id); setOpen(null); }}>
+        return <button key={id} type="button" className="ss-spend" aria-pressed={spend === id} onClick={() => { setSpend(id); setOpen(null); setAll(false); }}>
           {l}{sub && <small>{sub}</small>}
         </button>;
       })}
@@ -422,7 +425,7 @@ function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mc
             return mine && here;
           })} />
           <ol className="ss-cards">
-            {rows.map(r => {
+            {(all ? rows : rows.slice(0, TOP)).map(r => {
               const id = r.c.name; const isOpen = open === id;
               return (
                 <li key={id} className={`ss-cardrow st-${r.status}`}>
@@ -439,6 +442,11 @@ function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mc
               );
             })}
           </ol>
+          {rows.length > TOP && (
+            <button type="button" className="ss-btn" onClick={() => { setAll(a => !a); setOpen(null); }} aria-expanded={all}>
+              {all ? `Show top ${TOP} only` : `Show all ${rows.length} cards`}
+            </button>
+          )}
           <div className="ss-legend">
             <span><Mark status="yes" /> earns</span><span><Mark status="no" /> no points</span>
             <span><Mark status="limited" /> limited or see terms</span><span><Mark status="check" /> figure needs checking</span>
