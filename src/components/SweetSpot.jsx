@@ -99,6 +99,8 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
   const [scope, setScope] = useState("mine");
   const [soon, setSoon] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
+  const [q, setQ] = useState("");
+  const [limit, setLimit] = useState(40);
 
   const load = useCallback(async () => {
     setError(null);
@@ -179,7 +181,8 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
   const promoBankMine = p => { const b = bankNorm(p.bank_penerbit_kartu || p.bank); return myBankTokens.some(t => b.startsWith(t)); };
   const today = todayISO();
   const active = data.promo.filter(p => (p.status || "ok") === "ok" && (!p.periode_akhir || p.periode_akhir >= today));
-  const why = { banking: 0, notcard: 0, interest: 0, wealth: 0, later: 0, hidden: 0 };
+  const why = { banking: 0, notcard: 0, interest: 0, wealth: 0, later: 0, hidden: 0, search: 0 };
+  const qs = q.trim().toLowerCase();
   const shownPromos = [], hiddenPromos = [];
   active.forEach(p => {
     if (prefs.hidden.includes(p.url)) { why.hidden++; hiddenPromos.push(p); return; }
@@ -193,6 +196,7 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
     const wealth = p.butuh_status_prioritas ?? WEALTH_RE.test(`${p.minimal_transaksi || ""} ${p.kartu_atau_produk || ""} ${p.judul || ""}`);
     if (prefs.hideWealth && wealth) { why.wealth++; return; }
     if (soon && !(p.periode_akhir && daysLeft(p.periode_akhir) <= 30)) { why.later++; return; }
+    if (qs && !`${p.judul || ""} ${p.merchant || ""} ${p.benefit || ""} ${p.bank || ""} ${p.kartu_atau_produk || ""}`.toLowerCase().includes(qs)) { why.search++; return; }
     shownPromos.push(p);
   });
   const coveredBanks = new Set(data.promo.map(p => bankNorm(p.bank_penerbit_kartu || p.bank)));
@@ -257,6 +261,9 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
                     onClick={() => savePrefs({ ...prefs, interests: prefs.interests.includes(v) ? prefs.interests.filter(x => x !== v) : [...prefs.interests, v] })}>{l}</button>
                 ))}
               </div></div>
+            <div className="ss-frow"><span className="ss-label"><label htmlFor="ss-q">Search</label></span>
+              <input id="ss-q" className="ss-input" type="search" placeholder="Merchant, benefit or card" value={q}
+                onChange={e => { setQ(e.target.value); setLimit(40); }} /></div>
             <div className="ss-frow"><span className="ss-label">Also</span>
               <label className="ss-check"><input id="ss-wealth" type="checkbox" checked={prefs.hideWealth} onChange={e => savePrefs({ ...prefs, hideWealth: e.target.checked })} /> Hide offers that need priority or wealth status</label>
               <label className="ss-check"><input id="ss-soon" type="checkbox" checked={soon} onChange={e => setSoon(e.target.checked)} /> Ending in 30 days</label></div>
@@ -266,12 +273,13 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
                 why.banking && `${why.banking} savings, loans or investment`, why.notcard && `${why.notcard} not for a credit card you hold`,
                 why.interest && `${why.interest} outside your interests`, why.wealth && `${why.wealth} need priority status`, why.later && `${why.later} end later`,
               ].filter(Boolean).join(" · ")}.</span>}
+              {why.search > 0 && <span>{why.search} do not match your search.</span>}
               {why.hidden > 0 && <span>{why.hidden} hidden by you. <button className="ss-linkbtn" onClick={() => setShowHidden(s => !s)}>{showHidden ? "Hide them again" : "Show"}</button></span>}
             </div>
           </div>
           {uncovered.length > 0 && <div className="ss-callout"><b>Not covered yet:</b> {uncovered.join(", ")}. No promos stored for these banks, which does not mean they have none.</div>}
           <div className="ss-list">
-            {(showHidden ? [...shownPromos, ...hiddenPromos] : shownPromos).map(p => {
+            {(showHidden ? [...shownPromos, ...hiddenPromos] : shownPromos).slice(0, limit).map(p => {
               const dl = p.periode_akhir ? daysLeft(p.periode_akhir) : null; const hidden = prefs.hidden.includes(p.url);
               return (
                 <article key={p.url} className={`ss-promo${hidden ? " is-hidden" : ""}`}>
@@ -296,6 +304,11 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
                 </article>
               );
             })}
+            {shownPromos.length > limit && !showHidden && (
+              <div className="ss-promo" style={{ gridTemplateColumns: "1fr" }}>
+                <button className="ss-btn" onClick={() => setLimit(l => l + 60)}>Show 60 more of {shownPromos.length - limit} left</button>
+              </div>
+            )}
             {shownPromos.length === 0 && !showHidden && <div className="ss-promo" style={{ gridTemplateColumns: "1fr" }}><div className="ss-muted">Nothing left after these filters. Turn on another interest, or switch Show to Everything.</div></div>}
           </div>
         </section>
@@ -769,6 +782,7 @@ const CSS = `
 .ss-btn{height:34px;padding:0 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:600 13px/1 ${FF};cursor:pointer;white-space:nowrap}
 .ss-btn:hover{border-color:var(--accent);color:var(--accent-ink)} .ss-btn.small{height:28px;padding:0 10px;font-size:12px}
 .ss-btn.primary{background:var(--accent);border-color:var(--accent);color:#fff} .ss-btn:disabled{opacity:.6;cursor:default}
+.ss-input{height:34px;min-width:min(280px,100%);border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font:500 13px ${FF};padding:0 10px}
 .ss-select{height:42px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font:600 13px/1 ${FF};padding:0 10px}
 .ss-linkbtn{all:unset;cursor:pointer;color:var(--accent-ink);font-weight:600;text-decoration:underline;text-underline-offset:2px}
 .ss-callout{font-size:13px;color:var(--muted);background:var(--sunk);border-radius:10px;padding:10px 14px} .ss-callout b{color:var(--ink)}
