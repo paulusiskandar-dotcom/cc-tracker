@@ -408,11 +408,6 @@ function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mc
           <Pick group="Often excluded" items={EXC_ROWS.map(([k, l]) => [k, l])} />
         </nav>
         <div className="ss-ranked">
-          <MerchantTips tips={mcc.filter(t => {
-            const mine = cols.some(c => c.catalog === t.kartu) || cols.some(c => t.bank && c.bank && c.bank.toLowerCase().startsWith(String(t.bank).toLowerCase()));
-            const here = t.kategori_spending === key || (key === "utilitas" && /listrik|\bpln\b|tagihan/i.test(t.dampak || ""));
-            return mine && here;
-          })} />
           <ol className="ss-cards">
             {(all ? rows : rows.slice(0, TOP)).map(r => {
               const id = r.c.name; const isOpen = open === id;
@@ -441,6 +436,11 @@ function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mc
             <span><Mark status="limited" /> limited</span><span><Mark status="check" /> needs checking</span>
             <span><Mark status="unknown" /> not stated</span>
           </div>
+          <MerchantTips tips={mcc.filter(t => {
+            const mine = cols.some(c => c.catalog === t.kartu) || cols.some(c => t.bank && c.bank && c.bank.toLowerCase().startsWith(String(t.bank).toLowerCase()));
+            const here = t.kategori_spending === key || (key === "utilitas" && /listrik|\bpln\b|tagihan/i.test(`${t.dampak || ""} ${t.catatan || ""}`));
+            return mine && here;
+          })} />
           {ROUTE_TOPIC[key] && <RouteReports key={key} topic={ROUTE_TOPIC[key]} routes={routes} cols={cols} />}
         </div>
       </div>
@@ -461,7 +461,10 @@ function MerchantTips({ tips }) {
         return (
           <div key={t.kunci} className="ss-tip">
             <button type="button" className="ss-tipbtn" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : t.kunci)}>
-              <span><b>{t.merchant}</b>{t.kartu ? ` · ${t.kartu}` : t.bank ? ` · ${t.bank}` : ""}<br /><span className="ss-muted ss-clamp">{t.dampak || t.catatan || "No summary in the source"}</span></span>
+              <span className="ss-tiptext">
+                <span className="ss-clamp1"><b>{t.merchant}</b>{t.kartu ? ` · ${t.kartu}` : t.bank ? ` · ${t.bank}` : ""}</span>
+                <span className="ss-muted ss-clamp">{t.dampak || t.catatan || "No summary in the source"}</span>
+              </span>
               <ChevronDown size={16} className="ss-chev" aria-hidden="true" />
             </button>
             {isOpen && (
@@ -796,6 +799,8 @@ const CSS = `
 .ss-tipchips{display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap}
 .ss-tipdetail{padding:0 14px 12px}
 .ss-clamp{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.ss-clamp1{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ss-tiptext{display:flex;flex-direction:column;gap:2px;min-width:0}
 .ss-chev{color:var(--faint);transition:transform .15s} .ss-cardbtn[aria-expanded="true"] .ss-chev{transform:rotate(180deg)}
 .ss-mark{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:999px;flex-shrink:0}
 .ss-mark.yes{background:var(--good-soft);color:var(--good)} .ss-mark.no{background:var(--hot-soft);color:var(--hot)}
