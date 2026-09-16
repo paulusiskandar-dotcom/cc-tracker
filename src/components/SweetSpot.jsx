@@ -386,16 +386,6 @@ function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mc
   }).sort((a, b) => (ORDER[a.status] - ORDER[b.status]) || (a.rpm - b.rpm) || a.c.name.localeCompare(b.c.name));
   if (isEarn && rows[0]?.status === "yes") rows[0] = { ...rows[0], status: "best" };
 
-  const count = s => rows.filter(r => r.status === s).length;
-  const best = rows[0]?.status === "best" ? rows[0] : null;
-  let summary;
-  if (isEarn) summary = best
-    ? <>Best for {label.toLowerCase()}: <b>{best.c.name}</b> at <b>Rp {rpn(best.rpm)}</b> per {progName} mile{best.v?.fallback ? " (its everyday rate)" : ""}. Rp 1.000.000 earns about <b>{Math.floor(1000000 / best.rpm).toLocaleString("id-ID")} miles</b>.</>
-    : <>None of your matched cards has a {label.toLowerCase()} figure in {progName}.</>;
-  else summary = <>{count("no") ? <><b>{count("no")}</b> {count("no") === 1 ? "card earns" : "cards earn"} nothing here. </> : null}
-    {count("yes") ? <><b>{count("yes")}</b> confirmed to earn. </> : null}
-    {count("unknown") + count("see") ? <><b>{count("unknown") + count("see")}</b> not classified yet, so they are not marked either way.</> : null}</>;
-
   const Pick = ({ items, group }) => (
     <div className="ss-spendgroup">
       <div className="ss-label">{group}</div>
@@ -418,7 +408,6 @@ function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mc
           <Pick group="Often excluded" items={EXC_ROWS.map(([k, l]) => [k, l])} />
         </nav>
         <div className="ss-ranked">
-          <div className="ss-summary">{summary}</div>
           <MerchantTips tips={mcc.filter(t => {
             const mine = cols.some(c => c.catalog === t.kartu) || cols.some(c => t.bank && c.bank && c.bank.toLowerCase().startsWith(String(t.bank).toLowerCase()));
             const here = t.kategori_spending === key || (key === "utilitas" && /listrik|\bpln\b|tagihan/i.test(t.dampak || ""));
@@ -449,8 +438,8 @@ function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mc
           )}
           <div className="ss-legend">
             <span><Mark status="yes" /> earns</span><span><Mark status="no" /> no points</span>
-            <span><Mark status="limited" /> limited or see terms</span><span><Mark status="check" /> figure needs checking</span>
-            <span><Mark status="unknown" /> not stated, not assumed</span>
+            <span><Mark status="limited" /> limited</span><span><Mark status="check" /> needs checking</span>
+            <span><Mark status="unknown" /> not stated</span>
           </div>
           {ROUTE_TOPIC[key] && <RouteReports key={key} topic={ROUTE_TOPIC[key]} routes={routes} cols={cols} />}
         </div>
@@ -786,17 +775,17 @@ const CSS = `
 .ss-no{color:var(--hot);font-weight:700} .ss-lim{color:var(--warn);font-weight:700} .ss-yes{color:var(--good);font-weight:700} .ss-na{color:var(--faint)}
 .ss-src{font-size:12.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 14px}
 .ss-facts{display:grid;grid-template-columns:minmax(120px,auto) 1fr;gap:6px 14px;font-size:13px;margin:0} .ss-facts dt{color:var(--muted)} .ss-facts dd{margin:0;overflow-wrap:anywhere}
-.ss-cmpgrid{display:grid;grid-template-columns:220px minmax(0,1fr);gap:18px;align-items:start}
-.ss-spendnav{display:flex;flex-direction:column;gap:14px;position:sticky;top:12px}
-.ss-spendgroup{display:flex;flex-direction:column;gap:2px}
-.ss-spendgroup .ss-label{padding:0 10px 4px}
-.ss-spend{all:unset;box-sizing:border-box;display:flex;flex-direction:column;padding:8px 10px;border-radius:8px;cursor:pointer;font-weight:600;font-size:13.5px;color:var(--ink)}
-.ss-spend small{font-weight:400;font-size:12px;color:var(--muted)}
-.ss-spend:hover{background:var(--sunk)}
-.ss-spend[aria-pressed="true"]{background:var(--accent-soft);color:var(--accent-ink);box-shadow:inset 3px 0 0 var(--accent)}
+.ss-cmpgrid{display:flex;flex-direction:column;gap:14px;min-width:0}
+.ss-spendnav{display:flex;flex-direction:column;gap:8px}
+.ss-spendgroup{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.ss-spendgroup .ss-label{width:104px;flex-shrink:0}
+.ss-spend{all:unset;box-sizing:border-box;height:32px;display:inline-flex;align-items:center;padding:0 12px;border:1px solid var(--line);border-radius:8px;
+  background:var(--surface);cursor:pointer;font-weight:600;font-size:13px;color:var(--ink);white-space:nowrap}
+.ss-spend small{display:none}
+.ss-spend:hover{border-color:var(--accent);color:var(--accent-ink)}
+.ss-spend[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-ink)}
 .ss-spend:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .ss-ranked{display:flex;flex-direction:column;gap:12px;min-width:0}
-.ss-summary{font-size:14px;background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px 16px}
 .ss-cards{list-style:none;margin:0;padding:0;background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow:hidden}
 .ss-cardrow{border-top:1px solid var(--line)} .ss-cardrow:first-child{border-top:0}
 .ss-cardrow.st-best{background:var(--accent-soft)}
@@ -817,13 +806,7 @@ const CSS = `
 .ss-mark.lim{background:var(--warn-soft);color:var(--warn)} .ss-mark.na{background:var(--sunk);color:var(--faint)}
 .ss-carddetail{padding:0 14px 14px 50px;display:flex;flex-direction:column;gap:8px}
 @media (max-width:760px){
-  .ss-cmpgrid{grid-template-columns:1fr}
-  .ss-spendnav{position:static;flex-direction:row;flex-wrap:wrap;gap:10px}
-  .ss-spendgroup{flex-direction:row;flex-wrap:wrap;gap:6px;align-items:center}
-  .ss-spendgroup .ss-label{width:100%;padding:0}
-  .ss-spend{flex-direction:row;padding:6px 10px;border:1px solid var(--line);font-size:13px}
-  .ss-spend small{display:none}
-  .ss-spend[aria-pressed="true"]{box-shadow:none;border-color:var(--accent)}
+  .ss-spendgroup .ss-label{width:100%}
   .ss-carddetail{padding-left:14px}
   .ss-facts{grid-template-columns:1fr}
 }
@@ -839,7 +822,8 @@ const CSS = `
 .ss-gain{font-weight:500;font-size:13px;color:var(--good);margin-top:3px}
 .ss-trickdetail{padding-left:14px}
 .ss-steps{margin:4px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:3px;font-size:13px}
-.ss-legend{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:12.5px;color:var(--muted)} .ss-legend span{display:inline-flex;gap:8px;align-items:center}
+.ss-legend{display:flex;flex-wrap:nowrap;gap:16px;font-size:12.5px;color:var(--muted);overflow-x:auto}
+.ss-legend span{display:inline-flex;gap:6px;align-items:center;white-space:nowrap}
 .ss-sw{display:inline-block;width:14px;height:14px;border-radius:4px;background:var(--accent-soft);border:1px solid var(--accent)}
 .ss-filterbar,.ss-match{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px 18px;display:flex;flex-direction:column;gap:12px}
 .ss-frow{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center} .ss-frow>.ss-label{min-width:92px}
