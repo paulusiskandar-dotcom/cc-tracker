@@ -38,7 +38,7 @@ const EXC_ROWS = [
   ["spbu", "Fuel", "Petrol stations", /spbu|bensin|fuel/i],
 ];
 // Community route reports (jalur_transaksi_kartu) shown under these rows.
-const ROUTE_TOPIC = { emoney_topup: "topup_emoney", bayar_ewallet: "qris_dompet" };
+const ROUTE_TOPIC = { emoney_topup: "topup_emoney", bayar_ewallet: "qris_dompet", qris: "qris_dompet", paper: "bayar_invoice" };
 const ROUTE_STATUS = [["masih_berlaku", "Still works"], ["tidak_jelas", "Unclear"], ["sudah_ditutup", "Closed"]];
 const ROUTE_POINTS = { dapat: ["yes", "Earns"], terbatas: ["limited", "Partly"], tidak_dapat: ["no", "No points"], berubah: ["check", "Keeps changing"] };
 const TRICK_CAT = { sweet_spot_penukaran: "Redemption sweet spot", promo_penukaran: "Redemption sale", optimasi_kartu: "Card strategy",
