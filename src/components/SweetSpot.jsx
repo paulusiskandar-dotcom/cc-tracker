@@ -74,6 +74,9 @@ const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${Stri
 const fmtDate = iso => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || ""); if (!m) return iso || ""; const y = +m[1]; return `${+m[3]} ${MONTHS[+m[2] - 1]}${y !== new Date().getFullYear() ? " " + y : ""}`; };
 const daysLeft = iso => Math.ceil((new Date(iso + "T23:59:59") - new Date()) / 86400000);
 const isBankPoints = r => r.satuan ? r.satuan !== "miles_maskapai" : String(r.catatan || "").startsWith("[POIN BANK");
+// n8n marks rows whose points cannot reach any airline (CIMB Visa Platinum,
+// checked by Paulus in OCTO 16 Sep 2026). Such a card must not show a rate.
+const NO_CONVERT = /TIDAK BISA DITUKAR KE MILES/i;
 const needsCheck = r => r.perlu_cek ?? String(r.catatan || "").includes("[PERLU CEK");
 const cleanNote = s => String(s || "").replace(/^\[PERLU CEK:[^\]]*\]\s*/, "");
 const feeText = v => { const n = Number(v); return v != null && v !== "" && Number.isFinite(n) ? `Rp ${rpn(n)}` : v; };
@@ -138,6 +141,7 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
     }),
   [creditCards, mapByAccount, kartuByName]);
   const unmatched = creditCards.filter(a => !mapByAccount[a.id]);
+  const blocked = useMemo(() => new Set((data?.earn || []).filter(r => NO_CONVERT.test(r.catatan || "")).map(r => r.kartu)), [data]);
 
   // lowest clean airline-miles figure per card × category × program.
   // A card with no separate rate for a category earns its everyday rate there
@@ -146,7 +150,7 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
   const earnFor = useCallback((col, c) => {
     const catOf = r => (col.bonus && col.bonus.re.test(r.catatan || "")) ? col.bonus.kategori : CAT_OF[r.kategori];
     const pickFor = cat => {
-      const rs = (data?.earn || []).filter(r => r.kartu === col.catalog && catOf(r) === cat && progKey(r.program) === prog && !isBankPoints(r) && r.rupiah_per_mile != null)
+      const rs = (data?.earn || []).filter(r => r.kartu === col.catalog && catOf(r) === cat && progKey(r.program) === prog && !isBankPoints(r) && r.rupiah_per_mile != null && !NO_CONVERT.test(r.catatan || ""))
         .sort((a, b) => a.rupiah_per_mile - b.rupiah_per_mile);
       if (!rs.length) return null;
       const clean = rs.filter(r => !needsCheck(r)); const pick = clean[0] || rs[0];
@@ -245,7 +249,7 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
       </nav>
 
       {tab === "compare" && (
-        <CompareView cols={cols} kartuByName={kartuByName} earnFor={earnFor} progName={progName} spend={spend} setSpend={setSpend} mcc={data.mcc} routes={data.routes} />
+        <CompareView cols={cols} kartuByName={kartuByName} earnFor={earnFor} progName={progName} spend={spend} setSpend={setSpend} mcc={data.mcc} routes={data.routes} blocked={blocked} />
       )}
 
       {tab === "promo" && (
@@ -357,7 +361,7 @@ function Seg({ items, value, onChange, label, labelledBy }) {
 }
 
 // Left: what you are about to pay for. Right: your cards, best first, as a checklist.
-function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mcc = [], routes = [] }) {
+function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mcc = [], routes = [], blocked = new Set() }) {
   const [open, setOpen] = useState(null);
   const [type, key] = spend.split(":");
   const isEarn = type === "e";
@@ -368,7 +372,8 @@ function CompareView({ cols, kartuByName, earnFor, progName, spend, setSpend, mc
     const kr = kartuByName[c.catalog] || {};
     if (isEarn) {
       const v = earnFor(c, key);
-      return { c, kr, v, status: !v ? "unknown" : v.flagged ? "check" : "yes", rpm: v ? Number(v.rupiah_per_mile) : Infinity };
+      const status = v ? (v.flagged ? "check" : "yes") : blocked.has(c.catalog) ? "no" : "unknown";
+      return { c, kr, v, status, rpm: v ? Number(v.rupiah_per_mile) : Infinity };
     }
     const val = kr[`pengecualian_${key}`];
     const re = EXC_ROWS.find(r => r[0] === key)[3];
@@ -455,6 +460,7 @@ function cautions(r, isEarn, spendKey) {
     return [];
   }
   if (r.status === "unknown") return [];
+  if (r.status === "no") return ["Its points have no airline transfer for you (checked in the bank app)"];
   const out = []; const v = r.v || {}; const kr = r.kr || {};
   // conditional variants ("efektif spend Rp20 juta/statement", "s.d. 200.000 per maskapai") can be the lowest figure; say so up front
   if (v.varian && !/^(dasar|resmi)$/i.test(String(v.varian).trim())) out.push(`Only when: ${v.varian}`);
@@ -508,6 +514,7 @@ function Mark({ status }) {
 
 function verdict(r, isEarn) {
   if (r.status === "unknown") return <span className="ss-na">Not stated</span>;
+  if (isEarn && r.status === "no") return <span className="ss-no">Points cannot become miles</span>;
   if (!isEarn) return { yes: <span className="ss-yes">Earns</span>, no: <span className="ss-no">No points</span>, limited: <span className="ss-lim">Limited</span>, see: <span className="ss-lim">See terms</span> }[r.status];
   return <span className="ss-rate">
     {r.status === "best" && <span className="ss-chip acc">Best</span>}
@@ -521,6 +528,7 @@ function CardDetail({ r, isEarn, spendKey }) {
   const kr = r.kr; const v = r.v;
   const facts = [];
   if (r.c.bonus) facts.push([`Your ${r.c.bonus.nama}`, `${r.c.bonus.label_bank} (set ${r.c.bonus.diatur_pada || "by you"}). ${r.c.bonus.nama} rates follow this choice, not the catalog category.`]);
+  if (isEarn && !v && r.status === "no") facts.push(["Miles", "The card earns bank points, but they cannot be transferred to an airline programme with your account."]);
   if (isEarn && v) {
     if (v.fallback) facts.push(["Rate used", "No separate rate for this kind of spending in the source, so the everyday rate is shown."]);
     facts.push(["Conditions", cleanNote(v.catatan) || "None stated in the source"]);
