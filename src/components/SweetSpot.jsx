@@ -462,10 +462,11 @@ function MerchantTips({ tips }) {
           <div key={t.kunci} className="ss-tip">
             <button type="button" className="ss-tipbtn" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : t.kunci)}>
               <span><b>{t.merchant}</b>{t.kartu ? ` · ${t.kartu}` : t.bank ? ` · ${t.bank}` : ""}<br /><span className="ss-muted">{t.dampak}</span></span>
-              <span className="ss-tipchips"><span className="ss-chip soft">{SRC[t.sumber_jenis] || t.sumber_jenis}</span><span className={`ss-chip ${st[0]}`}>{st[1]}</span></span>
+              <ChevronDown size={16} className="ss-chev" aria-hidden="true" />
             </button>
             {isOpen && (
               <dl className="ss-facts ss-tipdetail">
+                <dt>Basis</dt><dd>{SRC[t.sumber_jenis] || t.sumber_jenis} · {st[1]}</dd>
                 {t.mcc_kode && <><dt>MCC</dt><dd>{t.mcc_kode}{t.kategori_mcc ? ` · ${t.kategori_mcc}` : ""}</dd></>}
                 {!t.mcc_kode && t.kategori_mcc && <><dt>MCC category</dt><dd>{t.kategori_mcc} (code not recorded)</dd></>}
                 {t.bukti && <><dt>Evidence</dt><dd>{t.bukti}</dd></>}
@@ -627,16 +628,7 @@ function RouteReports({ topic, routes, cols }) {
                   <li key={r.kunci} className="ss-cardrow">
                     <button type="button" className="ss-cardbtn" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : r.kunci)}>
                       <Mark status={pts[0]} />
-                      <span className="ss-cname">{label(r)}<small>{r.kanal}</small>
-                        <span className="ss-routemeta">
-                          {o === "yours" && <span className="ss-chip acc">Your card</span>}
-                          {o === "other" && <span className="ss-chip soft">Not a card you hold</span>}
-                          {r.bertentangan_dengan_resmi && <span className="ss-chip hot">Against bank terms</span>}
-                          {r.keyakinan && <span className="ss-chip soft">{LEVEL[r.keyakinan] || r.keyakinan} confidence</span>}
-                          {r.terakhir_dilaporkan && <span>Last report {fmtDate(r.terakhir_dilaporkan)}</span>}
-                          {r.biaya_admin && <span>Fee: {r.biaya_admin}</span>}
-                        </span>
-                      </span>
+                      <span className="ss-cname">{label(r)}<small>{r.kanal}</small></span>
                       <span className="ss-verdict"><span className={`ss-${{ yes: "yes", no: "no", limited: "lim", check: "lim", unknown: "na" }[pts[0]]}`}>{pts[1]}</span></span>
                       <ChevronDown size={16} className="ss-chev" aria-hidden="true" />
                     </button>
@@ -644,6 +636,8 @@ function RouteReports({ topic, routes, cols }) {
                       <div className="ss-carddetail">
                         {r.detail && <p className="ss-routep">{r.detail}</p>}
                         <dl className="ss-facts">
+                          <dt>Card</dt><dd>{o === "yours" ? "One of yours" : o === "other" ? "Not a card you hold" : "Channel rule, any card"}{r.keyakinan ? ` · ${LEVEL[r.keyakinan] || r.keyakinan} confidence` : ""}{r.bertentangan_dengan_resmi ? " · against the bank's terms" : ""}</dd>
+                          {r.biaya_admin && <><dt>Fee</dt><dd>{r.biaya_admin}</dd></>}
                           {r.catatan && <><dt>Bank terms</dt><dd>{r.catatan}</dd></>}
                           {r.jenis_transaksi && <><dt>Transaction</dt><dd>{r.jenis_transaksi.replace(/_/g, " ")}</dd></>}
                           {r.mcc_dilaporkan && <><dt>Shows up as</dt><dd>{r.mcc_dilaporkan}</dd></>}
@@ -703,21 +697,19 @@ function TricksView({ tricks }) {
             return (
               <li key={t.kode} className="ss-cardrow">
                 <button type="button" className="ss-cardbtn ss-trickbtn" aria-expanded={isOpen} onClick={() => setOpen(isOpen ? null : t.kode)}>
-                  <span className="ss-cname">{t.judul}
-                    {t.manfaat_perkiraan && <span className="ss-gain">{t.manfaat_perkiraan}</span>}
-                    <span className="ss-routemeta">
-                      {t.kategori && <span className="ss-chip soft">{TRICK_CAT[t.kategori] || t.kategori.replace(/_/g, " ")}</span>}
-                      {t.relevan_paulus === "ya" && <span className="ss-chip acc">Uses your cards</span>}
-                      {t.relevan_paulus === "sebagian" && <span className="ss-chip soft">Partly relevant</span>}
-                      {LEVEL[t.keyakinan] && <span className="ss-chip soft">{LEVEL[t.keyakinan]} confidence</span>}
-                      {t.terakhir_dibahas && <span>Last discussed {fmtDate(String(t.terakhir_dibahas).slice(0, 10))}</span>}
-                    </span>
-                  </span>
+                  <span className="ss-cname">{t.judul}</span>
                   <ChevronDown size={16} className="ss-chev" aria-hidden="true" />
                 </button>
                 {isOpen && (
                   <div className="ss-carddetail ss-trickdetail">
                     {t.ringkasan && <p className="ss-routep">{t.ringkasan}</p>}
+                    {t.manfaat_perkiraan && <p className="ss-gain">{t.manfaat_perkiraan}</p>}
+                    <dl className="ss-facts">
+                      <dt>Kind</dt><dd>{TRICK_CAT[t.kategori] || String(t.kategori || "").replace(/_/g, " ")}
+                        {t.relevan_paulus === "ya" ? " · uses your cards" : t.relevan_paulus === "sebagian" ? " · partly relevant" : ""}
+                        {LEVEL[t.keyakinan] ? ` · ${LEVEL[t.keyakinan]} confidence` : ""}
+                        {t.terakhir_dibahas ? ` · last discussed ${fmtDate(String(t.terakhir_dibahas).slice(0, 10))}` : ""}</dd>
+                    </dl>
                     {steps.length > 0 && <div><div className="ss-label">How</div><ol className="ss-steps">{steps.map((x, i) => <li key={i}>{typeof x === "string" ? x : JSON.stringify(x)}</li>)}</ol></div>}
                     <dl className="ss-facts">
                       {t.syarat && <><dt>You need</dt><dd>{t.syarat}</dd></>}
@@ -797,7 +789,8 @@ const CSS = `
 .ss-bonus{color:var(--accent-ink)!important;font-weight:600!important}
 .ss-tips{display:flex;flex-direction:column;gap:6px}
 .ss-tip{background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow:hidden}
-.ss-tipbtn{all:unset;box-sizing:border-box;width:100%;display:flex;justify-content:space-between;gap:12px;padding:10px 14px;cursor:pointer;font-size:13px;flex-wrap:wrap}
+.ss-tipbtn{all:unset;box-sizing:border-box;width:100%;display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;font-size:13px}
+.ss-tipbtn[aria-expanded="true"] .ss-chev{transform:rotate(180deg)}
 .ss-tipbtn:hover{background:var(--sunk)} .ss-tipbtn:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .ss-tipchips{display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap}
 .ss-tipdetail{padding:0 14px 12px}
@@ -819,7 +812,7 @@ const CSS = `
 .ss-evidence{display:flex;flex-direction:column;gap:4px} .ss-evidence ul{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px;font-size:12.5px}
 .ss-evidence q{display:block;color:var(--ink)}
 .ss-trickbtn{grid-template-columns:minmax(0,1fr) auto}
-.ss-gain{font-weight:500;font-size:13px;color:var(--good);margin-top:3px}
+.ss-gain{margin:0;font-weight:600;font-size:13px;color:var(--good);max-width:75ch}
 .ss-trickdetail{padding-left:14px}
 .ss-steps{margin:4px 0 0;padding-left:20px;display:flex;flex-direction:column;gap:3px;font-size:13px}
 .ss-legend{display:flex;flex-wrap:nowrap;gap:16px;font-size:12.5px;color:var(--muted);overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
