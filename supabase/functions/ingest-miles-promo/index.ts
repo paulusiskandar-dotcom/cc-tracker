@@ -66,8 +66,10 @@ const TABLES: Record<string, Spec> = {
       kartu_berlaku: "json",
     },
   },
+  // prunable: renaming a kunci (mis. "Lazada (belanja umum)" → "Lazada|<kartu>|<kategori>")
+  // used to leave the old row behind as a duplicate tip in the UI.
   mcc_merchant: {
-    key: "kunci", prunable: false,
+    key: "kunci", prunable: true,
     cols: t(["kunci", "merchant", "mcc_kode", "kategori_mcc", "kategori_spending", "kartu", "bank", "dampak", "sumber_jenis",
       "sumber_url", "bukti", "status_verifikasi", "bertentangan_dengan", "per_tanggal", "catatan", "asal"]),
   },
