@@ -776,9 +776,9 @@ const CSS = `
 .ss-src{font-size:12.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 14px}
 .ss-facts{display:grid;grid-template-columns:minmax(120px,auto) 1fr;gap:6px 14px;font-size:13px;margin:0} .ss-facts dt{color:var(--muted)} .ss-facts dd{margin:0;overflow-wrap:anywhere}
 .ss-cmpgrid{display:flex;flex-direction:column;gap:14px;min-width:0}
-.ss-spendnav{display:flex;flex-direction:column;gap:8px}
+.ss-spendnav{display:flex;flex-direction:column;gap:12px}
 .ss-spendgroup{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
-.ss-spendgroup .ss-label{width:104px;flex-shrink:0}
+.ss-spendgroup .ss-label{width:100%;margin-bottom:-2px}
 .ss-spend{all:unset;box-sizing:border-box;height:32px;display:inline-flex;align-items:center;padding:0 12px;border:1px solid var(--line);border-radius:8px;
   background:var(--surface);cursor:pointer;font-weight:600;font-size:13px;color:var(--ink);white-space:nowrap}
 .ss-spend small{display:none}
@@ -806,7 +806,6 @@ const CSS = `
 .ss-mark.lim{background:var(--warn-soft);color:var(--warn)} .ss-mark.na{background:var(--sunk);color:var(--faint)}
 .ss-carddetail{padding:0 14px 14px 50px;display:flex;flex-direction:column;gap:8px}
 @media (max-width:760px){
-  .ss-spendgroup .ss-label{width:100%}
   .ss-carddetail{padding-left:14px}
   .ss-facts{grid-template-columns:1fr}
 }
