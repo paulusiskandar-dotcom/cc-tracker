@@ -234,3 +234,6 @@ button.mw-row { cursor: pointer; }
 .mw-duo i { display: block; height: 4px; min-width: 2px; border-radius: 3px; background: var(--ink); }
 .mw-duo i.in { background: var(--good); }
 .mw-month button:disabled { opacity: 0.3; }
+
+.mw-label-act { display: inline-flex; align-items: center; gap: 10px; }
+.mw-mini { width: 28px; height: 28px; border: 0; border-radius: 50%; background: var(--card); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
