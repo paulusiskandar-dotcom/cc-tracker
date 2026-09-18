@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { X, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { fmtIDR, fmtCurNative } from "../../utils";
+import CurrencyFlag from "../shared/CurrencyFlag";
 import "./mobile.css";
 
 const slug = s => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -30,6 +31,7 @@ export default function Wallet({ user, accounts = [], ledger = [], fxRates = {},
   const navigate = useNavigate();
   const [seg, setSeg] = useState(() => lsGet("m.wallet.seg") || initialSegment);
   const [openCard, setOpenCard] = useState(null); // { id, from: rect of the tapped card }
+  const [leaving, setLeaving] = useState(false);   // sheet is closing: bring the stack back in step with it
   const stackRef = useRef(null);
   const [catalog, setCatalog] = useState({ byAccount: {}, ratio: {} });
   const [dismissed, setDismissed] = useState(() => lsGet("m.wallet.notice") || "");
@@ -100,8 +102,8 @@ export default function Wallet({ user, accounts = [], ledger = [], fxRates = {},
   };
 
   return (
-    <div className={`mw${open ? " mw-behind" : ""}`}>
-      {open && <CardSheet card={open} from={openCard.from} ledger={ledger} onClose={() => setOpenCard(null)} navigate={navigate} setTab={setTab} />}
+    <div className={`mw${open && !leaving ? " mw-behind" : ""}`}>
+      {open && <CardSheet card={open} from={openCard.from} ledger={ledger} onLeave={() => setLeaving(true)} onClose={() => { setOpenCard(null); setLeaving(false); }} navigate={navigate} setTab={setTab} />}
       <div className="mw-hdr">
         <h1>Wallet</h1>
         {onSearch && <button className="mw-round" onClick={onSearch} aria-label="Search"><Search size={20} strokeWidth={1.8} /></button>}
@@ -124,7 +126,7 @@ export default function Wallet({ user, accounts = [], ledger = [], fxRates = {},
         <>
           <div className="mw-stack" ref={stackRef}>
             {cards.map(c => (
-              <button key={c.id} data-card={c.id} className="mw-card" onClick={() => openById(c.id)} aria-label={c.name}>
+              <button key={c.id} data-card={c.id} className={`mw-card${open && c.id === open.id ? " mw-gone" : ""}`} onClick={() => openById(c.id)} aria-label={c.name}>
                 <CardArt card={c} />
               </button>
             ))}
@@ -133,30 +135,35 @@ export default function Wallet({ user, accounts = [], ledger = [], fxRates = {},
       )}
 
       {seg === "bank" && <AccountList rows={banks} fxRates={fxRates} navigate={navigate} />}
-      {seg === "cash" && <AccountList rows={cash} fxRates={fxRates} navigate={navigate} showTotal />}
+      {seg === "cash" && <AccountList rows={cash} fxRates={fxRates} navigate={navigate} showTotal flags />}
     </div>
   );
 }
 
 function CardArt({ card }) {
   const [broken, setBroken] = useState(false);
-  if (card.img && !broken) return <img className="mw-art" src={card.img} alt="" onError={() => setBroken(true)} />;
+  if (card.img && !broken) return <img className="mw-art" src={card.img} alt="" decoding="sync" draggable={false} onError={() => setBroken(true)} />;
   return <div className="mw-art mw-art-ph"><b>{card.bank_name || card.name}</b>{card.bank_name && card.bank_name !== card.name ? <span>{card.name}</span> : null}</div>;
 }
 
-function AccountList({ rows, fxRates, navigate, showTotal }) {
+// Rows are ordered by rupiah value; a foreign balance shows that value underneath so the
+// order reads at a glance.
+function AccountList({ rows, fxRates, navigate, showTotal, flags }) {
   const total = rows.reduce((s, a) => s + Number(a.current_balance || 0) * (fxRates[a.currency] || 1), 0);
   if (!rows.length) return <div className="mw-empty">Nothing here yet.</div>;
   return (
     <div className="mw-list">
       {rows.map(a => (
         <button key={a.id} className="mw-row" onClick={() => navigate(`/accounts/${a.id}/statement`)}>
+          {flags && <CurrencyFlag code={a.currency || "IDR"} size={28} />}
           <span className="mw-row-name">{a.name}</span>
-          <span className="mw-row-amt">{fmtCurNative(a.current_balance, a.currency)}</span>
+          <span className="mw-row-amt">{fmtCurNative(a.current_balance, a.currency)}
+            {a.currency && a.currency !== "IDR" && fxRates[a.currency] ? <small>{fmtIDR(Number(a.current_balance || 0) * fxRates[a.currency])}</small> : null}
+          </span>
           <ChevronRight size={16} className="mw-chev" />
         </button>
       ))}
-      {showTotal && <div className="mw-row mw-total"><span className="mw-row-name">Total</span><span className="mw-row-amt">{fmtIDR(total)}</span><span className="mw-chev" /></div>}
+      {showTotal && <div className="mw-row mw-total">{flags && <span style={{ width: 28, flex: "none" }} />}<span className="mw-row-name">Total</span><span className="mw-row-amt">{fmtIDR(total)}</span><span className="mw-chev" /></div>}
     </div>
   );
 }
@@ -164,10 +171,11 @@ function AccountList({ rows, fxRates, navigate, showTotal }) {
 // Apple Wallet flow. First tap: the card flies to the top, the rest of the stack drops
 // away, and a quick preview sits under it. Tap the card again for the full detail;
 // the close button steps back one level at a time.
-function CardSheet({ card, from, ledger, onClose, navigate, setTab }) {
+function CardSheet({ card, from, ledger, onLeave, onClose, navigate, setTab }) {
   const [level, setLevel] = useState("peek");
   const [shown, setShown] = useState(false);
   const artRef = useRef(null);
+  const swapped = useRef(false); // the swap animation is for peek ↔ detail only, not for opening
   const [delta, setDelta] = useState(0);
 
   useLayoutEffect(() => {
@@ -178,8 +186,8 @@ function CardSheet({ card, from, ledger, onClose, navigate, setTab }) {
     return () => { cancelAnimationFrame(id); document.body.style.overflow = prev; };
   }, [from]);
 
-  const close = () => { setShown(false); setTimeout(onClose, 380); };
-  const back = () => (level === "detail" ? setLevel("peek") : close());
+  const close = () => { setShown(false); onLeave && onLeave(); setTimeout(onClose, 560); };
+  const back = () => { if (level === "detail") { swapped.current = true; setLevel("peek"); } else close(); };
 
   const mine = useMemo(() => ledger.filter(e => e.from_id === card.id || e.to_id === card.id)
     .sort((a, b) => String(b.tx_date).localeCompare(String(a.tx_date))), [ledger, card.id]);
@@ -199,12 +207,12 @@ function CardSheet({ card, from, ledger, onClose, navigate, setTab }) {
         <h2>{level === "detail" ? card.name : ""}</h2>
       </div>
 
-      <button ref={artRef} className="mw-card mw-fly" style={{ transform: shown ? "none" : `translateY(${delta}px)` }}
-        onClick={() => setLevel(l => (l === "peek" ? "detail" : "peek"))} aria-label={`${card.name}: ${level === "peek" ? "show details" : "show preview"}`}>
+      <button ref={artRef} className="mw-card mw-fly" style={{ transform: shown ? "translate3d(0,0,0)" : `translate3d(0,${delta}px,0)` }}
+        onClick={() => { swapped.current = true; setLevel(l => (l === "peek" ? "detail" : "peek")); }} aria-label={`${card.name}: ${level === "peek" ? "show details" : "show preview"}`}>
         <CardArt card={card} />
       </button>
 
-      <div className="mw-under" key={level}>
+      <div className={`mw-under${swapped.current ? " swap" : ""}`} key={level}>
         {level === "peek" ? (
           <>
             {card.avail != null && (
