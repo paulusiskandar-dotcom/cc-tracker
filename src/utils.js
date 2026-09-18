@@ -1,4 +1,5 @@
 import { hitungPiutang } from "./lib/piutang";
+import { loanStatus } from "./lib/loans";
 // ─── NUMBER FORMATTING ────────────────────────────────────────
 // Always use dot as thousand separator (Indonesian locale)
 // e.g. Rp 1.250.750.000
@@ -167,12 +168,7 @@ export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], 
   // actual dated bank transaction, so it is what net worth must follow.
   const employeeLoanTotal = employeeLoans
     .filter(l => l.status !== "settled")
-    .reduce((sum, l) => {
-      const paid = (ledger || [])
-        .filter(e => e.employee_loan_id === l.id && e.tx_type === "collect_loan")
-        .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
-      return sum + Math.max(0, Number(l.total_amount || 0) - paid);
-    }, 0);
+    .reduce((sum, l) => sum + loanStatus(l, ledger || []).left, 0);
 
   // Reimburse receivable = SALDO AKUNTANSI per entitas dari ledger:
   // Σ out − Σ in − Σ kurang (expense Match) + Σ lebih (income Match), boleh negatif

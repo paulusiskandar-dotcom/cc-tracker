@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
+import { loanStatus } from "../lib/loans";
 import MobileMatch from "./mobile/MobileMatch";
 import { Pencil, Trash2, ChevronUp, ChevronDown, Scissors } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -509,12 +510,11 @@ export default function Receivables({
   // 125.327.083, and four other loans disagreed with the ledger too.
   const loansWithStats = useMemo(() => {
     return employeeLoans.map(loan => {
-      const total        = Number(loan.total_amount || 0);
       const ledgerPays   = ledger
         .filter(e => e.employee_loan_id === loan.id && e.tx_type === "collect_loan")
         .sort((a, b) => (a.tx_date || "").localeCompare(b.tx_date || ""));
-      const paidSoFar    = ledgerPays.reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
-      const remaining    = Math.max(0, total - paidSoFar);
+      // Includes instalments paid before the books began (src/lib/loans.js).
+      const { paid: paidSoFar, left: remaining } = loanStatus(loan, ledger);
       return { ...loan, paidSoFar, remaining, ledgerPays };
     });
   }, [employeeLoans, ledger]);

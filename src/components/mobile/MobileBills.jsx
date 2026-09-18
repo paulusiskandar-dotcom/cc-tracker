@@ -1,6 +1,7 @@
 // Mobile Bills (phones only): Bills · Reimburse · Match. The bill figures come from the
 // same buildBills() the desktop Bills page uses; receivables from src/lib/piutang.js.
 import { useEffect, useMemo, useState } from "react";
+import { loanStatus } from "../../lib/loans";
 import { ChevronRight } from "lucide-react";
 import { fmtIDR } from "../../utils";
 import { hitungPiutang } from "../../lib/piutang";
@@ -29,8 +30,7 @@ export default function MobileBills(props) {
   const entities = Object.entries(piutang.perEntity).filter(([k]) => k !== "?").sort((a, b) => b[1].saldo - a[1].saldo);
   // Remaining per loan = amount lent − repayments in the ledger (the rule calcNetWorth uses).
   const loans = useMemo(() => employeeLoans.filter(l => l.status !== "settled").map(l => {
-    const paid = ledger.filter(e => e.employee_loan_id === l.id && e.tx_type === "collect_loan").reduce((t, e) => t + Number(e.amount_idr || e.amount || 0), 0);
-    return { id: l.id, name: l.employee_name || l.name || "Loan", left: Math.max(0, Number(l.total_amount || 0) - paid), monthly: Number(l.monthly_installment || 0) };
+    return { id: l.id, name: l.employee_name || l.name || "Loan", left: loanStatus(l, ledger).left, monthly: Number(l.monthly_installment || 0) };
   }).filter(l => l.left > 0).sort((a, b) => b.left - a.left), [employeeLoans, ledger]);
 
   return (
