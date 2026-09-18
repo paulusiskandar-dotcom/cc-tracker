@@ -21,7 +21,6 @@ export default function MobileBills(props) {
   const { ledger = [], creditCards = [], liabilities = [], recurTemplates = [], installments = [], employeeLoans = [] } = props;
   const [view, setView] = useState(() => lsGet("m.bills.view") || "bills");
   const [full, setFull] = useState(false);
-  const [openEnt, setOpenEnt] = useState(null);
   useEffect(() => { lsSet("m.bills.view", view); }, [view]);
 
   const bills = useMemo(() => { const b = buildBills({ ledger, creditCards, liabilities, recurTemplates, installments }); return { ...b, cicilan: nameInstalments(b.cicilan, ledger, installments) }; }, [ledger, creditCards, liabilities, recurTemplates, installments]);
@@ -29,13 +28,6 @@ export default function MobileBills(props) {
   const week = useMemo(() => groups.flatMap(g => g[1]).filter(i => i.dayLeft <= 7 && !(isAuto(i) && i.dayLeft < 0)).sort((a, b) => a.when - b.when), [bills]); // eslint-disable-line react-hooks/exhaustive-deps
   const piutang = useMemo(() => hitungPiutang(ledger), [ledger]);
   const entities = Object.entries(piutang.perEntity).filter(([k]) => k !== "?").sort((a, b) => b[1].saldo - a[1].saldo);
-  // Open items = reimburse rows not yet matched into a settlement (same test piutang.js uses).
-  const openItems = useMemo(() => {
-    const m = {};
-    ledger.forEach(e => { if ((e.tx_type === "reimburse_out" || e.tx_type === "reimburse_in") && !e.reimburse_settlement_id) (m[e.entity || "?"] = m[e.entity || "?"] || []).push(e); });
-    Object.values(m).forEach(l => l.sort((a, b) => String(b.tx_date).localeCompare(String(a.tx_date))));
-    return m;
-  }, [ledger]);
   // Remaining per loan = amount lent − repayments in the ledger (the rule calcNetWorth uses).
   const loans = useMemo(() => employeeLoans.filter(l => l.status !== "settled").map(l => {
     const paid = ledger.filter(e => e.employee_loan_id === l.id && e.tx_type === "collect_loan").reduce((t, e) => t + Number(e.amount_idr || e.amount || 0), 0);
@@ -79,7 +71,7 @@ export default function MobileBills(props) {
           </div>
           <div className="mw-list mw-gap">
             {entities.map(([name, p]) => (
-              <button key={name} className="mw-row" onClick={() => setFull(true)}>
+              <button key={name} className="mw-row" onClick={() => setView("match")}>
                 <span className="mw-row-name">{name}</span>
                 <span className={`mw-row-amt${p.saldo < 0 ? " hot" : ""}`}>{fmtIDR(p.saldo, false, true)}</span>
                 <ChevronRight size={16} className="mw-chev" />
@@ -102,39 +94,7 @@ export default function MobileBills(props) {
         </>
       )}
 
-      {view === "match" && (
-        <>
-          <div className="mw-list">
-            {entities.map(([name, p]) => {
-              const items = openItems[name] || [];
-              return (
-                <div key={name}>
-                  <button className="mw-row" onClick={() => setOpenEnt(openEnt === name ? null : name)} aria-expanded={openEnt === name}>
-                    <span className="mw-row-name">{name}<small>{items.length} open item{items.length === 1 ? "" : "s"}</small></span>
-                    <span className="mw-row-amt">{fmtIDR(p.openNet, false, true)}</span>
-                  </button>
-                  {openEnt === name && (
-                    <div className="mw-sub">
-                      {items.slice(0, 40).map(e => {
-                        const back = e.tx_type === "reimburse_in";
-                        return (
-                          <div key={e.id} className="mw-row mw-tx">
-                            <span className="mw-row-name">{e.notes && !/^imported from/i.test(e.notes) ? e.notes : (e.description || "Reimburse")}<small>{`${new Date(`${e.tx_date}T00:00:00`).getDate()} ${MONTHS[new Date(`${e.tx_date}T00:00:00`).getMonth()]}`}</small></span>
-                            <span className={`mw-row-amt${back ? " in" : ""}`}>{back ? "+" : ""}{fmtIDR(e.amount_idr || e.amount)}</span>
-                          </div>
-                        );
-                      })}
-                      {items.length > 40 && <div className="mw-more">and {items.length - 40} more</div>}
-                      {!items.length && <div className="mw-more">Everything is matched.</div>}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            <button className="mw-row mw-showall" onClick={() => setFull(true)}>Match in Receivables</button>
-          </div>
-        </>
-      )}
+      {view === "match" && <Receivables {...props} mobile matchOnly />}
     </div>
   );
 }

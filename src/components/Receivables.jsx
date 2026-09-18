@@ -391,6 +391,7 @@ export default function Receivables({
   creditCards = [], assets = [], liabilities = [],
   incomeSrcs = [],
   mobile = false,   // phones: the Match tab is drawn by mobile/MobileMatch with this page's own state and handlers
+  matchOnly = false,
 }) {
   const T = dark ? DARK : LIGHT;
 
@@ -1046,6 +1047,30 @@ export default function Receivables({
     return dues[0].toLocaleDateString("en-US", { month: "short", day: "numeric" });
   })();
 
+  // Phones: the Match screen, drawn by mobile/MobileMatch from this page's own state and
+  // handlers. With `matchOnly` it is all that renders (Bills › Match on the phone).
+  const matchUI = mobile ? (
+        <MobileMatch dark={dark} threshold={AMBANG_SELISIH} categories={categories || []} settling={settling}
+          onMatch={ent => handleSettleEntity(ent.entity, ent.acc)}
+          entities={reimburseAccs.map(r => {
+            const outRows = ledger.filter(e => e.tx_type === "reimburse_out" && e.entity === r.entity && !e.reimburse_settlement_id).sort((a, b) => b.tx_date.localeCompare(a.tx_date));
+            const inRows  = ledger.filter(e => e.tx_type === "reimburse_in"  && e.entity === r.entity && !e.reimburse_settlement_id).sort((a, b) => b.tx_date.localeCompare(a.tx_date));
+            const sugg = suggestReimbursePairs(outRows, inRows);
+            const stats = reimburseStats[r.entity] || { out: 0, in: 0 };
+            return {
+              id: r.id, acc: r, entity: r.entity,
+              outstanding: piutangSemua.perEntity[r.entity]?.saldo ?? (stats.out - stats.in),
+              outRows: sugg?.orderedOut || outRows, inRows: sugg?.orderedIn || inRows, pairIndex: sugg?.pairIndex || {},
+              selOut: selectedOut[r.id] || new Set(), selIn: selectedIn[r.id] || new Set(),
+              toggleOut: id => toggleOutRow(r.id, id), toggleIn: id => toggleInRow(r.id, id),
+              shortAs: pilihanKurang[r.id] || "", setShortAs: v => setPilihanKurang(prev => ({ ...prev, [r.id]: v })),
+              overAs: pilihanSelisih[r.id] || "", setOverAs: v => setPilihanSelisih(prev => ({ ...prev, [r.id]: v })),
+              settleDate: getSettleDate(r.id), setSettleDate: v => setSettleDate(prev => ({ ...prev, [r.id]: v })),
+            };
+          })} />
+  ) : null;
+  if (mobile && matchOnly) return matchUI;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
@@ -1093,26 +1118,7 @@ export default function Receivables({
       {/* ══════════════════════════════════════════════════ */}
       {/* ── REIMBURSE TAB ────────────────────────────── */}
       {/* ══════════════════════════════════════════════════ */}
-      {subTab === "reimburse" && mobile && (
-        <MobileMatch dark={dark} threshold={AMBANG_SELISIH} categories={categories || []} settling={settling}
-          onMatch={ent => handleSettleEntity(ent.entity, ent.acc)}
-          entities={reimburseAccs.map(r => {
-            const outRows = ledger.filter(e => e.tx_type === "reimburse_out" && e.entity === r.entity && !e.reimburse_settlement_id).sort((a, b) => b.tx_date.localeCompare(a.tx_date));
-            const inRows  = ledger.filter(e => e.tx_type === "reimburse_in"  && e.entity === r.entity && !e.reimburse_settlement_id).sort((a, b) => b.tx_date.localeCompare(a.tx_date));
-            const sugg = suggestReimbursePairs(outRows, inRows);
-            const stats = reimburseStats[r.entity] || { out: 0, in: 0 };
-            return {
-              id: r.id, acc: r, entity: r.entity,
-              outstanding: piutangSemua.perEntity[r.entity]?.saldo ?? (stats.out - stats.in),
-              outRows: sugg?.orderedOut || outRows, inRows: sugg?.orderedIn || inRows, pairIndex: sugg?.pairIndex || {},
-              selOut: selectedOut[r.id] || new Set(), selIn: selectedIn[r.id] || new Set(),
-              toggleOut: id => toggleOutRow(r.id, id), toggleIn: id => toggleInRow(r.id, id),
-              shortAs: pilihanKurang[r.id] || "", setShortAs: v => setPilihanKurang(prev => ({ ...prev, [r.id]: v })),
-              overAs: pilihanSelisih[r.id] || "", setOverAs: v => setPilihanSelisih(prev => ({ ...prev, [r.id]: v })),
-              settleDate: getSettleDate(r.id), setSettleDate: v => setSettleDate(prev => ({ ...prev, [r.id]: v })),
-            };
-          })} />
-      )}
+      {subTab === "reimburse" && mobile && matchUI}
       {subTab === "reimburse" && !mobile && (
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {/* ── Summary cards ── */}
