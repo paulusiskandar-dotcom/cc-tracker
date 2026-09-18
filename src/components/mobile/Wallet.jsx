@@ -330,7 +330,7 @@ function CardSheet({ card, phase, txs, plans = [], onPlaced, onClose, navigate, 
             {plans.length > 0 && (
               <div className="mw-tile">
                 <div className="mw-tile-l">Installments · {fmtIDR(plans.reduce((t, p) => t + p.left, 0))} left</div>
-                {plans.slice(0, 4).map(p => <div key={p.id} className="mw-inst"><span>{p.name}</span><span>{p.paid}/{p.total} · {fmtIDR(p.monthly)}</span></div>)}
+                {plans.slice(0, 4).map(p => <div key={p.id} className="mw-inst"><span>{p.name}</span><span>{p.total - p.paid} more · {fmtIDR(p.monthly)}</span></div>)}
                 {plans.length > 4 && <div className="mw-tile-s">and {plans.length - 4} more — tap the card for all</div>}
               </div>
             )}
@@ -358,7 +358,7 @@ function CardSheet({ card, phase, txs, plans = [], onPlaced, onClose, navigate, 
               <>
                 <div className="mw-label">Installments</div>
                 <div className="mw-list">
-                  {plans.map(p => <div key={p.id} className="mw-row mw-tx"><span className="mw-row-name">{p.name}<small>{p.paid}/{p.total} · {fmtIDR(p.left)} left</small></span><span className="mw-row-amt">{fmtIDR(p.monthly)}</span></div>)}
+                  {plans.map(p => <div key={p.id} className="mw-row mw-tx"><span className="mw-row-name">{p.name}<small>{p.paid}/{p.total} paid · {p.total - p.paid} more · {fmtIDR(p.left)} left</small></span><span className="mw-row-amt">{fmtIDR(p.monthly)}</span></div>)}
                 </div>
               </>
             )}

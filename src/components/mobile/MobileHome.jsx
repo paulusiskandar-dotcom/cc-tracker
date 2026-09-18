@@ -15,13 +15,12 @@ import "./mobile.css";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
 const isExpense = e => (e.tx_type === "expense" || e.tx_type === "pay_liability") && !e.is_reimburse;
-const isAuto = i => /^[il]/.test(String(i.id));
 const amt = e => Number(e.amount_idr || e.amount || 0);
 const ymOf = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 const LIQUID = /^(stocks?|mutual fund|deposit|deposito)$/i;
 const signed = v => `${v < 0 ? "−" : ""}${fmtIDR(Math.abs(v))}`;
 
-export default function MobileHome({ user, ledger = [], accounts = [], creditCards = [], liabilities = [], recurTemplates = [], installments = [], pendingSyncs = [], netWorth = {}, fxRates = {}, assets = [], dark, setTab, onSearch }) {
+export default function MobileHome({ user, reconSessions = [], ledger = [], accounts = [], creditCards = [], liabilities = [], recurTemplates = [], installments = [], pendingSyncs = [], netWorth = {}, fxRates = {}, assets = [], dark, setTab, onSearch }) {
   const [openGroup, setOpenGroup] = useState(null);
   const [snaps, setSnaps] = useState([]);
   useEffect(() => { if (user?.id) supabase.from("net_worth_snapshots").select("month,total").order("month").then(({ data }) => setSnaps(data || [])); }, [user?.id]);
@@ -63,9 +62,9 @@ export default function MobileHome({ user, ledger = [], accounts = [], creditCar
 
   // 3 ── what needs attention
   const week = useMemo(() => {
-    const b = buildBills({ ledger, creditCards, liabilities, recurTemplates, installments });
-    return [...b.cards, ...b.cicilan, ...b.rutinManual, ...b.subs].filter(i => i.dayLeft <= 7 && !(isAuto(i) && i.dayLeft < 0));
-  }, [ledger, creditCards, liabilities, recurTemplates, installments]);
+    const b = buildBills({ ledger, creditCards, liabilities, recurTemplates, installments, reconSessions, actionable: true });
+    return [...b.cards, ...b.cicilan, ...b.rutinManual, ...b.subs].filter(i => i.dayLeft <= 7);
+  }, [ledger, creditCards, liabilities, recurTemplates, installments, reconSessions]);
   const weekSum = week.filter(i => i.known).reduce((s, i) => s + i.amount, 0);
   const owed = useMemo(() => hitungPiutang(ledger).saldoTotal, [ledger]);
   const inbox = pendingSyncs.filter(x => !x.currency || x.currency === "IDR").length;
@@ -74,7 +73,7 @@ export default function MobileHome({ user, ledger = [], accounts = [], creditCar
     .filter(x => x.days >= 0 && x.days <= 45).sort((x, y) => x.days - y.days);
   const needs = [
     inbox > 0 && { key: "inbox", name: "To approve", sub: `${inbox} transaction${inbox === 1 ? "" : "s"} from email`, value: String(inbox), on: () => go("transactions", "m.tx.view", "inbox") },
-    week.length > 0 && { key: "bills", name: "Due this week", sub: `${week.length} bill${week.length === 1 ? "" : "s"}`, value: fmtIDR(weekSum), on: () => go("billing", "m.bills.view", "bills") },
+    week.length > 0 && { key: "bills", name: "To pay", sub: `${week.length} bill${week.length === 1 ? "" : "s"}`, value: fmtIDR(weekSum), on: () => go("billing", "m.bills.view", "bills") },
     Math.round(owed) !== 0 && { key: "owed", name: "Owed to you", sub: "Reimbursements not yet repaid", value: signed(owed), on: () => go("billing", "m.bills.view", "reimburse") },
     ...expiring.map(({ a }) => ({ key: a.id, name: `${a.name} points expire`, sub: `${new Date(`${a.points_expiry_date}T00:00:00`).getDate()} ${MONTHS[new Date(`${a.points_expiry_date}T00:00:00`).getMonth()]}`, value: Number(a.points_expiring).toLocaleString("id-ID"), hot: true, on: () => go("cards", "m.wallet.seg", "credit") })),
   ].filter(Boolean);

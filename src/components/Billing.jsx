@@ -78,8 +78,18 @@ const MANUAL_RE = /listrik|metro|apart|internet|wifi|indihome|\bpph\b|pajak|telk
 
 // What is still unpaid this month, in four groups. Shared with the phone Bills screen
 // (src/components/mobile/MobileBills.jsx) so both always show the same bills.
-export function buildBills({ ledger = [], creditCards = [], liabilities = [], recurTemplates = [], installments = [] }, today = new Date()) {
+// The phone screens pass `actionable: true`: only what Paulus himself has to go and pay
+// (decided 18 Sep 2026). Under that rule —
+//   · a card's bill comes from its newest statement, finalized or not (the bank's figure is
+//     final the day it is issued), with the due date printed on that statement;
+//   · instalments and auto-charged subscriptions on a credit card are NOT bills: they are
+//     already inside that card's bill, so they live in the card's own detail;
+//   · a bill counts as paid when any row this month is tied to its template, whatever the
+//     type (an electricity bill fronted for SDC is a reimburse_out, not an expense).
+// The desktop Bills page calls this without the flag and keeps its old behaviour.
+export function buildBills({ ledger = [], creditCards = [], liabilities = [], recurTemplates = [], installments = [], reconSessions = [], actionable = false }, today = new Date()) {
   const curMonth = ym(today.toISOString().slice(0, 10));
+  if (actionable) return buildToPay({ ledger, creditCards, liabilities, recurTemplates, reconSessions }, today, curMonth);
 
     const dayLeft = (dt) => Math.round(
       (new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).getTime()
@@ -134,6 +144,44 @@ export function buildBills({ ledger = [], creditCards = [], liabilities = [], re
     const subs        = rutin.filter(r => !MANUAL_RE.test(r.name || ""));
 
     return { cards, cicilan, rutinManual, subs };
+}
+
+function buildToPay({ ledger, creditCards, liabilities, recurTemplates, reconSessions }, today, curMonth) {
+  const day0 = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const dayLeft = dt => Math.round((new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).getTime() - day0) / 86400000);
+  const asDate = s => new Date(`${String(s).slice(0, 10)}T00:00:00`);
+
+  const cards = (creditCards || []).filter(c => c.is_active !== false).map(c => {
+    // Newest statement for this card: a reconcile session (any status) or the last finalized one.
+    const sess = (reconSessions || []).filter(r => r.account_id === c.id && r.statement_date && r.closing_balance != null)
+      .sort((a, b) => String(b.statement_date).localeCompare(String(a.statement_date)))[0];
+    const useSess = sess && (!c.last_statement_date || String(sess.statement_date).slice(0, 10) >= String(c.last_statement_date).slice(0, 10));
+    const stmtDate = useSess ? String(sess.statement_date).slice(0, 10) : c.last_statement_date;
+    const stmtAmt = useSess ? Number(sess.closing_balance) : (c.last_statement_amount != null ? Number(c.last_statement_amount) : null);
+    if (!stmtDate || stmtAmt == null) return null;
+    const paidSince = ledger.filter(e => e.to_id === c.id && e.to_type === "account" && e.tx_date && e.tx_date >= stmtDate).reduce((s, e) => s + Number(e.amount_idr || 0), 0);
+    const when = useSess && sess.due_date ? asDate(sess.due_date) : (c.due_day ? ccDueDate(c, today) : null);
+    if (!when) return null;
+    return { id: c.id, name: c.name, when, dayLeft: dayLeft(when), amount: Math.max(0, stmtAmt - paidSince), known: true };
+  }).filter(c => c && c.amount >= 25000).sort((a, b) => a.when - b.when);
+
+  const monthRows = ledger.filter(e => ym(e.tx_date) === curMonth);
+  const isCard = id => (creditCards || []).some(c => c.id === id);
+  const rutin = (recurTemplates || [])
+    .filter(t => t.is_active !== false && t.day_of_month && t.tx_type !== "income")
+    // auto-charged to a credit card → part of that card's bill, not something to go and pay
+    .filter(t => MANUAL_RE.test(t.name || "") || !isCard(t.from_id))
+    .map(t => {
+      const when = dueDateInMonth(t.day_of_month, today); const amt = Number(t.amount || 0);
+      const paid = monthRows.some(e => (t.id && e.recurring_template_id === t.id) || (t.name && e.description && e.description.toLowerCase().includes(String(t.name).toLowerCase())));
+      return { id: t.id, name: t.name, when, dayLeft: dayLeft(when), amount: amt, known: amt > 0, paid };
+    }).filter(r => !r.paid).sort((a, b) => a.when - b.when);
+
+  const loans = (liabilities || []).filter(l => l.is_active !== false && l.due_day && Number(l.monthly_installment))
+    .map(l => { const when = dueDateInMonth(l.due_day, today); return { id: "l" + l.id, name: l.name, when, dayLeft: dayLeft(when), amount: Number(l.monthly_installment), known: true, paid: monthRows.some(e => e.to_id === l.id) }; })
+    .filter(l => !l.paid).sort((a, b) => a.when - b.when);
+
+  return { cards, cicilan: loans, rutinManual: rutin, subs: [] };
 }
 
 // ─── Component ────────────────────────────────────────────────────
