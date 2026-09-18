@@ -7,6 +7,7 @@ import { fmtIDR } from "../../utils";
 import { hitungPiutang } from "../../lib/piutang";
 import { buildBills } from "../Billing";
 import { nameInstalments } from "./names";
+import LoanSheet from "./LoanSheet";
 import Receivables from "../Receivables";
 import "./mobile.css";
 
@@ -18,6 +19,7 @@ const dueText = i => `${i.when.getDate()} ${MONTHS[i.when.getMonth()]} · ${i.da
 export default function MobileBills(props) {
   const { ledger = [], creditCards = [], liabilities = [], recurTemplates = [], installments = [], reconSessions = [], employeeLoans = [] } = props;
   const [view, setView] = useState(() => lsGet("m.bills.view") || "bills");
+  const [openLoan, setOpenLoan] = useState(null);
   useEffect(() => { lsSet("m.bills.view", view); }, [view]);
 
   const bills = useMemo(() => { const b = buildBills({ ledger, creditCards, liabilities, recurTemplates, installments, reconSessions, actionable: true }); return { ...b, cicilan: nameInstalments(b.cicilan, ledger, installments) }; }, [ledger, creditCards, liabilities, recurTemplates, installments, reconSessions]);
@@ -67,7 +69,7 @@ export default function MobileBills(props) {
               <div className="mw-label mw-label-row"><span>Employee loans</span><b>{fmtIDR(loans.reduce((t, l) => t + l.left, 0))}</b></div>
               <div className="mw-list">
                 {loans.map(l => (
-                  <button key={l.id} className="mw-row mw-tx" onClick={() => { lsSet("m.recv.view", "loans"); props.setTab && props.setTab("receivables"); }}>
+                  <button key={l.id} className="mw-row mw-tx" onClick={() => setOpenLoan(l.id)}>
                     <span className="mw-row-name">{l.name}{l.monthly > 0 && <small>{fmtIDR(l.monthly)} a month</small>}</span>
                     <span className="mw-row-amt">{fmtIDR(l.left)}</span>
                   </button>
@@ -79,6 +81,7 @@ export default function MobileBills(props) {
       )}
 
       {view === "match" && <Receivables {...props} mobile matchOnly />}
+      {openLoan && <LoanSheet {...props} loanId={openLoan} onClose={() => setOpenLoan(null)} />}
     </div>
   );
 }
