@@ -21,6 +21,7 @@ import { generateMissingReminders } from "./lib/recurringDetection";
 import { Spinner, ToastContainer, showToast } from "./components/shared/index";
 import UndoToast from "./components/shared/UndoToast";
 import MobileWallet from "./components/mobile/Wallet";
+import MobileTransactions from "./components/mobile/MobileTransactions";
 
 import Dashboard    from "./components/Dashboard";
 import Transactions from "./components/Transactions";
@@ -422,7 +423,7 @@ function Finance({ user, signOut }) {
   const EXTRA_LABELS = { scan: "AI Scan", aiimport: "AI Scan", email: "Email", notifications: "Notifications" };
   // Phone-only screens bring their own large title, so the top bar steps aside there.
   const walletProps = { user, accounts, ledger, fxRates, setTab: goTab, onSearch: () => setSearchOpen(true) };
-  const mobileOwnsHeader = isMobile && onMainPage && ["cards", "bank", "cash"].includes(tab);
+  const mobileOwnsHeader = isMobile && onMainPage && ["cards", "bank", "cash", "transactions"].includes(tab);
   const pageLabel = !onMainPage
     ? "Statement"
     : (TABS.find(t => t.id === tab)?.label || EXTRA_LABELS[tab] || "Dashboard");
@@ -435,7 +436,7 @@ function Finance({ user, signOut }) {
   const renderPage = () => {
     switch (tab) {
       case "dashboard":    return <Dashboard    {...shared} />;
-      case "transactions": return <Transactions {...shared} />;
+      case "transactions": return isMobile ? <MobileTransactions {...shared} onSearch={() => setSearchOpen(true)} /> : <Transactions {...shared} />;
       case "bank":         return isMobile ? <MobileWallet {...walletProps} initialSegment="bank" /> : <Accounts {...shared} initialSubTab="bank" />;
       case "cash":         return isMobile ? <MobileWallet {...walletProps} initialSegment="cash" /> : <Accounts {...shared} initialSubTab="cash" />;
       case "accounts":     return <Accounts     {...shared} initialSubTab="bank" />; // legacy redirect

@@ -28,6 +28,21 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private
 
 // Cash rows read as the currency itself ("Pound Sterling"), not the account's nickname.
 const CUR_NAME = { ...Object.fromEntries(CURRENCIES.map(c => [c.code, c.name])), GBP: "Pound Sterling" };
+// Round bank mark beside each bank account, same size as the currency flags on Cash.
+// A monogram in the bank's colour until real logo files are added under /public/banks.
+const BANK_MARK = {
+  BCA: ["BCA", "#0060AF", "#fff"], BLU: ["blu", "#00AEEF", "#fff"], BNI: ["BNI", "#F15A23", "#fff"], Danamon: ["D", "#F7941D", "#fff"],
+  Jenius: ["J", "#25A4DD", "#fff"], Mandiri: ["m", "#003D79", "#FFB700"], Maybank: ["M", "#FFC83D", "#111827"], Neobank: ["neo", "#FFD400", "#111827"],
+  OCBC: ["OCBC", "#ED1C24", "#fff"], Sinarmas: ["S", "#E30613", "#fff"], Superbank: ["sb", "#111827", "#C8F169"],
+};
+function BankMark({ bank, name }) {
+  const [broken, setBroken] = useState(false);
+  const key = bank || String(name || "").split(" ")[0];
+  const [txt, bg, fg] = BANK_MARK[key] || [String(key || "?").slice(0, 2), "#e5e7eb", "#374151"];
+  if (!broken) return <img className="mw-mark" src={`/banks/${slug(key)}.png`} alt="" onError={() => setBroken(true)} />;
+  return <span className="mw-mark" style={{ background: bg, color: fg, fontSize: txt.length > 3 ? 8 : txt.length > 2 ? 9.5 : 12 }}>{txt}</span>;
+}
+
 const EASE = "cubic-bezier(0.32, 0.72, 0, 1)"; // close to the iOS sheet spring
 const EASE_LIFT = "cubic-bezier(0.3, 1.18, 0.4, 1)"; // the lifted card overshoots a touch, then settles
 const FLY_MS = 560;
@@ -193,7 +208,7 @@ export default function Wallet({ user, accounts = [], ledger = [], fxRates = {},
         </>
       )}
 
-      {seg === "bank" && <AccountList rows={banks} fxRates={fxRates} navigate={navigate} />}
+      {seg === "bank" && <AccountList rows={banks} fxRates={fxRates} navigate={navigate} marks />}
       {seg === "cash" && <AccountList rows={cash} fxRates={fxRates} navigate={navigate} showTotal flags />}
     </div>
   );
@@ -207,7 +222,7 @@ function CardArt({ card }) {
 
 // Rows are ordered by rupiah value; a foreign balance shows that value underneath so the
 // order reads at a glance.
-function AccountList({ rows, fxRates, navigate, showTotal, flags }) {
+function AccountList({ rows, fxRates, navigate, showTotal, flags, marks }) {
   const total = rows.reduce((s, a) => s + Number(a.current_balance || 0) * (fxRates[a.currency] || 1), 0);
   if (!rows.length) return <div className="mw-empty">Nothing here yet.</div>;
   return (
@@ -215,6 +230,7 @@ function AccountList({ rows, fxRates, navigate, showTotal, flags }) {
       {rows.map(a => (
         <button key={a.id} className="mw-row" onClick={() => navigate(`/accounts/${a.id}/statement`)}>
           {flags && <CurrencyFlag code={a.currency || "IDR"} size={28} />}
+          {marks && <BankMark bank={a.bank_name} name={a.name} />}
           <span className="mw-row-name">{flags ? (CUR_NAME[a.currency || "IDR"] || a.name) : a.name}</span>
           <span className={`mw-row-amt${Number(a.current_balance) < 0 ? " hot" : ""}`}>{Number(a.current_balance) < 0 ? "−" : ""}{fmtCurNative(Math.abs(Number(a.current_balance || 0)), a.currency)}
             {!flags && a.currency && a.currency !== "IDR" && fxRates[a.currency] ? <small>{fmtIDR(Number(a.current_balance || 0) * fxRates[a.currency])}</small> : null}
