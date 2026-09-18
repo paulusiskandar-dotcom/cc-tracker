@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, useNavigate, useLocation } from "react-ro
 import {
   Home, ArrowUpDown, Landmark, Wallet, CreditCard,
   TrendingUp, ClipboardList, ArrowDown, BarChart2,
-  Calendar as CalendarIcon, Settings as SettingsIcon, LayoutGrid,
+  Calendar as CalendarIcon, Settings as SettingsIcon, LayoutGrid, Plane,
   ClipboardCheck, PiggyBank, Tag, Receipt,
 } from "lucide-react";
 import PILogo from "./components/PILogo";
@@ -697,6 +697,7 @@ function NAV_ICON({ id }) {
     case "calendar":     return <CalendarIcon  {...LUCIDE_PROPS} />;
     case "reconcile":    return <ClipboardCheck {...LUCIDE_PROPS} />;
     case "settings":     return <SettingsIcon  {...LUCIDE_PROPS} />;
+    case "sweetspot":    return <Plane         {...LUCIDE_PROPS} />;
     case "more":         return <LayoutGrid    {...LUCIDE_PROPS} />;
     default:             return null;
   }
@@ -962,7 +963,7 @@ const S = {
     left:         12,
     right:        12,
     zIndex:       196,
-    background:   "rgba(255,255,255,0.78)",
+    background:   "rgba(255,255,255,0.9)",
     backdropFilter:       "blur(24px) saturate(180%)",
     WebkitBackdropFilter: "blur(24px) saturate(180%)",
     border:       "1px solid rgba(255,255,255,0.75)",
