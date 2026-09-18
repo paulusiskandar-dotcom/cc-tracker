@@ -1,0 +1,121 @@
+// Mobile Bills (phones only): Bills · Reimburse · Match. The bill figures come from the
+// same buildBills() the desktop Bills page uses; receivables from src/lib/piutang.js.
+import { useEffect, useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { fmtIDR } from "../../utils";
+import { hitungPiutang } from "../../lib/piutang";
+import { buildBills } from "../Billing";
+import Receivables from "../Receivables";
+import "./mobile.css";
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const lsGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
+const dueText = i => `${i.when.getDate()} ${MONTHS[i.when.getMonth()]} · ${i.dayLeft < 0 ? `${-i.dayLeft}d late` : i.dayLeft === 0 ? "today" : `${i.dayLeft}d`}`;
+
+export default function MobileBills(props) {
+  const { ledger = [], creditCards = [], liabilities = [], recurTemplates = [], installments = [], employeeLoans = [], netWorth = {} } = props;
+  const [view, setView] = useState(() => lsGet("m.bills.view") || "bills");
+  const [full, setFull] = useState(false);
+  useEffect(() => { lsSet("m.bills.view", view); }, [view]);
+
+  const bills = useMemo(() => buildBills({ ledger, creditCards, liabilities, recurTemplates, installments }), [ledger, creditCards, liabilities, recurTemplates, installments]);
+  const groups = [["Cards", bills.cards], ["Installments", bills.cicilan], ["Recurring", bills.rutinManual], ["Subscriptions", bills.subs]];
+  const week = useMemo(() => groups.flatMap(g => g[1]).filter(i => i.dayLeft <= 7).sort((a, b) => a.when - b.when), [bills]); // eslint-disable-line react-hooks/exhaustive-deps
+  const piutang = useMemo(() => hitungPiutang(ledger), [ledger]);
+  const entities = Object.entries(piutang.perEntity).filter(([k]) => k !== "?").sort((a, b) => b[1].saldo - a[1].saldo);
+  const activeLoans = employeeLoans.filter(l => l.status !== "settled").length;
+
+  if (full) {
+    return (
+      <div className="mw">
+        <div className="mw-hdr">
+          <button className="mw-round" onClick={() => setFull(false)} aria-label="Back"><ChevronLeft size={22} strokeWidth={1.8} /></button>
+          <h2>Receivables</h2>
+        </div>
+        <div className="mw-legacy"><Receivables {...props} /></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mw">
+      <div className="mw-hdr"><h1>Bills</h1></div>
+      <div className="mw-seg" role="tablist">
+        {[["bills", "Bills"], ["reimburse", "Reimburse"], ["match", "Match"]].map(([id, label]) => (
+          <button key={id} role="tab" aria-selected={view === id} className={view === id ? "on" : ""} onClick={() => setView(id)}>{label}</button>
+        ))}
+      </div>
+
+      {view === "bills" && (
+        <>
+          {week.length > 0 && <BillGroup title="Due this week" items={week} total />}
+          {groups.map(([title, items]) => items.length > 0 && <BillGroup key={title} title={title} items={items} />)}
+          {!groups.some(g => g[1].length) && <div className="mw-empty">Nothing left to pay this month.</div>}
+        </>
+      )}
+
+      {view === "reimburse" && (
+        <>
+          <div className="mw-tile">
+            <div className="mw-tile-l">Owed to you</div>
+            <div className="mw-tile-n">{fmtIDR(piutang.saldoTotal, false, true)}</div>
+          </div>
+          <div className="mw-list mw-gap">
+            {entities.map(([name, p]) => (
+              <button key={name} className="mw-row" onClick={() => setFull(true)}>
+                <span className="mw-row-name">{name}</span>
+                <span className={`mw-row-amt${p.saldo < 0 ? " hot" : ""}`}>{fmtIDR(p.saldo, false, true)}</span>
+                <ChevronRight size={16} className="mw-chev" />
+              </button>
+            ))}
+          </div>
+          {activeLoans > 0 && (
+            <>
+              <div className="mw-label">Employee loans</div>
+              <div className="mw-list">
+                <button className="mw-row" onClick={() => setFull(true)}>
+                  <span className="mw-row-name">{activeLoans} active</span>
+                  <span className="mw-row-amt">{fmtIDR(netWorth.employeeLoanTotal || 0)}</span>
+                  <ChevronRight size={16} className="mw-chev" />
+                </button>
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      {view === "match" && (
+        <>
+          <div className="mw-list">
+            {entities.map(([name, p]) => (
+              <button key={name} className="mw-row" onClick={() => setFull(true)}>
+                <span className="mw-row-name">{name}<small>Paid out {fmtIDR(p.openOut)} · received {fmtIDR(p.openIn)}</small></span>
+                <span className="mw-row-amt">{fmtIDR(p.openNet, false, true)}</span>
+                <ChevronRight size={16} className="mw-chev" />
+              </button>
+            ))}
+            <button className="mw-row mw-showall" onClick={() => setFull(true)}>Match in Receivables</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function BillGroup({ title, items, total }) {
+  const sum = items.filter(i => i.known).reduce((s, i) => s + i.amount, 0);
+  return (
+    <>
+      <div className="mw-label mw-label-row"><span>{title}</span>{total && <b>{fmtIDR(sum)}</b>}</div>
+      <div className="mw-list">
+        {items.map(i => (
+          <div key={i.id} className="mw-row mw-tx">
+            <span className="mw-row-name">{i.name}<small className={i.dayLeft <= 3 ? "hot" : ""}>{dueText(i)}</small></span>
+            <span className="mw-row-amt">{i.known ? fmtIDR(i.amount) : "—"}</span>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}

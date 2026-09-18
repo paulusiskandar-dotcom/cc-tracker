@@ -120,3 +120,7 @@ button.mw-row { cursor: pointer; }
 
 /* The existing full page, shown inside the phone layout. */
 .mw-legacy { margin: 0 -8px; }
+
+.mw-label-row { display: flex; justify-content: space-between; align-items: baseline; }
+.mw-label-row b { font-size: 13px; letter-spacing: 0; color: var(--ink); font-variant-numeric: tabular-nums; }
+.mw-row small.hot { color: var(--hot); }

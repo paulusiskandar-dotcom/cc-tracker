@@ -76,16 +76,11 @@ const SUBTABS = [
 // subscriptions on a card. Classified by name since there's no schema field.
 const MANUAL_RE = /listrik|metro|apart|internet|wifi|indihome|\bpph\b|pajak|telkomsel|\bipl\b|pdam|bpjs|iuran|residence|riverside|circleone/i;
 
-// ─── Component ────────────────────────────────────────────────────
-export default function Billing({
-  ledger = [], creditCards = [], liabilities = [],
-  recurTemplates = [], installments = [],
-}) {
-  const [tab, setTab] = useState("cards");
-  const today = new Date();
+// What is still unpaid this month, in four groups. Shared with the phone Bills screen
+// (src/components/mobile/MobileBills.jsx) so both always show the same bills.
+export function buildBills({ ledger = [], creditCards = [], liabilities = [], recurTemplates = [], installments = [] }, today = new Date()) {
   const curMonth = ym(today.toISOString().slice(0, 10));
 
-  const { cards, cicilan, rutinManual, subs } = useMemo(() => {
     const dayLeft = (dt) => Math.round(
       (new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).getTime()
         - new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) / 86400000
@@ -139,7 +134,19 @@ export default function Billing({
     const subs        = rutin.filter(r => !MANUAL_RE.test(r.name || ""));
 
     return { cards, cicilan, rutinManual, subs };
-  }, [ledger, creditCards, liabilities, recurTemplates, installments, curMonth]); // eslint-disable-line
+}
+
+// ─── Component ────────────────────────────────────────────────────
+export default function Billing({
+  ledger = [], creditCards = [], liabilities = [],
+  recurTemplates = [], installments = [],
+}) {
+  const [tab, setTab] = useState("cards");
+  const today = new Date();
+  const curMonth = ym(today.toISOString().slice(0, 10));
+
+  const { cards, cicilan, rutinManual, subs } = useMemo(() => buildBills({ ledger, creditCards, liabilities, recurTemplates, installments }, today),
+    [ledger, creditCards, liabilities, recurTemplates, installments, curMonth]); // eslint-disable-line
 
   const byTab = { cards, installments: cicilan, recurring: rutinManual, subscriptions: subs };
   const items = byTab[tab] || [];

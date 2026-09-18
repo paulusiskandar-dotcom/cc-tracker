@@ -22,6 +22,8 @@ import { Spinner, ToastContainer, showToast } from "./components/shared/index";
 import UndoToast from "./components/shared/UndoToast";
 import MobileWallet from "./components/mobile/Wallet";
 import MobileTransactions from "./components/mobile/MobileTransactions";
+import MobileBills from "./components/mobile/MobileBills";
+import MobileAssets from "./components/mobile/MobileAssets";
 
 import Dashboard    from "./components/Dashboard";
 import Transactions from "./components/Transactions";
@@ -423,7 +425,7 @@ function Finance({ user, signOut }) {
   const EXTRA_LABELS = { scan: "AI Scan", aiimport: "AI Scan", email: "Email", notifications: "Notifications" };
   // Phone-only screens bring their own large title, so the top bar steps aside there.
   const walletProps = { user, accounts, ledger, fxRates, setTab: goTab, onSearch: () => setSearchOpen(true) };
-  const mobileOwnsHeader = isMobile && onMainPage && ["cards", "bank", "cash", "transactions"].includes(tab);
+  const mobileOwnsHeader = isMobile && onMainPage && ["cards", "bank", "cash", "transactions", "billing", "assets"].includes(tab);
   const pageLabel = !onMainPage
     ? "Statement"
     : (TABS.find(t => t.id === tab)?.label || EXTRA_LABELS[tab] || "Dashboard");
@@ -441,7 +443,7 @@ function Finance({ user, signOut }) {
       case "cash":         return isMobile ? <MobileWallet {...walletProps} initialSegment="cash" /> : <Accounts {...shared} initialSubTab="cash" />;
       case "accounts":     return <Accounts     {...shared} initialSubTab="bank" />; // legacy redirect
       case "cards":        return isMobile ? <MobileWallet {...walletProps} /> : <CreditCards {...shared} />;
-      case "assets":       return <Assets       {...shared} />;
+      case "assets":       return isMobile ? <MobileAssets {...shared} /> : <Assets {...shared} />;
       case "receivables":  return <Receivables  {...shared} />;
       case "income":       return <Income       {...shared} />;
       case "reports":      return <Reports      {...shared} />;
@@ -449,7 +451,7 @@ function Finance({ user, signOut }) {
       case "tags":         return <Tags         user={user} ledger={ledger} onRefresh={loadData} />;
       case "sweetspot":    return <SweetSpot    user={user} ledger={ledger} accounts={accounts} />;
       case "calendar":     return <Calendar     {...shared} />;
-      case "billing":      return <Billing      {...shared} />;
+      case "billing":      return isMobile ? <MobileBills {...shared} /> : <Billing {...shared} />;
       case "settings":     return <Settings     {...shared} signOut={signOut} initialTab={settingsInitialTab} />;
       case "reconcile":    return <Reconcile    {...shared} />;
       case "scan":         return <AIImport     {...shared} />;

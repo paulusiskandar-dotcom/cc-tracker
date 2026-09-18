@@ -161,7 +161,7 @@ export default function MobileTransactions(props) {
   );
 }
 
-function Donut({ cats, total, label }) {
+export function Donut({ cats, total, label }) {
   const R = 54; const C = 2 * Math.PI * R;
   let off = 0;
   return (
