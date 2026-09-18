@@ -1,7 +1,8 @@
 // Mobile Assets (phones only): Assets · Net Worth. Net worth is the app's own
 // calcNetWorth() result passed down from App, not recomputed here.
 import { useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronDown } from "lucide-react";
+import { ChevronLeft, ChevronDown, X } from "lucide-react";
+import { updateAssetValue } from "../../lib/assetValue";
 import { supabase } from "../../lib/supabase";
 import { fmtIDR } from "../../utils";
 import Assets from "../Assets";
@@ -18,6 +19,7 @@ export default function MobileAssets(props) {
   const view = forcedView || "assets"; // net worth and its make-up now live on Home
   const [full, setFull] = useState(false);
   const [openGroup, setOpenGroup] = useState(null);
+  const [editing, setEditing] = useState(null);
   useEffect(() => {
     if (!user?.id) return;
     supabase.from("net_worth_snapshots").select("month,total").order("month").then(({ data }) => setSnaps(data || []));
@@ -76,7 +78,7 @@ export default function MobileAssets(props) {
                 {openGroup === g.name && (
                   <div className="mw-sub">
                     {g.items.map(a => (
-                      <div key={a.id} className="mw-row mw-tx"><span className="mw-row-name">{a.name}</span><span className="mw-row-amt">{fmtIDR(value(a))}</span></div>
+                      <button key={a.id} className="mw-row mw-tx" onClick={() => setEditing(a)}><span className="mw-row-name">{a.name}</span><span className="mw-row-amt">{fmtIDR(value(a))}</span></button>
                     ))}
                   </div>
                 )}
@@ -84,6 +86,8 @@ export default function MobileAssets(props) {
             ))}
             <button className="mw-row mw-showall" onClick={() => setFull(true)}>Manage assets</button>
           </div>
+          {editing && <ValueSheet asset={editing} userId={user?.id} onClose={() => setEditing(null)}
+            onSaved={v => { props.setAccounts && props.setAccounts(p => p.map(a => (a.id === editing.id ? { ...a, current_value: v } : a))); setEditing(null); props.onRefresh && props.onRefresh(); }} />}
         </>
       ) : (
         <>
@@ -129,5 +133,35 @@ export function Trend({ series }) {
       <circle cx={x(last)} cy={y(vals[last])} r="4" fill="var(--accent)" />
       {pts.map((p, i) => (pts.length <= 6 || i % 2 === last % 2) && <text key={p.month} x={x(i)} y={H - 5} textAnchor={i === 0 ? "start" : i === last ? "end" : "middle"} fontSize="10.5" fill="var(--faint)">{MONTHS[Number(p.month.slice(5, 7)) - 1]}</text>)}
     </svg>
+  );
+}
+
+// Revalue one asset. Same write as the desktop timeline (src/lib/assetValue.js).
+function ValueSheet({ asset, userId, onClose, onSaved }) {
+  const [val, setVal] = useState(String(Math.round(Number(asset.current_value || 0))));
+  const [notes, setNotes] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const foreign = asset.currency && asset.currency !== "IDR";
+  const save = async () => {
+    const n = Number(String(val).replace(/[^\d.-]/g, ""));
+    if (!String(val).trim() || !Number.isFinite(n) || n < 0) { setErr("Enter the new value as a number."); return; }
+    setBusy(true); setErr("");
+    try { await updateAssetValue({ userId, assetId: asset.id, value: n, notes }); onSaved(n); }
+    catch (e) { setErr(`Could not save: ${e.message}`); setBusy(false); }
+  };
+  return (
+    <div className="mw-modal" role="dialog" aria-modal="true" onClick={onClose}>
+      <div className="mw-modal-card" onClick={ev => ev.stopPropagation()}>
+        <div className="mw-hdr"><h2>{asset.name}</h2><button className="mw-round mw-round-sunk" onClick={onClose} aria-label="Close"><X size={20} strokeWidth={1.8} /></button></div>
+        <div className="mw-tile-s">{asset.subtype || "Asset"} · now {foreign ? `${asset.currency} ` : ""}{foreign ? Number(asset.current_value || 0).toLocaleString("id-ID") : fmtIDR(asset.current_value)}</div>
+        <div className="mw-fields">
+          <label htmlFor="av-val">New value{foreign ? ` (${asset.currency})` : ""}<input id="av-val" inputMode="decimal" value={val} onChange={e => setVal(e.target.value)} /></label>
+          <label htmlFor="av-notes">Notes<input id="av-notes" value={notes} onChange={e => setNotes(e.target.value)} placeholder="Why it changed" /></label>
+        </div>
+        {err && <div className="mw-err">{err}</div>}
+        <div className="mw-form-act"><button className="mw-btn mw-btn-ghost" onClick={onClose} disabled={busy}>Cancel</button><button className="mw-btn" onClick={save} disabled={busy}>{busy ? "Saving" : "Update value"}</button></div>
+      </div>
+    </div>
   );
 }

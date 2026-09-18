@@ -18,7 +18,7 @@ const isAuto = i => /^[il]/.test(String(i.id));
 const dueText = i => `${i.when.getDate()} ${MONTHS[i.when.getMonth()]} · ${i.dayLeft < 0 ? (isAuto(i) ? "billed" : `${-i.dayLeft}d late`) : i.dayLeft === 0 ? "today" : `${i.dayLeft}d`}`;
 
 export default function MobileBills(props) {
-  const { ledger = [], creditCards = [], liabilities = [], recurTemplates = [], installments = [], employeeLoans = [], netWorth = {} } = props;
+  const { ledger = [], creditCards = [], liabilities = [], recurTemplates = [], installments = [], employeeLoans = [] } = props;
   const [view, setView] = useState(() => lsGet("m.bills.view") || "bills");
   const [full, setFull] = useState(false);
   const [openEnt, setOpenEnt] = useState(null);
@@ -36,7 +36,11 @@ export default function MobileBills(props) {
     Object.values(m).forEach(l => l.sort((a, b) => String(b.tx_date).localeCompare(String(a.tx_date))));
     return m;
   }, [ledger]);
-  const activeLoans = employeeLoans.filter(l => l.status !== "settled").length;
+  // Remaining per loan = amount lent − repayments in the ledger (the rule calcNetWorth uses).
+  const loans = useMemo(() => employeeLoans.filter(l => l.status !== "settled").map(l => {
+    const paid = ledger.filter(e => e.employee_loan_id === l.id && e.tx_type === "collect_loan").reduce((t, e) => t + Number(e.amount_idr || e.amount || 0), 0);
+    return { id: l.id, name: l.employee_name || l.name || "Loan", left: Math.max(0, Number(l.total_amount || 0) - paid), monthly: Number(l.monthly_installment || 0) };
+  }).filter(l => l.left > 0).sort((a, b) => b.left - a.left), [employeeLoans, ledger]);
 
   if (full) {
     return (
@@ -82,15 +86,16 @@ export default function MobileBills(props) {
               </button>
             ))}
           </div>
-          {activeLoans > 0 && (
+          {loans.length > 0 && (
             <>
-              <div className="mw-label">Employee loans</div>
+              <div className="mw-label mw-label-row"><span>Employee loans</span><b>{fmtIDR(loans.reduce((t, l) => t + l.left, 0))}</b></div>
               <div className="mw-list">
-                <button className="mw-row" onClick={() => setFull(true)}>
-                  <span className="mw-row-name">{activeLoans} active</span>
-                  <span className="mw-row-amt">{fmtIDR(netWorth.employeeLoanTotal || 0)}</span>
-                  <ChevronRight size={16} className="mw-chev" />
-                </button>
+                {loans.map(l => (
+                  <button key={l.id} className="mw-row mw-tx" onClick={() => setFull(true)}>
+                    <span className="mw-row-name">{l.name}{l.monthly > 0 && <small>{fmtIDR(l.monthly)} a month</small>}</span>
+                    <span className="mw-row-amt">{fmtIDR(l.left)}</span>
+                  </button>
+                ))}
               </div>
             </>
           )}

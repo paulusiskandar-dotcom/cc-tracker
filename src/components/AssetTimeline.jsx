@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { updateAssetValue } from "../lib/assetValue";
 import { supabase } from "../lib/supabase";
 import { fmtIDR, todayStr } from "../utils";
 import { AssetIcon } from "../lib/categoryIcons";
@@ -178,15 +179,7 @@ export default function AssetTimeline({
     setSaving(true);
     try {
       const newVal = Number(updateForm.value);
-      const { data: current } = await supabase.from("accounts").select("current_value").eq("id", asset.id).single();
-      const oldValue = current?.current_value || 0;
-      await supabase.from("accounts").update({ current_value: newVal }).eq("id", asset.id);
-      await supabase.from("asset_value_history").insert({
-        account_id: asset.id, user_id: user.id,
-        old_value: oldValue, new_value: newVal,
-        date: updateForm.date || todayStr(),
-        notes: updateForm.notes || "Manual update",
-      });
+      const { old_value: oldValue } = await updateAssetValue({ userId: user.id, assetId: asset.id, value: newVal, date: updateForm.date, notes: updateForm.notes });
       if (setAccounts) setAccounts(p => p.map(a => a.id === asset.id ? { ...a, current_value: newVal } : a));
       setValueHistory(p => [...p, { account_id: asset.id, old_value: oldValue, new_value: newVal, date: updateForm.date || todayStr(), notes: updateForm.notes || "Manual update" }]);
       showToast("Value updated");
