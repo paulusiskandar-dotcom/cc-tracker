@@ -546,6 +546,13 @@ function TxHorizontalCard({
             CICILAN{r._instNo ? ` ${r._instNo}${r._instTotal ? `/${r._instTotal}` : ""}` : ""}
           </span>
         )}
+        {/* Antrean email: angsuran dari statement (gmail-estatement prepare). Angsuran
+            1/N membuat rencana cicilan saat disetujui; yang lanjutan sudah dibukukan server. */}
+        {source !== "estatement" && r._cicilanInfo && (
+          <span style={BADGE("#dbeafe","#1d4ed8")} title={r._cicilan ? "Angsuran pertama — rencana cicilan dibuat saat disetujui" : "Angsuran cicilan"}>
+            CICILAN {r._cicilanInfo.ke || "?"}/{r._cicilanInfo.dari || "?"}{r._cicilan ? " · NEW PLAN" : ""}
+          </span>
+        )}
         {r.learned_cat?.confidence >= 2 && r.learned_cat?.category_id === r.category_id && (
           <span style={BADGE("#dcfce7","#059669")}>✓ Learned</span>
         )}

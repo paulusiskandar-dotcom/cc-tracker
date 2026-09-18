@@ -1147,7 +1147,7 @@ export const installmentsApi = {
   },
 
   // Create installment + recurring template from an import row, link to ledger entry
-  createFromImport: async (userId, { ledgerId, description, accountId, amount, totalMonths, paidMonths, currency, txDate, categoryId }) => {
+  createFromImport: async (userId, { ledgerId, description, accountId, amount, totalMonths, paidMonths, currency, txDate, categoryId, totalAmount }) => {
     const monthlyAmount = Number(amount);
     const paid = Number(paidMonths) || 1;
     // Compute start_date: txDate minus (paidMonths - 1) months
@@ -1163,7 +1163,9 @@ export const installmentsApi = {
       description,
       purchase_ledger_id: ledgerId,
       account_id:    accountId,
-      total_amount:  monthlyAmount * totalMonths,
+      // Total sebenarnya = nominal belanja yang dikonversi (Retail), bukan N × angsuran:
+      // BRI membulatkan angsuran, 6 × 655.071 = 3.930.426 padahal belanjanya 3.930.423.
+      total_amount:  Number(totalAmount) > 0 ? Number(totalAmount) : monthlyAmount * totalMonths,
       monthly_amount: monthlyAmount,
       total_months:  totalMonths,
       paid_months:   paid,
@@ -1953,6 +1955,12 @@ export function flattenEmailSync(rows) {
         // ±40 days anywhere — the same charge probably entered via another door.
         _dup_hint:               tx._dup_hint || null,
         _source:                 tx._source || row.source || null,
+        // Cicilan dari statement (gmail-estatement prepare): angsuran 1/N membuat
+        // rencana baru saat disetujui; angsuran lanjutan sudah dibukukan server.
+        is_installment:          !!tx.is_installment,
+        installment_current:     tx.installment_current ?? null,
+        installment_total:       tx.installment_total ?? null,
+        plan_total:              tx.plan_total ?? null,
         suggested_category_label: tx.suggested_category,
         // Keep the AI's original type + destination bank so the UI can still
         // suggest "transfer to own bank" when the server couldn't resolve to_account_id

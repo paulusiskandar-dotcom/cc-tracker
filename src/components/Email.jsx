@@ -38,8 +38,15 @@ const syncToRow = (s) => ({
   entity:        s.entity || "",
   category_id:   null,
   suggested_category_label: s.suggested_category_label || "",
-  notes:         "",
+  // Nama barang dari email pesanan (item_note) ikut ke ledger.notes.
+  notes:         s.notes || "",
   status:        "new",
+  // Angsuran 1/N dari statement → rencana cicilan dibuat saat baris disetujui.
+  _cicilan:       !!(s.is_installment && Number(s.installment_current) === 1 && Number(s.installment_total) >= 2),
+  _cicilanMonths: Number(s.installment_total) || 0,
+  _cicilanKe:     Number(s.installment_current) || 1,
+  _planTotal:     s.plan_total || null,
+  _cicilanInfo:   s.is_installment ? { ke: Number(s.installment_current) || null, dari: Number(s.installment_total) || null } : null,
   // "statement" rows come from gmail-estatement prepare (unmatched reconcile
   // lines) — rendered with their own tint + badge so the door is visible.
   _source:       s._source || null,
@@ -888,9 +895,10 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       }
       if (r._cicilan && r._cicilanMonths >= 2 && created?.id) {
         installmentsApi.createFromImport(user.id, {
-          ledgerId: created.id, description: r.description || "", accountId: r.from_id,
+          // Nama rencana = nama barang kalau ada; kode bank hanya sebagai cadangan.
+          ledgerId: created.id, description: r.notes || r.description || "", accountId: r.from_id,
           amount: Number(r.amount_idr || r.amount || 0), totalMonths: r._cicilanMonths,
-          paidMonths: r._cicilanKe || 1,
+          paidMonths: r._cicilanKe || 1, totalAmount: r._planTotal || null,
           currency: r.currency || "IDR", txDate: r.tx_date, categoryId: r.category_id || null,
         }).catch(e => console.error("[cicilan import]", e));
       }
@@ -973,9 +981,10 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
         }
         if (r._cicilan && r._cicilanMonths >= 2 && created?.id) {
           installmentsApi.createFromImport(user.id, {
-            ledgerId: created.id, description: r.description || "", accountId: r.from_id,
+            // Nama rencana = nama barang kalau ada; kode bank hanya sebagai cadangan.
+            ledgerId: created.id, description: r.notes || r.description || "", accountId: r.from_id,
             amount: Number(r.amount_idr || r.amount || 0), totalMonths: r._cicilanMonths,
-            paidMonths: r._cicilanKe || 1,
+            paidMonths: r._cicilanKe || 1, totalAmount: r._planTotal || null,
             currency: r.currency || "IDR", txDate: r.tx_date, categoryId: r.category_id || null,
           }).catch(e => console.error("[cicilan import]", e));
         }

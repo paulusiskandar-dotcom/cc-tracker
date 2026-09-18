@@ -1292,6 +1292,29 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
 
   let { match, missing, extra } = matchRowsSrv(stmtRows, ledgerWindow);
 
+  // ── PASANGAN KONVERSI CICILAN (wash) ──────────────────────────────────────
+  // "Retail … NAME" (debit) + "NAME : 0/N" (kredit) bernominal sama di hari yang
+  // sama = belanja yang diubah jadi cicilan. Keduanya saling menghapus dan bukan
+  // belanja nyata: yang ditagih sungguhan adalah cicilan 1/N-nya. Sebelum 17 Sep
+  // 2026 pasangan ini masuk antrean sebagai expense + income (13 baris di BRI,
+  // 48,7 jt expense semu di laporan). Sekarang: tidak dibukukan, langsung masuk
+  // ignoredIds draft supaya Finalize tetap lolos.
+  const washIds = new Set<string>();
+  const washPairs: { retail: any; credit: any }[] = [];
+  {
+    const dayMs = 86400000;
+    const credits = missing.filter((m: any) => (m.direction || "out") === "in" && /:\s*0\s*\/\s*\d{1,2}\b/.test(String(m.description || "")));
+    for (const c of credits) {
+      const cAmt = Math.abs(Number(c.amount || 0));
+      const r = missing.find((m: any) => m !== c && !washIds.has(m._id) && (m.direction || "out") !== "in"
+        && /retail/i.test(String(m.description || ""))
+        && Math.abs(Math.abs(Number(m.amount || 0)) - cAmt) <= 2
+        && Math.abs(new Date((m.date || "") + "T00:00:00").getTime() - new Date((c.date || "") + "T00:00:00").getTime()) <= dayMs);
+      if (r) { washIds.add(r._id); washIds.add(c._id); washPairs.push({ retail: r, credit: c }); }
+    }
+    if (washPairs.length) console.log(`[prepare] ${washPairs.length} pasangan konversi cicilan dikecualikan: ${washPairs.map((w) => w.retail.amount).join(", ")}`);
+  }
+
   // ── AUTO-CICILAN & AUTO-BIAYA DARI STATEMENT ──────────────────────────────
   // Statement = sumber final. Dua golongan baris "hilang" yang TIDAK PERNAH
   // punya email dibuat langsung dari statement, dengan bukti pola:
@@ -1317,9 +1340,25 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
       throw `statement lama (${periodEnd} < anchor ${acc.last_statement_date}) — auto-create dilewati`;
     const BIAYA_RE = /BEA METERAI|BIAYA NOTIFIKASI|ADMINISTRATION FEE|E-?BILLING|E-?STATEMENT FEE|STAMP DUTY/i;
     const CICIL_RE = /(\d{1,2})\s*\/\s*(\d{1,2})/;
+    // Rencana cicilan aktif kartu ini + angsuran terakhir tiap rencana (sumber nama
+    // barang, kategori, entity). Pencocokan lewat nominal bulanan ±50 (nominal BRI
+    // bergeser 2–6 rupiah antarbulan) dan tenor — bukan lewat teks deskripsi, yang
+    // berubah begitu barisnya diberi nama barang.
+    const { data: plansRaw } = await serviceSupabase.from("installments")
+      .select("id, description, monthly_amount, total_months, paid_months, expense_category_id, status")
+      .eq("user_id", userId).eq("account_id", acc.id).eq("status", "active");
+    const plans: any[] = plansRaw || [];
+    const { data: legsRaw } = plans.length ? await serviceSupabase.from("ledger")
+      .select("installment_id, tx_date, notes, category_id, category_name, entity, merchant_name, tx_type, to_type, to_id")
+      .eq("user_id", userId).eq("from_id", acc.id).in("installment_id", plans.map((p: any) => p.id))
+      .order("tx_date", { ascending: false }) : { data: [] };
+    const legByPlan = new Map<string, any>();
+    for (const l of (legsRaw || [])) if (!legByPlan.has(l.installment_id)) legByPlan.set(l.installment_id, l);
+    const usedPlan = new Set<string>();
     const sisaMissing: any[] = [];
     const inserts: any[] = [];
     for (const m0 of missing) {
+      if (washIds.has(m0._id)) continue; // pasangan konversi: tidak dibukukan
       const desc = String(m0.description || "");
       const amt = Math.round(Number(m0.amount || 0));
       const isOut = (m0.direction || "out") !== "in";
@@ -1342,6 +1381,46 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
       const cm = desc.match(CICIL_RE);
       if (isOut && cm) {
         const n = Number(cm[1]), tot = Number(cm[2]);
+        // (a1) tersambung ke rencana cicilan yang berjalan
+        if (n >= 2 && tot >= n) {
+          const plan = plans.find((p: any) => !usedPlan.has(p.id)
+            && Math.abs(Number(p.monthly_amount) - amt) <= 50
+            && (!p.total_months || Number(p.total_months) === tot)
+            && Number(p.paid_months || 0) < n);
+          if (plan) {
+            usedPlan.add(plan.id);
+            const leg = legByPlan.get(plan.id) || null;
+            let catId = leg?.category_id || plan.expense_category_id || null;
+            let catName = leg?.category_name || null;
+            if (catId && !catName) {
+              const { data: kat } = await serviceSupabase.from("expense_categories").select("name").eq("id", catId).maybeSingle();
+              catName = kat?.name || null;
+            }
+            const item = String(leg?.notes || plan.description || m0.merchant || "TOKOPEDIA").split(" · Cicilan ")[0].trim();
+            inserts.push({
+              user_id: userId, tx_date: m0.date,
+              description: `${item} · Cicilan ${n}/${tot}`.slice(0, 120),
+              amount: amt, amount_idr: amt, currency: "IDR",
+              tx_type: leg?.tx_type === "reimburse_out" && leg?.to_id ? "reimburse_out" : "expense",
+              from_type: "account", from_id: acc.id,
+              to_type: leg?.tx_type === "reimburse_out" && leg?.to_id ? "account" : "expense",
+              to_id: leg?.tx_type === "reimburse_out" && leg?.to_id ? leg.to_id : null,
+              category_id: catId, category_name: catName,
+              entity: leg?.entity || "Personal", is_reimburse: !!(leg?.tx_type === "reimburse_out" && leg?.to_id),
+              source: "statement_auto", merchant_name: leg?.merchant_name || m0.merchant || null,
+              installment_id: plan.id, notes: leg?.notes || null,
+            });
+            // Majukan rencananya sekarang juga (idempoten: hanya maju, sama dengan
+            // installmentsApi.syncFromStatementRows di Finalize).
+            await serviceSupabase.from("installments").update({
+              paid_months: n, total_paid: Number(plan.monthly_amount) * n,
+              ...(n >= tot ? { status: "settled" } : {}),
+            }).eq("id", plan.id);
+            autoCreated.push({ jenis: "cicilan", date: m0.date, amount: amt, desc: `${item} (${n}/${tot})` });
+            continue;
+          }
+        }
+        // (a2) jalur lama: cari angsuran (n−1)/tot berteks sama di buku
         if (n >= 2 && tot >= n) {
           const prevRe = new RegExp(`${n - 1}\\s*\\/\\s*${tot}\\b`);
           const prev = (ledAll || [])
@@ -1423,7 +1502,7 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
   let draftSaved = false;
   if (!hasUserWork) {
     const state_json = {
-      stmtRows, ignoredIds: [], pendingRows: {}, pdfSource: filename,
+      stmtRows, ignoredIds: [...washIds], pendingRows: {}, pdfSource: filename,
       stmtClosingBalance: stmtClosing, stmtOpeningBalance: extraction.opening_balance != null ? Number(extraction.opening_balance) : null,
       stmtStatementDate: stmtDate, stmtDueDate: dueDate, stmtAnchorDate: anchorDate,
     };
@@ -1503,6 +1582,8 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
     const dupHint = (row: any) => {
       const amt = Math.abs(Number(row.amount || 0));
       if (!amt) return null;
+      // Cicilan bulan ini bernominal sama persis dengan bulan lalu — bukan kembar.
+      if (row.is_installment) return null;
       const d0 = new Date((row.date || "") + "T00:00:00").getTime();
       for (const l of (ledgerAllAccounts || [])) {
         if (l.reconciled_at) continue; // consumed by an earlier statement
@@ -1516,8 +1597,22 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
     // Summary lines are not transactions — "Tagihan Bulan Lalu" accepted as an
     // expense would double the carried-over balance.
     const SUMMARY_RE = /tagihan bulan lalu|balance of last month|saldo sebelumnya|last balance|ending balance|^total\b|saldo awal/i;
-    const txs = missing.filter((m: any) => !ignoredPrev.has(m._id) && !SUMMARY_RE.test(m.description || "")).map((m: any) => ({
+    // Cicilan pertama (1/N): total rencananya = nominal Retail dari pasangan
+    // konversi di hari yang sama; kalau tidak ada, N × angsuran.
+    const planTotalFor = (m: any) => {
+      const tot = Number(m.installment_total || 0);
+      const w = washPairs.find((x) => Math.abs(Math.abs(Number(x.retail.amount || 0)) - Math.abs(Number(m.amount || 0)) * tot) <= tot * 2
+        && Math.abs(new Date((x.retail.date || "") + "T00:00:00").getTime() - new Date((m.date || "") + "T00:00:00").getTime()) <= 3 * 86400000);
+      return w ? Math.abs(Number(w.retail.amount)) : null;
+    };
+    const txs = missing.filter((m: any) => !ignoredPrev.has(m._id) && !washIds.has(m._id) && !SUMMARY_RE.test(m.description || "")).map((m: any) => ({
       date: m.date, description: m.description || m.merchant || "",
+      ...(m.is_installment ? {
+        is_installment: true,
+        installment_current: Number(m.installment_current || 0) || null,
+        installment_total: Number(m.installment_total || 0) || null,
+        plan_total: Number(m.installment_current) === 1 ? planTotalFor(m) : null,
+      } : {}),
       merchant_name: m.merchant || m.description || "",
       amount: Math.abs(Number(m.amount || 0)), amount_idr: Math.abs(Number(m.amount || 0)),
       currency: "IDR",
@@ -1557,7 +1652,8 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
             const amt = Number(t.amount_idr || t.amount || 0);
             const p = cariPecahan(splits, amt);
             if (p) t.paper_split = p;
-            const n = cariCatatan(notes, amt);
+            // Angsuran 1/N: email pesanannya bernominal total belanja, bukan angsuran.
+            const n = cariCatatan(notes, amt) || (t.plan_total ? cariCatatan(notes, Number(t.plan_total)) : null);
             if (n) t.item_note = n;
           }
         }
