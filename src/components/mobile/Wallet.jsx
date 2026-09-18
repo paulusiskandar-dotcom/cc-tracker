@@ -212,7 +212,9 @@ function CardSheet({ card, from, txs, onLeave, onClose, navigate, setTab }) {
     if (el?.animate && !calm && from) {
       const backTo = from.top - el.getBoundingClientRect().top; // the sheet may have been scrolled since it opened
       const a = el.animate([{ transform: "translate3d(0,0,0)" }, { transform: `translate3d(0,${backTo}px,0)` }], { duration: FLY_MS - 80, easing: EASE, fill: "forwards" });
-      a.onfinish = onClose; a.oncancel = onClose;
+      // onfinish never fires while the page is hidden, so a timer backs it up.
+      let done = false; const end = () => { if (!done) { done = true; onClose(); } };
+      a.onfinish = end; a.oncancel = end; setTimeout(end, FLY_MS + 200);
     } else onClose();
   };
   const back = () => { if (level === "detail") { swapped.current = true; setLevel("peek"); } else close(); };
