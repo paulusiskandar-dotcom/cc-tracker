@@ -73,7 +73,7 @@ export default function MobileHome({ user, reconSessions = [], ledger = [], acco
     .filter(x => x.days >= 0 && x.days <= 45).sort((x, y) => x.days - y.days);
   const needs = [
     inbox > 0 && { key: "inbox", name: "To approve", sub: `${inbox} transaction${inbox === 1 ? "" : "s"} from email`, value: String(inbox), on: () => go("transactions", "m.tx.view", "inbox") },
-    week.length > 0 && { key: "bills", name: "To pay", sub: `${week.length} bill${week.length === 1 ? "" : "s"}`, value: fmtIDR(weekSum), on: () => go("billing", "m.bills.view", "bills") },
+    week.length > 0 && { key: "bills", name: "Due soon", sub: `${week.length} bill${week.length === 1 ? "" : "s"}`, value: fmtIDR(weekSum), on: () => go("billing", "m.bills.view", "bills") },
     Math.round(owed) !== 0 && { key: "owed", name: "Owed to you", sub: "Reimbursements not yet repaid", value: signed(owed), on: () => go("billing", "m.bills.view", "reimburse") },
     ...expiring.map(({ a }) => ({ key: a.id, name: `${a.name} points expire`, sub: `${new Date(`${a.points_expiry_date}T00:00:00`).getDate()} ${MONTHS[new Date(`${a.points_expiry_date}T00:00:00`).getMonth()]}`, value: Number(a.points_expiring).toLocaleString("id-ID"), hot: true, on: () => go("cards", "m.wallet.seg", "credit") })),
   ].filter(Boolean);
