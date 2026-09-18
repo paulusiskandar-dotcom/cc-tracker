@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
 import MobileQueue from "./mobile/MobileQueue";
+import { ChevronLeft } from "lucide-react";
+import "./mobile/mobile.css";
 import { gmailApi, settingsApi, ledgerApi, merchantApi, getTxFromToTypes, flattenEmailSync, loanPaymentsApi, installmentsApi, recurringApi } from "../api";
 import { supabase } from "../lib/supabase";
 import { undoManager } from "../lib/undoManager";
@@ -179,6 +181,7 @@ export default function Email({
   fxRates = {},
   initialTab = "pending",
   mobile = false,
+  onBack,
 }) {
   const T = dark ? DARK : LIGHT;
   const [tab, setTab] = useState(initialTab);
@@ -287,16 +290,29 @@ export default function Email({
 
   const waitingCount = (pendingSyncs || []).filter(s => s.currency && s.currency !== "IDR").length;
   const TABS_LIST = [
-    { id: "pending", label: "✉️ Email Pending" },
-    { id: "waiting", label: `Waiting for Statement${waitingCount ? ` (${waitingCount})` : ""}` },
-    { id: "sync",    label: "Email Sync"    },
+    { id: "pending", label: mobile ? "Pending" : "Email Pending" },
+    { id: "waiting", label: `${mobile ? "Waiting" : "Waiting for Statement"}${waitingCount ? ` (${waitingCount})` : ""}` },
+    { id: "sync",    label: mobile ? "Sync" : "Email Sync" },
   ];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div className={mobile ? `mw${dark ? " dark" : ""}` : undefined} style={{ display: "flex", flexDirection: "column", gap: mobile ? 12 : 16 }}>
+
+      {/* Phones: the phone header and segmented control instead of the pill tabs. */}
+      {mobile && (
+        <>
+          <div className="mw-hdr" style={{ marginBottom: 4 }}>
+            {onBack && <button className="mw-round" onClick={onBack} aria-label="Back"><ChevronLeft size={22} strokeWidth={1.8} /></button>}
+            <h2>Email Sync</h2>
+          </div>
+          <div className="mw-seg" role="tablist" style={{ marginBottom: 0 }}>
+            {TABS_LIST.map(t => <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? "on" : ""} onClick={() => setTab(t.id)}>{t.label}</button>)}
+          </div>
+        </>
+      )}
 
       {/* ── Tabs ── */}
-      <div style={{ display: "flex", gap: 4 }}>
+      <div style={{ display: mobile ? "none" : "flex", gap: 4 }}>
         {TABS_LIST.map(t => (
           <button key={t.id}
             onClick={() => setTab(t.id)}

@@ -440,7 +440,7 @@ function Finance({ user, signOut }) {
   const EXTRA_LABELS = { scan: "AI Scan", aiimport: "AI Scan", email: "Email", notifications: "Notifications" };
   // Phone-only screens bring their own large title, so the top bar steps aside there.
   const walletProps = { user, accounts, ledger, fxRates, installments, dark: isDark, setTab: goTab, onSearch: () => setSearchOpen(true), onRefresh: loadData };
-  const mobileOwnsHeader = isMobile && onMainPage && ["cards", "bank", "cash", "transactions", "billing", "assets"].includes(tab);
+  const mobileOwnsHeader = isMobile && onMainPage && ["cards", "bank", "cash", "transactions", "billing", "assets", "email"].includes(tab);
   const pageLabel = !onMainPage
     ? "Statement"
     : (TABS.find(t => t.id === tab)?.label || EXTRA_LABELS[tab] || "Dashboard");
@@ -471,7 +471,7 @@ function Finance({ user, signOut }) {
       case "reconcile":    return <Reconcile    {...shared} />;
       case "scan":         return <AIImport     {...shared} />;
       case "aiimport":     return <AIImport     {...shared} />; // legacy redirect
-      case "email":         return <Email         {...shared} initialTab={emailInitialTab} mobile={isMobile} />;
+      case "email":         return <Email         {...shared} initialTab={emailInitialTab} mobile={isMobile} onBack={() => goTab("transactions")} />;
       case "notifications": return <Notifications {...shared} />;
       default:              return <Dashboard    {...shared} />;
     }
