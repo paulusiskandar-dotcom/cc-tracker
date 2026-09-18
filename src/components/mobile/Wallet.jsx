@@ -29,14 +29,21 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private
 // Cash rows read as the currency itself ("Pound Sterling"), not the account's nickname.
 const CUR_NAME = { ...Object.fromEntries(CURRENCIES.map(c => [c.code, c.name])), GBP: "Pound Sterling" };
 const EASE = "cubic-bezier(0.32, 0.72, 0, 1)"; // close to the iOS sheet spring
-const FLY_MS = 520;
+const EASE_LIFT = "cubic-bezier(0.3, 1.18, 0.4, 1)"; // the lifted card overshoots a touch, then settles
+const FLY_MS = 560;
 const SEGMENTS = [["credit", "Credit"], ["bank", "Bank"], ["cash", "Cash"]];
 
 export default function Wallet({ user, accounts = [], ledger = [], fxRates = {}, initialSegment = "credit", setTab, onSearch }) {
   const navigate = useNavigate();
   const [seg, setSeg] = useState(() => lsGet("m.wallet.seg") || initialSegment);
-  const [openCard, setOpenCard] = useState(null); // { id, from: rect of the tapped card }
-  const [leaving, setLeaving] = useState(false);   // sheet is closing: bring the stack back in step with it
+  // Opening a card moves the REAL cards in the stack, the way Apple Wallet does: the tapped
+  // card rises to the top, the ones after it (which lie on top of it) slide down and away,
+  // the ones before it slide up. Closing plays it back, so the card is lowered into its slot
+  // and its neighbours close over it. Once the card is up, an identical copy inside the
+  // scrollable sheet takes over so it can scroll with the content.
+  const [openCard, setOpenCard] = useState(null);   // { id }
+  const [phase, setPhase] = useState(null);         // "opening" | "open" | "closing"
+  const flight = useRef({ anims: [], timers: [] });
   const stackRef = useRef(null);
   const [catalog, setCatalog] = useState({ byAccount: {}, ratio: {} });
   const [dismissed, setDismissed] = useState(() => lsGet("m.wallet.notice") || "");
@@ -109,15 +116,53 @@ export default function Wallet({ user, accounts = [], ledger = [], fxRates = {},
   }, [ledger, cards]);
 
   const open = openCard && cards.find(c => c.id === openCard.id);
-  const openById = id => {
-    const el = stackRef.current?.querySelector(`[data-card="${id}"]`);
-    const r = el?.getBoundingClientRect();
-    setOpenCard({ id, from: r ? { top: r.top } : null });
+  const calm = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const clearFlight = () => { flight.current.anims.forEach(a => a.cancel()); flight.current.timers.forEach(clearTimeout); flight.current = { anims: [], timers: [] }; };
+  const later = (fn, ms) => flight.current.timers.push(setTimeout(fn, ms));
+  useEffect(() => () => clearFlight(), []);
+
+  const openById = id => { if (!openCard) { setOpenCard({ id }); setPhase("opening"); } };
+
+  // Called by the sheet as soon as it knows where its copy of the card sits.
+  const flyUp = copyTop => {
+    const els = [...(stackRef.current?.querySelectorAll("[data-card]") || [])];
+    const i = els.findIndex(el => el.dataset.card === openCard.id);
+    if (i < 0 || !els[i].animate) { setPhase("open"); return; }
+    const vh = window.innerHeight; const ms = calm() ? 1 : FLY_MS;
+    const rects = els.map(el => el.getBoundingClientRect());
+    clearFlight();
+    flight.current.offsets = els.map((el, j) => (j === i ? copyTop - rects[j].top : j < i ? -(rects[j].bottom + 40) : vh - rects[j].top + 40));
+    els.forEach((el, j) => {
+      if (j !== i && (rects[j].bottom < -60 || rects[j].top > vh + 60)) return; // never on screen: leave it be
+      flight.current.anims.push(el.animate(
+        [{ transform: "translate3d(0,0,0)" }, { transform: `translate3d(0,${flight.current.offsets[j]}px,0)` }],
+        { duration: ms, easing: j === i ? EASE_LIFT : EASE, fill: "forwards" }));
+    });
+    later(() => setPhase("open"), ms + 30);
+  };
+
+  // copyTop: where the sheet's copy is right now (the sheet may have been scrolled).
+  const flyDown = copyTop => {
+    const els = [...(stackRef.current?.querySelectorAll("[data-card]") || [])];
+    const i = els.findIndex(el => el.dataset.card === openCard?.id);
+    const ms = calm() ? 1 : FLY_MS; const offs = flight.current.offsets || [];
+    const vh = window.innerHeight;
+    clearFlight();
+    setPhase("closing");
+    els.forEach((el, j) => {
+      const r = el.getBoundingClientRect(); // back at rest now that the old animations are cancelled
+      if (j !== i && (r.bottom < -60 || r.top > vh + 60)) return;
+      const from = j === i ? copyTop - r.top : offs[j] ?? 0;
+      if (el.animate) flight.current.anims.push(el.animate(
+        [{ transform: `translate3d(0,${from}px,0)` }, { transform: "translate3d(0,0,0)" }],
+        { duration: ms, easing: EASE, fill: "backwards" }));
+    });
+    later(() => { clearFlight(); setOpenCard(null); setPhase(null); }, ms + 30);
   };
 
   return (
-    <div className={`mw${open && !leaving ? " mw-behind" : ""}`}>
-      {open && <CardSheet card={open} from={openCard.from} covered={cards[cards.length - 1]?.id !== open.id} txs={txByCard[open.id] || []} onLeave={() => setLeaving(true)} onClose={() => { setOpenCard(null); setLeaving(false); }} navigate={navigate} setTab={setTab} />}
+    <div className={`mw${open && phase !== "closing" ? " mw-behind" : ""}`}>
+      {open && <CardSheet card={open} phase={phase} txs={txByCard[open.id] || []} onPlaced={flyUp} onClose={flyDown} navigate={navigate} setTab={setTab} />}
       <div className="mw-hdr">
         <h1>Wallet</h1>
         {onSearch && <button className="mw-round" onClick={onSearch} aria-label="Search"><Search size={20} strokeWidth={1.8} /></button>}
@@ -140,7 +185,7 @@ export default function Wallet({ user, accounts = [], ledger = [], fxRates = {},
         <>
           <div className="mw-stack" ref={stackRef}>
             {cards.map(c => (
-              <button key={c.id} data-card={c.id} className={`mw-card${open && c.id === open.id ? " mw-gone" : ""}`} onClick={() => openById(c.id)} aria-label={c.name}>
+              <button key={c.id} data-card={c.id} className={`mw-card${open && c.id === open.id && phase === "open" ? " mw-gone" : ""}`} onClick={() => openById(c.id)} aria-label={c.name}>
                 <CardArt card={c} />
               </button>
             ))}
@@ -185,44 +230,19 @@ function AccountList({ rows, fxRates, navigate, showTotal, flags }) {
 // Apple Wallet flow. First tap: the card flies to the top, the rest of the stack drops
 // away, and a quick preview sits under it. Tap the card again for the full detail;
 // the close button steps back one level at a time.
-function CardSheet({ card, from, covered, txs, onLeave, onClose, navigate, setTab }) {
+function CardSheet({ card, phase, txs, onPlaced, onClose, navigate, setTab }) {
   const [level, setLevel] = useState("peek");
-  const [ready, setReady] = useState(false);   // content under the card mounts one beat after the card starts moving
-  const [closing, setClosing] = useState(false);
   const artRef = useRef(null);
-  const delta = useRef(0);
   const swapped = useRef(false); // the swap animation is for peek ↔ detail only, not for opening
+  const closing = phase === "closing";
 
-  // In the stack only the top strip of a card shows; the cards after it lie on top of the
-  // rest. The flying copy is clipped to that strip at the stack end of its flight, so it
-  // leaves and lands under its neighbours instead of popping over them.
-  const FULL = "inset(0px 0px 0px 0px)";
-  const strip = el => (covered ? `inset(0px 0px ${Math.max(0, el.offsetHeight - 56)}px 0px)` : FULL);
-
-  // The flight runs through the Web Animations API: it is handed to the compositor in the
-  // same frame the sheet mounts and is not held up by React rendering the rest.
   useLayoutEffect(() => {
-    const el = artRef.current; if (!el) return undefined;
-    delta.current = from ? from.top - el.getBoundingClientRect().top : 0;
-    const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (el.animate && !calm && delta.current) el.animate([{ transform: `translate3d(0,${delta.current}px,0)`, clipPath: strip(el) }, { transform: "translate3d(0,0,0)", clipPath: FULL }], { duration: FLY_MS, easing: EASE });
-    const t = setTimeout(() => setReady(true), 40);
+    onPlaced(artRef.current ? artRef.current.getBoundingClientRect().top : 0);
     const prev = document.body.style.overflow; document.body.style.overflow = "hidden";
-    return () => { clearTimeout(t); document.body.style.overflow = prev; };
-  }, [from]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => { document.body.style.overflow = prev; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const close = () => {
-    if (closing) return;
-    setClosing(true); onLeave && onLeave();
-    const el = artRef.current; const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (el?.animate && !calm && from) {
-      const backTo = from.top - el.getBoundingClientRect().top; // the sheet may have been scrolled since it opened
-      const a = el.animate([{ transform: "translate3d(0,0,0)", clipPath: FULL }, { transform: `translate3d(0,${backTo}px,0)`, clipPath: strip(el) }], { duration: FLY_MS, easing: EASE, fill: "forwards" });
-      // onfinish never fires while the page is hidden, so a timer backs it up.
-      let done = false; const end = () => { if (!done) { done = true; onClose(); } };
-      a.onfinish = end; a.oncancel = end; setTimeout(end, FLY_MS + 200);
-    } else onClose();
-  };
+  const close = () => { if (phase === "open") onClose(artRef.current ? artRef.current.getBoundingClientRect().top : 0); };
   const back = () => { if (level === "detail") { swapped.current = true; setLevel("peek"); } else close(); };
 
   const mine = txs;
@@ -242,12 +262,13 @@ function CardSheet({ card, from, covered, txs, onLeave, onClose, navigate, setTa
         <h2>{level === "detail" ? card.name : ""}</h2>
       </div>
 
-      <button ref={artRef} className="mw-card mw-fly"
+      {/* The copy only shows while the sheet is at rest; during the flight the real card is what moves. */}
+      <button ref={artRef} className="mw-card" style={{ visibility: phase === "open" ? "visible" : "hidden" }}
         onClick={() => { swapped.current = true; setLevel(l => (l === "peek" ? "detail" : "peek")); }} aria-label={`${card.name}: ${level === "peek" ? "show details" : "show preview"}`}>
         <CardArt card={card} />
       </button>
 
-      {ready && <div className={`mw-under${swapped.current ? " swap" : ""}`} key={level}>
+      <div className={`mw-under${swapped.current ? " swap" : ""}`} key={level}>
         {level === "peek" ? (
           <>
             {card.avail != null && (
@@ -285,7 +306,7 @@ function CardSheet({ card, from, covered, txs, onLeave, onClose, navigate, setTa
             <TxList title="Transactions" rows={mine.slice(0, 30)} cardId={card.id} />
           </>
         )}
-      </div>}
+      </div>
     </div>
   );
 }
