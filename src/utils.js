@@ -136,7 +136,10 @@ export const calcNetWorth = (accounts, { employeeLoans = [], loanPayments = [], 
       // outstanding_amount = debt (>= 0); current_balance = CR, not net worth
       ccBalance += toIDRValue(a.outstanding_amount || 0, a.currency);
     } else if (a.type === "asset") {
-      assets += toIDRValue(a.current_value || a.current_balance || 0, a.currency);
+      // current_value is the asset's worth, and 0 is a real value (BIBIT after it was redeemed).
+      // The old `current_value || current_balance` fell back to a stale ledger balance whenever
+      // the value was 0 and kept a sold asset in net worth (Rp 50.184.155, found 18 Sep 2026).
+      assets += toIDRValue(a.current_value != null ? a.current_value : (a.current_balance || 0), a.currency);
     } else if (a.type === "liability") {
       liabilities += Number(a.outstanding_amount || 0);
     }

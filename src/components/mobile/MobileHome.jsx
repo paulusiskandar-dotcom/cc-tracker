@@ -36,7 +36,7 @@ export default function MobileHome(props) {
     const byType = {};
     assets.filter(a => a.is_active !== false).forEach(a => {
       const raw = String(a.subtype || "Other").trim(); const k = raw.toLowerCase();
-      const v = Number(a.current_value || a.current_balance || 0) * (a.currency && a.currency !== "IDR" ? (fxRates[a.currency] || 1) : 1);
+      const v = Number(a.current_value != null ? a.current_value : (a.current_balance || 0)) * (a.currency && a.currency !== "IDR" ? (fxRates[a.currency] || 1) : 1);
       (byType[k] = byType[k] || [raw.charAt(0).toUpperCase() + raw.slice(1), 0])[1] += v;
     });
     const types = Object.values(byType).sort((a, b) => b[1] - a[1]);

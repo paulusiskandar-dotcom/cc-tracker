@@ -25,7 +25,7 @@ export default function MobileAssets(props) {
     supabase.from("net_worth_snapshots").select("month,total").order("month").then(({ data }) => setSnaps(data || []));
   }, [user?.id]);
 
-  const value = a => Number(a.current_value || a.current_balance || 0) * (a.currency && a.currency !== "IDR" ? (fxRates[a.currency] || 1) : 1);
+  const value = a => Number(a.current_value != null ? a.current_value : (a.current_balance || 0)) * (a.currency && a.currency !== "IDR" ? (fxRates[a.currency] || 1) : 1);
   const groups = useMemo(() => {
     const m = {};
     assets.filter(a => a.is_active !== false).forEach(a => { const raw = String(a.subtype || "Other").trim(); const k = raw.toLowerCase(); // "deposit" and "Deposit" are one group
