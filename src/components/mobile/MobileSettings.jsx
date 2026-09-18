@@ -22,7 +22,7 @@ export default function MobileSettings(props) {
     <div className={`mw${dark ? " dark" : ""}`}>
       <div className="mw-hdr"><h1>Settings</h1></div>
       <div className="mw-list">
-        <div className="mw-row mw-kv"><span className="mw-row-name">Signed in as</span><span className="mw-row-amt mw-wrap" style={{ textAlign: "right" }}>{user?.email}</span></div>
+        <div className="mw-row mw-kv"><span className="mw-row-name">Signed in as</span><span className="mw-row-amt" style={{ fontWeight: 500 }}>{user?.email}</span></div>
         <button className="mw-row" role="switch" aria-checked={!!dark} onClick={() => setDark && setDark(d => !d)}>
           <span className="mw-row-name">Dark mode</span>
           <span className={`mw-switch${dark ? " on" : ""}`} aria-hidden="true"><i /></span>

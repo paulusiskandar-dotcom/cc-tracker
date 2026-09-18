@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, useNavigate, useLocation } from "react-ro
 import {
   Home, ArrowUpDown, Landmark, Wallet, CreditCard,
   TrendingUp, ClipboardList, ArrowDown, BarChart2,
-  Calendar as CalendarIcon, Settings as SettingsIcon, LayoutGrid, Mail, Sun, Moon, Plane,
+  Calendar as CalendarIcon, Settings as SettingsIcon, LayoutGrid, Mail, Plane,
   ClipboardCheck, PiggyBank, Tag, Receipt,
 } from "lucide-react";
 import PILogo from "./components/PILogo";
@@ -680,13 +680,6 @@ function Finance({ user, signOut }) {
                   </button>
                 );
               })}
-              <button onClick={() => setIsDark(d => !d)} style={{
-                ...S.moreBtn, border: `1.5px solid ${isDark ? "#2a2f3a" : "#e5e7eb"}`, background: isDark ? "#1e232d" : "#ffffff",
-                color: isDark ? "#d1d5db" : "#374151", fontWeight: 500, display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
-              }}>
-                {isDark ? <Sun {...LUCIDE_PROPS} /> : <Moon {...LUCIDE_PROPS} />}
-                {isDark ? "Light mode" : "Dark mode"}
-              </button>
             </div>
           </div>
         </>
