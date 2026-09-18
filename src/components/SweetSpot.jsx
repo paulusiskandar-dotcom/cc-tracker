@@ -810,6 +810,29 @@ const CSS = `
   .ss-carddetail{padding-left:14px}
   .ss-facts{grid-template-columns:1fr}
 }
+/* Phones: same look as the other phone screens. The page title comes from the app shell, so
+   the header keeps only the programme picker; housekeeping (data date, Match cards) moves to
+   the end; every chip group is one swipeable row so the cards show on the first screen. */
+@media (max-width:768px){
+  .ss{gap:14px}
+  .ss-top > div:first-child,.ss-top .ss-label{display:none}
+  .ss-top{gap:8px}
+  .ss-top > div{width:100%}
+  .ss-top .ss-frow{flex-direction:column;align-items:stretch}
+  .ss-seg{display:flex;flex-wrap:nowrap;width:100%;border:0;border-radius:12px;box-sizing:border-box}
+  .ss-seg button{flex:1;height:38px;border-radius:10px;font-size:14px;padding:0 6px}
+  .ss-select{width:100%;height:40px;border-radius:12px;border:0}
+  .ss-note{order:99;padding:4px}
+  .ss-tabs{gap:0;border:0;background:var(--sunk);border-radius:12px;padding:3px}
+  .ss-tabs button{flex:1 0 auto;height:36px;margin:0;border:0;border-radius:10px;padding:0 12px;font-size:13.5px}
+  .ss-tabs button[aria-selected="true"]{background:var(--surface);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+  .ss-spendgroup{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin:0 -16px;padding:0 16px}
+  .ss-spendgroup::-webkit-scrollbar{display:none}
+  .ss-spendgroup .ss-label{display:none}
+  .ss-spendgroup > *{flex:none}
+  .ss-cards{border:0}
+  .ss-cardrow{border-top-color:var(--sunk)}
+}
 @media (prefers-reduced-motion:reduce){.ss-chev{transition:none}}
 .ss-routes{display:flex;flex-direction:column;gap:10px;margin-top:6px;padding-top:14px;border-top:1px dashed var(--line)}
 .ss-routes h3{font-size:15px;font-weight:700} .ss-routes p{margin:2px 0 0;max-width:70ch}
