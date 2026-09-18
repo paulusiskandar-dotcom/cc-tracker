@@ -1384,8 +1384,11 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
     // statement yang lebih baru. Hanya statement TERBARU yang boleh menulis.
     if (acc.last_statement_date && periodEnd && periodEnd < acc.last_statement_date)
       throw `statement lama (${periodEnd} < anchor ${acc.last_statement_date}) — auto-create dilewati`;
-    const BIAYA_RE = /BEA METERAI|BIAYA NOTIFIKASI|ADMINISTRATION FEE|E-?BILLING|E-?STATEMENT FEE|STAMP DUTY/i;
-    const CICIL_RE = /(\d{1,2})\s*\/\s*(\d{1,2})/;
+    // "TRX NOTIFICATION CHARGE" = biaya notifikasi versi Mandiri (Signa, Rp7.500/bulan) — 19 Sep 2026.
+    const BIAYA_RE = /BEA METERAI|BIAYA NOTIFIKASI|NOTIFICATION CHARGE|ADMINISTRATION FEE|E-?BILLING|E-?STATEMENT FEE|STAMP DUTY/i;
+    // Mandiri menulis angsuran tiga digit berawalan nol ("ERASPACE.COM Jakar 012/024"); pola lama
+    // \d{1,2} membacanya "12/02" lalu membuangnya, jadi angsuran itu jatuh ke antrean (19 Sep 2026).
+    const CICIL_RE = /(?<!\d)0*(\d{1,2})\s*\/\s*0*(\d{1,2})(?!\d)/;
     // Rencana cicilan aktif kartu ini + angsuran terakhir tiap rencana (sumber nama
     // barang, kategori, entity). Pencocokan lewat nominal bulanan ±50 (nominal BRI
     // bergeser 2–6 rupiah antarbulan) dan tenor — bukan lewat teks deskripsi, yang
@@ -1442,7 +1445,9 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
               const { data: kat } = await serviceSupabase.from("expense_categories").select("name").eq("id", catId).maybeSingle();
               catName = kat?.name || null;
             }
-            const item = String(leg?.notes || plan.description || m0.merchant || "TOKOPEDIA").split(" · Cicilan ")[0].trim();
+            // Catatan generik ("Imported from Gmail: Statement …") bukan nama barang — pakai nama rencananya.
+            const catatanAsli = leg?.notes && !/^imported from/i.test(String(leg.notes)) ? leg.notes : null;
+            const item = String(catatanAsli || plan.description || m0.merchant || "TOKOPEDIA").split(" · Cicilan ")[0].replace(/\s*[:(]\s*\d+\s*\/\s*\d+\)?\s*$/, "").trim();
             inserts.push({
               user_id: userId, tx_date: m0.date,
               description: `${item} · Cicilan ${n}/${tot}`.slice(0, 120),
@@ -1454,7 +1459,7 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
               category_id: catId, category_name: catName,
               entity: leg?.entity || "Personal", is_reimburse: !!(leg?.tx_type === "reimburse_out" && leg?.to_id),
               source: "statement_auto", merchant_name: leg?.merchant_name || m0.merchant || null,
-              installment_id: plan.id, notes: leg?.notes || null,
+              installment_id: plan.id, notes: catatanAsli,
             });
             // Majukan rencananya sekarang juga (idempoten: hanya maju, sama dengan
             // installmentsApi.syncFromStatementRows di Finalize).
@@ -1704,6 +1709,20 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
           }
         }
       } catch (e) { console.warn("[prepare] pecahan Paper / catatan pesanan gagal:", (e as any)?.message); }
+    }
+    // Prepare ulang atas statement yang sama: baris antrean yang BELUM disentuh (pending, tak
+    // satu pun barisnya confirmed/skipped) disegarkan mengikuti hasil terbaru — kalau aturan
+    // auto-create kini menangani barisnya, baris itu harus hilang dari antrean, bukan tertinggal
+    // untuk di-approve kedua kalinya. Baris yang sudah disentuh Paulus tidak diubah.
+    if (pY && pM) {
+      const gid = `stmt:${acc.id}:${pY}-${String(pM).padStart(2, "0")}`;
+      const { data: lama } = await serviceSupabase.from("email_sync").select("id,status,ai_raw_result").eq("user_id", userId).eq("gmail_message_id", gid).maybeSingle();
+      const tersentuh = Array.isArray(lama?.ai_raw_result) && lama.ai_raw_result.some((t: any) => t?.confirmed || t?.skipped);
+      if (lama && lama.status === "pending" && !tersentuh) {
+        await serviceSupabase.from("email_sync").update(txs.length
+          ? { ai_raw_result: txs, extracted_count: txs.length }
+          : { ai_raw_result: [], extracted_count: 0, status: "skipped" }).eq("id", lama.id);
+      }
     }
     if (txs.length && pY && pM) {
       await serviceSupabase.from("email_sync").upsert({
