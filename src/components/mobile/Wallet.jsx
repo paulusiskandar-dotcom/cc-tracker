@@ -117,7 +117,7 @@ export default function Wallet({ user, accounts = [], ledger = [], fxRates = {},
 
   return (
     <div className={`mw${open && !leaving ? " mw-behind" : ""}`}>
-      {open && <CardSheet card={open} from={openCard.from} txs={txByCard[open.id] || []} onLeave={() => setLeaving(true)} onClose={() => { setOpenCard(null); setLeaving(false); }} navigate={navigate} setTab={setTab} />}
+      {open && <CardSheet card={open} from={openCard.from} covered={cards[cards.length - 1]?.id !== open.id} txs={txByCard[open.id] || []} onLeave={() => setLeaving(true)} onClose={() => { setOpenCard(null); setLeaving(false); }} navigate={navigate} setTab={setTab} />}
       <div className="mw-hdr">
         <h1>Wallet</h1>
         {onSearch && <button className="mw-round" onClick={onSearch} aria-label="Search"><Search size={20} strokeWidth={1.8} /></button>}
@@ -185,7 +185,7 @@ function AccountList({ rows, fxRates, navigate, showTotal, flags }) {
 // Apple Wallet flow. First tap: the card flies to the top, the rest of the stack drops
 // away, and a quick preview sits under it. Tap the card again for the full detail;
 // the close button steps back one level at a time.
-function CardSheet({ card, from, txs, onLeave, onClose, navigate, setTab }) {
+function CardSheet({ card, from, covered, txs, onLeave, onClose, navigate, setTab }) {
   const [level, setLevel] = useState("peek");
   const [ready, setReady] = useState(false);   // content under the card mounts one beat after the card starts moving
   const [closing, setClosing] = useState(false);
@@ -193,17 +193,23 @@ function CardSheet({ card, from, txs, onLeave, onClose, navigate, setTab }) {
   const delta = useRef(0);
   const swapped = useRef(false); // the swap animation is for peek ↔ detail only, not for opening
 
+  // In the stack only the top strip of a card shows; the cards after it lie on top of the
+  // rest. The flying copy is clipped to that strip at the stack end of its flight, so it
+  // leaves and lands under its neighbours instead of popping over them.
+  const FULL = "inset(0px 0px 0px 0px)";
+  const strip = el => (covered ? `inset(0px 0px ${Math.max(0, el.offsetHeight - 56)}px 0px)` : FULL);
+
   // The flight runs through the Web Animations API: it is handed to the compositor in the
   // same frame the sheet mounts and is not held up by React rendering the rest.
   useLayoutEffect(() => {
     const el = artRef.current; if (!el) return undefined;
     delta.current = from ? from.top - el.getBoundingClientRect().top : 0;
     const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (el.animate && !calm && delta.current) el.animate([{ transform: `translate3d(0,${delta.current}px,0)` }, { transform: "translate3d(0,0,0)" }], { duration: FLY_MS, easing: EASE });
+    if (el.animate && !calm && delta.current) el.animate([{ transform: `translate3d(0,${delta.current}px,0)`, clipPath: strip(el) }, { transform: "translate3d(0,0,0)", clipPath: FULL }], { duration: FLY_MS, easing: EASE });
     const t = setTimeout(() => setReady(true), 40);
     const prev = document.body.style.overflow; document.body.style.overflow = "hidden";
     return () => { clearTimeout(t); document.body.style.overflow = prev; };
-  }, [from]);
+  }, [from]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const close = () => {
     if (closing) return;
@@ -211,7 +217,7 @@ function CardSheet({ card, from, txs, onLeave, onClose, navigate, setTab }) {
     const el = artRef.current; const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (el?.animate && !calm && from) {
       const backTo = from.top - el.getBoundingClientRect().top; // the sheet may have been scrolled since it opened
-      const a = el.animate([{ transform: "translate3d(0,0,0)" }, { transform: `translate3d(0,${backTo}px,0)` }], { duration: FLY_MS - 80, easing: EASE, fill: "forwards" });
+      const a = el.animate([{ transform: "translate3d(0,0,0)", clipPath: FULL }, { transform: `translate3d(0,${backTo}px,0)`, clipPath: strip(el) }], { duration: FLY_MS, easing: EASE, fill: "forwards" });
       // onfinish never fires while the page is hidden, so a timer backs it up.
       let done = false; const end = () => { if (!done) { done = true; onClose(); } };
       a.onfinish = end; a.oncancel = end; setTimeout(end, FLY_MS + 200);

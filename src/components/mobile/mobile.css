@@ -48,6 +48,8 @@ button.mw-row { cursor: pointer; }
 .mw { --ease: cubic-bezier(0.32, 0.72, 0, 1); --dur: 0.56s; }
 .mw > .mw-hdr, .mw > .mw-notice, .mw > .mw-seg { transition: opacity 0.3s ease; }
 .mw > .mw-stack { transition: transform 0.52s var(--ease); will-change: transform; }
+/* Coming back, the stack waits a beat so the card leads and both land together. */
+.mw:not(.mw-behind) > .mw-stack { transition-delay: 0.07s; }
 /* Every card is its own GPU layer, so lifting one out never repaints the other 21. */
 .mw-card { transform: translateZ(0); backface-visibility: hidden; touch-action: manipulation; }
 .mw-behind > .mw-hdr, .mw-behind > .mw-notice, .mw-behind > .mw-seg { opacity: 0; pointer-events: none; }
