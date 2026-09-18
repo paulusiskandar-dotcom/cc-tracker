@@ -3,7 +3,7 @@
 // tap a card to lift it and read its figures as plain rows underneath.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { X, ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { X, ChevronLeft, ChevronRight, Search, Pencil } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { fmtIDR, fmtCurNative } from "../../utils";
 import { CURRENCIES } from "../../constants";
@@ -48,7 +48,7 @@ const EASE_LIFT = "cubic-bezier(0.3, 1.18, 0.4, 1)"; // the lifted card overshoo
 const FLY_MS = 560;
 const SEGMENTS = [["credit", "Credit"], ["bank", "Bank"], ["cash", "Cash"]];
 
-export default function Wallet({ user, accounts = [], ledger = [], fxRates = {}, initialSegment = "credit", setTab, onSearch }) {
+export default function Wallet({ user, accounts = [], ledger = [], fxRates = {}, initialSegment = "credit", setTab, onSearch, onRefresh }) {
   const navigate = useNavigate();
   const [seg, setSeg] = useState(() => lsGet("m.wallet.seg") || initialSegment);
   // Opening a card moves the REAL cards in the stack, the way Apple Wallet does: the tapped
@@ -177,7 +177,7 @@ export default function Wallet({ user, accounts = [], ledger = [], fxRates = {},
 
   return (
     <div className={`mw${open && phase !== "closing" ? " mw-behind" : ""}`}>
-      {open && <CardSheet card={open} phase={phase} txs={txByCard[open.id] || []} onPlaced={flyUp} onClose={flyDown} navigate={navigate} setTab={setTab} />}
+      {open && <CardSheet card={open} phase={phase} txs={txByCard[open.id] || []} onPlaced={flyUp} onClose={flyDown} navigate={navigate} setTab={setTab} onRefresh={onRefresh} />}
       <div className="mw-hdr">
         <h1>Wallet</h1>
         {onSearch && <button className="mw-round" onClick={onSearch} aria-label="Search"><Search size={20} strokeWidth={1.8} /></button>}
@@ -246,7 +246,7 @@ function AccountList({ rows, fxRates, navigate, showTotal, flags, marks }) {
 // Apple Wallet flow. First tap: the card flies to the top, the rest of the stack drops
 // away, and a quick preview sits under it. Tap the card again for the full detail;
 // the close button steps back one level at a time.
-function CardSheet({ card, phase, txs, onPlaced, onClose, navigate, setTab }) {
+function CardSheet({ card, phase, txs, onPlaced, onClose, navigate, setTab, onRefresh }) {
   const [level, setLevel] = useState("peek");
   const artRef = useRef(null);
   const swapped = useRef(false); // the swap animation is for peek ↔ detail only, not for opening
@@ -315,6 +315,9 @@ function CardSheet({ card, phase, txs, onPlaced, onClose, navigate, setTab }) {
               {hasPoints && <Row label="Points" value={`${num(card.points_balance)}${card.points_unit ? ` ${card.points_unit}` : ""}`} sub={[kf != null ? `≈ ${num(kf)} KrisFlyer miles` : null, card.points_as_of ? `Statement ${fmtDate(card.points_as_of)}` : null].filter(Boolean).join(" · ")} />}
               {hasPoints && Number(card.points_expiring) > 0 && card.points_expiry_date && <Row label="Expiring" value={num(card.points_expiring)} sub={fmtDate(card.points_expiry_date)} hot={expDays != null && expDays <= 45} />}
             </div>
+            {/* Points typed by hand, for cards whose statement prints none. A statement that
+                does print them always wins (it is newer and final). */}
+            {card.points_source !== "statement" && <PointsEditor card={card} onSaved={onRefresh} />}
             <div className="mw-list mw-gap">
               <button className="mw-row" onClick={() => navigate(`/accounts/${card.id}/statement`)}><span className="mw-row-name">Statement</span><ChevronRight size={16} className="mw-chev" /></button>
               <button className="mw-row" onClick={() => setTab && setTab("reconcile")}><span className="mw-row-name">Reconcile</span><ChevronRight size={16} className="mw-chev" /></button>
@@ -322,6 +325,42 @@ function CardSheet({ card, phase, txs, onPlaced, onClose, navigate, setTab }) {
             <TxList title="Transactions" rows={mine.slice(0, 30)} cardId={card.id} />
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+function PointsEditor({ card, onSaved }) {
+  const [open, setOpen] = useState(false);
+  const [bal, setBal] = useState(card.points_balance != null ? String(Math.round(card.points_balance)) : "");
+  const [unit, setUnit] = useState(card.points_unit || "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const save = async () => {
+    const n = Number(String(bal).replace(/[^\d]/g, ""));
+    if (!String(bal).trim() || !Number.isFinite(n)) { setErr("Enter the points balance as a number."); return; }
+    setBusy(true); setErr("");
+    const { error } = await supabase.from("accounts").update({ points_balance: n, points_unit: unit.trim() || null, points_expiring: null, points_expiry_date: null,
+      points_as_of: new Date().toISOString().slice(0, 10), points_source: "manual" }).eq("id", card.id);
+    setBusy(false);
+    if (error) { setErr(`Could not save: ${error.message}`); return; }
+    setOpen(false); onSaved && onSaved();
+  };
+  if (!open) return (
+    <div className="mw-list mw-gap">
+      <button className="mw-row" onClick={() => setOpen(true)}><span className="mw-row-name">{card.points_balance != null ? "Update points" : "Add points"}</span><Pencil size={16} className="mw-chev" /></button>
+    </div>
+  );
+  return (
+    <div className="mw-tile mw-gap">
+      <div className="mw-form">
+        <label htmlFor="pts-bal">Points<input id="pts-bal" inputMode="numeric" value={bal} onChange={e => setBal(e.target.value)} placeholder="0" /></label>
+        <label htmlFor="pts-unit">Name<input id="pts-unit" value={unit} onChange={e => setUnit(e.target.value)} placeholder="BCA Reward" /></label>
+      </div>
+      {err && <div className="mw-err">{err}</div>}
+      <div className="mw-form-act">
+        <button className="mw-btn mw-btn-ghost" onClick={() => setOpen(false)} disabled={busy}>Cancel</button>
+        <button className="mw-btn" onClick={save} disabled={busy}>{busy ? "Saving" : "Save"}</button>
       </div>
     </div>
   );

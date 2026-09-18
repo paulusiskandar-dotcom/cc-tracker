@@ -23,6 +23,14 @@ export default function MobileBills(props) {
   useEffect(() => { lsSet("m.bills.view", view); }, [view]);
 
   const bills = useMemo(() => buildBills({ ledger, creditCards, liabilities, recurTemplates, installments }), [ledger, creditCards, liabilities, recurTemplates, installments]);
+  // An instalment is stored under the bank's raw descriptor ("TOKOPEDIA_CYBS_CCL12 (131k)");
+  // the item bought is in the purchase row's notes, so show that when it exists.
+  const itemName = useMemo(() => {
+    const byId = Object.fromEntries(ledger.map(e => [e.id, e])); const m = {};
+    installments.forEach(it => { const n = byId[it.purchase_ledger_id]?.notes; if (n && !/^imported from/i.test(n)) m["i" + it.id] = String(n).replace(/\s+\d+\/\d+$/, ""); });
+    return m;
+  }, [ledger, installments]);
+  bills.cicilan.forEach(i => { if (itemName[i.id]) i.name = itemName[i.id]; });
   const groups = [["Cards", bills.cards], ["Installments", bills.cicilan], ["Recurring", bills.rutinManual], ["Subscriptions", bills.subs]];
   const week = useMemo(() => groups.flatMap(g => g[1]).filter(i => i.dayLeft <= 7 && !(isAuto(i) && i.dayLeft < 0)).sort((a, b) => a.when - b.when), [bills]); // eslint-disable-line react-hooks/exhaustive-deps
   const piutang = useMemo(() => hitungPiutang(ledger), [ledger]);

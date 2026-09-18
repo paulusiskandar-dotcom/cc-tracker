@@ -124,3 +124,13 @@ button.mw-row { cursor: pointer; }
 .mw-label-row { display: flex; justify-content: space-between; align-items: baseline; }
 .mw-label-row b { font-size: 13px; letter-spacing: 0; color: var(--ink); font-variant-numeric: tabular-nums; }
 .mw-row small.hot { color: var(--hot); }
+
+.mw-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.mw-form label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); min-width: 0; }
+.mw-form input { height: 44px; min-width: 0; border: 1px solid var(--line); border-radius: 12px; padding: 0 12px; font: inherit; font-size: 16px; color: var(--ink); background: #fff; }
+.mw-form input:focus-visible { outline: 2px solid #3b5bdb; outline-offset: 1px; }
+.mw-form-act { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.mw-form-act .mw-btn { margin-top: 14px; height: 44px; }
+.mw-btn-ghost { background: var(--sunk); color: var(--ink) !important; }
+.mw-btn:disabled { opacity: 0.6; }
+.mw-err { margin-top: 10px; font-size: 13px; color: var(--hot); }
