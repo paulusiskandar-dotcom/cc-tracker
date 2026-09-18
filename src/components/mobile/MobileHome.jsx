@@ -9,10 +9,11 @@ import { supabase } from "../../lib/supabase";
 import { fmtIDR } from "../../utils";
 import { hitungPiutang } from "../../lib/piutang";
 import { buildBills } from "../Billing";
-import { Trend } from "./MobileAssets";
+import MobileAssets, { Trend } from "./MobileAssets";
 import "./mobile.css";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const lsGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
 const isExpense = e => (e.tx_type === "expense" || e.tx_type === "pay_liability") && !e.is_reimburse;
 const amt = e => Number(e.amount_idr || e.amount || 0);
@@ -20,7 +21,10 @@ const ymOf = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0"
 const LIQUID = /^(stocks?|mutual fund|deposit|deposito)$/i;
 const signed = v => `${v < 0 ? "−" : ""}${fmtIDR(Math.abs(v))}`;
 
-export default function MobileHome({ user, reconSessions = [], ledger = [], accounts = [], creditCards = [], liabilities = [], recurTemplates = [], installments = [], pendingSyncs = [], netWorth = {}, fxRates = {}, assets = [], dark, setTab, onSearch }) {
+export default function MobileHome(props) {
+  const { user, reconSessions = [], ledger = [], accounts = [], creditCards = [], liabilities = [], recurTemplates = [], installments = [], pendingSyncs = [], netWorth = {}, fxRates = {}, assets = [], dark, setTab, onSearch } = props;
+  const [view, setView] = useState(() => lsGet("m.home.view") === "assets" ? "assets" : "overview");
+  useEffect(() => { lsSet("m.home.view", view); }, [view]);
   const [openGroup, setOpenGroup] = useState(null);
   const [snaps, setSnaps] = useState([]);
   useEffect(() => { if (user?.id) supabase.from("net_worth_snapshots").select("month,total").order("month").then(({ data }) => setSnaps(data || [])); }, [user?.id]);
@@ -82,8 +86,15 @@ export default function MobileHome({ user, reconSessions = [], ledger = [], acco
     <div className={`mw${dark ? " dark" : ""}`}>
       <div className="mw-hdr">
         <h1>Home</h1>
+        {/* Small switch at the right of the title: the overview, or the assets behind the net worth. */}
+        <div className="mw-seg mw-seg-hdr" role="tablist">
+          <button role="tab" aria-selected={view === "overview"} className={view === "overview" ? "on" : ""} onClick={() => setView("overview")}>Overview</button>
+          <button role="tab" aria-selected={view === "assets"} className={view === "assets" ? "on" : ""} onClick={() => setView("assets")}>Assets</button>
+        </div>
         {onSearch && <button className="mw-round" onClick={onSearch} aria-label="Search"><Search size={20} strokeWidth={1.8} /></button>}
       </div>
+      {view === "assets" && <MobileAssets {...props} bare view="assets" />}
+      {view === "overview" && <>
 
       <div className="mw-tile mw-hero">
         <div className="mw-tile-l">Net worth</div>
@@ -125,6 +136,7 @@ export default function MobileHome({ user, reconSessions = [], ledger = [], acco
           </div>
         </>
       )}
+      </>}
     </div>
   );
 }
