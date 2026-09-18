@@ -58,7 +58,7 @@ const fmtDateShort = (d) => {
 // BCA CHF) dicatat dalam mata uangnya, bukan rupiah — sama dengan recalculateBalance
 // di api.js. FX Exchange: sisi asal turun sebesar `amount`, sisi tujuan naik
 // `amount / fx_rate_used` (18 Sep 2026: tukar Rp4.365.000 → RM1.000 tampil "Rp 4.365.000").
-function nativeAmt(tx, accountId, isForeign) {
+export function nativeAmt(tx, accountId, isForeign) {
   if (tx.tx_type === "fx_exchange") {
     const fromAmount = Number(tx.amount || 0);
     const rate = Number(tx.fx_rate_used || tx.fx_rate || 1);

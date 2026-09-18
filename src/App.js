@@ -26,6 +26,7 @@ import "./components/mobile/mobile.css";
 import MobileHome from "./components/mobile/MobileHome";
 import MobileReceivables from "./components/mobile/MobileReceivables";
 import MobileReports from "./components/mobile/MobileReports";
+import MobileStatement from "./components/mobile/MobileStatement";
 import MobileBills from "./components/mobile/MobileBills";
 import MobileAssets from "./components/mobile/MobileAssets";
 
@@ -206,6 +207,7 @@ function Finance({ user, signOut }) {
   });
 
   const isMobile = useIsMobile();
+  const [fullStatement, setFullStatement] = useState(null); // pathname whose desktop statement was asked for
   const goTab = useCallback((tabId) => {
     if (!onMainPage) navigate("/");
     setTab(tabId);
@@ -444,7 +446,11 @@ function Finance({ user, signOut }) {
   const EXTRA_LABELS = { scan: "AI Scan", aiimport: "AI Scan", email: "Email", notifications: "Notifications" };
   // Phone-only screens bring their own large title, so the top bar steps aside there.
   const walletProps = { user, accounts, ledger, fxRates, installments, reconSessions, dark: isDark, setTab: goTab, onSearch: () => setSearchOpen(true), onRefresh: loadData };
-  const mobileOwnsHeader = isMobile && onMainPage && ["dashboard", "cards", "bank", "cash", "transactions", "billing", "assets", "email", "receivables", "reports"].includes(tab);
+  // Phones get their own statement screen; the desktop page still opens for reconcile
+  // hand-offs (they carry seeds in the navigation state) and from its "Reconcile, PDF and Excel" link.
+  const isStatementRoute = /^\/accounts\/[^/]+\/statement/.test(location.pathname);
+  const phoneStatement = isMobile && isStatementRoute && fullStatement !== location.pathname && !location.state?.reconcileSeeds;
+  const mobileOwnsHeader = phoneStatement || (isMobile && onMainPage && ["dashboard", "cards", "bank", "cash", "transactions", "billing", "assets", "email", "receivables", "reports"].includes(tab));
   const pageLabel = !onMainPage
     ? "Statement"
     : (TABS.find(t => t.id === tab)?.label || EXTRA_LABELS[tab] || "Dashboard");
@@ -602,7 +608,7 @@ function Finance({ user, signOut }) {
             <div className={`mw${isDark ? " dark" : ""}`}><div className="mw-hdr"><h1 style={{ fontSize: 28 }}>{pageLabel}</h1></div></div>
           )}
           <Routes>
-            <Route path="/accounts/:id/statement"         element={<StatementPage          {...shared} />} />
+            <Route path="/accounts/:id/statement"         element={phoneStatement ? <MobileStatement {...shared} onFull={() => setFullStatement(location.pathname)} /> : <StatementPage {...shared} />} />
             <Route path="/reimburse/:entity/statement"    element={<ReimburseStatementPage {...shared} />} />
             <Route path="/loans/:loanId/statement"        element={<LoanStatementPage      {...shared} />} />
             <Route path="*"                               element={renderPage()} />
