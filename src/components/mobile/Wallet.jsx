@@ -171,8 +171,8 @@ function AccountList({ rows, fxRates, navigate, showTotal, flags }) {
         <button key={a.id} className="mw-row" onClick={() => navigate(`/accounts/${a.id}/statement`)}>
           {flags && <CurrencyFlag code={a.currency || "IDR"} size={28} />}
           <span className="mw-row-name">{flags ? (CUR_NAME[a.currency || "IDR"] || a.name) : a.name}</span>
-          <span className="mw-row-amt">{fmtCurNative(a.current_balance, a.currency)}
-            {a.currency && a.currency !== "IDR" && fxRates[a.currency] ? <small>{fmtIDR(Number(a.current_balance || 0) * fxRates[a.currency])}</small> : null}
+          <span className={`mw-row-amt${Number(a.current_balance) < 0 ? " hot" : ""}`}>{Number(a.current_balance) < 0 ? "−" : ""}{fmtCurNative(Math.abs(Number(a.current_balance || 0)), a.currency)}
+            {!flags && a.currency && a.currency !== "IDR" && fxRates[a.currency] ? <small>{fmtIDR(Number(a.current_balance || 0) * fxRates[a.currency])}</small> : null}
           </span>
           <ChevronRight size={16} className="mw-chev" />
         </button>
