@@ -713,7 +713,9 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     let category_id   = null;
     let category_name = null;
     let from_id       = r.from_id || null;
-    if (!isReimburseOut) {
+    // Transfer, FX exchange, pay CC, pinjaman: tidak berkategori. Tanpa penjaga ini
+    // autoCategorize memberi "Donations & Gifts" ke tukar valas RIKO (18 Sep 2026).
+    if (!isReimburseOut && !GMAIL_NO_CAT.has(r.tx_type)) {
       // For income, the "category" is an income_source; user dropdown stores its UUID
       // directly into r.category_id, so prefer that.
       if (r.category_id) {
@@ -754,6 +756,9 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       source:        "gmail",
       email_sync_id: r.email_sync_id || r._id,
       recurring_template_id: r.recurring_template_id || null,
+      // Kurs dari kotak Rate. Tanpa ini fx_exchange tersimpan dengan rate 1 dan
+      // rekening tujuan (MYR Cash) bertambah 4.365.000 "RM", bukan 1.000.
+      ...(r.fx_rate && Number(r.fx_rate) > 0 ? { fx_rate_used: Number(r.fx_rate) } : {}),
       // Pecahan Paper.id HARUS ikut diteruskan. buildEntry menyusun objek baru,
       // jadi field yang tidak disebut di sini hilang — dan `ledgerApi.create`
       // membaca `_paper_split` untuk memisahkan uang vendor dari fee Paper.

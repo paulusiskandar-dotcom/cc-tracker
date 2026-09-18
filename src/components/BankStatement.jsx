@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "../lib/supabase";
-import { fmtIDR } from "../utils";
+import { fmtIDR, fmtCurNative } from "../utils";
 import { detectAccount } from "../lib/accountDetection";
 import { statementWindow } from "../lib/reconcilePdfUpload";
 import AutoDetectBadge from "./shared/AutoDetectBadge";
@@ -54,6 +54,20 @@ const fmtDateShort = (d) => {
 // Returns whether this tx is debit (out from account) or credit (in to account).
 // Must check both the ID and the _type to correctly handle non-account sides
 // (e.g. expense to_type is "expense" — should not be counted as a credit).
+// Nominal sebuah baris dalam mata uang rekening ini. Rekening valas (MYR Cash,
+// BCA CHF) dicatat dalam mata uangnya, bukan rupiah — sama dengan recalculateBalance
+// di api.js. FX Exchange: sisi asal turun sebesar `amount`, sisi tujuan naik
+// `amount / fx_rate_used` (18 Sep 2026: tukar Rp4.365.000 → RM1.000 tampil "Rp 4.365.000").
+function nativeAmt(tx, accountId, isForeign) {
+  if (tx.tx_type === "fx_exchange") {
+    const fromAmount = Number(tx.amount || 0);
+    const rate = Number(tx.fx_rate_used || tx.fx_rate || 1);
+    if (tx.to_id === accountId && tx.to_type === "account") return rate > 0 ? fromAmount / rate : 0;
+    return fromAmount;
+  }
+  return isForeign ? Number(tx.amount || tx.amount_idr || 0) : Number(tx.amount_idr || tx.amount || 0);
+}
+
 function txDirection(tx, accountId) {
   const isDebit  = tx.from_id === accountId && tx.from_type === "account";
   const isCredit = tx.to_id   === accountId && tx.to_type   === "account";
@@ -302,7 +316,8 @@ export default function BankStatement({
   const data = useMemo(() => {
     if (!rawData || !selectedAccount) return null;
     const { allTxs, allPreTxs } = rawData;
-    const getAmt = (t) => Number(t.amount_idr || 0);
+    const isForeign = !!selectedAccount.currency && selectedAccount.currency !== "IDR";
+    const getAmt = (t) => nativeAmt(t, accountId, isForeign);
     const initialBal = Number(selectedAccount.initial_balance || 0);
 
     const beforeCredit = allPreTxs
@@ -328,14 +343,15 @@ export default function BankStatement({
   const rowsWithBalance = useMemo(() => {
     if (!data) return [];
     let bal = data.openingBal;
+    const isForeign = !!selectedAccount?.currency && selectedAccount.currency !== "IDR";
     return data.txs.map(tx => {
       const dir = txDirection(tx, accountId);
-      const amt = Number(tx.amount_idr || 0);
+      const amt = nativeAmt(tx, accountId, isForeign);
       if (dir === "debit")  bal -= amt;
       if (dir === "credit") bal += amt;
       return { ...tx, _dir: dir, _runBal: bal, _displayAmt: amt };
     });
-  }, [data, accountId]);
+  }, [data, accountId, selectedAccount]);
 
   // Group by date
   const grouped = useMemo(() => {
@@ -400,7 +416,8 @@ export default function BankStatement({
   })();
 
   // ── Amount formatters ─────────────────────────────────────
-  const fmtAmt    = (n) => fmtIDR(Math.abs(Number(n || 0)));
+  const accCur    = selectedAccount?.currency || "IDR";
+  const fmtAmt    = (n) => accCur === "IDR" ? fmtIDR(Math.abs(Number(n || 0))) : fmtCurNative(Math.abs(Number(n || 0)), accCur);
   const fmtBalCur = (v) => {
     const n = Number(v || 0);
     return { text: fmtAmt(n), color: n < 0 ? "#A32D2D" : "#111827", sign: n < 0 ? "-" : "" };
