@@ -1,7 +1,8 @@
 // Mobile Assets (phones only): Assets · Net Worth. Net worth is the app's own
 // calcNetWorth() result passed down from App, not recomputed here.
 import { useEffect, useMemo, useState } from "react";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, ChevronDown } from "lucide-react";
+import { supabase } from "../../lib/supabase";
 import { fmtIDR } from "../../utils";
 import Assets from "../Assets";
 import { Donut } from "./MobileTransactions";
@@ -12,11 +13,17 @@ const lsGet = k => { try { return localStorage.getItem(k); } catch { return null
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
 
 export default function MobileAssets(props) {
-  const { assets = [], netWorth = {}, fxRates = {} } = props;
+  const { user, assets = [], netWorth = {}, fxRates = {} } = props;
+  const [snaps, setSnaps] = useState([]);
+  const [openNw, setOpenNw] = useState(null);
   const [view, setView] = useState(() => lsGet("m.assets.view") || "assets");
   const [full, setFull] = useState(false);
   const [openGroup, setOpenGroup] = useState(null);
   useEffect(() => { lsSet("m.assets.view", view); }, [view]);
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase.from("net_worth_snapshots").select("month,total").order("month").then(({ data }) => setSnaps(data || []));
+  }, [user?.id]);
 
   const value = a => Number(a.current_value || a.current_balance || 0) * (a.currency && a.currency !== "IDR" ? (fxRates[a.currency] || 1) : 1);
   const groups = useMemo(() => {
@@ -39,11 +46,19 @@ export default function MobileAssets(props) {
     );
   }
 
-  const nw = [
-    ["Bank", netWorth.bank], ["Cash", netWorth.cash], ["Assets", netWorth.assets],
-    ["Receivables", netWorth.receivables], ["Employee loans", netWorth.employeeLoanTotal],
-    ["Credit cards", -(netWorth.ccDebt || 0)], ["Loans & installments", -(netWorth.liabilities || 0)],
-  ].filter(r => Math.round(Number(r[1] || 0)) !== 0);
+  // Liquid = can be turned into cash within days. The split is by asset type:
+  const LIQUID = /^(stocks?|mutual fund|deposit|deposito)$/i;
+  const liquidAssets = groups.filter(g => LIQUID.test(g.name));
+  const fixedAssets = groups.filter(g => !LIQUID.test(g.name));
+  const sum = l => l.reduce((t, r) => t + Number(r[1] || 0), 0);
+  const keep = l => l.filter(r => Math.round(Number(r[1] || 0)) !== 0);
+  const liquid = keep([["Bank", netWorth.bank], ["Cash", netWorth.cash], ...liquidAssets.map(g => [g.name, g.total])]);
+  const fixed = keep([...fixedAssets.map(g => [g.name, g.total]), ["Receivables", netWorth.receivables], ["Employee loans", netWorth.employeeLoanTotal]]);
+  const debts = keep([["Credit cards", -(netWorth.ccDebt || 0)], ["Loans & installments", -(netWorth.liabilities || 0)]]);
+  const nwGroups = [["Liquid assets", liquid], ["Non-liquid assets", fixed], ["Liabilities", debts]];
+  // The stored row for this month can lag the live figure by a few seconds; show the live one.
+  const curMonth = new Date().toISOString().slice(0, 7);
+  const series = [...snaps.filter(p => p.month !== curMonth), { month: curMonth, total: netWorth.total }].filter(p => Number.isFinite(Number(p.total)));
 
   return (
     <div className="mw">
@@ -81,14 +96,44 @@ export default function MobileAssets(props) {
           <div className="mw-tile">
             <div className="mw-tile-l">Net worth</div>
             <div className="mw-tile-n">{fmtIDR(netWorth.total, false, true)}</div>
+            {series.length >= 2 ? <Trend series={series} /> : <div className="mw-tile-s">The trend starts this month and adds one point per month.</div>}
           </div>
           <div className="mw-list mw-gap">
-            {nw.map(([k, v]) => (
-              <div key={k} className="mw-row"><span className="mw-row-name">{k}</span><span className={`mw-row-amt${v < 0 ? " hot" : ""}`}>{v < 0 ? "−" : ""}{fmtIDR(Math.abs(v))}</span></div>
+            {nwGroups.map(([name, rows]) => rows.length > 0 && (
+              <div key={name}>
+                <button className="mw-row" onClick={() => setOpenNw(openNw === name ? null : name)} aria-expanded={openNw === name}>
+                  <span className="mw-row-name">{name}</span>
+                  <span className={`mw-row-amt${sum(rows) < 0 ? " hot" : ""}`}>{sum(rows) < 0 ? "−" : ""}{fmtIDR(Math.abs(sum(rows)))}</span>
+                  <ChevronDown size={16} className="mw-chev" style={{ transform: openNw === name ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
+                </button>
+                {openNw === name && (
+                  <div className="mw-sub">
+                    {rows.map(([k, v]) => <div key={k} className="mw-row mw-tx"><span className="mw-row-name">{k}</span><span className={`mw-row-amt${v < 0 ? " hot" : ""}`}>{v < 0 ? "−" : ""}{fmtIDR(Math.abs(v))}</span></div>)}
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         </>
       )}
     </div>
+  );
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+// Net worth by month. One scale places the line, the area and the month labels.
+function Trend({ series }) {
+  const pts = series.slice(-12); const W = 320, H = 130, L = 8, R = 8, T = 10, B = 22;
+  const vals = pts.map(p => Number(p.total)); const lo = Math.min(...vals), hi = Math.max(...vals); const span = hi - lo || 1;
+  const x = i => L + (i * (W - L - R)) / (pts.length - 1); const y = v => T + (1 - (v - lo) / span) * (H - T - B);
+  const line = pts.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)} ${y(Number(p.total)).toFixed(1)}`).join(" ");
+  const last = pts.length - 1;
+  return (
+    <svg className="mw-trend" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Net worth by month">
+      <path d={`${line} L${x(last)} ${H - B} L${x(0)} ${H - B} Z`} fill="#3b5bdb" opacity="0.1" />
+      <path d={line} fill="none" stroke="#3b5bdb" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={x(last)} cy={y(vals[last])} r="4" fill="#3b5bdb" />
+      {pts.map((p, i) => (pts.length <= 6 || i % 2 === last % 2) && <text key={p.month} x={x(i)} y={H - 5} textAnchor={i === 0 ? "start" : i === last ? "end" : "middle"} fontSize="10.5" fill="#9ca3af">{MONTHS[Number(p.month.slice(5, 7)) - 1]}</text>)}
+    </svg>
   );
 }

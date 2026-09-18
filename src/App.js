@@ -373,6 +373,21 @@ function Finance({ user, signOut }) {
   const liabilities   = useMemo(() => accounts.filter(a => a.type === "liability"), [accounts]);
   const receivables   = useMemo(() => accounts.filter(a => a.type === "receivable"), [accounts]);
   const netWorth      = useMemo(() => calcNetWorth(accounts, { employeeLoans, loanPayments, fxRates, ledger, installments }), [accounts, employeeLoans, loanPayments, fxRates, ledger, installments]);
+  // Monthly net-worth snapshot (feeds the trend on the phone Net Worth screen). Written a
+  // few seconds after the data has settled; the current month's row is overwritten.
+  useEffect(() => {
+    if (loading || !user?.id || !accounts.length || !Number.isFinite(netWorth.total)) return undefined;
+    const t = setTimeout(() => {
+      supabase.from("net_worth_snapshots").upsert({
+        user_id: user.id, month: new Date().toISOString().slice(0, 7), total: Math.round(netWorth.total),
+        bank: Math.round(netWorth.bank), cash: Math.round(netWorth.cash), assets: Math.round(netWorth.assets),
+        receivables: Math.round(netWorth.receivables), employee_loans: Math.round(netWorth.employeeLoanTotal),
+        cc_debt: Math.round(netWorth.ccDebt), liabilities: Math.round(netWorth.liabilities), updated_at: new Date().toISOString(),
+      }, { onConflict: "user_id,month" }).then(({ error }) => { if (error) console.warn("[net worth snapshot]", error.message); });
+    }, 4000);
+    return () => clearTimeout(t);
+  }, [loading, user?.id, accounts.length, netWorth]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const thisMonthLedger = useMemo(
     () => ledger.filter(e => ym(e.tx_date) === curMonth),
     [ledger, curMonth]
@@ -424,7 +439,7 @@ function Finance({ user, signOut }) {
 
   const EXTRA_LABELS = { scan: "AI Scan", aiimport: "AI Scan", email: "Email", notifications: "Notifications" };
   // Phone-only screens bring their own large title, so the top bar steps aside there.
-  const walletProps = { user, accounts, ledger, fxRates, setTab: goTab, onSearch: () => setSearchOpen(true), onRefresh: loadData };
+  const walletProps = { user, accounts, ledger, fxRates, installments, setTab: goTab, onSearch: () => setSearchOpen(true), onRefresh: loadData };
   const mobileOwnsHeader = isMobile && onMainPage && ["cards", "bank", "cash", "transactions", "billing", "assets"].includes(tab);
   const pageLabel = !onMainPage
     ? "Statement"

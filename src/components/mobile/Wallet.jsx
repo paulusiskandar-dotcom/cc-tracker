@@ -48,7 +48,7 @@ const EASE_LIFT = "cubic-bezier(0.3, 1.18, 0.4, 1)"; // the lifted card overshoo
 const FLY_MS = 560;
 const SEGMENTS = [["credit", "Credit"], ["bank", "Bank"], ["cash", "Cash"]];
 
-export default function Wallet({ user, accounts = [], ledger = [], fxRates = {}, initialSegment = "credit", setTab, onSearch, onRefresh }) {
+export default function Wallet({ user, accounts = [], ledger = [], fxRates = {}, initialSegment = "credit", setTab, onSearch, onRefresh, installments = [] }) {
   const navigate = useNavigate();
   const [seg, setSeg] = useState(() => lsGet("m.wallet.seg") || initialSegment);
   // Opening a card moves the REAL cards in the stack, the way Apple Wallet does: the tapped
@@ -130,6 +130,20 @@ export default function Wallet({ user, accounts = [], ledger = [], fxRates = {},
     return m;
   }, [ledger, cards]);
 
+  // Active instalment plans per card, named after the item bought (purchase row's notes).
+  const plansByCard = useMemo(() => {
+    const byId = Object.fromEntries(ledger.map(e => [e.id, e])); const m = {};
+    installments.filter(i => i.status === "active").forEach(i => {
+      const cid = i.account_id || i.cc_account_id; if (!cid) return;
+      const note = byId[i.purchase_ledger_id]?.notes;
+      const left = Math.max(0, Number(i.total_months || 0) - Number(i.paid_months || 0));
+      (m[cid] = m[cid] || []).push({ id: i.id, name: note && !/^imported from/i.test(note) ? String(note).replace(/\s+\d+\/\d+$/, "") : i.description,
+        paid: Number(i.paid_months || 0), total: Number(i.total_months || 0), monthly: Number(i.monthly_amount || 0), left: left * Number(i.monthly_amount || 0) });
+    });
+    Object.values(m).forEach(l => l.sort((a, b) => b.left - a.left));
+    return m;
+  }, [installments, ledger]);
+
   const open = openCard && cards.find(c => c.id === openCard.id);
   const calm = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const clearFlight = () => { flight.current.anims.forEach(a => a.cancel()); flight.current.timers.forEach(clearTimeout); flight.current = { anims: [], timers: [] }; };
@@ -177,7 +191,7 @@ export default function Wallet({ user, accounts = [], ledger = [], fxRates = {},
 
   return (
     <div className={`mw${open && phase !== "closing" ? " mw-behind" : ""}`}>
-      {open && <CardSheet card={open} phase={phase} txs={txByCard[open.id] || []} onPlaced={flyUp} onClose={flyDown} navigate={navigate} setTab={setTab} onRefresh={onRefresh} />}
+      {open && <CardSheet card={open} phase={phase} txs={txByCard[open.id] || []} plans={plansByCard[open.id] || []} onPlaced={flyUp} onClose={flyDown} navigate={navigate} setTab={setTab} onRefresh={onRefresh} />}
       <div className="mw-hdr">
         <h1>Wallet</h1>
         {onSearch && <button className="mw-round" onClick={onSearch} aria-label="Search"><Search size={20} strokeWidth={1.8} /></button>}
@@ -246,7 +260,7 @@ function AccountList({ rows, fxRates, navigate, showTotal, flags, marks }) {
 // Apple Wallet flow. First tap: the card flies to the top, the rest of the stack drops
 // away, and a quick preview sits under it. Tap the card again for the full detail;
 // the close button steps back one level at a time.
-function CardSheet({ card, phase, txs, onPlaced, onClose, navigate, setTab, onRefresh }) {
+function CardSheet({ card, phase, txs, plans = [], onPlaced, onClose, navigate, setTab, onRefresh }) {
   const [level, setLevel] = useState("peek");
   const artRef = useRef(null);
   const swapped = useRef(false); // the swap animation is for peek ↔ detail only, not for opening
@@ -302,6 +316,13 @@ function CardSheet({ card, phase, txs, onPlaced, onClose, navigate, setTab, onRe
                 {hasPoints && <div className="mw-tile"><div className="mw-tile-l">Points</div><div className="mw-tile-m">{num(card.points_balance)}</div>{kf != null && <div className="mw-tile-s">≈ {num(kf)} KrisFlyer miles</div>}</div>}
               </div>
             )}
+            {plans.length > 0 && (
+              <div className="mw-tile">
+                <div className="mw-tile-l">Installments · {fmtIDR(plans.reduce((t, p) => t + p.left, 0))} left</div>
+                {plans.slice(0, 4).map(p => <div key={p.id} className="mw-inst"><span>{p.name}</span><span>{p.paid}/{p.total} · {fmtIDR(p.monthly)}</span></div>)}
+                {plans.length > 4 && <div className="mw-tile-s">and {plans.length - 4} more — tap the card for all</div>}
+              </div>
+            )}
             <TxList title="Latest" rows={mine.slice(0, 5)} cardId={card.id} />
           </>
         ) : (
@@ -322,11 +343,65 @@ function CardSheet({ card, phase, txs, onPlaced, onClose, navigate, setTab, onRe
               <button className="mw-row" onClick={() => navigate(`/accounts/${card.id}/statement`)}><span className="mw-row-name">Statement</span><ChevronRight size={16} className="mw-chev" /></button>
               <button className="mw-row" onClick={() => setTab && setTab("reconcile")}><span className="mw-row-name">Reconcile</span><ChevronRight size={16} className="mw-chev" /></button>
             </div>
-            <TxList title="Transactions" rows={mine.slice(0, 30)} cardId={card.id} />
+            {plans.length > 0 && (
+              <>
+                <div className="mw-label">Installments</div>
+                <div className="mw-list">
+                  {plans.map(p => <div key={p.id} className="mw-row mw-tx"><span className="mw-row-name">{p.name}<small>{p.paid}/{p.total} · {fmtIDR(p.left)} left</small></span><span className="mw-row-amt">{fmtIDR(p.monthly)}</span></div>)}
+                </div>
+              </>
+            )}
+            <MonthByCategory txs={mine} cardId={card.id} />
           </>
         )}
       </div>
     </div>
+  );
+}
+
+const MONTHS_S = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const stepMonth = (m, by) => { const d = new Date(Number(m.slice(0, 4)), Number(m.slice(5, 7)) - 1 + by, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+
+// One month of this card's charges grouped by category; payments to the card sit in their own group.
+function MonthByCategory({ txs, cardId }) {
+  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [openCat, setOpenCat] = useState(null);
+  const groups = useMemo(() => {
+    const m = {};
+    txs.filter(e => String(e.tx_date || "").slice(0, 7) === month).forEach(e => {
+      const pay = e.to_id === cardId;
+      const k = pay ? "Payments" : (e.category_name || (e.is_reimburse || /^reimburse/.test(e.tx_type) ? "Reimburse" : "Uncategorized"));
+      (m[k] = m[k] || { name: k, total: 0, pay, items: [] }); m[k].total += Number(e.amount_idr || e.amount || 0); m[k].items.push(e);
+    });
+    return Object.values(m).sort((a, b) => Number(a.pay) - Number(b.pay) || b.total - a.total);
+  }, [txs, month, cardId]);
+  return (
+    <>
+      <div className="mw-label mw-label-row"><span>Transactions</span>
+        <div className="mw-month">
+          <button onClick={() => setMonth(m => stepMonth(m, -1))} aria-label="Previous month"><ChevronLeft size={16} /></button>
+          <span>{MONTHS_S[Number(month.slice(5, 7)) - 1]} {month.slice(0, 4)}</span>
+          <button onClick={() => setMonth(m => stepMonth(m, 1))} aria-label="Next month"><ChevronRight size={16} /></button>
+        </div>
+      </div>
+      {groups.length === 0 ? <div className="mw-empty">No transactions this month.</div> : (
+        <div className="mw-list">
+          {groups.map(g => (
+            <div key={g.name}>
+              <button className="mw-row" onClick={() => setOpenCat(openCat === g.name ? null : g.name)} aria-expanded={openCat === g.name}>
+                <span className="mw-row-name">{g.name}<small>{g.items.length} transaction{g.items.length === 1 ? "" : "s"}</small></span>
+                <span className={`mw-row-amt${g.pay ? " in" : ""}`}>{g.pay ? "+" : ""}{fmtIDR(g.total)}</span>
+              </button>
+              {openCat === g.name && (
+                <div className="mw-sub">
+                  {g.items.map(e => <div key={e.id} className="mw-row mw-tx"><span className="mw-row-name">{e.notes && !/^imported from/i.test(e.notes) ? e.notes : (e.description || e.merchant_name || e.tx_type)}<small>{fmtDate(e.tx_date)}</small></span><span className="mw-row-amt">{fmtIDR(e.amount_idr || e.amount)}</span></div>)}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 

@@ -134,3 +134,11 @@ button.mw-row { cursor: pointer; }
 .mw-btn-ghost { background: var(--sunk); color: var(--ink) !important; }
 .mw-btn:disabled { opacity: 0.6; }
 .mw-err { margin-top: 10px; font-size: 13px; color: var(--hot); }
+
+.mw-trend { display: block; width: 100%; height: auto; margin-top: 10px; }
+.mw-inst { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; padding: 6px 0; }
+.mw-inst span:last-child { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mw-inst span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mw-label-row .mw-month { flex: none; height: 30px; background: #fff; }
+.mw-label-row .mw-month span { padding: 0 2px; font-size: 12.5px; letter-spacing: 0; text-transform: none; color: var(--ink); }
+.mw-label-row .mw-month button { width: 30px; height: 30px; }
