@@ -194,3 +194,5 @@ button.mw-row { cursor: pointer; }
 .mw-ring { display: block; width: 76px; height: 76px; margin: 6px 0 4px; }
 .mw-big { font-size: 44px; font-weight: 800; letter-spacing: -0.03em; line-height: 76px; margin: 6px 0 4px; font-variant-numeric: tabular-nums; }
 .mw-tile + .mw-tile.mw-tap, .mw-tap + .mw-tile, .mw-tap + .mw-tiles, .mw-tiles + .mw-tile { margin-top: 12px; }
+
+.mw-tiles > .mw-tile { margin-top: 0 !important; }
