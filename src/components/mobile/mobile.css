@@ -1,7 +1,7 @@
 /* Mobile-only screens (rendered under 768px). Palette matches the rest of Ryūsei. */
-.mw { margin: 0 -8px; --ink: #111827; --muted: #6b7280; --faint: #9ca3af; --line: #e5e7eb; --sunk: #f3f4f6; --card: #ffffff; --sub: #fafbfc; --page: #f8f9fb; --accent: #3b5bdb; --hot: #dc2626; --good: #059669; color: var(--ink); }
+.mw { margin: 0 -8px; --ink: #111827; --muted: #6b7280; --faint: #9ca3af; --line: #e5e7eb; --sunk: #f3f4f6; --card: #ffffff; --sub: #fafbfc; --page: #f8f9fb; --accent: #3b5bdb; --hot: #dc2626; --good: #059669; --amber: #d97706; --teal: #0891b2; color: var(--ink); }
 /* Dark: same tokens, redefined once. Components only ever read the tokens. */
-.mw.dark { --ink: #f3f4f6; --muted: #9ca3af; --faint: #6b7280; --line: #2a2f3a; --sunk: #242935; --card: #181c25; --sub: #1e232d; --page: #0b0d12; --accent: #8da2fb; --hot: #f87171; --good: #34d399; }
+.mw.dark { --ink: #f3f4f6; --muted: #9ca3af; --faint: #6b7280; --line: #2a2f3a; --sunk: #242935; --card: #181c25; --sub: #1e232d; --page: #0b0d12; --accent: #8da2fb; --hot: #f87171; --good: #34d399; --amber: #fbbf24; --teal: #22d3ee; }
 .mw button { font: inherit; color: inherit; -webkit-tap-highlight-color: transparent; }
 
 .mw-hdr { display: flex; align-items: center; gap: 10px; margin: 4px 0 16px; }
@@ -217,3 +217,9 @@ button.mw-row { cursor: pointer; }
 .mw-dock-act { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: end; margin-top: 12px; }
 .mw-dock-act label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); min-width: 0; }
 .mw-dock-act .mw-btn { margin-top: 0; height: 44px; }
+
+/* Amount by kind of movement (Amt.jsx) */
+.mw-row-amt[class*="mw-amt-"] { display: inline-flex; align-items: center; gap: 5px; }
+.mw-amt-in { color: var(--good); } .mw-amt-out { color: var(--hot); } .mw-amt-move { color: var(--accent); }
+.mw-amt-rout { color: var(--amber); } .mw-amt-rin { color: var(--teal); }
+.mw-tile-n .mw-row-amt { font-size: inherit; font-weight: inherit; text-align: left; }

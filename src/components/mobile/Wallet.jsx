@@ -8,6 +8,7 @@ import { supabase } from "../../lib/supabase";
 import { fmtIDR, fmtCurNative } from "../../utils";
 import { CURRENCIES } from "../../constants";
 import CurrencyFlag from "../shared/CurrencyFlag";
+import Amt from "./Amt";
 import "./mobile.css";
 
 const slug = s => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -404,7 +405,7 @@ function MonthByCategory({ txs, cardId }) {
               </button>
               {openCat === g.name && (
                 <div className="mw-sub">
-                  {g.items.map(e => <div key={e.id} className="mw-row mw-tx"><span className="mw-row-name">{e.notes && !/^imported from/i.test(e.notes) ? e.notes : (e.description || e.merchant_name || e.tx_type)}<small>{fmtDate(e.tx_date)}</small></span><span className="mw-row-amt">{fmtIDR(e.amount_idr || e.amount)}</span></div>)}
+                  {g.items.map(e => <div key={e.id} className="mw-row mw-tx"><span className="mw-row-name">{e.notes && !/^imported from/i.test(e.notes) ? e.notes : (e.description || e.merchant_name || e.tx_type)}<small>{fmtDate(e.tx_date)}</small></span><Amt e={e} /></div>)}
                 </div>
               )}
             </div>
@@ -458,11 +459,10 @@ function TxList({ title, rows, cardId }) {
       <div className="mw-label">{title}</div>
       <div className="mw-list">
         {rows.map(e => {
-          const out = e.from_id === cardId;
           return (
             <div key={e.id} className="mw-row mw-tx">
               <span className="mw-row-name">{e.description || e.merchant_name || e.tx_type}<small>{fmtDate(e.tx_date)}</small></span>
-              <span className={`mw-row-amt${out ? "" : " in"}`}>{out ? "" : "+"}{fmtIDR(e.amount_idr || e.amount)}</span>
+              <Amt e={e} />
             </div>
           );
         })}

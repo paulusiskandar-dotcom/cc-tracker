@@ -8,6 +8,7 @@ import { fmtIDR, fmtCurNative } from "../../utils";
 import Transactions from "../Transactions";
 import Email from "../Email";
 import TxVerticalBig from "../shared/TxVerticalBig";
+import Amt from "./Amt";
 import "./mobile.css";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -122,11 +123,10 @@ export default function MobileTransactions(props) {
             <div className="mw-label">{fmtDate(d.date)}</div>
             <div className="mw-list">
               {d.items.map(e => {
-                const inc = e.tx_type === "income" || e.tx_type === "reimburse_in";
                 return (
                   <button key={e.id} className="mw-row mw-tx" onClick={() => setDetail(e)}>
                     <span className="mw-row-name">{e.description || e.merchant_name || e.tx_type}</span>
-                    <span className={`mw-row-amt${inc ? " in" : ""}`}>{inc ? "+" : ""}{fmtIDR(amt(e))}</span>
+                    <Amt e={e} value={amt(e)} />
                   </button>
                 );
               })}
@@ -205,11 +205,10 @@ export default function MobileTransactions(props) {
               <div className="mw-label">Latest</div>
               <div className="mw-list">
                 {recent.map(e => {
-                  const inc = e.tx_type === "income" || e.tx_type === "reimburse_in";
                   return (
                     <button key={e.id} className="mw-row mw-tx" onClick={() => setDetail(e)}>
                       <span className="mw-row-name">{e.description || e.merchant_name || e.tx_type}</span>
-                      <span className={`mw-row-amt${inc ? " in" : ""}`}>{inc ? "+" : ""}{fmtIDR(amt(e))}</span>
+                      <Amt e={e} value={amt(e)} />
                     </button>
                   );
                 })}
@@ -264,7 +263,7 @@ function TxDetail({ e, accName, category, trips, onClose, onEdit }) {
           <h2>{e.description || e.merchant_name || "Transaction"}</h2>
           <button className="mw-round mw-round-sunk" onClick={onClose} aria-label="Close"><X size={20} strokeWidth={1.8} /></button>
         </div>
-        <div className="mw-tile-n">{fmtIDR(amt(e))}</div>
+        <div className="mw-tile-n"><Amt e={e} value={amt(e)} /></div>
         <div className="mw-list mw-gap mw-list-sunk">
           {rowsOut.map(([k, v]) => <div key={k} className="mw-row mw-kv"><span className="mw-row-name">{k}</span><span className="mw-row-amt mw-wrap">{v}</span></div>)}
         </div>
