@@ -28,7 +28,12 @@ const syncToRow = (s) => ({
   subject:       s.subject,
   received_at:   s.received_at,
   tx_date:       s.transaction_date || s.received_at?.slice(0, 10) || todayStr(),
-  description:   s.merchant_name || s.subject || "",
+  // Angsuran 1/N dari statement: pakai nama barang (kalau ada) + "Cicilan 1/N",
+  // bukan kode bank "TOKOPEDIA_CYBS_CCL06 : 1/6" — sama dengan angsuran lanjutan
+  // yang dibukukan server.
+  description:   (s.is_installment && Number(s.installment_current) === 1 && Number(s.installment_total) >= 2)
+                   ? `${s.notes || String(s.merchant_name || "").replace(/_CYBS_CCL\d+.*$/i, "").replace(/\s*:\s*1\/\d+.*$/, "").trim() || "TOKOPEDIA"} · Cicilan 1/${s.installment_total}`
+                   : (s.merchant_name || s.subject || ""),
   amount:        String(Number(s.amount || 0)),
   currency:      s.currency || "IDR",
   amount_idr:    String(Number(s.amount_idr || s.amount || 0)),
@@ -896,7 +901,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       if (r._cicilan && r._cicilanMonths >= 2 && created?.id) {
         installmentsApi.createFromImport(user.id, {
           // Nama rencana = nama barang kalau ada; kode bank hanya sebagai cadangan.
-          ledgerId: created.id, description: r.notes || r.description || "", accountId: r.from_id,
+          ledgerId: created.id, description: r.notes || (String(r.description || "").replace(/\s*·\s*Cicilan.*$/, "") + " " + r.tx_date), accountId: r.from_id,
           amount: Number(r.amount_idr || r.amount || 0), totalMonths: r._cicilanMonths,
           paidMonths: r._cicilanKe || 1, totalAmount: r._planTotal || null,
           currency: r.currency || "IDR", txDate: r.tx_date, categoryId: r.category_id || null,
@@ -982,7 +987,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
         if (r._cicilan && r._cicilanMonths >= 2 && created?.id) {
           installmentsApi.createFromImport(user.id, {
             // Nama rencana = nama barang kalau ada; kode bank hanya sebagai cadangan.
-            ledgerId: created.id, description: r.notes || r.description || "", accountId: r.from_id,
+            ledgerId: created.id, description: r.notes || (String(r.description || "").replace(/\s*·\s*Cicilan.*$/, "") + " " + r.tx_date), accountId: r.from_id,
             amount: Number(r.amount_idr || r.amount || 0), totalMonths: r._cicilanMonths,
             paidMonths: r._cicilanKe || 1, totalAmount: r._planTotal || null,
             currency: r.currency || "IDR", txDate: r.tx_date, categoryId: r.category_id || null,
