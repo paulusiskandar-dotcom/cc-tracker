@@ -471,7 +471,7 @@ function Finance({ user, signOut }) {
       case "reconcile":    return <Reconcile    {...shared} />;
       case "scan":         return <AIImport     {...shared} />;
       case "aiimport":     return <AIImport     {...shared} />; // legacy redirect
-      case "email":         return <Email         {...shared} initialTab={emailInitialTab} />;
+      case "email":         return <Email         {...shared} initialTab={emailInitialTab} mobile={isMobile} />;
       case "notifications": return <Notifications {...shared} />;
       default:              return <Dashboard    {...shared} />;
     }

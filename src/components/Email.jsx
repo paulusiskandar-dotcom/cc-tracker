@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import MobileQueue from "./mobile/MobileQueue";
 import { gmailApi, settingsApi, ledgerApi, merchantApi, getTxFromToTypes, flattenEmailSync, loanPaymentsApi, installmentsApi, recurringApi } from "../api";
 import { supabase } from "../lib/supabase";
 import { undoManager } from "../lib/undoManager";
@@ -177,6 +178,7 @@ export default function Email({
   recurTemplates = [],
   fxRates = {},
   initialTab = "pending",
+  mobile = false,
 }) {
   const T = dark ? DARK : LIGHT;
   const [tab, setTab] = useState(initialTab);
@@ -314,6 +316,7 @@ export default function Email({
       {(tab === "pending" || tab === "waiting") && (
         <EmailPendingTab
           key={tab}
+          mobile={mobile}
           waitingMode={tab === "waiting"}
           pendingSyncs={pendingSyncs}
           setPendingSyncs={setPendingSyncs}
@@ -490,7 +493,8 @@ export default function Email({
 // ─── EMAIL PENDING TAB ────────────────────────────────────────────
 const GMAIL_NO_CAT = new Set(["transfer","pay_cc","give_loan","collect_loan","fx_exchange","reimburse_in","reimburse_out","buy_asset","sell_asset","pay_liability"]);
 
-function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, incomeSrcs = [], user, ledger, setLedger, onRefresh, setReminders, dark, T: theme, employeeLoans = [], merchantMaps = [], recurTemplates = [], fxRates = {}, waitingMode = false }) {
+function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, incomeSrcs = [], user, ledger, setLedger, onRefresh, setReminders, dark, T: theme, employeeLoans = [], merchantMaps = [], recurTemplates = [], fxRates = {}, waitingMode = false, mobile = false }) {
+  const [fullEditor, setFullEditor] = useState(false); // phones: the desktop row editor, on request
   const T = theme || LIGHT;
 
   // Local editable rows (mirrors pendingSyncs but editable)
@@ -1112,7 +1116,12 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
           Transaksi valas <b>waiting for statement</b> — kurs belum pasti, jadi tidak masuk ledger dulu. Nilai IDR asli diambil dari statement bulanan; begitu statement masuk &amp; di-reconcile, item di sini hilang otomatis. Tombol ✕ = buang kalau bukan transaksi.
         </div>
       )}
-      {visibleRows.length > 0 && (
+      {mobile && !fullEditor && visibleRows.length > 0 && (
+        <MobileQueue rows={visibleRows} onUpdateRow={updateRow} onConfirmRow={confirm} onSkipRow={skipById}
+          accounts={accounts} categories={categories} incomeSrcs={incomeSrcs} busy={importing} waiting={waitingMode} dark={dark}
+          onFullEditor={waitingMode ? null : () => setFullEditor(true)} />
+      )}
+      {(!mobile || fullEditor) && visibleRows.length > 0 && (
         <TxHorizontal
           rows={visibleRows}
           selected={selected}

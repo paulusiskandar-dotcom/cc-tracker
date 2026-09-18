@@ -136,7 +136,7 @@ function TabbedAcctSelect({ accounts, value, onChange, placeholder = "Select…"
 const REIMBURSE_ENTITY_NAMES = REIMBURSE_ENTITIES;
 
 // ── Account filter/mode per tx_type ────────────────────────────
-function getAcctCfg(txType, accounts) {
+export function getAcctCfg(txType, accounts) {
   const bc      = accounts.filter(a => ["bank","cash"].includes(a.type));
   const bccc    = accounts.filter(a => ["bank","cash","credit_card"].includes(a.type));
   const cc      = accounts.filter(a => a.type === "credit_card");
@@ -165,7 +165,7 @@ function getAcctCfg(txType, accounts) {
 }
 
 // ── Validation ─────────────────────────────────────────────────
-function validateRow(r, accounts) {
+export function validateRow(r, accounts) {
   const cfg = getAcctCfg(r.tx_type, accounts);
   const isUUID = v => typeof v === "string" && v.length === 36;
   if (r.tx_type === "collect_loan") {
