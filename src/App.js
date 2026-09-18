@@ -22,6 +22,7 @@ import { Spinner, ToastContainer, showToast } from "./components/shared/index";
 import UndoToast from "./components/shared/UndoToast";
 import MobileWallet from "./components/mobile/Wallet";
 import MobileTransactions from "./components/mobile/MobileTransactions";
+import "./components/mobile/mobile.css";
 import MobileHome from "./components/mobile/MobileHome";
 import MobileBills from "./components/mobile/MobileBills";
 import MobileAssets from "./components/mobile/MobileAssets";
@@ -460,7 +461,7 @@ function Finance({ user, signOut }) {
       case "accounts":     return <Accounts     {...shared} initialSubTab="bank" />; // legacy redirect
       case "cards":        return isMobile ? <MobileWallet {...walletProps} /> : <CreditCards {...shared} />;
       case "assets":       return isMobile ? <MobileAssets {...shared} /> : <Assets {...shared} />;
-      case "receivables":  return <Receivables  {...shared} />;
+      case "receivables":  return <Receivables  {...shared} mobile={isMobile} />;
       case "income":       return <Income       {...shared} />;
       case "reports":      return <Reports      {...shared} />;
       case "budget":       return <Budget       {...shared} />;
@@ -543,7 +544,9 @@ function Finance({ user, signOut }) {
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
 
         {/* Top bar */}
-        <header style={{ ...S.topBar, ...(mobileOwnsHeader ? { display: "none" } : {}) }}>
+        {/* Phones never show the desktop top bar: phone screens bring their own title, and the
+            remaining desktop pages get the same large title from MobileTitle below. */}
+        <header style={{ ...S.topBar, ...(isMobile ? { display: "none" } : {}) }}>
           {/* Left: logo on mobile, title on desktop */}
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <button
@@ -593,6 +596,9 @@ function Finance({ user, signOut }) {
           className="fade-up page-content"
           style={{ flex: 1, padding: "20px 24px", maxWidth: sidebarOpen ? 840 : 1080, width: "100%", margin: "0 auto", paddingBottom: 88, transition: "max-width .22s ease" }}
         >
+          {isMobile && !mobileOwnsHeader && (
+            <div className={`mw${isDark ? " dark" : ""}`}><div className="mw-hdr"><h1 style={{ fontSize: 28 }}>{pageLabel}</h1></div></div>
+          )}
           <Routes>
             <Route path="/accounts/:id/statement"         element={<StatementPage          {...shared} />} />
             <Route path="/reimburse/:entity/statement"    element={<ReimburseStatementPage {...shared} />} />

@@ -200,3 +200,20 @@ button.mw-row { cursor: pointer; }
 .mw-hero { padding: 18px 16px; }
 .mw-hero-n { font-size: 34px; font-weight: 800; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
 .mw-tile.mw-gap { margin-top: 16px; }
+
+/* ── Match ─────────────────────────────────────────────────────────────── */
+.mw-box { width: 22px; height: 22px; flex: none; border-radius: 7px; border: 1.5px solid var(--line); background: var(--card); position: relative; }
+.mw-check.on .mw-box { background: var(--ink); border-color: var(--ink); }
+.mw-check.on .mw-box::after { content: ""; position: absolute; left: 7px; top: 3px; width: 5px; height: 10px; border: solid var(--card); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.mw-check.on { background: var(--sub); }
+.mw-dock { position: fixed; left: 12px; right: 12px; bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 180; padding: 14px 16px; border-radius: 22px; background: var(--card); box-shadow: 0 12px 34px rgba(17, 24, 39, 0.22); border: 1px solid var(--line); color: var(--ink); }
+.mw-dock-row { display: flex; justify-content: space-between; font-size: 14px; padding: 2px 0; color: var(--muted); }
+.mw-dock-row b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+.mw-dock-row b.in { color: var(--good); } .mw-dock-row b.hot { color: var(--hot); }
+.mw-dock-sum { margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--sunk); }
+.mw-dock-sum span, .mw-dock-sum b { font-weight: 700; color: var(--ink); }
+.mw-dock-pick { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; font-size: 13px; color: var(--muted); }
+.mw-dock-pick select, .mw-dock-act input { height: 44px; min-width: 0; box-sizing: border-box; border: 1px solid var(--line); border-radius: 12px; padding: 0 12px; font: inherit; font-size: 16px; color: var(--ink); background: var(--card); }
+.mw-dock-act { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: end; margin-top: 12px; }
+.mw-dock-act label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); min-width: 0; }
+.mw-dock-act .mw-btn { margin-top: 0; height: 44px; }

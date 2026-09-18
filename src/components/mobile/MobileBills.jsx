@@ -49,7 +49,7 @@ export default function MobileBills(props) {
           <button className="mw-round" onClick={() => setFull(false)} aria-label="Back"><ChevronLeft size={22} strokeWidth={1.8} /></button>
           <h2>Receivables</h2>
         </div>
-        <div className="mw-legacy"><Receivables {...props} /></div>
+        <div className="mw-legacy"><Receivables {...props} mobile /></div>
       </div>
     );
   }

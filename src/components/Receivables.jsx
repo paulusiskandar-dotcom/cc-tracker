@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
+import MobileMatch from "./mobile/MobileMatch";
 import { Pencil, Trash2, ChevronUp, ChevronDown, Scissors } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { ledgerApi, employeeLoanApi, loanPaymentsApi, recalculateBalance, tagsApi } from "../api";
@@ -389,6 +390,7 @@ export default function Receivables({
   bankAccounts: bankAccountsProp = [],
   creditCards = [], assets = [], liabilities = [],
   incomeSrcs = [],
+  mobile = false,   // phones: the Match tab is drawn by mobile/MobileMatch with this page's own state and handlers
 }) {
   const T = dark ? DARK : LIGHT;
 
@@ -1091,7 +1093,27 @@ export default function Receivables({
       {/* ══════════════════════════════════════════════════ */}
       {/* ── REIMBURSE TAB ────────────────────────────── */}
       {/* ══════════════════════════════════════════════════ */}
-      {subTab === "reimburse" && (
+      {subTab === "reimburse" && mobile && (
+        <MobileMatch dark={dark} threshold={AMBANG_SELISIH} categories={categories || []} settling={settling}
+          onMatch={ent => handleSettleEntity(ent.entity, ent.acc)}
+          entities={reimburseAccs.map(r => {
+            const outRows = ledger.filter(e => e.tx_type === "reimburse_out" && e.entity === r.entity && !e.reimburse_settlement_id).sort((a, b) => b.tx_date.localeCompare(a.tx_date));
+            const inRows  = ledger.filter(e => e.tx_type === "reimburse_in"  && e.entity === r.entity && !e.reimburse_settlement_id).sort((a, b) => b.tx_date.localeCompare(a.tx_date));
+            const sugg = suggestReimbursePairs(outRows, inRows);
+            const stats = reimburseStats[r.entity] || { out: 0, in: 0 };
+            return {
+              id: r.id, acc: r, entity: r.entity,
+              outstanding: piutangSemua.perEntity[r.entity]?.saldo ?? (stats.out - stats.in),
+              outRows: sugg?.orderedOut || outRows, inRows: sugg?.orderedIn || inRows, pairIndex: sugg?.pairIndex || {},
+              selOut: selectedOut[r.id] || new Set(), selIn: selectedIn[r.id] || new Set(),
+              toggleOut: id => toggleOutRow(r.id, id), toggleIn: id => toggleInRow(r.id, id),
+              shortAs: pilihanKurang[r.id] || "", setShortAs: v => setPilihanKurang(prev => ({ ...prev, [r.id]: v })),
+              overAs: pilihanSelisih[r.id] || "", setOverAs: v => setPilihanSelisih(prev => ({ ...prev, [r.id]: v })),
+              settleDate: getSettleDate(r.id), setSettleDate: v => setSettleDate(prev => ({ ...prev, [r.id]: v })),
+            };
+          })} />
+      )}
+      {subTab === "reimburse" && !mobile && (
         <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           {/* ── Summary cards ── */}
           {reimburseAccs.length > 0 && (
