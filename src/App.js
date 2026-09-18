@@ -443,7 +443,7 @@ function Finance({ user, signOut }) {
 
   const EXTRA_LABELS = { scan: "AI Scan", aiimport: "AI Scan", email: "Email", notifications: "Notifications" };
   // Phone-only screens bring their own large title, so the top bar steps aside there.
-  const walletProps = { user, accounts, ledger, fxRates, installments, dark: isDark, setTab: goTab, onSearch: () => setSearchOpen(true), onRefresh: loadData };
+  const walletProps = { user, accounts, ledger, fxRates, installments, reconSessions, dark: isDark, setTab: goTab, onSearch: () => setSearchOpen(true), onRefresh: loadData };
   const mobileOwnsHeader = isMobile && onMainPage && ["dashboard", "cards", "bank", "cash", "transactions", "billing", "assets", "email", "receivables", "reports"].includes(tab);
   const pageLabel = !onMainPage
     ? "Statement"

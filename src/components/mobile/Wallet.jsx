@@ -49,7 +49,7 @@ const EASE_LIFT = "cubic-bezier(0.3, 1.18, 0.4, 1)"; // the lifted card overshoo
 const FLY_MS = 560;
 const SEGMENTS = [["credit", "Credit"], ["bank", "Bank"], ["cash", "Cash"]];
 
-export default function Wallet({ user, accounts = [], ledger = [], fxRates = {}, initialSegment = "credit", setTab, onSearch, onRefresh, installments = [], dark = false }) {
+export default function Wallet({ user, accounts = [], ledger = [], fxRates = {}, initialSegment = "credit", setTab, onSearch, onRefresh, installments = [], reconSessions = [], dark = false }) {
   const navigate = useNavigate();
   const [seg, setSeg] = useState(() => lsGet("m.wallet.seg") || initialSegment);
   // Opening a card moves the REAL cards in the stack, the way Apple Wallet does: the tapped
@@ -112,10 +112,15 @@ export default function Wallet({ user, accounts = [], ledger = [], fxRates = {},
       const heldHere = (g ? g.held || 0 : held[c.id] || 0) * rate;
       const avail = limit > 0 ? Math.max(0, (g ? (g.limit - g.debt + g.cr) * rate : limit - debt + Number(c.current_balance || 0) * rate) - heldHere) : null;
       const kat = catalog.byAccount[c.id];
-      return { ...c, debt, limit, avail, held: heldHere, due: nextDue(c.due_day), kat, img: c.card_image_url || (kat ? `/cards/${slug(kat)}.jpg` : null), ratio: kat ? catalog.ratio[kat] : null };
+      // Due date: the one printed on the newest statement while it is still ahead; else the usual day.
+      const today0 = new Date(); today0.setHours(0, 0, 0, 0);
+      const sess = reconSessions.filter(r => r.account_id === c.id && r.due_date).sort((a, b) => String(b.statement_date || "").localeCompare(String(a.statement_date || "")))[0];
+      const printed = sess ? new Date(`${String(sess.due_date).slice(0, 10)}T00:00:00`) : null;
+      const due = printed && printed >= today0 ? { date: printed, days: Math.round((printed - today0) / 86400000) } : nextDue(c.due_day);
+      return { ...c, debt, limit, avail, held: heldHere, due, kat, img: c.card_image_url || (kat ? `/cards/${slug(kat)}.jpg` : null), ratio: kat ? catalog.ratio[kat] : null };
     });
     return rows.sort((a, b) => b.debt - a.debt); // largest balance on top
-  }, [active, fxRates, catalog, installments]);
+  }, [active, fxRates, catalog, installments, reconSessions]);
 
   // Rupiah accounts first, then foreign ones; each group by rupiah value, largest on top.
   const banks = useMemo(() => active.filter(a => a.type === "bank" && a.subtype !== "cash" && a.subtype !== "reimburse")
