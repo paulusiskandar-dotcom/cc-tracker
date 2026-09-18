@@ -1,0 +1,48 @@
+/* Mobile-only screens (rendered under 768px). Palette matches the rest of Ryūsei. */
+.mw { margin: 0 -8px; --ink: #111827; --muted: #6b7280; --faint: #9ca3af; --line: #e5e7eb; --sunk: #f3f4f6; --hot: #dc2626; --good: #059669; color: var(--ink); }
+.mw button { font: inherit; color: inherit; -webkit-tap-highlight-color: transparent; }
+
+.mw-hdr { display: flex; align-items: center; gap: 10px; margin: 4px 0 16px; }
+.mw-hdr h1 { flex: 1; margin: 0; font-size: 32px; font-weight: 800; letter-spacing: -0.02em; }
+.mw-hdr h2 { flex: 1; margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+.mw-round { width: 44px; height: 44px; flex: none; border-radius: 50%; border: 0; background: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+
+.mw-notice { display: flex; align-items: center; background: #fff; border-radius: 16px; margin: 0 0 16px; }
+.mw-notice-body { flex: 1; min-width: 0; text-align: left; border: 0; background: none; padding: 14px 4px 14px 16px; display: flex; flex-direction: column; gap: 2px; cursor: pointer; }
+.mw-notice-body b { font-size: 14px; font-weight: 700; }
+.mw-notice-body span { font-size: 13px; color: var(--muted); }
+.mw-x { width: 44px; height: 44px; flex: none; border: 0; background: none; color: var(--faint); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+
+.mw-seg { display: flex; background: var(--sunk); border-radius: 12px; padding: 3px; margin: 0 0 14px; }
+.mw-seg button { flex: 1; height: 38px; border: 0; background: none; border-radius: 10px; font-size: 14px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.mw-seg button.on { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); }
+
+.mw-pills { display: flex; gap: 6px; margin: 0 0 16px; overflow-x: auto; scrollbar-width: none; }
+.mw-pills::-webkit-scrollbar { display: none; }
+.mw-pills button { flex: none; height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line); background: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
+.mw-pills button.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+
+/* The stack: each card shows a 56px strip above the next, like Apple Wallet. */
+.mw-stack { display: flex; flex-direction: column; padding-top: 8px; container-type: inline-size; }
+.mw-card { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: pointer; }
+.mw-card + .mw-card { margin-top: calc(56px - 100cqw / 1.586); }
+.mw-art { display: block; width: 100%; aspect-ratio: 1.586; object-fit: cover; border-radius: 16px; box-shadow: 0 -6px 16px rgba(17, 24, 39, 0.22); }
+.mw-art-ph { box-sizing: border-box; padding: 14px 16px; background: linear-gradient(135deg, #374151, #111827); color: #fff; text-align: left; display: flex; flex-direction: column; gap: 2px; }
+.mw-art-ph b { font-size: 20px; font-weight: 800; }
+.mw-art-ph span { font-size: 13px; opacity: 0.7; }
+
+.mw-list { background: #fff; border-radius: 16px; overflow: hidden; }
+.mw-gap { margin-top: 16px; }
+.mw-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 50px; padding: 10px 16px; box-sizing: border-box; border: 0; border-top: 1px solid var(--sunk); background: none; text-align: left; }
+.mw-row:first-child { border-top: 0; }
+button.mw-row { cursor: pointer; }
+.mw-row-name { flex: 1; min-width: 0; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mw-row-amt { flex: none; text-align: right; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.mw-row-amt.hot { color: var(--hot); }
+.mw-row-amt.in { color: var(--good); }
+.mw-row small { display: block; font-size: 12px; font-weight: 400; color: var(--muted); margin-top: 1px; white-space: normal; }
+.mw-kv .mw-row-name { color: var(--muted); }
+.mw-total .mw-row-name, .mw-total .mw-row-amt { font-weight: 700; }
+.mw-chev { flex: none; width: 16px; color: var(--faint); }
+.mw-label { margin: 22px 4px 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
+.mw-empty { padding: 32px 0; text-align: center; color: var(--muted); font-size: 14px; }

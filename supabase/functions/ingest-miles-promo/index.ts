@@ -43,7 +43,7 @@ const TABLES: Record<string, Spec> = {
         "batas_konversi_periode", "min_konversi_satuan", "iuran_hapus_status", "iuran_hapus_syarat", "catatan_resmi",
         "asal_resmi", "resmi_per_tanggal"]),
       ...t(["keyakinan", "kelipatan_transaksi_rp", "biaya_konversi_rp", "iuran_tahunan_utama_rp",
-        "batas_perolehan_bulanan_angka", "batas_konversi_angka", "min_konversi_angka"], "num"),
+        "batas_perolehan_bulanan_angka", "batas_konversi_angka", "min_konversi_angka", "poin_per_mile_kf"], "num"),
       ...t(["pengecualian_kutipan", "angka_kutipan", "sumber_resmi_dibaca"], "json"),
     },
   },

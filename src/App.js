@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import PILogo from "./components/PILogo";
 import { supabase } from "./lib/supabase";
-import { TABS, MOBILE_MAIN_TABS, MOBILE_MORE_TABS, CURRENCIES, APP_VERSION, APP_BUILD } from "./constants";
+import { TABS, MOBILE_MAIN_TABS, MOBILE_MORE_TABS, MOBILE_TAB_LABELS, CURRENCIES, APP_VERSION, APP_BUILD } from "./constants";
 import {
   accountsApi, ledgerApi, categoriesApi, incomeSrcApi,
   installmentsApi, recurringApi, merchantApi, fxApi,
@@ -20,6 +20,7 @@ import { calcNetWorth, fmtIDR, todayStr, ym } from "./utils";
 import { generateMissingReminders } from "./lib/recurringDetection";
 import { Spinner, ToastContainer, showToast } from "./components/shared/index";
 import UndoToast from "./components/shared/UndoToast";
+import MobileWallet from "./components/mobile/Wallet";
 
 import Dashboard    from "./components/Dashboard";
 import Transactions from "./components/Transactions";
@@ -193,9 +194,11 @@ function Finance({ user, signOut }) {
 
   const [tab, setTab]           = useState(() => {
     const hash = window.location.hash.replace("#", "");
-    return TABS.some(t => t.id === hash) ? hash : "dashboard";
+    if (TABS.some(t => t.id === hash)) return hash;
+    return window.matchMedia("(max-width: 768px)").matches ? "cards" : "dashboard"; // phones open on Wallet
   });
 
+  const isMobile = useIsMobile();
   const goTab = useCallback((tabId) => {
     if (!onMainPage) navigate("/");
     setTab(tabId);
@@ -417,6 +420,9 @@ function Finance({ user, signOut }) {
   );
 
   const EXTRA_LABELS = { scan: "AI Scan", aiimport: "AI Scan", email: "Email", notifications: "Notifications" };
+  // Phone-only screens bring their own large title, so the top bar steps aside there.
+  const walletProps = { user, accounts, ledger, fxRates, setTab: goTab, onSearch: () => setSearchOpen(true) };
+  const mobileOwnsHeader = isMobile && onMainPage && ["cards", "bank", "cash"].includes(tab);
   const pageLabel = !onMainPage
     ? "Statement"
     : (TABS.find(t => t.id === tab)?.label || EXTRA_LABELS[tab] || "Dashboard");
@@ -430,10 +436,10 @@ function Finance({ user, signOut }) {
     switch (tab) {
       case "dashboard":    return <Dashboard    {...shared} />;
       case "transactions": return <Transactions {...shared} />;
-      case "bank":         return <Accounts     {...shared} initialSubTab="bank" />;
-      case "cash":         return <Accounts     {...shared} initialSubTab="cash" />;
+      case "bank":         return isMobile ? <MobileWallet {...walletProps} initialSegment="bank" /> : <Accounts {...shared} initialSubTab="bank" />;
+      case "cash":         return isMobile ? <MobileWallet {...walletProps} initialSegment="cash" /> : <Accounts {...shared} initialSubTab="cash" />;
       case "accounts":     return <Accounts     {...shared} initialSubTab="bank" />; // legacy redirect
-      case "cards":        return <CreditCards  {...shared} />;
+      case "cards":        return isMobile ? <MobileWallet {...walletProps} /> : <CreditCards {...shared} />;
       case "assets":       return <Assets       {...shared} />;
       case "receivables":  return <Receivables  {...shared} />;
       case "income":       return <Income       {...shared} />;
@@ -518,7 +524,7 @@ function Finance({ user, signOut }) {
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
 
         {/* Top bar */}
-        <header style={S.topBar}>
+        <header style={{ ...S.topBar, ...(mobileOwnsHeader ? { display: "none" } : {}) }}>
           {/* Left: logo on mobile, title on desktop */}
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <button
@@ -607,7 +613,7 @@ function Finance({ user, signOut }) {
               color: active ? "#3b5bdb" : "#9ca3af",
             }}>
               <NAV_ICON id={id} />
-              <span style={{ fontSize: 9, fontWeight: active ? 700 : 500 }}>{t?.label}</span>
+              <span style={{ fontSize: 9, fontWeight: active ? 700 : 500 }}>{MOBILE_TAB_LABELS[id] || t?.label}</span>
             </button>
           );
         })}
@@ -671,6 +677,18 @@ function Finance({ user, signOut }) {
       <UndoToast onUndone={() => loadData()} />
     </div>
   );
+}
+
+// Phones get their own layout for some tabs; desktop pages are never touched by it.
+function useIsMobile() {
+  const q = "(max-width: 768px)";
+  const [m, setM] = useState(() => typeof window !== "undefined" && window.matchMedia(q).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(q); const on = e => setM(e.matches);
+    mq.addEventListener ? mq.addEventListener("change", on) : mq.addListener(on);
+    return () => { mq.removeEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on); };
+  }, []);
+  return m;
 }
 
 // ─── NAV ICONS ────────────────────────────────────────────────

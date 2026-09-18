@@ -124,11 +124,13 @@ export const TABS = [
   { id: "settings",     label: "Settings"     },
 ];
 
-export const MOBILE_MAIN_TABS = ["dashboard", "transactions", "bank", "assets"];
+// Phone layout (approved 18 Sep 2026): Wallet · Transactions · Bills · Assets · More.
+// Wallet holds Credit / Bank / Cash, so those three are not repeated under More.
+export const MOBILE_MAIN_TABS = ["cards", "transactions", "billing", "assets"];
+export const MOBILE_TAB_LABELS = { cards: "Wallet" };
 export const MOBILE_MORE_TABS = [
-  { id: "cash",        label: "Cash"         },
-  { id: "cards",       label: "Credit Cards" },
-  { id: "billing",     label: "Bills"        },
+  { id: "dashboard",   label: "Dashboard"    },
+  { id: "sweetspot",   label: "SweetSpot"    },
   { id: "reconcile",   label: "Reconcile"    },
   { id: "receivables", label: "Receivables"  },
   { id: "income",      label: "Income"       },
