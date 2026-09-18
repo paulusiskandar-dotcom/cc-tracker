@@ -177,3 +177,20 @@ button.mw-row { cursor: pointer; }
 .mw-tiles .mw-tap { height: 100%; }
 
 .mw-fit { font-size: 17px; white-space: nowrap; flex-wrap: nowrap; }
+
+/* ── Home charts ───────────────────────────────────────────────────────── */
+.mw-mix { display: flex; gap: 2px; height: 10px; margin-top: 14px; border-radius: 6px; overflow: hidden; background: var(--sunk); }
+.mw-mix i { display: block; height: 100%; min-width: 3px; }
+.mw-mix-thin { height: 5px; margin-top: 4px; }
+.mw-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.mw-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.mw-legend i { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.mw-hbars { display: grid; gap: 12px; margin-top: 8px; }
+.mw-hbar-top { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; }
+.mw-hbar-top span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mw-hbar-top b { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mw-hbar-track { height: 6px; margin-top: 6px; border-radius: 6px; background: var(--sunk); overflow: hidden; }
+.mw-hbar-track i { display: block; height: 100%; border-radius: 6px; background: var(--ink); }
+.mw-ring { display: block; width: 76px; height: 76px; margin: 6px 0 4px; }
+.mw-big { font-size: 44px; font-weight: 800; letter-spacing: -0.03em; line-height: 76px; margin: 6px 0 4px; font-variant-numeric: tabular-nums; }
+.mw-tile + .mw-tile.mw-tap, .mw-tap + .mw-tile, .mw-tap + .mw-tiles, .mw-tiles + .mw-tile { margin-top: 12px; }

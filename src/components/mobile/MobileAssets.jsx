@@ -13,13 +13,15 @@ const lsGet = k => { try { return localStorage.getItem(k); } catch { return null
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
 
 export default function MobileAssets(props) {
-  const { user, assets = [], netWorth = {}, fxRates = {} } = props;
+  // `bare` + `view`: rendered inside Home, which owns the header and the tabs.
+  const { user, assets = [], netWorth = {}, fxRates = {}, bare = false, view: forcedView } = props;
   const [snaps, setSnaps] = useState([]);
   const [openNw, setOpenNw] = useState(null);
-  const [view, setView] = useState(() => lsGet("m.assets.view") || "assets");
+  const [ownView, setView] = useState(() => lsGet("m.assets.view") || "assets");
+  const view = forcedView || ownView;
   const [full, setFull] = useState(false);
   const [openGroup, setOpenGroup] = useState(null);
-  useEffect(() => { lsSet("m.assets.view", view); }, [view]);
+  useEffect(() => { if (!forcedView) lsSet("m.assets.view", ownView); }, [ownView, forcedView]);
   useEffect(() => {
     if (!user?.id) return;
     supabase.from("net_worth_snapshots").select("month,total").order("month").then(({ data }) => setSnaps(data || []));
@@ -36,7 +38,7 @@ export default function MobileAssets(props) {
 
   if (full) {
     return (
-      <div className={`mw${props.dark ? " dark" : ""}`}>
+      <div className={bare ? undefined : `mw${props.dark ? " dark" : ""}`}>
         <div className="mw-hdr">
           <button className="mw-round" onClick={() => setFull(false)} aria-label="Back"><ChevronLeft size={22} strokeWidth={1.8} /></button>
           <h2>Manage assets</h2>
@@ -61,12 +63,12 @@ export default function MobileAssets(props) {
   const series = [...snaps.filter(p => p.month !== curMonth), { month: curMonth, total: netWorth.total }].filter(p => Number.isFinite(Number(p.total)));
 
   return (
-    <div className={`mw${props.dark ? " dark" : ""}`}>
-      <div className="mw-hdr"><h1>Assets</h1></div>
-      <div className="mw-seg" role="tablist">
+    <div className={bare ? undefined : `mw${props.dark ? " dark" : ""}`}>
+      {!bare && <div className="mw-hdr"><h1>Assets</h1></div>}
+      {!bare && <div className="mw-seg" role="tablist">
         <button role="tab" aria-selected={view === "assets"} className={view === "assets" ? "on" : ""} onClick={() => setView("assets")}>Assets</button>
         <button role="tab" aria-selected={view === "networth"} className={view === "networth" ? "on" : ""} onClick={() => setView("networth")}>Net Worth</button>
-      </div>
+      </div>}
 
       {view === "assets" ? (
         <>
