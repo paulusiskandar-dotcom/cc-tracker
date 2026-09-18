@@ -25,6 +25,7 @@ import MobileTransactions from "./components/mobile/MobileTransactions";
 import "./components/mobile/mobile.css";
 import MobileHome from "./components/mobile/MobileHome";
 import MobileReceivables from "./components/mobile/MobileReceivables";
+import MobileReports from "./components/mobile/MobileReports";
 import MobileBills from "./components/mobile/MobileBills";
 import MobileAssets from "./components/mobile/MobileAssets";
 
@@ -443,7 +444,7 @@ function Finance({ user, signOut }) {
   const EXTRA_LABELS = { scan: "AI Scan", aiimport: "AI Scan", email: "Email", notifications: "Notifications" };
   // Phone-only screens bring their own large title, so the top bar steps aside there.
   const walletProps = { user, accounts, ledger, fxRates, installments, dark: isDark, setTab: goTab, onSearch: () => setSearchOpen(true), onRefresh: loadData };
-  const mobileOwnsHeader = isMobile && onMainPage && ["dashboard", "cards", "bank", "cash", "transactions", "billing", "assets", "email", "receivables"].includes(tab);
+  const mobileOwnsHeader = isMobile && onMainPage && ["dashboard", "cards", "bank", "cash", "transactions", "billing", "assets", "email", "receivables", "reports"].includes(tab);
   const pageLabel = !onMainPage
     ? "Statement"
     : (TABS.find(t => t.id === tab)?.label || EXTRA_LABELS[tab] || "Dashboard");
@@ -464,7 +465,7 @@ function Finance({ user, signOut }) {
       case "assets":       return isMobile ? <MobileAssets {...shared} /> : <Assets {...shared} />;
       case "receivables":  return isMobile ? <MobileReceivables {...shared} /> : <Receivables {...shared} />;
       case "income":       return <Income       {...shared} />;
-      case "reports":      return <Reports      {...shared} />;
+      case "reports":      return isMobile ? <MobileReports {...shared} /> : <Reports {...shared} />;
       case "budget":       return <Budget       {...shared} />;
       case "tags":         return <Tags         user={user} ledger={ledger} onRefresh={loadData} />;
       case "sweetspot":    return <SweetSpot    user={user} ledger={ledger} accounts={accounts} />;

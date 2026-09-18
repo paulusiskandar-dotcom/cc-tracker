@@ -223,3 +223,14 @@ button.mw-row { cursor: pointer; }
 .mw-amt-in { color: var(--good); } .mw-amt-out { color: var(--hot); } .mw-amt-move { color: var(--accent); }
 .mw-amt-rout { color: var(--amber); } .mw-amt-rin { color: var(--teal); }
 .mw-tile-n .mw-row-amt { font-size: inherit; font-weight: inherit; text-align: left; }
+
+/* ── Reports ───────────────────────────────────────────────────────────── */
+.mw-neg { color: var(--hot); }
+.mw-kv2 { display: flex; justify-content: space-between; margin-top: 8px; font-size: 14px; color: var(--muted); }
+.mw-kv2 b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; } .mw-kv2 b.in { color: var(--good); }
+.mw-rep { min-height: 62px; }
+.mw-rep .mw-row-name { white-space: normal; }
+.mw-duo { display: grid; gap: 3px; margin-top: 6px; max-width: 170px; }
+.mw-duo i { display: block; height: 4px; min-width: 2px; border-radius: 3px; background: var(--ink); }
+.mw-duo i.in { background: var(--good); }
+.mw-month button:disabled { opacity: 0.3; }
