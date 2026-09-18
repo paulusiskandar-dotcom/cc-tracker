@@ -41,3 +41,35 @@ button.mw-row { cursor: pointer; }
 .mw-chev { flex: none; width: 16px; color: var(--faint); }
 .mw-label { margin: 22px 4px 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
 .mw-empty { padding: 32px 0; text-align: center; color: var(--muted); font-size: 14px; }
+
+/* ── Card sheet (Apple Wallet flow) ─────────────────────────────────────── */
+/* What stays behind: the header fades and the stack drops away. */
+.mw > .mw-hdr, .mw > .mw-notice, .mw > .mw-seg, .mw > .mw-stack { transition: opacity 0.3s ease, transform 0.45s cubic-bezier(0.3, 0.7, 0.2, 1); }
+.mw-behind > .mw-hdr, .mw-behind > .mw-notice, .mw-behind > .mw-seg { opacity: 0; pointer-events: none; }
+.mw-behind > .mw-stack { opacity: 0; transform: translateY(45vh); pointer-events: none; }
+.mw-behind [data-card] { visibility: hidden; }
+
+.mw-sheet { position: fixed; inset: 0; z-index: 150; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 24px 16px calc(120px + env(safe-area-inset-bottom)); box-sizing: border-box; }
+.mw-sheet > .mw-hdr { opacity: 0; transition: opacity 0.25s ease 0.1s; min-height: 44px; }
+.mw-sheet.in > .mw-hdr { opacity: 1; }
+.mw-fly { transition: transform 0.5s cubic-bezier(0.2, 0.85, 0.25, 1); will-change: transform; }
+.mw-under { opacity: 0; transform: translateY(28px); transition: opacity 0.3s ease, transform 0.45s cubic-bezier(0.2, 0.85, 0.25, 1); margin-top: 16px; animation: mw-swap 0.3s ease; }
+.mw-sheet.in .mw-under { opacity: 1; transform: none; transition-delay: 0.12s; }
+@keyframes mw-swap { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+
+.mw-tile { background: #fff; border-radius: 16px; padding: 14px 16px; min-width: 0; }
+.mw-tile + .mw-tiles, .mw-tiles + .mw-tile, .mw-tile + .mw-tile { margin-top: 12px; }
+.mw-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 12px; }
+.mw-tiles .mw-tile + .mw-tile { margin-top: 0; }
+.mw-tile-l { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.mw-tile-n { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.mw-tile-m { font-size: 20px; font-weight: 700; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mw-tile-s { font-size: 12.5px; color: var(--muted); margin-top: 4px; font-variant-numeric: tabular-nums; }
+.mw-bar { height: 6px; border-radius: 6px; background: var(--sunk); margin: 12px 0 8px; overflow: hidden; }
+.mw-bar i { display: block; height: 100%; min-width: 6px; border-radius: 6px; background: var(--ink); }
+.mw-chip { font-size: 11px; font-weight: 700; letter-spacing: 0.04em; padding: 3px 8px; border-radius: 999px; background: var(--ink); color: #fff; }
+.mw-chip.hot { background: var(--hot); }
+
+@media (prefers-reduced-motion: reduce) {
+  .mw-fly, .mw-under, .mw > .mw-stack, .mw > .mw-hdr, .mw-sheet > .mw-hdr { transition: none !important; animation: none !important; }
+}
