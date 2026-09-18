@@ -2,7 +2,7 @@
 // same buildBills() the desktop Bills page uses; receivables from src/lib/piutang.js.
 import { useEffect, useMemo, useState } from "react";
 import { loanStatus } from "../../lib/loans";
-import { ChevronRight, Plus } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { fmtIDR } from "../../utils";
 import { hitungPiutang } from "../../lib/piutang";
 import { buildBills } from "../Billing";
@@ -20,7 +20,6 @@ export default function MobileBills(props) {
   const { ledger = [], creditCards = [], liabilities = [], recurTemplates = [], installments = [], reconSessions = [], employeeLoans = [] } = props;
   const [view, setView] = useState(() => lsGet("m.bills.view") || "bills");
   const [openLoan, setOpenLoan] = useState(null);
-  const [newLoan, setNewLoan] = useState(false);
   useEffect(() => { lsSet("m.bills.view", view); }, [view]);
 
   const bills = useMemo(() => { const b = buildBills({ ledger, creditCards, liabilities, recurTemplates, installments, reconSessions, actionable: true }); return { ...b, cicilan: nameInstalments(b.cicilan, ledger, installments) }; }, [ledger, creditCards, liabilities, recurTemplates, installments, reconSessions]);
@@ -132,7 +131,7 @@ export default function MobileBills(props) {
           {(
             <>
               <div className="mw-label mw-label-row"><span>Employee loans</span>
-                <span className="mw-label-act"><b>{fmtIDR(loans.reduce((t, l) => t + l.left, 0))}</b><button className="mw-mini" onClick={() => setNewLoan(true)} aria-label="New loan"><Plus size={16} strokeWidth={2} /></button></span></div>
+                <b>{fmtIDR(loans.reduce((t, l) => t + l.left, 0))}</b></div>
               <div className="mw-list">
                 {!loans.length && <div className="mw-row"><span className="mw-row-name" style={{ color: "var(--muted)" }}>No loans outstanding</span></div>}
                 {loans.map(l => (
@@ -148,7 +147,7 @@ export default function MobileBills(props) {
       )}
 
       {view === "match" && <Receivables {...props} mobile matchOnly />}
-      {(openLoan || newLoan) && <LoanSheet {...props} loanId={openLoan} newLoan={newLoan} onClose={() => { setOpenLoan(null); setNewLoan(false); }} />}
+      {openLoan && <LoanSheet {...props} loanId={openLoan} onClose={() => setOpenLoan(null)} />}
     </div>
   );
 }
