@@ -670,7 +670,12 @@ function TxHorizontalCard({
               value={r.fx_rate ?? ""}
               onChange={e => {
                 const rate = e.target.value;
-                const idr  = Math.round(Number(r.amount || 0) * Number(rate || 0));
+                // Baris valas: nominal dalam mata uang asing × rate = rupiah.
+                // FX Exchange DARI rekening rupiah (OCBC IDR → MYR Cash): nominalnya
+                // sudah rupiah, rate = harga 1 unit mata uang tujuan (1 RM = 4.365);
+                // mengalikannya membuat 4.365.000 × 4.365 = 19 miliar (Paulus, 18 Sep 2026).
+                const dariRupiah = r.tx_type === "fx_exchange" && (!r.currency || r.currency === "IDR");
+                const idr = dariRupiah ? Number(r.amount || 0) : Math.round(Number(r.amount || 0) * Number(rate || 0));
                 onUpdate({ fx_rate: rate, amount_idr: String(idr) });
               }}
             />
