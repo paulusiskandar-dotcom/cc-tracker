@@ -31,6 +31,21 @@ export default function MobileBills(props) {
   const later = useMemo(() => groups.flatMap(g => g[1]).filter(i => i.dayLeft > 7 && i.dayLeft <= 14).sort((a, b) => a.when - b.when), [bills]); // eslint-disable-line react-hooks/exhaustive-deps
   const piutang = useMemo(() => hitungPiutang(ledger), [ledger]);
   const entities = Object.entries(piutang.perEntity).filter(([k]) => k !== "?").sort((a, b) => b[1].saldo - a[1].saldo);
+  // Everything still being paid off in instalments: plans on credit cards and financed
+  // liabilities (BYD). "4/12" = instalments paid out of the total; left = what is still to come.
+  const plans = useMemo(() => {
+    const byId = Object.fromEntries(ledger.map(e => [e.id, e])); const accName = Object.fromEntries((props.accounts || []).map(a => [a.id, a.name]));
+    const onCards = installments.filter(i => i.status === "active").map(i => {
+      const note = byId[i.purchase_ledger_id]?.notes; const total = Number(i.total_months || 0), paid = Number(i.paid_months || 0), monthly = Number(i.monthly_amount || 0);
+      return { id: "i" + i.id, name: note && !/^imported from/i.test(note) ? String(note).replace(/\s+\d+\/\d+$/, "") : i.description, where: accName[i.account_id || i.cc_account_id] || "Card", paid, total, monthly, left: Math.max(0, total - paid) * monthly };
+    });
+    const financed = liabilities.filter(l => l.is_active !== false && Number(l.monthly_installment) > 0 && Number(l.tenor_months) > 0).map(l => {
+      const monthly = Number(l.monthly_installment), total = Number(l.tenor_months), left = Number(l.outstanding_amount || 0);
+      return { id: "l" + l.id, name: l.name, where: "Loan", paid: Math.max(0, Math.min(total, Math.round((total * monthly - left) / monthly))), total, monthly, left };
+    });
+    return [...onCards, ...financed].filter(p => p.left > 0).sort((a, b) => b.left - a.left);
+  }, [installments, liabilities, ledger, props.accounts]);
+
   // Remaining per loan = amount lent − repayments in the ledger (the rule calcNetWorth uses).
   const loans = useMemo(() => employeeLoans.filter(l => l.status !== "settled").map(l => {
     return { id: l.id, name: l.employee_name || l.name || "Loan", left: loanStatus(l, ledger).left, monthly: Number(l.monthly_installment || 0) };
@@ -39,8 +54,8 @@ export default function MobileBills(props) {
   return (
     <div className={`mw${props.dark ? " dark" : ""}`}>
       <div className="mw-hdr"><h1>Bills</h1></div>
-      <div className="mw-seg" role="tablist">
-        {[["bills", "Bills"], ["reimburse", "Reimburse"], ["match", "Match"]].map(([id, label]) => (
+      <div className="mw-seg mw-seg-4" role="tablist">
+        {[["bills", "Bills"], ["installments", "Installments"], ["reimburse", "Reimburse"], ["match", "Match"]].map(([id, label]) => (
           <button key={id} role="tab" aria-selected={view === id} className={view === id ? "on" : ""} onClick={() => setView(id)}>{label}</button>
         ))}
       </div>
@@ -50,6 +65,25 @@ export default function MobileBills(props) {
           {week.length > 0 && <BillGroup title="Due soon" items={week} />}
           {later.length > 0 && <BillGroup title="Upcoming" items={later} />}
           {!week.length && !later.length && <div className="mw-empty">Nothing due in the next two weeks.</div>}
+        </>
+      )}
+
+      {view === "installments" && (
+        <>
+          <div className="mw-tile" style={{ marginBottom: 16 }}>
+            <div className="mw-tile-l">Still to pay</div>
+            <div className="mw-tile-n">{fmtIDR(plans.reduce((t, p) => t + p.left, 0))}</div>
+            <div className="mw-tile-s">{fmtIDR(plans.reduce((t, p) => t + p.monthly, 0))} a month across {plans.length} plans</div>
+          </div>
+          <div className="mw-list">
+            {plans.map(p => (
+              <div key={p.id} className="mw-row mw-tx">
+                <span className="mw-row-name">{p.name}<small>{p.where} · {p.paid}/{p.total} · {p.total - p.paid} more</small></span>
+                <span className="mw-row-amt">{fmtIDR(p.left)}<small>{fmtIDR(p.monthly)} a month</small></span>
+              </div>
+            ))}
+            {!plans.length && <div className="mw-row"><span className="mw-row-name" style={{ color: "var(--muted)" }}>No instalments running</span></div>}
+          </div>
         </>
       )}
 

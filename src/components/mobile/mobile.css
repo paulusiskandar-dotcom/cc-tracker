@@ -237,3 +237,5 @@ button.mw-row { cursor: pointer; }
 
 .mw-label-act { display: inline-flex; align-items: center; gap: 10px; }
 .mw-mini { width: 28px; height: 28px; border: 0; border-radius: 50%; background: var(--card); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+
+.mw-seg-4 button { font-size: 12.5px; padding: 0 2px; letter-spacing: -0.01em; }
