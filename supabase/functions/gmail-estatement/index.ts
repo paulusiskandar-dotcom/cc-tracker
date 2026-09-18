@@ -373,8 +373,21 @@ Return ONLY a valid JSON object (no markdown, no explanation) with this exact sc
   "closing_balance": 5000000,
   "opening_balance": 3000000,
   "statement_date": "2025-03-21",
-  "due_date": "2025-04-06"
+  "due_date": "2025-04-06",
+  "points": { "balance": 43331, "unit": "Travel Miles", "expiring": 0, "expiry_date": "2026-10-31" }
 }
+- points: the CARD'S REWARD POINTS / MILES BALANCE printed in the statement summary, or null if the statement prints none.
+  balance = the current/total balance AFTER this cycle. unit = the programme name as printed. expiring/expiry_date = the
+  next batch that will expire and its date, null if not printed. Plain numbers, no thousands separators. Bank wordings:
+  OCBC "RINGKASAN MILES ANDA: Miles Saat Ini <balance>, Miles Hangus Bulan Depan <expiring>, Tanggal Daluarsa <date>" (unit "Travel Miles");
+  UOB "Informasi Bonus Poin Anda: Saldo Poin <balance>, Poin Yang Akan Kadaluarsa <expiring>, Tanggal Kadaluarsa <date>" (unit "UOB Points");
+  Maybank "RINGKASAN TREATS: Total TREATS Sekarang <balance>" (unit "TREATS");
+  CIMB "Informasi Gabungan Total Poin Xtra: ... Total Poin Xtra <balance> ... Poin Xtra yang akan kadaluarsa** <date> <expiring>" — the last column prints the DATE first then the amount (e.g. "30 Sep 2026 0" = 0 points expiring on 2026-09-30) (unit "Poin Xtra");
+  Mandiri summary column "Livin'poin <balance>" (unit "Livin'poin");
+  HSBC "Ringkasan Rewards Poin: Jumlah Poin Bulan Lalu + Tambahan Poin Bulan Ini − Jumlah Poin Ditukarkan" → balance = that sum (unit "Poin Rewards");
+  BNI "JUMLAH POIN BULAN LALU + JUMLAH POIN BULAN INI − JUMLAH POIN DITUKARKAN" → balance (unit "BNI Reward Points");
+  Skorcard "Jumlah Poin Bulan Lalu + Tambahan − Ditukarkan" (unit "Skorpoin").
+  BCA, BRI, Jenius, Danamon, Mega, DBS print no balance → points = null. Never invent a number.
 - detected_account: extracted from statement header (card last 4, bank name, account number). Set fields to null if not found. Set entire value to null if no account info present.
 - detected_period: statement month/year from header (e.g. March 2025 → year:2025, month:3). null if not found.
 - closing_balance: the amount BILLED this cycle — "Total Tagihan" / "TAGIHAN BULAN INI" / "Total Payment Due" / "Saldo Akhir" / "Closing Balance". This is what the cardholder must pay by the due date.
@@ -421,8 +434,10 @@ Return ONLY a valid JSON object (no markdown) with this schema:
   "closing_balance": null,
   "opening_balance": null,
   "statement_date": null,
-  "due_date": null
+  "due_date": null,
+  "points": null
 }
+points: card reward points/miles balance printed in the summary ({ "balance", "unit", "expiring", "expiry_date" }), null if the statement prints none. Never invent.
 currency: document currency ("IDR", "JPY", "USD", etc.) — always set this.
 direction: "out" for debits/expenses, "in" for credits received.
 amount: positive number in document currency (no dots/commas formatting).
@@ -561,6 +576,7 @@ async function callClaude(pdfBase64: string, prompt: string, anthropicKey: strin
           due_date:         normStmtDate(parsed.due_date),
           detected_account: parsed.detected_account ?? null,
           detected_period:  parsed.detected_period  ?? null,
+          points:           parsed.points && typeof parsed.points === "object" ? parsed.points : null,
         };
       }
     } catch { /* fall through to array format */ }
@@ -926,6 +942,7 @@ async function extractUploadedPDF(serviceSupabase: any, userId: string, body: an
       closing_balance:  claudeResult.closing_balance  ?? null,
       opening_balance:  claudeResult.opening_balance  ?? null,
       statement_date:   claudeResult.statement_date   ?? null,
+      points:        claudeResult.points ?? null,
       due_date:         claudeResult.due_date         ?? null,
     };
   }
@@ -956,6 +973,7 @@ async function extractUploadedPDF(serviceSupabase: any, userId: string, body: an
           closing_balance:  claudeResult.closing_balance  ?? null,
           opening_balance:  claudeResult.opening_balance  ?? null,
           statement_date:   claudeResult.statement_date   ?? null,
+          points:        claudeResult.points ?? null,
           due_date:         claudeResult.due_date         ?? null,
         };
       }
@@ -1167,6 +1185,30 @@ function ledgerClosingAt(acc: any, rows: any[], cutoff: string): number {
   return Number(acc.initial_balance || 0) + inn - out;
 }
 
+// ── POIN / MILES DARI STATEMENT ───────────────────────────────────────────
+// 8 bank mencetak saldo poin di ringkasan statement (audit 18 Sep 2026: OCBC,
+// UOB, Maybank, CIMB, Mandiri, HSBC, BNI, Skorcard). Simpan ke akun kartu
+// bersama tanggal statement-nya; statement yang lebih lama tidak boleh menimpa
+// catatan yang lebih baru (termasuk isian manual Paulus). Dipanggil juga untuk
+// statement tanpa transaksi (kartu tidur tetap mencetak poinnya).
+async function simpanPoinStatement(serviceSupabase: any, acc: any, extraction: any, asOf: string | null) {
+  try {
+    const pts = extraction?.points;
+    const bal = pts && pts.balance != null ? Number(String(pts.balance).replace(/[^\d.]/g, "")) : NaN;
+    if (!Number.isFinite(bal) || !asOf) return;
+    const { data: cur } = await serviceSupabase.from("accounts").select("points_as_of").eq("id", acc.id).maybeSingle();
+    if (cur?.points_as_of && String(cur.points_as_of) > asOf) return;
+    const exp = pts.expiring != null ? Number(String(pts.expiring).replace(/[^\d.]/g, "")) : null;
+    const expDate = normStmtDate(pts.expiry_date);
+    await serviceSupabase.from("accounts").update({
+      points_balance: bal, points_unit: pts.unit ? String(pts.unit).slice(0, 40) : null,
+      points_expiring: Number.isFinite(exp as number) ? exp : null, points_expiry_date: expDate || null,
+      points_as_of: asOf, points_source: "statement",
+    }).eq("id", acc.id);
+    console.log(`[prepare] poin ${acc.name}: ${bal} ${pts.unit || ""} per ${asOf}${expDate ? `, hangus ${exp} pada ${expDate}` : ""}`);
+  } catch (e) { console.warn("[prepare] poin:", (e as any)?.message); }
+}
+
 async function prepareReconcile(serviceSupabase: any, userId: string, extraction: any, filename: string): Promise<any> {
   const txs: any[] = extraction.transactions || [];
   const { data: accounts } = await serviceSupabase.from("accounts")
@@ -1218,6 +1260,7 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
       prepared: false, reason: "account_not_matched",
       detected_account: extraction.detected_account, tx_count: txs.length,
       closing_balance: extraction.closing_balance ?? null,
+      points: extraction.points ?? null,
     };
   }
   // Statement tanpa transaksi (kartu tidur: BNI 18 Agu — PEMBELANJAAN 0,
@@ -1228,6 +1271,7 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
   if (!txs.length) {
     const tgl = normStmtDate(extraction.statement_date);
     const tutup = extraction.closing_balance ?? null;
+    await simpanPoinStatement(serviceSupabase, acc, extraction, tgl);
     if (tgl && tutup != null) {
       const [y, m] = tgl.split("-").map(Number);
       await serviceSupabase.from("reconcile_sessions").delete()
@@ -1289,6 +1333,8 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
     ? stmtDate
     : (periodEnd ? pad(periodEnd, 1) : null);
   const ledgerWindow = (ledAll || []).filter((l: any) => (!winStart || l.tx_date >= winStart) && (!winEnd || l.tx_date <= winEnd));
+
+  await simpanPoinStatement(serviceSupabase, acc, extraction, stmtDate || periodEnd || null);
 
   let { match, missing, extra } = matchRowsSrv(stmtRows, ledgerWindow);
 
