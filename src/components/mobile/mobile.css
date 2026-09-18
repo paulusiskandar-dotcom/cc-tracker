@@ -242,3 +242,7 @@ button.mw-row { cursor: pointer; }
 
 .mw-seg-hdr { flex: none; margin: 0; border-radius: 11px; }
 .mw-seg-hdr button { flex: none; height: 34px; padding: 0 12px; font-size: 13px; border-radius: 9px; }
+
+.mw-switch { width: 46px; height: 28px; flex: none; border-radius: 999px; background: var(--sunk); position: relative; transition: background 0.2s; }
+.mw-switch i { position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.25); transition: transform 0.2s; }
+.mw-switch.on { background: var(--good); } .mw-switch.on i { transform: translateX(18px); }

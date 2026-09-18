@@ -24,8 +24,12 @@ const amt = e => Number(e.amount_idr || e.amount || 0);
 const isExpense = e => (e.tx_type === "expense" || e.tx_type === "pay_liability") && !e.is_reimburse;
 const isIncome = e => e.tx_type === "income";
 
+// Search on the phone is one thing: the transaction search. Any screen's magnifier lands here
+// (App bumps searchSignal); a signal already acted on is remembered so a later visit is normal.
+let seenSearchSignal = 0;
+
 export default function MobileTransactions(props) {
-  const { user, ledger = [], accounts = [], categories = [], incomeSrcs = [], pendingSyncs = [], onSearch } = props;
+  const { user, ledger = [], accounts = [], categories = [], incomeSrcs = [], pendingSyncs = [] } = props;
   const [view, setView] = useState(() => lsGet("m.tx.view") || "history");   // history | inbox
   const [full, setFull] = useState(false);                                     // the existing full page
   const [legacy, setLegacy] = useState(false);                                 // desktop list: filters, split, bulk
@@ -42,6 +46,11 @@ export default function MobileTransactions(props) {
   const [detail, setDetail] = useState(null);
 
   useEffect(() => { lsSet("m.tx.view", view); }, [view]);
+  useEffect(() => {
+    if (!props.searchSignal || props.searchSignal === seenSearchSignal) return;
+    seenSearchSignal = props.searchSignal; setLegacy(false); setFull(true);
+    setTimeout(() => document.getElementById("m-tx-search")?.focus(), 60);
+  }, [props.searchSignal]);
   useEffect(() => {
     if (!user?.id) return;
     tagsApi.list(user.id, { status: "active" }).then(t => { setTags(t || []); setTrips((t || []).filter(x => x.type === "trip")); }).catch(() => {});
@@ -145,7 +154,7 @@ export default function MobileTransactions(props) {
     <div className={`mw${props.dark ? " dark" : ""}`}>
       <div className="mw-hdr">
         <h1>Transactions</h1>
-        {onSearch && <button className="mw-round" onClick={onSearch} aria-label="Search"><Search size={20} strokeWidth={1.8} /></button>}
+        <button className="mw-round" onClick={() => { setFull(true); setTimeout(() => document.getElementById("m-tx-search")?.focus(), 60); }} aria-label="Search"><Search size={20} strokeWidth={1.8} /></button>
         <button className="mw-round" onClick={() => setTxModal({ open: true, mode: "add", entry: null })} aria-label="Add transaction"><Plus size={22} strokeWidth={1.8} /></button>
       </div>
 

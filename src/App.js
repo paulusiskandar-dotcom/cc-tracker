@@ -27,6 +27,7 @@ import MobileHome from "./components/mobile/MobileHome";
 import MobileReceivables from "./components/mobile/MobileReceivables";
 import MobileReports from "./components/mobile/MobileReports";
 import MobileStatement from "./components/mobile/MobileStatement";
+import MobileSettings from "./components/mobile/MobileSettings";
 import MobileBills from "./components/mobile/MobileBills";
 import MobileAssets from "./components/mobile/MobileAssets";
 
@@ -207,6 +208,7 @@ function Finance({ user, signOut }) {
   });
 
   const isMobile = useIsMobile();
+  const [searchSignal, setSearchSignal] = useState(0);
   const [fullStatement, setFullStatement] = useState(null); // pathname whose desktop statement was asked for
   const goTab = useCallback((tabId) => {
     if (!onMainPage) navigate("/");
@@ -445,12 +447,14 @@ function Finance({ user, signOut }) {
 
   const EXTRA_LABELS = { scan: "AI Scan", aiimport: "AI Scan", email: "Email", notifications: "Notifications" };
   // Phone-only screens bring their own large title, so the top bar steps aside there.
-  const walletProps = { user, accounts, ledger, fxRates, installments, reconSessions, dark: isDark, setTab: goTab, onSearch: () => setSearchOpen(true), onRefresh: loadData };
+  // Phones: every magnifier opens the one transaction search.
+  const phoneSearch = () => { setSearchSignal(n => n + 1); goTab("transactions"); };
+  const walletProps = { user, accounts, ledger, fxRates, installments, reconSessions, dark: isDark, setTab: goTab, onSearch: phoneSearch, onRefresh: loadData };
   // Phones get their own statement screen; the desktop page still opens for reconcile
   // hand-offs (they carry seeds in the navigation state) and from its "Reconcile, PDF and Excel" link.
   const isStatementRoute = /^\/accounts\/[^/]+\/statement/.test(location.pathname);
   const phoneStatement = isMobile && isStatementRoute && fullStatement !== location.pathname && !location.state?.reconcileSeeds;
-  const mobileOwnsHeader = phoneStatement || (isMobile && onMainPage && ["dashboard", "cards", "bank", "cash", "transactions", "billing", "assets", "email", "receivables", "reports"].includes(tab));
+  const mobileOwnsHeader = phoneStatement || (isMobile && onMainPage && ["dashboard", "cards", "bank", "cash", "transactions", "billing", "assets", "email", "receivables", "reports", "settings"].includes(tab));
   const pageLabel = !onMainPage
     ? "Statement"
     : (TABS.find(t => t.id === tab)?.label || EXTRA_LABELS[tab] || "Dashboard");
@@ -462,8 +466,8 @@ function Finance({ user, signOut }) {
 
   const renderPage = () => {
     switch (tab) {
-      case "dashboard":    return isMobile ? <MobileHome {...shared} setTab={goTab} onSearch={() => setSearchOpen(true)} /> : <Dashboard {...shared} />;
-      case "transactions": return isMobile ? <MobileTransactions {...shared} onSearch={() => setSearchOpen(true)} /> : <Transactions {...shared} />;
+      case "dashboard":    return isMobile ? <MobileHome {...shared} setTab={goTab} onSearch={phoneSearch} /> : <Dashboard {...shared} />;
+      case "transactions": return isMobile ? <MobileTransactions {...shared} searchSignal={searchSignal} /> : <Transactions {...shared} />;
       case "bank":         return isMobile ? <MobileWallet {...walletProps} initialSegment="bank" /> : <Accounts {...shared} initialSubTab="bank" />;
       case "cash":         return isMobile ? <MobileWallet {...walletProps} initialSegment="cash" /> : <Accounts {...shared} initialSubTab="cash" />;
       case "accounts":     return <Accounts     {...shared} initialSubTab="bank" />; // legacy redirect
@@ -477,7 +481,7 @@ function Finance({ user, signOut }) {
       case "sweetspot":    return <SweetSpot    user={user} ledger={ledger} accounts={accounts} />;
       case "calendar":     return <Calendar     {...shared} />;
       case "billing":      return isMobile ? <MobileBills {...shared} /> : <Billing {...shared} />;
-      case "settings":     return <Settings     {...shared} signOut={signOut} initialTab={settingsInitialTab} />;
+      case "settings":     return isMobile ? <MobileSettings {...shared} signOut={signOut} initialTab={settingsInitialTab} /> : <Settings {...shared} signOut={signOut} initialTab={settingsInitialTab} />;
       case "reconcile":    return <Reconcile    {...shared} />;
       case "scan":         return <AIImport     {...shared} />;
       case "aiimport":     return <AIImport     {...shared} />; // legacy redirect
