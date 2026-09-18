@@ -17,11 +17,6 @@
 .mw-seg button { flex: 1; height: 38px; border: 0; background: none; border-radius: 10px; font-size: 14px; font-weight: 600; color: var(--muted); cursor: pointer; }
 .mw-seg button.on { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); }
 
-.mw-pills { display: flex; gap: 6px; margin: 0 0 16px; overflow-x: auto; scrollbar-width: none; }
-.mw-pills::-webkit-scrollbar { display: none; }
-.mw-pills button { flex: none; height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line); background: #fff; font-size: 13px; font-weight: 600; cursor: pointer; }
-.mw-pills button.on { background: var(--ink); border-color: var(--ink); color: #fff; }
-
 /* The stack: each card shows a 56px strip above the next, like Apple Wallet. */
 .mw-stack { display: flex; flex-direction: column; padding-top: 8px; container-type: inline-size; }
 .mw-card { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: pointer; }

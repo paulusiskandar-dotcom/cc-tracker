@@ -25,18 +25,15 @@ const lsGet = k => { try { return localStorage.getItem(k); } catch { return null
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
 
 const SEGMENTS = [["credit", "Credit"], ["bank", "Bank"], ["cash", "Cash"]];
-const SORTS = [["balance", "Balance"], ["due", "Due"], ["available", "Available"]];
 
 export default function Wallet({ user, accounts = [], ledger = [], fxRates = {}, initialSegment = "credit", setTab, onSearch }) {
   const navigate = useNavigate();
   const [seg, setSeg] = useState(() => lsGet("m.wallet.seg") || initialSegment);
-  const [sort, setSort] = useState(() => lsGet("m.wallet.sort") || "balance");
   const [openId, setOpenId] = useState(null);
   const [catalog, setCatalog] = useState({ byAccount: {}, ratio: {} });
   const [dismissed, setDismissed] = useState(() => lsGet("m.wallet.notice") || "");
 
   useEffect(() => { lsSet("m.wallet.seg", seg); }, [seg]);
-  useEffect(() => { lsSet("m.wallet.sort", sort); }, [sort]);
 
   // Catalogue link per card (for the picture) and the bank's points-per-KrisFlyer-mile
   // ratio. Both come from n8n's tables; nothing is filled in here.
@@ -76,13 +73,8 @@ export default function Wallet({ user, accounts = [], ledger = [], fxRates = {},
       const kat = catalog.byAccount[c.id];
       return { ...c, debt, limit, avail, due: nextDue(c.due_day), kat, img: c.card_image_url || (kat ? `/cards/${slug(kat)}.jpg` : null), ratio: kat ? catalog.ratio[kat] : null };
     });
-    const by = {
-      balance: (a, b) => b.debt - a.debt,
-      due: (a, b) => ((a.debt > 0 && a.due ? a.due.days : 999) - (b.debt > 0 && b.due ? b.due.days : 999)) || b.debt - a.debt,
-      available: (a, b) => (b.avail ?? -1) - (a.avail ?? -1),
-    };
-    return rows.sort(by[sort] || by.balance);
-  }, [active, fxRates, catalog, sort]);
+    return rows.sort((a, b) => b.debt - a.debt); // largest balance on top
+  }, [active, fxRates, catalog]);
 
   const banks = useMemo(() => active.filter(a => a.type === "bank" && a.subtype !== "cash" && a.subtype !== "reimburse")
     .sort((a, b) => Number(b.current_balance || 0) * (fxRates[b.currency] || 1) - Number(a.current_balance || 0) * (fxRates[a.currency] || 1)), [active, fxRates]);
@@ -124,9 +116,6 @@ export default function Wallet({ user, accounts = [], ledger = [], fxRates = {},
 
       {seg === "credit" && (
         <>
-          <div className="mw-pills">
-            {SORTS.map(([id, label]) => <button key={id} className={sort === id ? "on" : ""} onClick={() => setSort(id)}>{label}</button>)}
-          </div>
           <div className="mw-stack">
             {cards.map(c => (
               <button key={c.id} className="mw-card" onClick={() => { setOpenId(c.id); window.scrollTo(0, 0); }} aria-label={c.name}>

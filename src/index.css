@@ -179,7 +179,7 @@ body {
 /* Content area bottom padding above mobile nav */
 @media (max-width: 768px) {
   .page-content {
-    padding-bottom: calc(80px + env(safe-area-inset-bottom)) !important;
+    padding-bottom: calc(96px + env(safe-area-inset-bottom)) !important;
   }
 }
 

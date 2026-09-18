@@ -589,7 +589,7 @@ function Finance({ user, signOut }) {
         onClick={() => { goTab("transactions"); setShowMore(false); setTxAddSignal(s => s + 1); }}
         title="Add transaction"
         style={{
-          position: "fixed", right: 16, bottom: "calc(72px + env(safe-area-inset-bottom))", zIndex: 190,
+          position: "fixed", right: 16, bottom: "calc(86px + env(safe-area-inset-bottom))", zIndex: 190,
           width: 52, height: 52, borderRadius: 26, border: "none", cursor: "pointer",
           background: "#111827", color: "#fff",
           alignItems: "center", justifyContent: "center",
@@ -610,7 +610,8 @@ function Finance({ user, signOut }) {
           return (
             <button key={id} onClick={() => { goTab(id); setShowMore(false); }} style={{
               ...S.mobileNavBtn,
-              color: active ? "#3b5bdb" : "#9ca3af",
+              ...(active ? S.mobileNavOn : {}),
+              color: active ? "#111827" : "#6b7280",
             }}>
               <NAV_ICON id={id} />
               <span style={{ fontSize: 9, fontWeight: active ? 700 : 500 }}>{MOBILE_TAB_LABELS[id] || t?.label}</span>
@@ -619,7 +620,8 @@ function Finance({ user, signOut }) {
         })}
         <button onClick={() => setShowMore(s => !s)} style={{
           ...S.mobileNavBtn,
-          color: showMore ? "#3b5bdb" : "#9ca3af",
+          ...(showMore ? S.mobileNavOn : {}),
+          color: showMore ? "#111827" : "#6b7280",
         }}>
           <NAV_ICON id="more" />
           <span style={{ fontSize: 9, fontWeight: showMore ? 700 : 500 }}>More</span>
@@ -931,15 +933,21 @@ const S = {
 
   mobileNav: {
     position:       "fixed",
-    bottom:         0,
-    left:           0,
-    right:          0,
     zIndex:         200,
-    background:     "#ffffff",
-    borderTop:      "1px solid #e5e7eb",
-    paddingBottom:  "env(safe-area-inset-bottom)",
+    // Liquid glass: a floating capsule that blurs what scrolls underneath it.
+    bottom:         "calc(10px + env(safe-area-inset-bottom))",
+    left:           12,
+    right:          12,
+    height:         62,
+    padding:        4,
+    boxSizing:      "border-box",
+    borderRadius:   31,
+    background:     "rgba(255,255,255,0.58)",
+    backdropFilter:       "blur(24px) saturate(180%)",
+    WebkitBackdropFilter: "blur(24px) saturate(180%)",
+    border:         "1px solid rgba(255,255,255,0.75)",
+    boxShadow:      "0 10px 30px rgba(17,24,39,0.16), inset 0 1px 0 rgba(255,255,255,0.9), inset 0 -1px 0 rgba(17,24,39,0.04)",
     alignItems:     "stretch",
-    height:         56,
   },
 
   mobileNavBtn: {
@@ -953,19 +961,29 @@ const S = {
     justifyContent: "center",
     gap:            3,
     padding:        "6px 4px",
-    transition:     "color 0.15s",
+    borderRadius:   27,
+    transition:     "color 0.15s, background 0.2s",
     fontFamily:     "Figtree, sans-serif",
+  },
+
+  // The selected tab sits in a clearer "lens" inside the glass bar.
+  mobileNavOn: {
+    background: "rgba(255,255,255,0.85)",
+    boxShadow:  "0 1px 4px rgba(17,24,39,0.10), inset 0 1px 0 #fff",
   },
 
   moreDrawer: {
     position:     "fixed",
-    bottom:       "calc(56px + env(safe-area-inset-bottom))",
-    left:         0,
-    right:        0,
+    bottom:       "calc(82px + env(safe-area-inset-bottom))",
+    left:         12,
+    right:        12,
     zIndex:       196,
-    background:   "#ffffff",
-    borderTop:    "1px solid #e5e7eb",
-    borderRadius: "16px 16px 0 0",
+    background:   "rgba(255,255,255,0.78)",
+    backdropFilter:       "blur(24px) saturate(180%)",
+    WebkitBackdropFilter: "blur(24px) saturate(180%)",
+    border:       "1px solid rgba(255,255,255,0.75)",
+    boxShadow:    "0 10px 30px rgba(17,24,39,0.16)",
+    borderRadius: 24,
     padding:      "14px 16px 16px",
     animation:    "fadeUp 0.15s ease",
   },
