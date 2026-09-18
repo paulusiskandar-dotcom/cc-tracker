@@ -9,19 +9,15 @@ import { Donut } from "./MobileTransactions";
 import "./mobile.css";
 
 const COLORS = ["var(--ink)", "#3b5bdb", "#059669", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#9ca3af"];
-const lsGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
-const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
 
 export default function MobileAssets(props) {
   // `bare` + `view`: rendered inside Home, which owns the header and the tabs.
   const { user, assets = [], netWorth = {}, fxRates = {}, bare = false, view: forcedView } = props;
   const [snaps, setSnaps] = useState([]);
   const [openNw, setOpenNw] = useState(null);
-  const [ownView, setView] = useState(() => lsGet("m.assets.view") || "assets");
-  const view = forcedView || ownView;
+  const view = forcedView || "assets"; // net worth and its make-up now live on Home
   const [full, setFull] = useState(false);
   const [openGroup, setOpenGroup] = useState(null);
-  useEffect(() => { if (!forcedView) lsSet("m.assets.view", ownView); }, [ownView, forcedView]);
   useEffect(() => {
     if (!user?.id) return;
     supabase.from("net_worth_snapshots").select("month,total").order("month").then(({ data }) => setSnaps(data || []));
@@ -65,10 +61,6 @@ export default function MobileAssets(props) {
   return (
     <div className={bare ? undefined : `mw${props.dark ? " dark" : ""}`}>
       {!bare && <div className="mw-hdr"><h1>Assets</h1></div>}
-      {!bare && <div className="mw-seg" role="tablist">
-        <button role="tab" aria-selected={view === "assets"} className={view === "assets" ? "on" : ""} onClick={() => setView("assets")}>Assets</button>
-        <button role="tab" aria-selected={view === "networth"} className={view === "networth" ? "on" : ""} onClick={() => setView("networth")}>Net Worth</button>
-      </div>}
 
       {view === "assets" ? (
         <>
@@ -124,7 +116,7 @@ export default function MobileAssets(props) {
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 // Net worth by month. One scale places the line, the area and the month labels.
-function Trend({ series }) {
+export function Trend({ series }) {
   const pts = series.slice(-12); const W = 320, H = 130, L = 8, R = 8, T = 10, B = 22;
   const vals = pts.map(p => Number(p.total)); const lo = Math.min(...vals), hi = Math.max(...vals); const span = hi - lo || 1;
   const x = i => L + (i * (W - L - R)) / (pts.length - 1); const y = v => T + (1 - (v - lo) / span) * (H - T - B);
