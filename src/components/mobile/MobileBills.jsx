@@ -46,6 +46,18 @@ export default function MobileBills(props) {
     return [...onCards, ...financed].filter(p => p.left > 0).sort((a, b) => b.left - a.left);
   }, [installments, liabilities, ledger, props.accounts]);
 
+  // What the running plans will cost in each coming month: a plan with N payments left falls
+  // on the next N months, counted from next month (this month's are already billed or listed
+  // under Due soon / Upcoming).
+  const ahead = useMemo(() => {
+    const now = new Date(); const len = Math.min(36, Math.max(0, ...plans.map(p => p.total - p.paid)));
+    return Array.from({ length: len }, (_, k) => {
+      const d = new Date(now.getFullYear(), now.getMonth() + 1 + k, 1);
+      return { key: `${d.getFullYear()}-${d.getMonth()}`, label: `${MONTHS[d.getMonth()]} ${d.getFullYear()}`, short: MONTHS[d.getMonth()], total: plans.reduce((t, p) => t + (p.total - p.paid > k ? p.monthly : 0), 0), n: plans.filter(p => p.total - p.paid > k).length };
+    });
+  }, [plans]);
+  const [allAhead, setAllAhead] = useState(false);
+
   // Remaining per loan = amount lent − repayments in the ledger (the rule calcNetWorth uses).
   const loans = useMemo(() => employeeLoans.filter(l => l.status !== "settled").map(l => {
     return { id: l.id, name: l.employee_name || l.name || "Loan", left: loanStatus(l, ledger).left, monthly: Number(l.monthly_installment || 0) };
@@ -75,6 +87,21 @@ export default function MobileBills(props) {
             <div className="mw-tile-n">{fmtIDR(plans.reduce((t, p) => t + p.left, 0))}</div>
             <div className="mw-tile-s">{fmtIDR(plans.reduce((t, p) => t + p.monthly, 0))} a month across {plans.length} plans</div>
           </div>
+          {ahead.length > 0 && (
+            <>
+              <div className="mw-tile" style={{ marginBottom: 16 }}>
+                <div className="mw-tile-l">Coming months</div>
+                <AheadBars rows={ahead.slice(0, 12)} />
+              </div>
+              <div className="mw-list" style={{ marginBottom: 16 }}>
+                {(allAhead ? ahead : ahead.slice(0, 6)).map(m => (
+                  <div key={m.key} className="mw-row mw-tx"><span className="mw-row-name">{m.label}<small>{m.n} plan{m.n === 1 ? "" : "s"}</small></span><span className="mw-row-amt">{fmtIDR(m.total)}</span></div>
+                ))}
+                {ahead.length > 6 && <button className="mw-row mw-showall" onClick={() => setAllAhead(v => !v)}>{allAhead ? "Show less" : `Show all ${ahead.length} months`}</button>}
+              </div>
+              <div className="mw-label">Plans</div>
+            </>
+          )}
           <div className="mw-list">
             {plans.map(p => (
               <div key={p.id} className="mw-row mw-tx">
@@ -139,5 +166,16 @@ function BillGroup({ title, items }) {
         ))}
       </div>
     </>
+  );
+}
+
+// Monthly instalment load for the next 12 months; one scale, month initials underneath.
+function AheadBars({ rows }) {
+  const W = 320, H = 96, B = 18, top = Math.max(1, ...rows.map(r => r.total)); const slot = W / rows.length; const bw = Math.min(18, slot * 0.62);
+  return (
+    <svg className="mw-trend" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Instalments due in each of the coming months">
+      {rows.map((r, i) => { const h = Math.max(2, (r.total / top) * (H - B - 4)); const cx = slot * i + slot / 2;
+        return <g key={r.key}><rect x={cx - bw / 2} y={H - B - h} width={bw} height={h} rx="3" fill="var(--ink)" opacity={i === 0 ? 1 : 0.55} /><text x={cx} y={H - 4} textAnchor="middle" fontSize="10" fill="var(--faint)">{r.short}</text></g>; })}
+    </svg>
   );
 }
