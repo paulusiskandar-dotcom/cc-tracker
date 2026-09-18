@@ -181,6 +181,7 @@ export default function Email({
   fxRates = {},
   initialTab = "pending",
   mobile = false,
+  embedded = false,   // phones: just the pending queue, inside Transactions › Inbox
   onBack,
 }) {
   const T = dark ? DARK : LIGHT;
@@ -296,10 +297,10 @@ export default function Email({
   ];
 
   return (
-    <div className={mobile ? `mw${dark ? " dark" : ""}` : undefined} style={{ display: "flex", flexDirection: "column", gap: mobile ? 12 : 16 }}>
+    <div className={mobile ? `mw${dark ? " dark" : ""}` : undefined} style={{ display: "flex", flexDirection: "column", gap: mobile ? 12 : 16, ...(embedded ? { margin: 0 } : {}) }}>
 
       {/* Phones: the phone header and segmented control instead of the pill tabs. */}
-      {mobile && (
+      {mobile && !embedded && (
         <>
           <div className="mw-hdr" style={{ marginBottom: 4 }}>
             {onBack && <button className="mw-round" onClick={onBack} aria-label="Back"><ChevronLeft size={22} strokeWidth={1.8} /></button>}

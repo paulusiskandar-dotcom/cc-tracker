@@ -166,3 +166,9 @@ button.mw-row { cursor: pointer; }
 .mw-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: none; font: inherit; font-size: 16px; color: var(--ink); }
 .mw-search:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
 .mw-search button { width: 28px; height: 28px; border: 0; border-radius: 50%; background: var(--sunk); display: flex; align-items: center; justify-content: center; color: var(--muted); cursor: pointer; }
+
+.mw-pick { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.mw-pick-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.mw-pick-top label { font-size: 13px; color: var(--muted); }
+.mw-pick-top .mw-seg { flex: 0 1 auto; min-width: 0; }
+.mw-pick-top .mw-seg button { height: 28px; padding: 0 12px; font-size: 12.5px; }

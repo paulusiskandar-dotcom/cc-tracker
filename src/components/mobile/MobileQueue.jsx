@@ -41,6 +41,31 @@ export default function MobileQueue({ rows = [], onUpdateRow, onConfirmRow, onSk
   );
 }
 
+// Accounts are many (22 cards, 30 bank accounts, 11 cash), so the list is narrowed by kind
+// first: Card · Bank · Cash. Only kinds that this transaction type allows are offered.
+const KINDS = [["card", "Card"], ["bank", "Bank"], ["cash", "Cash"], ["other", "Other"]];
+const kindOf = a => (a.type === "credit_card" ? "card" : a.type === "bank" ? (a.subtype === "cash" ? "cash" : "bank") : "other");
+function AccountPick({ id, label, list = [], value, onChange }) {
+  const usable = list.filter(a => a.is_active !== false || a.id === value);
+  const kinds = KINDS.filter(([k]) => usable.some(a => kindOf(a) === k));
+  const current = usable.find(a => a.id === value);
+  const [kind, setKind] = useState(() => (current ? kindOf(current) : kinds[0]?.[0]));
+  const shown = usable.filter(a => kindOf(a) === kind).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  return (
+    <div className="mw-pick">
+      <div className="mw-pick-top"><label htmlFor={id}>{label}</label>
+        {kinds.length > 1 && <div className="mw-seg mw-seg-sm" role="tablist" aria-label={`${label} account kind`}>
+          {kinds.map(([k, l]) => <button key={k} type="button" role="tab" aria-selected={kind === k} className={kind === k ? "on" : ""} onClick={() => setKind(k)}>{l}</button>)}
+        </div>}
+      </div>
+      <select id={id} value={shown.some(a => a.id === value) ? value : ""} onChange={e => onChange(e.target.value)}>
+        <option value="">{current && !shown.some(a => a.id === value) ? `Now: ${current.name}` : "Choose account"}</option>
+        {shown.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+      </select>
+    </div>
+  );
+}
+
 function QueueSheet({ r, accounts, categories, incomeSrcs, busy, waiting, onUpdate, onClose, onApprove, onSkip, onFullEditor }) {
   const cfg = getAcctCfg(r.tx_type, accounts);
   const needFrom = cfg.mode === "from" || cfg.mode === "from_to";
@@ -70,12 +95,8 @@ function QueueSheet({ r, accounts, categories, incomeSrcs, busy, waiting, onUpda
                 {types.map(t => <option key={t} value={t}>{TX_TYPE_MAP[t]?.label || t}</option>)}
               </select>
             </label>
-            {needFrom && <label htmlFor={`${sid}-from`}>From
-              <select id={`${sid}-from`} value={r.from_id || ""} onChange={e => onUpdate({ from_id: e.target.value })}><option value="">Choose account</option>{opt(cfg.from)}</select>
-            </label>}
-            {needTo && <label htmlFor={`${sid}-to`}>To
-              <select id={`${sid}-to`} value={r.to_id || ""} onChange={e => onUpdate({ to_id: e.target.value })}><option value="">Choose account</option>{opt(cfg.to)}</select>
-            </label>}
+            {needFrom && <AccountPick id={`${sid}-from`} label="From" list={cfg.from} value={r.from_id || ""} onChange={v => onUpdate({ from_id: v })} />}
+            {needTo && <AccountPick id={`${sid}-to`} label="To" list={cfg.to} value={r.to_id || ""} onChange={v => onUpdate({ to_id: v })} />}
             {!NO_CAT.has(r.tx_type) && <label htmlFor={`${sid}-cat`}>{r.tx_type === "income" ? "Source" : "Category"}
               <select id={`${sid}-cat`} value={r.category_id || ""} onChange={e => onUpdate({ category_id: e.target.value || null })}>
                 <option value="">{r.suggested_category_label ? `Suggested: ${r.suggested_category_label}` : "Choose"}</option>{opt(cats)}

@@ -6,6 +6,7 @@ import { ChevronLeft, ChevronRight, Plus, Search, X } from "lucide-react";
 import { tagsApi } from "../../api";
 import { fmtIDR, fmtCurNative } from "../../utils";
 import Transactions from "../Transactions";
+import Email from "../Email";
 import TxVerticalBig from "../shared/TxVerticalBig";
 import "./mobile.css";
 
@@ -45,6 +46,10 @@ export default function MobileTransactions(props) {
     tagsApi.list(user.id, { status: "active" }).then(t => { setTags(t || []); setTrips((t || []).filter(x => x.type === "trip")); }).catch(() => {});
   }, [user?.id]);
 
+  // Inbox = what can be approved now. Foreign-currency rows wait for their statement and
+  // live on the Email Sync page with the sync settings.
+  const pendingCount = pendingSyncs.filter(x => !x.currency || x.currency === "IDR").length;
+  const waitingCount = pendingSyncs.length - pendingCount;
   const accName = useMemo(() => Object.fromEntries(accounts.map(a => [a.id, a.name])), [accounts]);
   const catName = useMemo(() => Object.fromEntries(categories.map(c => [c.id, c.name])), [categories]);
   const srcName = useMemo(() => Object.fromEntries(incomeSrcs.map(c => [c.id, c.name])), [incomeSrcs]);
@@ -147,11 +152,17 @@ export default function MobileTransactions(props) {
 
       <div className="mw-seg" role="tablist">
         <button role="tab" aria-selected={view === "history"} className={view === "history" ? "on" : ""} onClick={() => setView("history")}>History</button>
-        <button role="tab" aria-selected={view === "inbox"} className={view === "inbox" ? "on" : ""} onClick={() => setView("inbox")}>Inbox{pendingSyncs.length ? <em>{pendingSyncs.length}</em> : null}</button>
+        <button role="tab" aria-selected={view === "inbox"} className={view === "inbox" ? "on" : ""} onClick={() => setView("inbox")}>Inbox{pendingCount ? <em>{pendingCount}</em> : null}</button>
       </div>
 
       {view === "inbox" ? (
-        <Inbox rows={pendingSyncs} openEmail={openEmail} />
+        <>
+          <Email {...props} mobile embedded initialTab="pending" />
+          <div className="mw-list mw-gap">
+            <button className="mw-row" onClick={() => openEmail && openEmail("waiting")}><span className="mw-row-name">Waiting for statement</span><span className="mw-row-amt">{waitingCount || ""}</span><ChevronRight size={16} className="mw-chev" /></button>
+            <button className="mw-row" onClick={() => openEmail && openEmail("sync")}><span className="mw-row-name">Email Sync settings</span><ChevronRight size={16} className="mw-chev" /></button>
+          </div>
+        </>
       ) : (
         <>
           <div className="mw-bar2">
@@ -242,24 +253,6 @@ export function Donut({ cats, total, label }) {
       </svg>
       <div className="mw-donut-c"><span>{label}</span><b>{fmtIDR(total)}</b></div>
     </div>
-  );
-}
-
-function Inbox({ rows, openEmail }) {
-  if (!rows.length) return <div className="mw-empty">Nothing waiting.</div>;
-  const shown = rows.slice(0, 40);
-  return (
-    <>
-      <div className="mw-list">
-        {shown.map(r => (
-          <button key={r.id} className="mw-row mw-tx" onClick={() => openEmail && openEmail("pending")}>
-            <span className="mw-row-name">{r.notes || r.merchant_name || r.subject || "Transaction"}<small>{fmtDate(r.transaction_date || r.received_at)}</small></span>
-            <span className="mw-row-amt">{r.currency && r.currency !== "IDR" ? fmtCurNative(r.amount, r.currency) : fmtIDR(r.amount_idr || r.amount)}</span>
-          </button>
-        ))}
-        <button className="mw-row mw-showall" onClick={() => openEmail && openEmail("pending")}>Review {rows.length > shown.length ? `all ${rows.length}` : ""} in Email Sync</button>
-      </div>
-    </>
   );
 }
 
