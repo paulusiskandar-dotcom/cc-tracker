@@ -124,12 +124,13 @@ export const TABS = [
   { id: "settings",     label: "Settings"     },
 ];
 
-// Phone layout (approved 18 Sep 2026): Wallet · Transactions · Bills · Assets · More.
+// Phone layout: Home · Wallet · Transactions · Bills · More (Home became the opening
+// screen on 18 Sep 2026; Assets moved under More and opens from Home's net worth).
 // Wallet holds Credit / Bank / Cash, so those three are not repeated under More.
-export const MOBILE_MAIN_TABS = ["cards", "transactions", "billing", "assets"];
-export const MOBILE_TAB_LABELS = { cards: "Wallet" };
+export const MOBILE_MAIN_TABS = ["dashboard", "cards", "transactions", "billing"];
+export const MOBILE_TAB_LABELS = { dashboard: "Home", cards: "Wallet" };
 export const MOBILE_MORE_TABS = [
-  { id: "dashboard",   label: "Dashboard"    },
+  { id: "assets",      label: "Assets"       },
   { id: "sweetspot",   label: "SweetSpot"    },
   { id: "reconcile",   label: "Reconcile"    },
   { id: "receivables", label: "Receivables"  },

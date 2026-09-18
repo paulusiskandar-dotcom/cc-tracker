@@ -22,6 +22,7 @@ import { Spinner, ToastContainer, showToast } from "./components/shared/index";
 import UndoToast from "./components/shared/UndoToast";
 import MobileWallet from "./components/mobile/Wallet";
 import MobileTransactions from "./components/mobile/MobileTransactions";
+import MobileHome from "./components/mobile/MobileHome";
 import MobileBills from "./components/mobile/MobileBills";
 import MobileAssets from "./components/mobile/MobileAssets";
 
@@ -198,7 +199,7 @@ function Finance({ user, signOut }) {
   const [tab, setTab]           = useState(() => {
     const hash = window.location.hash.replace("#", "");
     if (TABS.some(t => t.id === hash)) return hash;
-    return window.matchMedia("(max-width: 768px)").matches ? "cards" : "dashboard"; // phones open on Wallet
+    return "dashboard"; // phones open on Home, desktop on Dashboard
   });
 
   const isMobile = useIsMobile();
@@ -440,7 +441,7 @@ function Finance({ user, signOut }) {
   const EXTRA_LABELS = { scan: "AI Scan", aiimport: "AI Scan", email: "Email", notifications: "Notifications" };
   // Phone-only screens bring their own large title, so the top bar steps aside there.
   const walletProps = { user, accounts, ledger, fxRates, installments, dark: isDark, setTab: goTab, onSearch: () => setSearchOpen(true), onRefresh: loadData };
-  const mobileOwnsHeader = isMobile && onMainPage && ["cards", "bank", "cash", "transactions", "billing", "assets", "email"].includes(tab);
+  const mobileOwnsHeader = isMobile && onMainPage && ["dashboard", "cards", "bank", "cash", "transactions", "billing", "assets", "email"].includes(tab);
   const pageLabel = !onMainPage
     ? "Statement"
     : (TABS.find(t => t.id === tab)?.label || EXTRA_LABELS[tab] || "Dashboard");
@@ -452,7 +453,7 @@ function Finance({ user, signOut }) {
 
   const renderPage = () => {
     switch (tab) {
-      case "dashboard":    return <Dashboard    {...shared} />;
+      case "dashboard":    return isMobile ? <MobileHome {...shared} setTab={goTab} onSearch={() => setSearchOpen(true)} /> : <Dashboard {...shared} />;
       case "transactions": return isMobile ? <MobileTransactions {...shared} onSearch={() => setSearchOpen(true)} /> : <Transactions {...shared} />;
       case "bank":         return isMobile ? <MobileWallet {...walletProps} initialSegment="bank" /> : <Accounts {...shared} initialSubTab="bank" />;
       case "cash":         return isMobile ? <MobileWallet {...walletProps} initialSegment="cash" /> : <Accounts {...shared} initialSubTab="cash" />;
