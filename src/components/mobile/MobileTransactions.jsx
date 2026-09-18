@@ -24,7 +24,7 @@ const isExpense = e => (e.tx_type === "expense" || e.tx_type === "pay_liability"
 const isIncome = e => e.tx_type === "income";
 
 export default function MobileTransactions(props) {
-  const { user, ledger = [], accounts = [], categories = [], incomeSrcs = [], pendingSyncs = [], openEmail, onSearch } = props;
+  const { user, ledger = [], accounts = [], categories = [], incomeSrcs = [], pendingSyncs = [], onSearch } = props;
   const [view, setView] = useState(() => lsGet("m.tx.view") || "history");   // history | inbox
   const [full, setFull] = useState(false);                                     // the existing full page
   const [legacy, setLegacy] = useState(false);                                 // desktop list: filters, split, bulk
@@ -49,7 +49,6 @@ export default function MobileTransactions(props) {
   // Inbox = what can be approved now. Foreign-currency rows wait for their statement and
   // live on the Email Sync page with the sync settings.
   const pendingCount = pendingSyncs.filter(x => !x.currency || x.currency === "IDR").length;
-  const waitingCount = pendingSyncs.length - pendingCount;
   const accName = useMemo(() => Object.fromEntries(accounts.map(a => [a.id, a.name])), [accounts]);
   const catName = useMemo(() => Object.fromEntries(categories.map(c => [c.id, c.name])), [categories]);
   const srcName = useMemo(() => Object.fromEntries(incomeSrcs.map(c => [c.id, c.name])), [incomeSrcs]);
@@ -158,10 +157,6 @@ export default function MobileTransactions(props) {
       {view === "inbox" ? (
         <>
           <Email {...props} mobile embedded initialTab="pending" />
-          <div className="mw-list mw-gap">
-            <button className="mw-row" onClick={() => openEmail && openEmail("waiting")}><span className="mw-row-name">Waiting for statement</span><span className="mw-row-amt">{waitingCount || ""}</span><ChevronRight size={16} className="mw-chev" /></button>
-            <button className="mw-row" onClick={() => openEmail && openEmail("sync")}><span className="mw-row-name">Email Sync settings</span><ChevronRight size={16} className="mw-chev" /></button>
-          </div>
         </>
       ) : (
         <>
@@ -176,12 +171,6 @@ export default function MobileTransactions(props) {
               <button className={kind === "income" ? "on" : ""} onClick={() => { setKind("income"); setOpenCat(null); }}>Income</button>
             </div>
           </div>
-
-          {trips.length > 0 && (
-            <div className="mw-pills">
-              {trips.map(t => <button key={t.id} className={trip === t.id ? "on" : ""} onClick={() => { setTrip(trip === t.id ? null : t.id); setOpenCat(null); }}>{t.name}</button>)}
-            </div>
-          )}
 
           <Donut cats={cats} total={total} label={kind === "expense" ? "Spent" : "Received"} />
 

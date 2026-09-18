@@ -132,6 +132,7 @@ export const MOBILE_TAB_LABELS = { dashboard: "Home", cards: "Wallet" };
 export const MOBILE_MORE_TABS = [
   { id: "assets",      label: "Assets"       },
   { id: "sweetspot",   label: "SweetSpot"    },
+  { id: "email",       label: "Email Sync"   },
   { id: "reconcile",   label: "Reconcile"    },
   { id: "receivables", label: "Receivables"  },
   { id: "income",      label: "Income"       },

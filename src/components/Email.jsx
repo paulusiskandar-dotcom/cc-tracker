@@ -334,6 +334,7 @@ export default function Email({
         <EmailPendingTab
           key={tab}
           mobile={mobile}
+          embedded={embedded}
           waitingMode={tab === "waiting"}
           pendingSyncs={pendingSyncs}
           setPendingSyncs={setPendingSyncs}
@@ -510,7 +511,7 @@ export default function Email({
 // ─── EMAIL PENDING TAB ────────────────────────────────────────────
 const GMAIL_NO_CAT = new Set(["transfer","pay_cc","give_loan","collect_loan","fx_exchange","reimburse_in","reimburse_out","buy_asset","sell_asset","pay_liability"]);
 
-function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, incomeSrcs = [], user, ledger, setLedger, onRefresh, setReminders, dark, T: theme, employeeLoans = [], merchantMaps = [], recurTemplates = [], fxRates = {}, waitingMode = false, mobile = false }) {
+function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, incomeSrcs = [], user, ledger, setLedger, onRefresh, setReminders, dark, T: theme, employeeLoans = [], merchantMaps = [], recurTemplates = [], fxRates = {}, waitingMode = false, mobile = false, embedded = false }) {
   const [fullEditor, setFullEditor] = useState(false); // phones: the desktop row editor, on request
   const T = theme || LIGHT;
 
@@ -1082,7 +1083,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
   if (!waitingMode && !visibleRows.length && failedRows === null) return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <EmptyState icon="" title="No pending emails" message="Gmail sync will surface transactions here for review." />
-      <button onClick={loadFailed} disabled={loadingFailed}
+      <button onClick={loadFailed} disabled={loadingFailed} hidden={embedded}
         style={{ fontSize: 11, color: "#9ca3af", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "Figtree, sans-serif", alignSelf: "flex-start" }}>
         {loadingFailed ? "Loading…" : "Show failed extractions"}
       </button>
@@ -1166,7 +1167,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       )}
 
       {/* ── Failed extractions section ── */}
-      <div style={{ marginTop: 4, display: waitingMode ? "none" : undefined }}>
+      <div style={{ marginTop: 4, display: waitingMode || embedded ? "none" : undefined }}>
         {failedRows === null ? (
           <button onClick={loadFailed} disabled={loadingFailed}
             style={{ fontSize: 11, color: "#9ca3af", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "Figtree, sans-serif" }}>
