@@ -25,9 +25,10 @@ export default function MobileBills(props) {
 
   const bills = useMemo(() => { const b = buildBills({ ledger, creditCards, liabilities, recurTemplates, installments, reconSessions, actionable: true }); return { ...b, cicilan: nameInstalments(b.cicilan, ledger, installments) }; }, [ledger, creditCards, liabilities, recurTemplates, installments, reconSessions]);
   const groups = [["Cards", bills.cards], ["Bills", bills.rutinManual], ["Loans", bills.cicilan]];
-  const week = useMemo(() => groups.flatMap(g => g[1]).filter(i => i.dayLeft <= 14).sort((a, b) => a.when - b.when), [bills]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Each bill shows once: due within 14 days (or overdue) under Due soon, everything else under Later.
-  const later = useMemo(() => groups.flatMap(g => g[1]).filter(i => i.dayLeft > 14).sort((a, b) => a.when - b.when), [bills]); // eslint-disable-line react-hooks/exhaustive-deps
+  const week = useMemo(() => groups.flatMap(g => g[1]).filter(i => i.dayLeft <= 7).sort((a, b) => a.when - b.when), [bills]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Each bill shows once: overdue or due within 7 days under Due soon, days 8–14 under Upcoming.
+  // Anything further out is not shown yet, and the sections carry no total (Paulus, 18 Sep 2026).
+  const later = useMemo(() => groups.flatMap(g => g[1]).filter(i => i.dayLeft > 7 && i.dayLeft <= 14).sort((a, b) => a.when - b.when), [bills]); // eslint-disable-line react-hooks/exhaustive-deps
   const piutang = useMemo(() => hitungPiutang(ledger), [ledger]);
   const entities = Object.entries(piutang.perEntity).filter(([k]) => k !== "?").sort((a, b) => b[1].saldo - a[1].saldo);
   // Remaining per loan = amount lent − repayments in the ledger (the rule calcNetWorth uses).
@@ -46,9 +47,9 @@ export default function MobileBills(props) {
 
       {view === "bills" && (
         <>
-          {week.length > 0 && <BillGroup title="Due soon" items={week} total />}
-          {later.length > 0 && <BillGroup title="Later" items={later} />}
-          {!week.length && !later.length && <div className="mw-empty">Nothing left to pay this month.</div>}
+          {week.length > 0 && <BillGroup title="Due soon" items={week} />}
+          {later.length > 0 && <BillGroup title="Upcoming" items={later} />}
+          {!week.length && !later.length && <div className="mw-empty">Nothing due in the next two weeks.</div>}
         </>
       )}
 
@@ -91,11 +92,10 @@ export default function MobileBills(props) {
   );
 }
 
-function BillGroup({ title, items, total }) {
-  const sum = items.filter(i => i.known).reduce((s, i) => s + i.amount, 0);
+function BillGroup({ title, items }) {
   return (
     <>
-      <div className="mw-label mw-label-row"><span>{title}</span>{total && <b>{fmtIDR(sum)}</b>}</div>
+      <div className="mw-label">{title}</div>
       <div className="mw-list">
         {items.map(i => (
           <div key={i.id} className="mw-row mw-tx">

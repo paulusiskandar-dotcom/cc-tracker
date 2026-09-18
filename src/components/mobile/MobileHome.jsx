@@ -1,7 +1,7 @@
 // Mobile Home (phones only): the opening screen. Three things, in order:
 //   1. where I stand  — net worth, and what it is made of (tap a row to open it)
 //   2. this month     — spending so far against last month, one chart
-//   3. what needs me  — approvals, bills due within 14 days, money owed, points about to expire
+//   3. what needs me  — approvals, bills due within 7 days, money owed, points about to expire
 // Every figure is one another screen already computes; nothing is recalculated differently here.
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
@@ -63,7 +63,7 @@ export default function MobileHome({ user, reconSessions = [], ledger = [], acco
   // 3 ── what needs attention
   const week = useMemo(() => {
     const b = buildBills({ ledger, creditCards, liabilities, recurTemplates, installments, reconSessions, actionable: true });
-    return [...b.cards, ...b.cicilan, ...b.rutinManual, ...b.subs].filter(i => i.dayLeft <= 14);
+    return [...b.cards, ...b.cicilan, ...b.rutinManual, ...b.subs].filter(i => i.dayLeft <= 7);
   }, [ledger, creditCards, liabilities, recurTemplates, installments, reconSessions]);
   const weekSum = week.filter(i => i.known).reduce((s, i) => s + i.amount, 0);
   const owed = useMemo(() => hitungPiutang(ledger).saldoTotal, [ledger]);
