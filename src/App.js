@@ -28,6 +28,7 @@ import MobileReceivables from "./components/mobile/MobileReceivables";
 import MobileReports from "./components/mobile/MobileReports";
 import MobileStatement from "./components/mobile/MobileStatement";
 import MobileSettings from "./components/mobile/MobileSettings";
+import MobileTrips from "./components/mobile/MobileTrips";
 import MobileBills from "./components/mobile/MobileBills";
 import MobileAssets from "./components/mobile/MobileAssets";
 
@@ -454,7 +455,7 @@ function Finance({ user, signOut }) {
   // hand-offs (they carry seeds in the navigation state) and from its "Reconcile, PDF and Excel" link.
   const isStatementRoute = /^\/accounts\/[^/]+\/statement/.test(location.pathname);
   const phoneStatement = isMobile && isStatementRoute && fullStatement !== location.pathname && !location.state?.reconcileSeeds;
-  const mobileOwnsHeader = phoneStatement || (isMobile && onMainPage && ["dashboard", "cards", "bank", "cash", "transactions", "billing", "assets", "email", "receivables", "reports", "settings"].includes(tab));
+  const mobileOwnsHeader = phoneStatement || (isMobile && onMainPage && ["dashboard", "cards", "bank", "cash", "transactions", "billing", "assets", "email", "receivables", "reports", "settings", "tags"].includes(tab));
   const pageLabel = !onMainPage
     ? "Statement"
     : (TABS.find(t => t.id === tab)?.label || EXTRA_LABELS[tab] || "Dashboard");
@@ -477,7 +478,7 @@ function Finance({ user, signOut }) {
       case "income":       return <Income       {...shared} />;
       case "reports":      return isMobile ? <MobileReports {...shared} /> : <Reports {...shared} />;
       case "budget":       return <Budget       {...shared} />;
-      case "tags":         return <Tags         user={user} ledger={ledger} onRefresh={loadData} />;
+      case "tags":         return isMobile ? <MobileTrips {...shared} /> : <Tags user={user} ledger={ledger} onRefresh={loadData} />;
       case "sweetspot":    return <SweetSpot    user={user} ledger={ledger} accounts={accounts} />;
       case "calendar":     return <Calendar     {...shared} />;
       case "billing":      return isMobile ? <MobileBills {...shared} /> : <Billing {...shared} />;
