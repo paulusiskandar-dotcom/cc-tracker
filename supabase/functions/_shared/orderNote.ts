@@ -66,6 +66,31 @@ export function parseOrderNote(subject: string, body: string): { amount: number;
     if (tot) return { amount: angka(tot[1]), note: RINGKAS(["Pajak DJP", nama?.trim() || (npwp ? "NPWP " + npwp.slice(-6) : null)].filter(Boolean).join(" · ")) };
   }
 
+  // 2b. Tokopedia "Pesanan Selesai" — sejak 2026 Tokopedia tidak lagi mengirim
+  // invoice saat bayar; nama barang & "Total belanja" baru muncul di email ini,
+  // setelah barang diterima (bisa 1–2 minggu sesudah kartu ditagih). Nominalnya
+  // = harga yang ditagih ke kartu (atau total rencana cicilan bila dikonversi).
+  if (/pesanan selesai|pesananmu selesai/i.test(subject + " " + body.slice(0, 400))) {
+    const totalBelanja = body.match(/Total\s+belanja[^\d]{0,40}([\d.,]+)/i);
+    if (totalBelanja) {
+      const lines = body.split("\n").map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+      const barang: string[] = [];
+      for (let i = 0; i < lines.length - 1; i++) {
+        // nama barang = baris tepat sebelum "1 x" / "2 x"
+        if (/^\d+\s*x$/i.test(lines[i + 1]) && lines[i].length >= 4 && !/^(toko|no\.?\s*invoice|rp)/i.test(lines[i])) barang.push(lines[i]);
+        if (/^Subtotal harga produk/i.test(lines[i])) break;
+      }
+      if (barang.length) {
+        // Buang embel-embel promo di depan nama ("Beli 1 Gratis 2 - LEGO…" → "LEGO…").
+        const depan = barang.slice(0, 3).map((b) => PENDEK(b.replace(/^(?:beli\s*\d+\s*gratis\s*\d+|promo|bundle|bundling|paket)\b[^-]*-\s*/i, ""), 40));
+        const sisa = barang.length - depan.length;
+        return { amount: angka(totalBelanja[1]), note: RINGKAS(depan.join(" + ") + (sisa > 0 ? ` +${sisa} barang` : "")) };
+      }
+      const dariSubjek = subject.match(/[""“]([^""”]{4,80})/)?.[1];
+      if (dariSubjek) return { amount: angka(totalBelanja[1]), note: RINGKAS(dariSubjek.replace(/\.\.\.$/, "")) };
+    }
+  }
+
   // 3. Checkout marketplace — "Total Bayar" + nama barang (muncul tepat sebelum "Berat:")
   const totalBayar = body.match(/Total\s+(?:Bayar|Pembayaran|Dibayarkan)[^\d]{0,40}([\d.,]+)/i);
   if (totalBayar) {

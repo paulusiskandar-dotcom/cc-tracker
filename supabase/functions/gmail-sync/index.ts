@@ -403,6 +403,50 @@ async function refreshAccessToken(token: any, clientSecret: string): Promise<str
   return data.access_token || null;
 }
 
+// Isi nama barang ke transaksi/rencana cicilan yang sudah ada, berdasarkan email
+// pesanan yang datang belakangan. Hanya menyentuh baris marketplace yang belum
+// bernama (notes kosong / "Imported from Gmail…" / deskripsi kode bank), dan
+// rencana cicilan bernama generik ("TOKOPEDIA 2026-09-10", kode CYBS_CCL).
+const MARKET_RE = /tokopedia|lazada|blibli|shopee/i;
+const GENERIC_NOTE_RE = /^\s*$|^Imported from Gmail|^Statement /i;
+const GENERIC_PLAN_RE = /^(tokopedia|lazada|blibli|shopee)(\s+\d{4}-\d{2}-\d{2})?\s*$|_CYBS_|CCL\d{2}/i;
+async function backfillOrderNotes(supabase: any, userId: string, orderNotes: Map<number, string>) {
+  if (!orderNotes?.size) return;
+  const sejak = new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10);
+  const { data: rows } = await supabase.from("ledger")
+    .select("id, amount_idr, description, merchant_name, notes, installment_id")
+    .eq("user_id", userId).gte("tx_date", sejak).eq("tx_type", "expense");
+  const { data: plans } = await supabase.from("installments")
+    .select("id, description, total_amount").eq("user_id", userId).gte("start_date", sejak);
+  let isi = 0;
+  for (const [amount, note] of orderNotes) {
+    // (1) transaksi langsung: nominal sama, merchant marketplace, belum bernama
+    for (const r of (rows || [])) {
+      if (Math.abs(Number(r.amount_idr || 0) - amount) > 1500) continue;
+      if (!MARKET_RE.test(`${r.description || ""} ${r.merchant_name || ""}`)) continue;
+      if (!GENERIC_NOTE_RE.test(r.notes || "")) continue;
+      await supabase.from("ledger").update({ notes: note }).eq("id", r.id);
+      isi++;
+    }
+    // (2) rencana cicilan: total rencana = total belanja; nama rencana + angsurannya diisi
+    for (const p of (plans || [])) {
+      if (Math.abs(Number(p.total_amount || 0) - amount) > 1500) continue;
+      if (!GENERIC_PLAN_RE.test(p.description || "")) continue;
+      await supabase.from("installments").update({ description: note }).eq("id", p.id);
+      const { data: legs } = await supabase.from("ledger").select("id, description, notes").eq("installment_id", p.id);
+      for (const l of (legs || [])) {
+        const m = String(l.description || "").match(/·\s*Cicilan\s+\d+\/\d+\s*$/);
+        const patch: any = {};
+        if (GENERIC_NOTE_RE.test(l.notes || "")) patch.notes = note;
+        if (m) patch.description = `${note} ${m[0]}`.slice(0, 120);
+        if (Object.keys(patch).length) await supabase.from("ledger").update(patch).eq("id", l.id);
+      }
+      isi++;
+    }
+  }
+  if (isi) console.log(`[gmail-sync] nama barang diisi ulang ke ${isi} baris/rencana`);
+}
+
 async function processUser(supabase: any, userId: string, anthropicKey: string, googleSecret: string, fromDate?: string, toDate?: string) {
   // Load token
   const { data: tokenRow } = await supabase.from("gmail_tokens").select("*").eq("user_id", userId).single();
@@ -483,6 +527,10 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
   // Peta nominal → deskripsi belanja, dari email pesanan/struk di jendela yang sama.
   const orderNotes  = await buildOrderNotes(accessToken, afterDate, beforeDate);
   const paperSplits = await buildPaperSplits(accessToken, afterDate, beforeDate);
+  // Email "Pesanan Selesai" Tokopedia datang 1–2 minggu SETELAH kartu ditagih, jadi
+  // transaksinya sudah lama dibukukan tanpa nama barang. Isi ulang ke belakang.
+  try { await backfillOrderNotes(supabase, userId, orderNotes); }
+  catch (e) { console.warn("[gmail-sync] backfill catatan pesanan gagal:", (e as any)?.message); }
 
   let processed = 0;
   let newTransactions = 0;
