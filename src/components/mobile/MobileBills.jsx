@@ -26,6 +26,8 @@ export default function MobileBills(props) {
   const bills = useMemo(() => { const b = buildBills({ ledger, creditCards, liabilities, recurTemplates, installments, reconSessions, actionable: true }); return { ...b, cicilan: nameInstalments(b.cicilan, ledger, installments) }; }, [ledger, creditCards, liabilities, recurTemplates, installments, reconSessions]);
   const groups = [["Cards", bills.cards], ["Bills", bills.rutinManual], ["Loans", bills.cicilan]];
   const week = useMemo(() => groups.flatMap(g => g[1]).filter(i => i.dayLeft <= 14).sort((a, b) => a.when - b.when), [bills]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Each bill shows once: due within 14 days (or overdue) under To pay, everything else under Later.
+  const later = useMemo(() => groups.flatMap(g => g[1]).filter(i => i.dayLeft > 14).sort((a, b) => a.when - b.when), [bills]); // eslint-disable-line react-hooks/exhaustive-deps
   const piutang = useMemo(() => hitungPiutang(ledger), [ledger]);
   const entities = Object.entries(piutang.perEntity).filter(([k]) => k !== "?").sort((a, b) => b[1].saldo - a[1].saldo);
   // Remaining per loan = amount lent − repayments in the ledger (the rule calcNetWorth uses).
@@ -45,8 +47,8 @@ export default function MobileBills(props) {
       {view === "bills" && (
         <>
           {week.length > 0 && <BillGroup title="To pay" items={week} total />}
-          {groups.map(([title, items]) => items.length > 0 && <BillGroup key={title} title={title} items={items} />)}
-          {!groups.some(g => g[1].length) && <div className="mw-empty">Nothing left to pay this month.</div>}
+          {later.length > 0 && <BillGroup title="Later" items={later} />}
+          {!week.length && !later.length && <div className="mw-empty">Nothing left to pay this month.</div>}
         </>
       )}
 
