@@ -5,6 +5,7 @@
 // Saving goes through the app's own form (TxVerticalBig) and Receivables' own Match action.
 import { useEffect, useMemo, useState } from "react";
 import { Plus, X } from "lucide-react";
+import { supabase } from "../../lib/supabase";
 import { fmtIDR } from "../../utils";
 import { hitungPiutang } from "../../lib/piutang";
 import Receivables from "../Receivables";
@@ -18,11 +19,18 @@ const lsGet = k => { try { return localStorage.getItem(k); } catch { return null
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
 
 export default function MobileReceivables(props) {
-  const { ledger = [], employeeLoans = [], reimburseSettlements = [], dark } = props;
+  const { user, ledger = [], employeeLoans = [], dark } = props;
+  const [settlements, setSettlements] = useState([]);
   const [view, setView] = useState(() => lsGet("m.recv.view") || "reimburse");
   const [openLoan, setOpenLoan] = useState(null);
   const [form, setForm] = useState(null); // { type: "collect_loan" | "give_loan", loan }
   useEffect(() => { lsSet("m.recv.view", view); }, [view]);
+  // Past matches, loaded the way the desktop page loads them (the app shell only keeps pending ones).
+  useEffect(() => {
+    if (!user?.id || view !== "history") return;
+    supabase.from("reimburse_settlements").select("id,entity,settled_at,settled_date,total_out,total_in").eq("user_id", user.id)
+      .order("settled_at", { ascending: false }).limit(60).then(({ data }) => setSettlements(data || []));
+  }, [user?.id, view]);
 
   const owed = useMemo(() => hitungPiutang(ledger).saldoTotal, [ledger]);
   // What is left = amount lent − repayments in the ledger (the rule calcNetWorth uses).
@@ -32,7 +40,7 @@ export default function MobileReceivables(props) {
     return { ...l, name: l.employee_name || "Loan", pays, paid, left: Math.max(0, Number(l.total_amount || 0) - paid) };
   }).sort((a, b) => b.left - a.left), [employeeLoans, ledger]);
   const loansLeft = loans.reduce((t, l) => t + l.left, 0);
-  const history = useMemo(() => [...reimburseSettlements].sort((a, b) => String(b.settled_at || b.settled_date || "").localeCompare(String(a.settled_at || a.settled_date || ""))).slice(0, 40), [reimburseSettlements]);
+  const history = settlements;
   const loan = openLoan && loans.find(l => l.id === openLoan);
 
   return (
