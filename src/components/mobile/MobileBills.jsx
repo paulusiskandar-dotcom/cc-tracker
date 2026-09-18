@@ -25,7 +25,7 @@ export default function MobileBills(props) {
 
   const bills = useMemo(() => { const b = buildBills({ ledger, creditCards, liabilities, recurTemplates, installments, reconSessions, actionable: true }); return { ...b, cicilan: nameInstalments(b.cicilan, ledger, installments) }; }, [ledger, creditCards, liabilities, recurTemplates, installments, reconSessions]);
   const groups = [["Cards", bills.cards], ["Bills", bills.rutinManual], ["Loans", bills.cicilan]];
-  const week = useMemo(() => groups.flatMap(g => g[1]).filter(i => i.dayLeft <= 7).sort((a, b) => a.when - b.when), [bills]); // eslint-disable-line react-hooks/exhaustive-deps
+  const week = useMemo(() => groups.flatMap(g => g[1]).filter(i => i.dayLeft <= 14).sort((a, b) => a.when - b.when), [bills]); // eslint-disable-line react-hooks/exhaustive-deps
   const piutang = useMemo(() => hitungPiutang(ledger), [ledger]);
   const entities = Object.entries(piutang.perEntity).filter(([k]) => k !== "?").sort((a, b) => b[1].saldo - a[1].saldo);
   // Remaining per loan = amount lent − repayments in the ledger (the rule calcNetWorth uses).
