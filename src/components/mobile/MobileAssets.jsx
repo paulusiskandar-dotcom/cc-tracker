@@ -21,7 +21,8 @@ export default function MobileAssets(props) {
   const value = a => Number(a.current_value || a.current_balance || 0) * (a.currency && a.currency !== "IDR" ? (fxRates[a.currency] || 1) : 1);
   const groups = useMemo(() => {
     const m = {};
-    assets.filter(a => a.is_active !== false).forEach(a => { const k = a.subtype || "Other"; (m[k] = m[k] || { name: k, total: 0, items: [] }); m[k].total += value(a); m[k].items.push(a); });
+    assets.filter(a => a.is_active !== false).forEach(a => { const raw = String(a.subtype || "Other").trim(); const k = raw.toLowerCase(); // "deposit" and "Deposit" are one group
+      (m[k] = m[k] || { name: raw.charAt(0).toUpperCase() + raw.slice(1), total: 0, items: [] }); m[k].total += value(a); m[k].items.push(a); });
     return Object.values(m).sort((a, b) => b.total - a.total).map((g, i) => ({ ...g, color: COLORS[Math.min(i, COLORS.length - 1)], items: g.items.sort((a, b) => value(b) - value(a)) }));
   }, [assets, fxRates]); // eslint-disable-line react-hooks/exhaustive-deps
   const total = groups.reduce((s, g) => s + g.total, 0);

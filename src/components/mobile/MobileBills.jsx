@@ -11,7 +11,10 @@ import "./mobile.css";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const lsGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
-const dueText = i => `${i.when.getDate()} ${MONTHS[i.when.getMonth()]} · ${i.dayLeft < 0 ? `${-i.dayLeft}d late` : i.dayLeft === 0 ? "today" : `${i.dayLeft}d`}`;
+// Instalments and loan payments are charged automatically on their date (there is no
+// "paid" check for them), so a past date means billed, not late.
+const isAuto = i => /^[il]/.test(String(i.id));
+const dueText = i => `${i.when.getDate()} ${MONTHS[i.when.getMonth()]} · ${i.dayLeft < 0 ? (isAuto(i) ? "billed" : `${-i.dayLeft}d late`) : i.dayLeft === 0 ? "today" : `${i.dayLeft}d`}`;
 
 export default function MobileBills(props) {
   const { ledger = [], creditCards = [], liabilities = [], recurTemplates = [], installments = [], employeeLoans = [], netWorth = {} } = props;
@@ -21,7 +24,7 @@ export default function MobileBills(props) {
 
   const bills = useMemo(() => buildBills({ ledger, creditCards, liabilities, recurTemplates, installments }), [ledger, creditCards, liabilities, recurTemplates, installments]);
   const groups = [["Cards", bills.cards], ["Installments", bills.cicilan], ["Recurring", bills.rutinManual], ["Subscriptions", bills.subs]];
-  const week = useMemo(() => groups.flatMap(g => g[1]).filter(i => i.dayLeft <= 7).sort((a, b) => a.when - b.when), [bills]); // eslint-disable-line react-hooks/exhaustive-deps
+  const week = useMemo(() => groups.flatMap(g => g[1]).filter(i => i.dayLeft <= 7 && !(isAuto(i) && i.dayLeft < 0)).sort((a, b) => a.when - b.when), [bills]); // eslint-disable-line react-hooks/exhaustive-deps
   const piutang = useMemo(() => hitungPiutang(ledger), [ledger]);
   const entities = Object.entries(piutang.perEntity).filter(([k]) => k !== "?").sort((a, b) => b[1].saldo - a[1].saldo);
   const activeLoans = employeeLoans.filter(l => l.status !== "settled").length;
@@ -111,7 +114,7 @@ function BillGroup({ title, items, total }) {
       <div className="mw-list">
         {items.map(i => (
           <div key={i.id} className="mw-row mw-tx">
-            <span className="mw-row-name">{i.name}<small className={i.dayLeft <= 3 ? "hot" : ""}>{dueText(i)}</small></span>
+            <span className="mw-row-name">{i.name}<small className={i.dayLeft <= 3 && !(isAuto(i) && i.dayLeft < 0) ? "hot" : ""}>{dueText(i)}</small></span>
             <span className="mw-row-amt">{i.known ? fmtIDR(i.amount) : "—"}</span>
           </div>
         ))}
