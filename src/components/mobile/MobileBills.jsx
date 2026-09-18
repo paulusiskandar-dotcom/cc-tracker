@@ -1,7 +1,7 @@
 // Mobile Bills (phones only): Bills · Reimburse · Match. The bill figures come from the
 // same buildBills() the desktop Bills page uses; receivables from src/lib/piutang.js.
 import { useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { fmtIDR } from "../../utils";
 import { hitungPiutang } from "../../lib/piutang";
 import { buildBills } from "../Billing";
@@ -20,7 +20,6 @@ const dueText = i => `${i.when.getDate()} ${MONTHS[i.when.getMonth()]} · ${i.da
 export default function MobileBills(props) {
   const { ledger = [], creditCards = [], liabilities = [], recurTemplates = [], installments = [], employeeLoans = [] } = props;
   const [view, setView] = useState(() => lsGet("m.bills.view") || "bills");
-  const [full, setFull] = useState(false);
   useEffect(() => { lsSet("m.bills.view", view); }, [view]);
 
   const bills = useMemo(() => { const b = buildBills({ ledger, creditCards, liabilities, recurTemplates, installments }); return { ...b, cicilan: nameInstalments(b.cicilan, ledger, installments) }; }, [ledger, creditCards, liabilities, recurTemplates, installments]);
@@ -33,18 +32,6 @@ export default function MobileBills(props) {
     const paid = ledger.filter(e => e.employee_loan_id === l.id && e.tx_type === "collect_loan").reduce((t, e) => t + Number(e.amount_idr || e.amount || 0), 0);
     return { id: l.id, name: l.employee_name || l.name || "Loan", left: Math.max(0, Number(l.total_amount || 0) - paid), monthly: Number(l.monthly_installment || 0) };
   }).filter(l => l.left > 0).sort((a, b) => b.left - a.left), [employeeLoans, ledger]);
-
-  if (full) {
-    return (
-      <div className={`mw${props.dark ? " dark" : ""}`}>
-        <div className="mw-hdr">
-          <button className="mw-round" onClick={() => setFull(false)} aria-label="Back"><ChevronLeft size={22} strokeWidth={1.8} /></button>
-          <h2>Receivables</h2>
-        </div>
-        <div className="mw-legacy"><Receivables {...props} mobile /></div>
-      </div>
-    );
-  }
 
   return (
     <div className={`mw${props.dark ? " dark" : ""}`}>
@@ -83,7 +70,7 @@ export default function MobileBills(props) {
               <div className="mw-label mw-label-row"><span>Employee loans</span><b>{fmtIDR(loans.reduce((t, l) => t + l.left, 0))}</b></div>
               <div className="mw-list">
                 {loans.map(l => (
-                  <button key={l.id} className="mw-row mw-tx" onClick={() => setFull(true)}>
+                  <button key={l.id} className="mw-row mw-tx" onClick={() => { lsSet("m.recv.view", "loans"); props.setTab && props.setTab("receivables"); }}>
                     <span className="mw-row-name">{l.name}{l.monthly > 0 && <small>{fmtIDR(l.monthly)} a month</small>}</span>
                     <span className="mw-row-amt">{fmtIDR(l.left)}</span>
                   </button>
