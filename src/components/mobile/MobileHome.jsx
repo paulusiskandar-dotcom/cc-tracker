@@ -5,6 +5,7 @@ import { ChevronRight, Search } from "lucide-react";
 import { fmtIDR } from "../../utils";
 import { hitungPiutang } from "../../lib/piutang";
 import { buildBills } from "../Billing";
+import { nameInstalments } from "./names";
 import "./mobile.css";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -16,7 +17,7 @@ export default function MobileHome({ ledger = [], accounts = [], creditCards = [
   const month = new Date().toISOString().slice(0, 7);
   const spent = useMemo(() => ledger.filter(e => String(e.tx_date || "").slice(0, 7) === month && isExpense(e)).reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0), [ledger, month]);
   const received = useMemo(() => ledger.filter(e => String(e.tx_date || "").slice(0, 7) === month && e.tx_type === "income").reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0), [ledger, month]);
-  const bills = useMemo(() => buildBills({ ledger, creditCards, liabilities, recurTemplates, installments }), [ledger, creditCards, liabilities, recurTemplates, installments]);
+  const bills = useMemo(() => { const b = buildBills({ ledger, creditCards, liabilities, recurTemplates, installments }); return { ...b, cicilan: nameInstalments(b.cicilan, ledger, installments) }; }, [ledger, creditCards, liabilities, recurTemplates, installments]);
   const week = useMemo(() => [...bills.cards, ...bills.cicilan, ...bills.rutinManual, ...bills.subs].filter(i => i.dayLeft <= 7 && !(isAuto(i) && i.dayLeft < 0)).sort((a, b) => a.when - b.when), [bills]);
   const weekSum = week.filter(i => i.known).reduce((s, i) => s + i.amount, 0);
   const owed = useMemo(() => hitungPiutang(ledger).saldoTotal, [ledger]);
@@ -42,7 +43,7 @@ export default function MobileHome({ ledger = [], accounts = [], creditCards = [
       <div className="mw-tiles">
         <button className="mw-tile mw-tap" onClick={() => go("transactions", "m.tx.view", "history")}>
           <div className="mw-tile-l">Spent in {MONTHS[now.getMonth()]}</div>
-          <div className="mw-tile-m">{fmtIDR(spent)}</div>
+          <div className="mw-tile-m mw-fit">{fmtIDR(spent)}</div>
           <div className="mw-tile-s">Received {fmtIDR(received)}</div>
         </button>
         <button className="mw-tile mw-tap" onClick={() => go("transactions", "m.tx.view", "inbox")}>

@@ -124,7 +124,7 @@ button.mw-row { cursor: pointer; }
 .mw-legacy { margin: 0 -8px; }
 
 .mw-label-row { display: flex; justify-content: space-between; align-items: baseline; }
-.mw-label-row b { font-size: 13px; letter-spacing: 0; color: var(--ink); font-variant-numeric: tabular-nums; }
+.mw-label-row b { font-size: 13px; letter-spacing: 0; text-transform: none; color: var(--ink); font-variant-numeric: tabular-nums; }
 .mw-row small.hot { color: var(--hot); }
 
 .mw-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
@@ -175,3 +175,5 @@ button.mw-row { cursor: pointer; }
 
 .mw-tap { display: block; width: 100%; text-align: left; border: 0; cursor: pointer; font: inherit; }
 .mw-tiles .mw-tap { height: 100%; }
+
+.mw-fit { font-size: 17px; white-space: nowrap; flex-wrap: nowrap; }
