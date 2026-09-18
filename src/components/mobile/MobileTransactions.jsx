@@ -43,7 +43,9 @@ export default function MobileTransactions(props) {
   const accName = useMemo(() => Object.fromEntries(accounts.map(a => [a.id, a.name])), [accounts]);
   const catName = useMemo(() => Object.fromEntries(categories.map(c => [c.id, c.name])), [categories]);
   const srcName = useMemo(() => Object.fromEntries(incomeSrcs.map(c => [c.id, c.name])), [incomeSrcs]);
-  const nameOfCat = e => e.category_name || catName[e.category_id] || "Uncategorized";
+  // Paying down a liability counts as money out (same as the Dashboard) but it is not an
+  // uncategorised purchase, so it gets its own name.
+  const nameOfCat = e => e.category_name || catName[e.category_id] || (e.tx_type === "pay_liability" ? "Loan repayment" : "Uncategorized");
 
   // A trip covers its own dates, so it replaces the month filter instead of narrowing it.
   const scope = useMemo(() => ledger.filter(e => (trip ? e.tag_id === trip : String(e.tx_date || "").slice(0, 7) === month)), [ledger, month, trip]);
