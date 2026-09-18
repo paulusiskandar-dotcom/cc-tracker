@@ -1,24 +1,13 @@
-// One way to show a transaction's amount on every phone list, by what kind of movement it is:
-//   income            + green        expense / loan payment   − red
-//   transfer, pay card, FX, asset and loan moves   ⇄ blue   (money changing pockets, not spent)
-//   reimburse out     ↻ amber  (fronted for someone)         reimburse in   ↺ teal (paid back)
-import { ArrowLeftRight, RotateCw, RotateCcw } from "lucide-react";
+// One way to show a transaction's amount on every phone list: colour only, no sign or icon
+// (Paulus, 19 Sep 2026 — simpler to read):
+//   income green · expense and loan payments red · reimburse (out or in) orange ·
+//   transfers, card payments, FX, asset and loan moves blue (money changing pockets).
 import { fmtIDR } from "../../utils";
 
-const KIND = {
-  income: "in", expense: "out", pay_liability: "out",
-  reimburse_out: "rout", reimburse_in: "rin",
-};
+const KIND = { income: "in", expense: "out", pay_liability: "out", reimburse_out: "re", reimburse_in: "re" };
 export const kindOf = e => KIND[e.tx_type] || "move";
 
-export default function Amt({ e, value }) {
-  const k = kindOf(e); const v = fmtIDR(value ?? (e.amount_idr || e.amount));
-  return (
-    <span className={`mw-row-amt mw-amt-${k}`}>
-      {k === "move" && <ArrowLeftRight size={14} strokeWidth={2} aria-label="Transfer" />}
-      {k === "rout" && <RotateCw size={14} strokeWidth={2} aria-label="Reimburse out" />}
-      {k === "rin" && <RotateCcw size={14} strokeWidth={2} aria-label="Reimburse in" />}
-      {k === "in" ? "+" : k === "out" ? "−" : ""}{v}
-    </span>
-  );
+// `text` lets a caller supply an already formatted amount (a foreign-currency statement).
+export default function Amt({ e, value, text }) {
+  return <span className={`mw-row-amt mw-amt-${kindOf(e)}`}>{text ?? fmtIDR(value ?? (e.amount_idr || e.amount))}</span>;
 }

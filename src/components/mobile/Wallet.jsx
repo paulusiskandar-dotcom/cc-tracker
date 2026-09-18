@@ -406,7 +406,7 @@ function MonthByCategory({ txs, cardId }) {
             <div key={g.name}>
               <button className="mw-row" onClick={() => setOpenCat(openCat === g.name ? null : g.name)} aria-expanded={openCat === g.name}>
                 <span className="mw-row-name">{g.name}<small>{g.items.length} transaction{g.items.length === 1 ? "" : "s"}</small></span>
-                <span className={`mw-row-amt${g.pay ? " in" : ""}`}>{g.pay ? "+" : ""}{fmtIDR(g.total)}</span>
+                <span className={`mw-row-amt${g.pay ? " in" : ""}`}>{fmtIDR(g.total)}</span>
               </button>
               {openCat === g.name && (
                 <div className="mw-sub">

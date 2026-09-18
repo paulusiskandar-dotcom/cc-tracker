@@ -219,9 +219,7 @@ button.mw-row { cursor: pointer; }
 .mw-dock-act .mw-btn { margin-top: 0; height: 44px; }
 
 /* Amount by kind of movement (Amt.jsx) */
-.mw-row-amt[class*="mw-amt-"] { display: inline-flex; align-items: center; gap: 5px; }
-.mw-amt-in { color: var(--good); } .mw-amt-out { color: var(--hot); } .mw-amt-move { color: var(--accent); }
-.mw-amt-rout { color: var(--amber); } .mw-amt-rin { color: var(--teal); }
+.mw-amt-in { color: var(--good); } .mw-amt-out { color: var(--hot); } .mw-amt-move { color: var(--accent); } .mw-amt-re { color: var(--amber); }
 .mw-tile-n .mw-row-amt { font-size: inherit; font-weight: inherit; text-align: left; }
 
 /* ── Reports ───────────────────────────────────────────────────────────── */

@@ -8,6 +8,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { fmtIDR, fmtCurNative } from "../../utils";
 import { nativeAmt } from "../BankStatement";
 import TxVerticalBig from "../shared/TxVerticalBig";
+import Amt from "./Amt";
 import "./mobile.css";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -67,10 +68,10 @@ export default function MobileStatement({ onFull, ...props }) {
         <div key={d.date}>
           <div className="mw-label">{fmtDay(d.date)}</div>
           <div className="mw-list">
-            {d.items.map(({ e, into, v }) => (
+            {d.items.map(({ e, v }) => (
               <button key={e.id} className="mw-row mw-tx" onClick={() => setEdit(e)}>
                 <span className="mw-row-name">{e.notes && !/^imported from/i.test(e.notes) ? e.notes : (e.description || e.merchant_name || e.tx_type)}</span>
-                <span className="mw-row-amt" style={into ? { color: "var(--good)" } : undefined}>{into ? "+" : "−"}{money(v)}</span>
+                <Amt e={e} text={money(v)} />
               </button>
             ))}
           </div>
