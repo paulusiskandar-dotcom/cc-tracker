@@ -39,7 +39,7 @@ export default function MobileBills(props) {
 
   if (full) {
     return (
-      <div className="mw">
+      <div className={`mw${props.dark ? " dark" : ""}`}>
         <div className="mw-hdr">
           <button className="mw-round" onClick={() => setFull(false)} aria-label="Back"><ChevronLeft size={22} strokeWidth={1.8} /></button>
           <h2>Receivables</h2>
@@ -50,7 +50,7 @@ export default function MobileBills(props) {
   }
 
   return (
-    <div className="mw">
+    <div className={`mw${props.dark ? " dark" : ""}`}>
       <div className="mw-hdr"><h1>Bills</h1></div>
       <div className="mw-seg" role="tablist">
         {[["bills", "Bills"], ["reimburse", "Reimburse"], ["match", "Match"]].map(([id, label]) => (

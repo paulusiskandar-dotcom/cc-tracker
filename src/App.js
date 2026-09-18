@@ -3,7 +3,7 @@ import { BrowserRouter, Routes, Route, useNavigate, useLocation } from "react-ro
 import {
   Home, ArrowUpDown, Landmark, Wallet, CreditCard,
   TrendingUp, ClipboardList, ArrowDown, BarChart2,
-  Calendar as CalendarIcon, Settings as SettingsIcon, LayoutGrid, Plane,
+  Calendar as CalendarIcon, Settings as SettingsIcon, LayoutGrid, Sun, Moon, Plane,
   ClipboardCheck, PiggyBank, Tag, Receipt,
 } from "lucide-react";
 import PILogo from "./components/PILogo";
@@ -439,7 +439,7 @@ function Finance({ user, signOut }) {
 
   const EXTRA_LABELS = { scan: "AI Scan", aiimport: "AI Scan", email: "Email", notifications: "Notifications" };
   // Phone-only screens bring their own large title, so the top bar steps aside there.
-  const walletProps = { user, accounts, ledger, fxRates, installments, setTab: goTab, onSearch: () => setSearchOpen(true), onRefresh: loadData };
+  const walletProps = { user, accounts, ledger, fxRates, installments, dark: isDark, setTab: goTab, onSearch: () => setSearchOpen(true), onRefresh: loadData };
   const mobileOwnsHeader = isMobile && onMainPage && ["cards", "bank", "cash", "transactions", "billing", "assets"].includes(tab);
   const pageLabel = !onMainPage
     ? "Statement"
@@ -478,7 +478,7 @@ function Finance({ user, signOut }) {
   };
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "#f8f9fb" }}>
+    <div style={{ display: "flex", minHeight: "100vh", background: isMobile && isDark && mobileOwnsHeader ? "#0b0d12" : "#f8f9fb" }}>
 
       {/* ── SIDEBAR (desktop) ── */}
       <aside
@@ -602,15 +602,15 @@ function Finance({ user, signOut }) {
       </div>
 
       {/* ── MOBILE BOTTOM NAV ── */}
-      <nav className="mobile-nav" style={S.mobileNav}>
+      <nav className="mobile-nav" style={{ ...S.mobileNav, ...(isDark ? S.mobileNavDark : {}) }}>
         {MOBILE_MAIN_TABS.map(id => {
           const t      = TABS.find(s => s.id === id);
           const active = tab === id && onMainPage;
           return (
             <button key={id} onClick={() => { goTab(id); setShowMore(false); }} style={{
               ...S.mobileNavBtn,
-              ...(active ? S.mobileNavOn : {}),
-              color: active ? "#111827" : "#6b7280",
+              ...(active ? (isDark ? S.mobileNavOnDark : S.mobileNavOn) : {}),
+              color: isDark ? (active ? "#f3f4f6" : "#aab1bd") : (active ? "#111827" : "#4b5563"),
             }}>
               <NAV_ICON id={id} />
               <span style={{ fontSize: 9, fontWeight: active ? 700 : 500 }}>{MOBILE_TAB_LABELS[id] || t?.label}</span>
@@ -619,8 +619,8 @@ function Finance({ user, signOut }) {
         })}
         <button onClick={() => setShowMore(s => !s)} style={{
           ...S.mobileNavBtn,
-          ...(showMore ? S.mobileNavOn : {}),
-          color: showMore ? "#111827" : "#6b7280",
+          ...(showMore ? (isDark ? S.mobileNavOnDark : S.mobileNavOn) : {}),
+          color: isDark ? (showMore ? "#f3f4f6" : "#aab1bd") : (showMore ? "#111827" : "#4b5563"),
         }}>
           <NAV_ICON id="more" />
           <span style={{ fontSize: 9, fontWeight: showMore ? 700 : 500 }}>More</span>
@@ -634,7 +634,7 @@ function Finance({ user, signOut }) {
             onClick={() => setShowMore(false)}
             style={{ position: "fixed", inset: 0, zIndex: 195, background: "rgba(0,0,0,0.3)" }}
           />
-          <div style={S.moreDrawer}>
+          <div style={{ ...S.moreDrawer, ...(isDark ? { background: "rgba(24,28,37,0.92)", border: "1px solid rgba(255,255,255,0.1)" } : {}) }}>
             <div style={{
               display:             "grid",
               gridTemplateColumns: "repeat(3, 1fr)",
@@ -648,9 +648,9 @@ function Finance({ user, signOut }) {
                     onClick={() => { goTab(t.id); setShowMore(false); }}
                     style={{
                       ...S.moreBtn,
-                      border:     `1.5px solid ${active ? "#3b5bdb" : "#e5e7eb"}`,
-                      background: active ? "#dbeafe" : "#ffffff",
-                      color:      active ? "#3b5bdb" : "#374151",
+                      border:     `1.5px solid ${active ? "#3b5bdb" : isDark ? "#2a2f3a" : "#e5e7eb"}`,
+                      background: active ? (isDark ? "#1e2a4a" : "#dbeafe") : isDark ? "#1e232d" : "#ffffff",
+                      color:      active ? (isDark ? "#8da2fb" : "#3b5bdb") : isDark ? "#d1d5db" : "#374151",
                       fontWeight: active ? 700 : 500,
                       display: "flex", flexDirection: "column",
                       alignItems: "center", gap: 4,
@@ -661,6 +661,13 @@ function Finance({ user, signOut }) {
                   </button>
                 );
               })}
+              <button onClick={() => setIsDark(d => !d)} style={{
+                ...S.moreBtn, border: `1.5px solid ${isDark ? "#2a2f3a" : "#e5e7eb"}`, background: isDark ? "#1e232d" : "#ffffff",
+                color: isDark ? "#d1d5db" : "#374151", fontWeight: 500, display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+              }}>
+                {isDark ? <Sun {...LUCIDE_PROPS} /> : <Moon {...LUCIDE_PROPS} />}
+                {isDark ? "Light mode" : "Dark mode"}
+              </button>
             </div>
           </div>
         </>
@@ -942,7 +949,7 @@ const S = {
     padding:        4,
     boxSizing:      "border-box",
     borderRadius:   31,
-    background:     "rgba(255,255,255,0.58)",
+    background:     "rgba(255,255,255,0.68)",
     backdropFilter:       "blur(24px) saturate(180%)",
     WebkitBackdropFilter: "blur(24px) saturate(180%)",
     border:         "1px solid rgba(255,255,255,0.75)",
@@ -965,6 +972,13 @@ const S = {
     transition:     "color 0.15s, background 0.2s",
     fontFamily:     "Figtree, sans-serif",
   },
+
+  mobileNavDark: {
+    background: "rgba(24,28,37,0.62)",
+    border:     "1px solid rgba(255,255,255,0.12)",
+    boxShadow:  "0 10px 30px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.08)",
+  },
+  mobileNavOnDark: { background: "rgba(255,255,255,0.14)", boxShadow: "inset 0 1px 0 rgba(255,255,255,0.12)" },
 
   // The selected tab sits in a clearer "lens" inside the glass bar.
   mobileNavOn: {

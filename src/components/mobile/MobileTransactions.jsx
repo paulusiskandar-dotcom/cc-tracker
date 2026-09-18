@@ -9,7 +9,7 @@ import Transactions from "../Transactions";
 import "./mobile.css";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const COLORS = ["#111827", "#3b5bdb", "#059669", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#9ca3af"];
+const COLORS = ["var(--ink)", "#3b5bdb", "#059669", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#9ca3af"];
 const fmtDate = s => { if (!s) return ""; const d = new Date(`${String(s).slice(0, 10)}T00:00:00`); return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`; };
 const monthLabel = m => `${MONTHS[Number(m.slice(5, 7)) - 1]} ${m.slice(0, 4)}`;
 const shiftMonth = (m, by) => { const d = new Date(Number(m.slice(0, 4)), Number(m.slice(5, 7)) - 1 + by, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
@@ -62,7 +62,7 @@ export default function MobileTransactions(props) {
 
   if (full) {
     return (
-      <div className="mw">
+      <div className={`mw${props.dark ? " dark" : ""}`}>
         <div className="mw-hdr">
           <button className="mw-round" onClick={() => { setFull(false); setAddSignal(0); }} aria-label="Back"><ChevronLeft size={22} strokeWidth={1.8} /></button>
           <h2>All transactions</h2>
@@ -73,7 +73,7 @@ export default function MobileTransactions(props) {
   }
 
   return (
-    <div className="mw">
+    <div className={`mw${props.dark ? " dark" : ""}`}>
       <div className="mw-hdr">
         <h1>Transactions</h1>
         {onSearch && <button className="mw-round" onClick={onSearch} aria-label="Search"><Search size={20} strokeWidth={1.8} /></button>}
@@ -167,7 +167,7 @@ export function Donut({ cats, total, label }) {
   return (
     <div className="mw-donut">
       <svg viewBox="0 0 140 140" aria-hidden="true">
-        <circle cx="70" cy="70" r={R} fill="none" stroke="#eceef2" strokeWidth="14" />
+        <circle cx="70" cy="70" r={R} fill="none" stroke="var(--sunk)" strokeWidth="14" />
         {total > 0 && cats.map(c => {
           const len = Math.max(0, (c.total / total) * C - 1.5);
           const el = <circle key={c.name} cx="70" cy="70" r={R} fill="none" stroke={c.color} strokeWidth="14" strokeDasharray={`${len} ${C - len}`} strokeDashoffset={-off} transform="rotate(-90 70 70)" />;

@@ -8,7 +8,7 @@ import Assets from "../Assets";
 import { Donut } from "./MobileTransactions";
 import "./mobile.css";
 
-const COLORS = ["#111827", "#3b5bdb", "#059669", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#9ca3af"];
+const COLORS = ["var(--ink)", "#3b5bdb", "#059669", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#9ca3af"];
 const lsGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
 
@@ -36,7 +36,7 @@ export default function MobileAssets(props) {
 
   if (full) {
     return (
-      <div className="mw">
+      <div className={`mw${props.dark ? " dark" : ""}`}>
         <div className="mw-hdr">
           <button className="mw-round" onClick={() => setFull(false)} aria-label="Back"><ChevronLeft size={22} strokeWidth={1.8} /></button>
           <h2>Manage assets</h2>
@@ -61,7 +61,7 @@ export default function MobileAssets(props) {
   const series = [...snaps.filter(p => p.month !== curMonth), { month: curMonth, total: netWorth.total }].filter(p => Number.isFinite(Number(p.total)));
 
   return (
-    <div className="mw">
+    <div className={`mw${props.dark ? " dark" : ""}`}>
       <div className="mw-hdr"><h1>Assets</h1></div>
       <div className="mw-seg" role="tablist">
         <button role="tab" aria-selected={view === "assets"} className={view === "assets" ? "on" : ""} onClick={() => setView("assets")}>Assets</button>
@@ -130,10 +130,10 @@ function Trend({ series }) {
   const last = pts.length - 1;
   return (
     <svg className="mw-trend" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Net worth by month">
-      <path d={`${line} L${x(last)} ${H - B} L${x(0)} ${H - B} Z`} fill="#3b5bdb" opacity="0.1" />
-      <path d={line} fill="none" stroke="#3b5bdb" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
-      <circle cx={x(last)} cy={y(vals[last])} r="4" fill="#3b5bdb" />
-      {pts.map((p, i) => (pts.length <= 6 || i % 2 === last % 2) && <text key={p.month} x={x(i)} y={H - 5} textAnchor={i === 0 ? "start" : i === last ? "end" : "middle"} fontSize="10.5" fill="#9ca3af">{MONTHS[Number(p.month.slice(5, 7)) - 1]}</text>)}
+      <path d={`${line} L${x(last)} ${H - B} L${x(0)} ${H - B} Z`} fill="var(--accent)" opacity="0.12" />
+      <path d={line} fill="none" stroke="var(--accent)" strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={x(last)} cy={y(vals[last])} r="4" fill="var(--accent)" />
+      {pts.map((p, i) => (pts.length <= 6 || i % 2 === last % 2) && <text key={p.month} x={x(i)} y={H - 5} textAnchor={i === 0 ? "start" : i === last ? "end" : "middle"} fontSize="10.5" fill="var(--faint)">{MONTHS[Number(p.month.slice(5, 7)) - 1]}</text>)}
     </svg>
   );
 }

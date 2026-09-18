@@ -48,7 +48,7 @@ const EASE_LIFT = "cubic-bezier(0.3, 1.18, 0.4, 1)"; // the lifted card overshoo
 const FLY_MS = 560;
 const SEGMENTS = [["credit", "Credit"], ["bank", "Bank"], ["cash", "Cash"]];
 
-export default function Wallet({ user, accounts = [], ledger = [], fxRates = {}, initialSegment = "credit", setTab, onSearch, onRefresh, installments = [] }) {
+export default function Wallet({ user, accounts = [], ledger = [], fxRates = {}, initialSegment = "credit", setTab, onSearch, onRefresh, installments = [], dark = false }) {
   const navigate = useNavigate();
   const [seg, setSeg] = useState(() => lsGet("m.wallet.seg") || initialSegment);
   // Opening a card moves the REAL cards in the stack, the way Apple Wallet does: the tapped
@@ -94,17 +94,27 @@ export default function Wallet({ user, accounts = [], ledger = [], fxRates = {},
       groups[g].debt += Number(c.outstanding_amount || 0); groups[g].cr += Number(c.current_balance || 0);
       if (c.is_limit_group_master || !groups[g].limit) groups[g].limit = Number(c.shared_limit || 0) || groups[g].limit;
     });
+    // Instalment months not billed yet still hold the limit at the bank. The card's balance
+    // only carries what has been billed, so the rest is taken off Available here (same
+    // split calcNetWorth uses, so nothing is counted twice).
+    const held = {};
+    installments.filter(i => i.status === "active").forEach(i => {
+      const cid = i.account_id || i.cc_account_id; if (!cid) return;
+      held[cid] = (held[cid] || 0) + Math.max(0, Number(i.total_months || 0) - Number(i.paid_months || 0)) * Number(i.monthly_amount || 0);
+    });
+    cc.forEach(c => { const g = c.shared_limit_group_id; if (g && groups[g]) groups[g].held = (groups[g].held || 0) + (held[c.id] || 0); });
     const rows = cc.map(c => {
       const rate = fxRates[c.currency] || 1;
       const debt = Number(c.outstanding_amount || 0) * rate;
       const g = c.shared_limit_group_id && groups[c.shared_limit_group_id];
       const limit = g ? g.limit * rate : Number(c.card_limit || 0) * rate;
-      const avail = limit > 0 ? Math.max(0, g ? (g.limit - g.debt + g.cr) * rate : limit - debt + Number(c.current_balance || 0) * rate) : null;
+      const heldHere = (g ? g.held || 0 : held[c.id] || 0) * rate;
+      const avail = limit > 0 ? Math.max(0, (g ? (g.limit - g.debt + g.cr) * rate : limit - debt + Number(c.current_balance || 0) * rate) - heldHere) : null;
       const kat = catalog.byAccount[c.id];
-      return { ...c, debt, limit, avail, due: nextDue(c.due_day), kat, img: c.card_image_url || (kat ? `/cards/${slug(kat)}.jpg` : null), ratio: kat ? catalog.ratio[kat] : null };
+      return { ...c, debt, limit, avail, held: heldHere, due: nextDue(c.due_day), kat, img: c.card_image_url || (kat ? `/cards/${slug(kat)}.jpg` : null), ratio: kat ? catalog.ratio[kat] : null };
     });
     return rows.sort((a, b) => b.debt - a.debt); // largest balance on top
-  }, [active, fxRates, catalog]);
+  }, [active, fxRates, catalog, installments]);
 
   // Rupiah accounts first, then foreign ones; each group by rupiah value, largest on top.
   const banks = useMemo(() => active.filter(a => a.type === "bank" && a.subtype !== "cash" && a.subtype !== "reimburse")
@@ -190,7 +200,7 @@ export default function Wallet({ user, accounts = [], ledger = [], fxRates = {},
   };
 
   return (
-    <div className={`mw${open && phase !== "closing" ? " mw-behind" : ""}`}>
+    <div className={`mw${dark ? " dark" : ""}${open && phase !== "closing" ? " mw-behind" : ""}`}>
       {open && <CardSheet card={open} phase={phase} txs={txByCard[open.id] || []} plans={plansByCard[open.id] || []} onPlaced={flyUp} onClose={flyDown} navigate={navigate} setTab={setTab} onRefresh={onRefresh} />}
       <div className="mw-hdr">
         <h1>Wallet</h1>
@@ -306,7 +316,7 @@ function CardSheet({ card, phase, txs, plans = [], onPlaced, onClose, navigate, 
                 <div className="mw-tile-l">Available</div>
                 <div className="mw-tile-n">{fmtIDR(card.avail)}</div>
                 <div className="mw-bar"><i style={{ width: `${Math.min(100, (used / card.limit) * 100)}%` }} /></div>
-                <div className="mw-tile-s">Used {fmtIDR(used)} of {fmtIDR(card.limit)}</div>
+                <div className="mw-tile-s">Used {fmtIDR(used)} of {fmtIDR(card.limit)}{card.held > 0 ? ` · ${fmtIDR(card.held)} held by installments` : ""}</div>
               </div>
             )}
             {card.avail == null && <div className="mw-tile"><div className="mw-tile-l">Balance</div><div className="mw-tile-n">{fmtIDR(card.debt)}</div></div>}
