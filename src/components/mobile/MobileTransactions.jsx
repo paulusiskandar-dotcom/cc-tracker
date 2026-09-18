@@ -6,6 +6,7 @@ import { ChevronLeft, ChevronRight, Plus, Search, X } from "lucide-react";
 import { tagsApi } from "../../api";
 import { fmtIDR, fmtCurNative } from "../../utils";
 import Transactions from "../Transactions";
+import TxVerticalBig from "../shared/TxVerticalBig";
 import "./mobile.css";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -25,7 +26,11 @@ export default function MobileTransactions(props) {
   const { user, ledger = [], accounts = [], categories = [], incomeSrcs = [], pendingSyncs = [], openEmail, onSearch } = props;
   const [view, setView] = useState(() => lsGet("m.tx.view") || "history");   // history | inbox
   const [full, setFull] = useState(false);                                     // the existing full page
-  const [addSignal, setAddSignal] = useState(0);
+  const [legacy, setLegacy] = useState(false);                                 // desktop list: filters, split, bulk
+  const [txModal, setTxModal] = useState({ open: false, mode: "add", entry: null }); // the app's own add/edit form
+  const [q, setQ] = useState("");
+  const [limit, setLimit] = useState(60);
+  const [tags, setTags] = useState([]);
   const [kind, setKind] = useState("expense");
   const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [trip, setTrip] = useState(null);
@@ -37,7 +42,7 @@ export default function MobileTransactions(props) {
   useEffect(() => { lsSet("m.tx.view", view); }, [view]);
   useEffect(() => {
     if (!user?.id) return;
-    tagsApi.list(user.id, { status: "active" }).then(t => setTrips((t || []).filter(x => x.type === "trip"))).catch(() => {});
+    tagsApi.list(user.id, { status: "active" }).then(t => { setTags(t || []); setTrips((t || []).filter(x => x.type === "trip")); }).catch(() => {});
   }, [user?.id]);
 
   const accName = useMemo(() => Object.fromEntries(accounts.map(a => [a.id, a.name])), [accounts]);
@@ -60,14 +65,74 @@ export default function MobileTransactions(props) {
 
   const recent = useMemo(() => [...scope].sort((a, b) => String(b.tx_date).localeCompare(String(a.tx_date)) || String(b.created_at || "").localeCompare(String(a.created_at || ""))).slice(0, 10), [scope]);
 
-  if (full) {
+  const modal = (
+    <TxVerticalBig open={txModal.open} mode={txModal.mode} initialData={txModal.entry} onSave={() => {}} onDelete={() => {}}
+      onClose={() => setTxModal({ open: false, mode: "add", entry: null })}
+      user={user} accounts={accounts} setLedger={props.setLedger} categories={categories} fxRates={props.fxRates} allCurrencies={props.CURRENCIES || []}
+      bankAccounts={props.bankAccounts} creditCards={props.creditCards} assets={props.assets} liabilities={props.liabilities} receivables={props.receivables}
+      incomeSrcs={incomeSrcs} employeeLoans={props.employeeLoans} setEmployeeLoans={props.setEmployeeLoans} recurTemplates={props.recurTemplates}
+      tags={tags} setReminders={props.setReminders} onRefresh={props.onRefresh} />
+  );
+  const detailSheet = detail && <TxDetail e={detail} accName={accName} category={nameOfCat(detail)} trips={trips} onClose={() => setDetail(null)}
+    onEdit={() => { const e = detail; setDetail(null); setTxModal({ open: true, mode: "edit", entry: e }); }} />;
+
+  if (legacy) {
     return (
       <div className={`mw${props.dark ? " dark" : ""}`}>
         <div className="mw-hdr">
-          <button className="mw-round" onClick={() => { setFull(false); setAddSignal(0); }} aria-label="Back"><ChevronLeft size={22} strokeWidth={1.8} /></button>
-          <h2>All transactions</h2>
+          <button className="mw-round" onClick={() => setLegacy(false)} aria-label="Back"><ChevronLeft size={22} strokeWidth={1.8} /></button>
+          <h2>Filters and bulk actions</h2>
         </div>
-        <div className="mw-legacy"><Transactions {...props} txAddSignal={addSignal} /></div>
+        <div className="mw-legacy"><Transactions {...props} /></div>
+      </div>
+    );
+  }
+
+  if (full) {
+    const needle = q.trim().toLowerCase();
+    const pool = needle
+      ? ledger.filter(e => `${e.description || ""} ${e.merchant_name || ""} ${e.notes || ""} ${nameOfCat(e)} ${accName[e.from_id] || ""} ${accName[e.to_id] || ""} ${Math.round(amt(e))}`.toLowerCase().includes(needle))
+      : scope;
+    const sorted = [...pool].sort((a, b) => String(b.tx_date).localeCompare(String(a.tx_date)) || String(b.created_at || "").localeCompare(String(a.created_at || "")));
+    const shown = sorted.slice(0, limit);
+    const days = []; shown.forEach(e => { const last = days[days.length - 1]; if (last && last.date === e.tx_date) last.items.push(e); else days.push({ date: e.tx_date, items: [e] }); });
+    return (
+      <div className={`mw${props.dark ? " dark" : ""}`}>
+        <div className="mw-hdr">
+          <button className="mw-round" onClick={() => { setFull(false); setQ(""); setLimit(60); }} aria-label="Back"><ChevronLeft size={22} strokeWidth={1.8} /></button>
+          <h2>All transactions</h2>
+          <button className="mw-round" onClick={() => setTxModal({ open: true, mode: "add", entry: null })} aria-label="Add transaction"><Plus size={22} strokeWidth={1.8} /></button>
+        </div>
+        <div className="mw-search"><Search size={18} /><input id="m-tx-search" value={q} onChange={e => { setQ(e.target.value); setLimit(60); }} placeholder="Search every month" aria-label="Search transactions" />{q && <button onClick={() => setQ("")} aria-label="Clear"><X size={16} /></button>}</div>
+        {!needle && (
+          <div className="mw-bar2">
+            <div className="mw-month">
+              <button onClick={() => { setTrip(null); setMonth(m => shiftMonth(m, -1)); setLimit(60); }} aria-label="Previous month"><ChevronLeft size={18} /></button>
+              <span>{trip ? trips.find(t => t.id === trip)?.name : monthLabel(month)}</span>
+              <button onClick={() => { setTrip(null); setMonth(m => shiftMonth(m, 1)); setLimit(60); }} aria-label="Next month"><ChevronRight size={18} /></button>
+            </div>
+          </div>
+        )}
+        {days.map(d => (
+          <div key={d.date}>
+            <div className="mw-label">{fmtDate(d.date)}</div>
+            <div className="mw-list">
+              {d.items.map(e => {
+                const inc = e.tx_type === "income" || e.tx_type === "reimburse_in";
+                return (
+                  <button key={e.id} className="mw-row mw-tx" onClick={() => setDetail(e)}>
+                    <span className="mw-row-name">{e.description || e.merchant_name || e.tx_type}</span>
+                    <span className={`mw-row-amt${inc ? " in" : ""}`}>{inc ? "+" : ""}{fmtIDR(amt(e))}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+        {!sorted.length && <div className="mw-empty">{needle ? "Nothing matches." : "No transactions."}</div>}
+        {sorted.length > shown.length && <div className="mw-list mw-gap"><button className="mw-row mw-showall" onClick={() => setLimit(l => l + 100)}>Show more ({sorted.length - shown.length} left)</button></div>}
+        <div className="mw-list mw-gap"><button className="mw-row mw-showall" onClick={() => setLegacy(true)}>Filters, split and bulk actions</button></div>
+        {detailSheet}{modal}
       </div>
     );
   }
@@ -77,7 +142,7 @@ export default function MobileTransactions(props) {
       <div className="mw-hdr">
         <h1>Transactions</h1>
         {onSearch && <button className="mw-round" onClick={onSearch} aria-label="Search"><Search size={20} strokeWidth={1.8} /></button>}
-        <button className="mw-round" onClick={() => { setAddSignal(s => s + 1); setFull(true); }} aria-label="Add transaction"><Plus size={22} strokeWidth={1.8} /></button>
+        <button className="mw-round" onClick={() => setTxModal({ open: true, mode: "add", entry: null })} aria-label="Add transaction"><Plus size={22} strokeWidth={1.8} /></button>
       </div>
 
       <div className="mw-seg" role="tablist">
@@ -156,7 +221,7 @@ export default function MobileTransactions(props) {
         </>
       )}
 
-      {detail && <TxDetail e={detail} accName={accName} category={nameOfCat(detail)} trips={trips} onClose={() => setDetail(null)} onEdit={() => { setDetail(null); setFull(true); }} />}
+      {detailSheet}{modal}
     </div>
   );
 }
@@ -221,7 +286,7 @@ function TxDetail({ e, accName, category, trips, onClose, onEdit }) {
         <div className="mw-list mw-gap mw-list-sunk">
           {rowsOut.map(([k, v]) => <div key={k} className="mw-row mw-kv"><span className="mw-row-name">{k}</span><span className="mw-row-amt mw-wrap">{v}</span></div>)}
         </div>
-        <button className="mw-btn" onClick={onEdit}>Edit in All transactions</button>
+        <button className="mw-btn" onClick={onEdit}>Edit</button>
       </div>
     </div>
   );

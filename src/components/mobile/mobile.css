@@ -109,7 +109,7 @@ button.mw-row { cursor: pointer; }
 .mw-sub .mw-row-name, .mw-sub .mw-row-amt { font-size: 14px; }
 .mw-sub .mw-row-amt { font-weight: 500; }
 .mw-more { padding: 8px 16px 12px 36px; font-size: 12.5px; color: var(--muted); }
-.mw-showall { justify-content: center; font-size: 14px; font-weight: 600; color: var(--accent); }
+.mw .mw-showall { justify-content: center; font-size: 14px; font-weight: 600; color: var(--accent); }
 .mw-wrap { flex: 1 1 60%; white-space: normal; font-weight: 500; text-transform: none; }
 .mw-kv .mw-wrap::first-letter { text-transform: uppercase; }
 
@@ -161,3 +161,8 @@ button.mw-row { cursor: pointer; }
 .mw-note { margin-top: 14px; padding: 12px 14px; border-radius: 12px; background: var(--sunk); font-size: 13px; line-height: 1.45; color: var(--muted); }
 .mw-note-warn { color: #92400e; background: #fef3c7; }
 .mw.dark .mw-note-warn { color: #fcd34d; background: #3a2e12; }
+
+.mw-search { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 12px; margin: 0 0 12px; border-radius: 12px; background: var(--card); color: var(--faint); }
+.mw-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: 0; background: none; font: inherit; font-size: 16px; color: var(--ink); }
+.mw-search:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mw-search button { width: 28px; height: 28px; border: 0; border-radius: 50%; background: var(--sunk); display: flex; align-items: center; justify-content: center; color: var(--muted); cursor: pointer; }
