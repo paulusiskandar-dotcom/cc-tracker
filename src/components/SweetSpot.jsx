@@ -93,6 +93,7 @@ async function fetchAll(table, build) {
 
 export default function SweetSpot({ user, ledger = [], accounts = [] }) {
   const [tab, setTab] = useState("compare");
+  const [showFilters, setShowFilters] = useState(false); // phones: promo filters start folded
   const [prog, setProg] = useState("krisflyer");
   const [spend, setSpend] = useState("e:everyday");
   const [data, setData] = useState(null);
@@ -255,7 +256,8 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
       {tab === "promo" && (
         <section className="ss-view">
           <div className="ss-head"><div><h2>Promos</h2><div className="ss-sub">Start narrow: credit card promos from banks you hold, in the kinds of spending you care about. Hide anything you will never use.</div></div></div>
-          <div className="ss-filterbar">
+          <button type="button" className="ss-filtertoggle" aria-expanded={showFilters} onClick={() => setShowFilters(v => !v)}>{showFilters ? "Hide filters" : "Filters"}</button>
+          <div className={`ss-filterbar${showFilters ? "" : " is-collapsed"}`}>
             <div className="ss-frow"><span className="ss-label" id="ss-scope-l">Show</span>
               <Seg labelledBy="ss-scope-l" items={[["mine", "My cards"], ["all", "Everything"]]} value={scope} onChange={setScope} /></div>
             <div className="ss-frow"><span className="ss-label" id="ss-int-l">Interested in</span>
@@ -265,7 +267,7 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
                     onClick={() => savePrefs({ ...prefs, interests: prefs.interests.includes(v) ? prefs.interests.filter(x => x !== v) : [...prefs.interests, v] })}>{l}</button>
                 ))}
               </div></div>
-            <div className="ss-frow"><span className="ss-label"><label htmlFor="ss-q">Search</label></span>
+            <div className="ss-frow ss-searchrow"><span className="ss-label"><label htmlFor="ss-q">Search</label></span>
               <input id="ss-q" className="ss-input" type="search" placeholder="Merchant, benefit or card" value={q}
                 onChange={e => { setQ(e.target.value); setLimit(40); }} /></div>
             <div className="ss-frow"><span className="ss-label">Also</span>
@@ -832,7 +834,30 @@ const CSS = `
   .ss-spendgroup > *{flex:none}
   .ss-cards{border:0}
   .ss-cardrow{border-top-color:var(--sunk)}
+  /* card rows: name takes the room and truncates; the figure stacks (number over its unit) */
+  .ss-cardbtn{grid-template-columns:auto minmax(0,1fr) auto auto;gap:10px;padding:12px}
+  .ss-cname,.ss-cname small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ss-verdict{white-space:nowrap}
+  .ss-rate{flex-direction:column;align-items:flex-end;gap:0;flex-wrap:nowrap}
+  .ss-rate b{font-size:15px}
+  .ss-rate small{font-size:11.5px;line-height:1.2}
+  .ss-rate .ss-chip{order:-1;margin-bottom:2px}
+  /* the tab already says what this is: no second heading or subtitle */
+  .ss-head h2,.ss-head .ss-sub,.ss-view > h2,.ss-view > .ss-sub{display:none}
+  .ss-head{gap:8px}
+  /* promo filters fold away; search stays */
+  .ss-filtertoggle{display:flex;align-items:center;justify-content:center;height:40px;width:100%;border:0;border-radius:12px;background:var(--surface);color:var(--ink);font:600 14px/1 inherit;cursor:pointer}
+  .ss-filterbar{border:0;padding:0;background:transparent;gap:10px}
+  .ss-filterbar.is-collapsed > .ss-frow:not(.ss-searchrow){display:none}
+  .ss-frow>.ss-label{min-width:0;width:100%}
+  .ss-searchrow .ss-label{display:none}
+  .ss-input{width:100%;height:44px;border:0;border-radius:12px;font-size:16px;box-sizing:border-box}
+  .ss-select,.ss-input{font-size:16px}
+  .ss-promo,.ss-item{border:0;border-radius:16px}
+  .ss-carddetail{padding:0 12px 14px}
 }
+.ss-filtertoggle{display:none}
+@media (max-width:768px){.ss-filtertoggle{display:flex}}
 @media (prefers-reduced-motion:reduce){.ss-chev{transition:none}}
 .ss-routes{display:flex;flex-direction:column;gap:10px;margin-top:6px;padding-top:14px;border-top:1px dashed var(--line)}
 .ss-routes h3{font-size:15px;font-weight:700} .ss-routes p{margin:2px 0 0;max-width:70ch}
