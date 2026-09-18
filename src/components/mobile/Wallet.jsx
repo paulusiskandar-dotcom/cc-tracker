@@ -79,8 +79,10 @@ export default function Wallet({ user, accounts = [], ledger = [], fxRates = {},
     return rows.sort((a, b) => b.debt - a.debt); // largest balance on top
   }, [active, fxRates, catalog]);
 
+  // Rupiah accounts first, then foreign ones; each group by rupiah value, largest on top.
   const banks = useMemo(() => active.filter(a => a.type === "bank" && a.subtype !== "cash" && a.subtype !== "reimburse")
-    .sort((a, b) => Number(b.current_balance || 0) * (fxRates[b.currency] || 1) - Number(a.current_balance || 0) * (fxRates[a.currency] || 1)), [active, fxRates]);
+    .sort((a, b) => Number((a.currency || "IDR") !== "IDR") - Number((b.currency || "IDR") !== "IDR")
+      || Number(b.current_balance || 0) * (fxRates[b.currency] || 1) - Number(a.current_balance || 0) * (fxRates[a.currency] || 1)), [active, fxRates]);
   const cash = useMemo(() => active.filter(a => a.type === "bank" && a.subtype === "cash")
     .sort((a, b) => Number(b.current_balance || 0) * (fxRates[b.currency] || 1) - Number(a.current_balance || 0) * (fxRates[a.currency] || 1)), [active, fxRates]);
 
