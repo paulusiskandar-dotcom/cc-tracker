@@ -46,20 +46,23 @@ button.mw-row { cursor: pointer; }
 /* One easing for everything that moves (close to the iOS sheet spring), and only
    transform/opacity are animated so it stays on the compositor. */
 .mw { --ease: cubic-bezier(0.32, 0.72, 0, 1); --dur: 0.56s; }
-.mw > .mw-hdr, .mw > .mw-notice, .mw > .mw-seg { transition: opacity 0.35s ease; }
-.mw > .mw-stack { transition: transform var(--dur) var(--ease), opacity 0.4s ease; will-change: transform; }
+.mw > .mw-hdr, .mw > .mw-notice, .mw > .mw-seg { transition: opacity 0.3s ease; }
+.mw > .mw-stack { transition: transform 0.52s var(--ease); will-change: transform; }
+/* Every card is its own GPU layer, so lifting one out never repaints the other 21. */
+.mw-card { transform: translateZ(0); backface-visibility: hidden; touch-action: manipulation; }
 .mw-behind > .mw-hdr, .mw-behind > .mw-notice, .mw-behind > .mw-seg { opacity: 0; pointer-events: none; }
-.mw-behind > .mw-stack { transform: translate3d(0, 110vh, 0); opacity: 0.4; pointer-events: none; }
+.mw-behind > .mw-stack { transform: translate3d(0, 105vh, 0); pointer-events: none; }
 .mw-gone { visibility: hidden; }
 
 .mw-sheet { position: fixed; inset: 0; z-index: 150; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 24px 16px calc(120px + env(safe-area-inset-bottom)); box-sizing: border-box; }
-.mw-sheet > .mw-hdr { opacity: 0; transition: opacity 0.3s ease; min-height: 44px; }
-.mw-sheet.in > .mw-hdr { opacity: 1; transition-delay: 0.15s; }
-.mw-fly { transition: transform var(--dur) var(--ease); will-change: transform; backface-visibility: hidden; }
-.mw-under { opacity: 0; transform: translate3d(0, 40px, 0); transition: opacity 0.25s ease, transform var(--dur) var(--ease); margin-top: 16px; }
-.mw-under.swap { animation: mw-swap 0.4s var(--ease); }
-.mw-sheet.in .mw-under { opacity: 1; transform: translate3d(0, 0, 0); transition: opacity 0.4s ease 0.12s, transform var(--dur) var(--ease) 0.06s; }
-@keyframes mw-swap { from { opacity: 0; transform: translate3d(0, 16px, 0); } to { opacity: 1; transform: translate3d(0, 0, 0); } }
+.mw-sheet > .mw-hdr { min-height: 44px; animation: mw-fade 0.3s ease 0.18s both; }
+.mw-fly { will-change: transform; }
+.mw-under { margin-top: 16px; animation: mw-rise 0.5s var(--ease) 0.08s both; will-change: transform, opacity; }
+.mw-under.swap { animation: mw-rise 0.38s var(--ease) both; }
+.mw-sheet.out > .mw-hdr, .mw-sheet.out .mw-under { animation: mw-out 0.22s ease both; }
+@keyframes mw-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes mw-rise { from { opacity: 0; transform: translate3d(0, 36px, 0); } to { opacity: 1; transform: translate3d(0, 0, 0); } }
+@keyframes mw-out { from { opacity: 1; } to { opacity: 0; } }
 
 .mw-tile { background: #fff; border-radius: 16px; padding: 14px 16px; min-width: 0; }
 .mw-tile + .mw-tiles, .mw-tiles + .mw-tile, .mw-tile + .mw-tile { margin-top: 12px; }
@@ -75,5 +78,5 @@ button.mw-row { cursor: pointer; }
 .mw-chip.hot { background: var(--hot); }
 
 @media (prefers-reduced-motion: reduce) {
-  .mw-fly, .mw-under, .mw > .mw-stack, .mw > .mw-hdr, .mw-sheet > .mw-hdr { transition: none !important; animation: none !important; }
+  .mw-under, .mw > .mw-stack, .mw > .mw-hdr, .mw-sheet > .mw-hdr { transition: none !important; animation: none !important; }
 }

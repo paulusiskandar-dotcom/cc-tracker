@@ -6,6 +6,7 @@ import { useNavigate } from "react-router-dom";
 import { X, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { fmtIDR, fmtCurNative } from "../../utils";
+import { CURRENCIES } from "../../constants";
 import CurrencyFlag from "../shared/CurrencyFlag";
 import "./mobile.css";
 
@@ -25,6 +26,10 @@ const nextDue = day => {
 const lsGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
 
+// Cash rows read as the currency itself ("Pound Sterling"), not the account's nickname.
+const CUR_NAME = { ...Object.fromEntries(CURRENCIES.map(c => [c.code, c.name])), GBP: "Pound Sterling" };
+const EASE = "cubic-bezier(0.32, 0.72, 0, 1)"; // close to the iOS sheet spring
+const FLY_MS = 520;
 const SEGMENTS = [["credit", "Credit"], ["bank", "Bank"], ["cash", "Cash"]];
 
 export default function Wallet({ user, accounts = [], ledger = [], fxRates = {}, initialSegment = "credit", setTab, onSearch }) {
@@ -96,6 +101,13 @@ export default function Wallet({ user, accounts = [], ledger = [], fxRates = {},
     return key === dismissed ? null : { key, text: `${num(soon.c.points_expiring)} ${soon.c.points_unit || "points"} expire ${fmtDate(soon.c.points_expiry_date)}`, name: soon.c.name, id: soon.c.id };
   }, [cards, dismissed]);
 
+  const txByCard = useMemo(() => {
+    const ids = new Set(cards.map(c => c.id)); const m = {};
+    ledger.forEach(e => { [e.from_id, e.to_id].forEach(id => { if (id && ids.has(id)) (m[id] = m[id] || []).push(e); }); });
+    Object.values(m).forEach(l => l.sort((a, b) => String(b.tx_date).localeCompare(String(a.tx_date))));
+    return m;
+  }, [ledger, cards]);
+
   const open = openCard && cards.find(c => c.id === openCard.id);
   const openById = id => {
     const el = stackRef.current?.querySelector(`[data-card="${id}"]`);
@@ -105,7 +117,7 @@ export default function Wallet({ user, accounts = [], ledger = [], fxRates = {},
 
   return (
     <div className={`mw${open && !leaving ? " mw-behind" : ""}`}>
-      {open && <CardSheet card={open} from={openCard.from} ledger={ledger} onLeave={() => setLeaving(true)} onClose={() => { setOpenCard(null); setLeaving(false); }} navigate={navigate} setTab={setTab} />}
+      {open && <CardSheet card={open} from={openCard.from} txs={txByCard[open.id] || []} onLeave={() => setLeaving(true)} onClose={() => { setOpenCard(null); setLeaving(false); }} navigate={navigate} setTab={setTab} />}
       <div className="mw-hdr">
         <h1>Wallet</h1>
         {onSearch && <button className="mw-round" onClick={onSearch} aria-label="Search"><Search size={20} strokeWidth={1.8} /></button>}
@@ -158,7 +170,7 @@ function AccountList({ rows, fxRates, navigate, showTotal, flags }) {
       {rows.map(a => (
         <button key={a.id} className="mw-row" onClick={() => navigate(`/accounts/${a.id}/statement`)}>
           {flags && <CurrencyFlag code={a.currency || "IDR"} size={28} />}
-          <span className="mw-row-name">{a.name}</span>
+          <span className="mw-row-name">{flags ? (CUR_NAME[a.currency || "IDR"] || a.name) : a.name}</span>
           <span className="mw-row-amt">{fmtCurNative(a.current_balance, a.currency)}
             {a.currency && a.currency !== "IDR" && fxRates[a.currency] ? <small>{fmtIDR(Number(a.current_balance || 0) * fxRates[a.currency])}</small> : null}
           </span>
@@ -173,26 +185,39 @@ function AccountList({ rows, fxRates, navigate, showTotal, flags }) {
 // Apple Wallet flow. First tap: the card flies to the top, the rest of the stack drops
 // away, and a quick preview sits under it. Tap the card again for the full detail;
 // the close button steps back one level at a time.
-function CardSheet({ card, from, ledger, onLeave, onClose, navigate, setTab }) {
+function CardSheet({ card, from, txs, onLeave, onClose, navigate, setTab }) {
   const [level, setLevel] = useState("peek");
-  const [shown, setShown] = useState(false);
+  const [ready, setReady] = useState(false);   // content under the card mounts one beat after the card starts moving
+  const [closing, setClosing] = useState(false);
   const artRef = useRef(null);
+  const delta = useRef(0);
   const swapped = useRef(false); // the swap animation is for peek ↔ detail only, not for opening
-  const [delta, setDelta] = useState(0);
 
+  // The flight runs through the Web Animations API: it is handed to the compositor in the
+  // same frame the sheet mounts and is not held up by React rendering the rest.
   useLayoutEffect(() => {
-    const top = artRef.current?.getBoundingClientRect().top ?? 0;
-    setDelta(from ? from.top - top : 0);
-    const id = requestAnimationFrame(() => requestAnimationFrame(() => setShown(true)));
+    const el = artRef.current; if (!el) return undefined;
+    delta.current = from ? from.top - el.getBoundingClientRect().top : 0;
+    const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (el.animate && !calm && delta.current) el.animate([{ transform: `translate3d(0,${delta.current}px,0)` }, { transform: "translate3d(0,0,0)" }], { duration: FLY_MS, easing: EASE });
+    const t = setTimeout(() => setReady(true), 40);
     const prev = document.body.style.overflow; document.body.style.overflow = "hidden";
-    return () => { cancelAnimationFrame(id); document.body.style.overflow = prev; };
+    return () => { clearTimeout(t); document.body.style.overflow = prev; };
   }, [from]);
 
-  const close = () => { setShown(false); onLeave && onLeave(); setTimeout(onClose, 560); };
+  const close = () => {
+    if (closing) return;
+    setClosing(true); onLeave && onLeave();
+    const el = artRef.current; const calm = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (el?.animate && !calm && from) {
+      const backTo = from.top - el.getBoundingClientRect().top; // the sheet may have been scrolled since it opened
+      const a = el.animate([{ transform: "translate3d(0,0,0)" }, { transform: `translate3d(0,${backTo}px,0)` }], { duration: FLY_MS - 80, easing: EASE, fill: "forwards" });
+      a.onfinish = onClose; a.oncancel = onClose;
+    } else onClose();
+  };
   const back = () => { if (level === "detail") { swapped.current = true; setLevel("peek"); } else close(); };
 
-  const mine = useMemo(() => ledger.filter(e => e.from_id === card.id || e.to_id === card.id)
-    .sort((a, b) => String(b.tx_date).localeCompare(String(a.tx_date))), [ledger, card.id]);
+  const mine = txs;
   const hasPoints = card.points_balance != null;
   const kf = hasPoints && card.ratio ? Math.floor(Number(card.points_balance) / card.ratio) : null;
   const expDays = card.points_expiry_date ? Math.round((new Date(`${card.points_expiry_date}T00:00:00`) - new Date()) / 86400000) : null;
@@ -201,7 +226,7 @@ function CardSheet({ card, from, ledger, onLeave, onClose, navigate, setTab }) {
   const dueText = showDue ? (card.due.days === 0 ? "TODAY" : `${card.due.days}D LEFT`) : null;
 
   return (
-    <div className={`mw-sheet${shown ? " in" : ""}`}>
+    <div className={`mw-sheet${closing ? " out" : ""}`}>
       <div className="mw-hdr">
         <button className="mw-round" onClick={back} aria-label={level === "detail" ? "Back" : "Close"}>
           {level === "detail" ? <ChevronLeft size={22} strokeWidth={1.8} /> : <X size={20} strokeWidth={1.8} />}
@@ -209,12 +234,12 @@ function CardSheet({ card, from, ledger, onLeave, onClose, navigate, setTab }) {
         <h2>{level === "detail" ? card.name : ""}</h2>
       </div>
 
-      <button ref={artRef} className="mw-card mw-fly" style={{ transform: shown ? "translate3d(0,0,0)" : `translate3d(0,${delta}px,0)` }}
+      <button ref={artRef} className="mw-card mw-fly"
         onClick={() => { swapped.current = true; setLevel(l => (l === "peek" ? "detail" : "peek")); }} aria-label={`${card.name}: ${level === "peek" ? "show details" : "show preview"}`}>
         <CardArt card={card} />
       </button>
 
-      <div className={`mw-under${swapped.current ? " swap" : ""}`} key={level}>
+      {ready && <div className={`mw-under${swapped.current ? " swap" : ""}`} key={level}>
         {level === "peek" ? (
           <>
             {card.avail != null && (
@@ -252,7 +277,7 @@ function CardSheet({ card, from, ledger, onLeave, onClose, navigate, setTab }) {
             <TxList title="Transactions" rows={mine.slice(0, 30)} cardId={card.id} />
           </>
         )}
-      </div>
+      </div>}
     </div>
   );
 }
