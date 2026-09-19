@@ -375,6 +375,7 @@ Return ONLY a valid JSON object (no markdown, no explanation) with this exact sc
   "opening_balance": 3000000,
   "statement_date": "2025-03-21",
   "due_date": "2025-04-06",
+  "minimum_payment": 250000,
   "points": { "balance": 43331, "unit": "Travel Miles", "expiring": 0, "expiry_date": "2026-10-31" }
 }
 - points: the CARD'S REWARD POINTS / MILES BALANCE printed in the statement summary, or null if the statement prints none.
@@ -400,6 +401,9 @@ Return ONLY a valid JSON object (no markdown, no explanation) with this exact sc
   Pembayaran Minimum / Minimum Payment / BATAS KREDIT / SISA KREDIT.
 - opening_balance: the opening/previous balance (Saldo Awal / Saldo Bulan Lalu / TAGIHAN BULAN LALU / Opening Balance / Previous Balance) as a plain number. null if not shown.
 - statement_date: the date the statement was CUT/PRINTED, from the header — "Tgl. Cetak" / "Tanggal Cetak" / "Statement Date" / "Tanggal Tagihan" / "Posting Date" / "Print Date". Format "YYYY-MM-DD". This is NOT a transaction date: it is normally on or after the last transaction row. null if not shown.
+- minimum_payment: the MINIMUM amount the bank requires by the due date — "Pembayaran Minimum" / "Minimum Payment" /
+  "Minimum Amount Due" / "Tagihan Minimum". Plain number. 0 when the statement prints 0. null if not printed.
+  This is a SEPARATE field: it never replaces closing_balance (the full bill).
 - due_date: the payment due date — "Tgl. Jatuh Tempo" / "Tanggal Jatuh Tempo" / "Payment Due Date" / "Due Date". Format "YYYY-MM-DD". null if not shown.
   Both dates are often printed as DD-MM-YY (e.g. "21-07-26" = 2026-07-21, "06-08-26" = 2026-08-06) — convert to YYYY-MM-DD. Never swap day and month.
 If no transactions found, return the object with an empty transactions array.`;
@@ -436,6 +440,7 @@ Return ONLY a valid JSON object (no markdown) with this schema:
   "opening_balance": null,
   "statement_date": null,
   "due_date": null,
+  "minimum_payment": null,
   "points": null
 }
 points: card reward points/miles balance printed in the summary ({ "balance", "unit", "expiring", "expiry_date" }), null if the statement prints none. Never invent.
@@ -446,6 +451,7 @@ closing_balance: closing/ending balance from statement summary as a plain number
 opening_balance: opening/previous balance as a plain number, null if not shown.
 statement_date: date the statement was cut/printed ("Tgl. Cetak" / "Statement Date"), "YYYY-MM-DD", null if not shown. Not a transaction date.
 due_date: payment due date ("Tgl. Jatuh Tempo" / "Payment Due Date"), "YYYY-MM-DD", null if not shown.
+minimum_payment: minimum amount due ("Pembayaran Minimum" / "Minimum Payment"), plain number, 0 if printed as 0, null if not shown. Never a substitute for closing_balance.
 Dates printed DD-MM-YY (e.g. "21-07-26") mean 2026-07-21 — convert, never swap day and month.
 IMPORTANT - Year detection rules:
 - If the document clearly shows a year, use that year
@@ -499,7 +505,7 @@ function normStmtDate(v: any): string | null {
 
 // ── HELPER: send PDF bytes to Claude, return extracted transactions ─
 type ClaudeResult =
-  | { ok: true;  transactions: any[]; closing_balance?: number | null; opening_balance?: number | null; statement_date?: string | null; due_date?: string | null; detected_account?: any; detected_period?: any; }
+  | { ok: true;  transactions: any[]; closing_balance?: number | null; opening_balance?: number | null; statement_date?: string | null; due_date?: string | null; minimum_payment?: number | null; detected_account?: any; detected_period?: any; }
   | { ok: false; is_encrypted: true }
   | { ok: false; is_encrypted: false; error: string };
 
@@ -575,6 +581,7 @@ async function callClaude(pdfBase64: string, prompt: string, anthropicKey: strin
           opening_balance:  parsed.opening_balance  ?? null,
           statement_date:   normStmtDate(parsed.statement_date),
           due_date:         normStmtDate(parsed.due_date),
+          minimum_payment:  parsed.minimum_payment != null && isFinite(Number(parsed.minimum_payment)) ? Number(parsed.minimum_payment) : null,
           detected_account: parsed.detected_account ?? null,
           detected_period:  parsed.detected_period  ?? null,
           points:           parsed.points && typeof parsed.points === "object" ? parsed.points : null,
@@ -684,7 +691,7 @@ async function chunkAndProcessPDF(
   const fullDoc = await PDFDocument.load(bytes);
 
   // Track metadata: detected_account/period from first chunk, balances from last chunk that has them
-  let chunkMeta: { detected_account?: any; detected_period?: any; closing_balance?: number | null; opening_balance?: number | null; statement_date?: string | null; due_date?: string | null } = {};
+  let chunkMeta: { detected_account?: any; detected_period?: any; closing_balance?: number | null; opening_balance?: number | null; statement_date?: string | null; due_date?: string | null; minimum_payment?: number | null } = {};
 
   for (let start = 0; start < pageCount; start += CHUNK_SIZE) {
     const end = Math.min(start + CHUNK_SIZE, pageCount);
@@ -711,6 +718,7 @@ async function chunkAndProcessPDF(
       // Header dates live on page 1 — first chunk that reports them wins.
       if (!chunkMeta.statement_date && chunkResult.statement_date) chunkMeta.statement_date = chunkResult.statement_date;
       if (!chunkMeta.due_date && chunkResult.due_date) chunkMeta.due_date = chunkResult.due_date;
+      if (chunkMeta.minimum_payment == null && (chunkResult as any).minimum_payment != null) chunkMeta.minimum_payment = (chunkResult as any).minimum_payment;
     } else if (chunkResult.is_encrypted) {
       return chunkResult; // Propagate encrypted signal
     } else {
@@ -945,6 +953,7 @@ async function extractUploadedPDF(serviceSupabase: any, userId: string, body: an
       statement_date:   claudeResult.statement_date   ?? null,
       points:        claudeResult.points ?? null,
       due_date:         claudeResult.due_date         ?? null,
+      minimum_payment:  (claudeResult as any).minimum_payment ?? null,
     };
   }
   if (!claudeResult.is_encrypted) {
@@ -976,6 +985,7 @@ async function extractUploadedPDF(serviceSupabase: any, userId: string, body: an
           statement_date:   claudeResult.statement_date   ?? null,
           points:        claudeResult.points ?? null,
           due_date:         claudeResult.due_date         ?? null,
+          minimum_payment:  (claudeResult as any).minimum_payment ?? null,
         };
       }
       return { success: false, needs_password: false, error: "PDF decrypted but no transactions could be extracted. It may be a scanned image." };
@@ -1282,7 +1292,7 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
         user_id: userId, account_id: acc.id,
         period_year: y, period_month: m, period_start: tgl, period_end: tgl,
         opening_balance: extraction.opening_balance ?? null, closing_balance: tutup,
-        statement_date: tgl, due_date: normStmtDate(extraction.due_date),
+        statement_date: tgl, due_date: normStmtDate(extraction.due_date), minimum_payment: extraction.minimum_payment ?? null,
         calculated_balance: tutup, status: "prepared", pdf_filename: filename,
         total_statement: 0, total_match: 0, total_missing: 0, total_extra: 0,
         notes: "Statement tanpa transaksi — tagihan dibawa dari bulan sebelumnya",
@@ -1605,6 +1615,13 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
       .eq("status", "completed").limit(1);
     bulanSelesai = !!(done && done.length);
   }
+  // Bulan yang sudah selesai tetap boleh DILENGKAPI header-nya (minimum payment baru diparse
+  // sejak 20 Sep 2026) — hanya kolom itu, hanya bila masih kosong.
+  if (bulanSelesai && extraction.minimum_payment != null) {
+    await serviceSupabase.from("reconcile_sessions").update({ minimum_payment: extraction.minimum_payment })
+      .eq("user_id", userId).eq("account_id", acc.id).eq("period_year", pY).eq("period_month", pM)
+      .eq("status", "completed").is("minimum_payment", null);
+  }
 
   // Don't clobber a draft the user is actively working on (has edits)
   const { data: existing } = await serviceSupabase.from("import_drafts")
@@ -1632,7 +1649,7 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
       user_id: userId, account_id: acc.id,
       period_year: pY, period_month: pM, period_start: periodStart, period_end: periodEnd,
       opening_balance: extraction.opening_balance ?? null, closing_balance: stmtClosing,
-      statement_date: stmtDate, due_date: dueDate,
+      statement_date: stmtDate, due_date: dueDate, minimum_payment: extraction.minimum_payment ?? null,
       calculated_balance: ledgerClosing, status: "prepared", pdf_filename: filename,
       total_statement: stmtRows.length, total_match: match, total_missing: missing.length, total_extra: extra,
     });

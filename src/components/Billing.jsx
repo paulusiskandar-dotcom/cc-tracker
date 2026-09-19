@@ -162,8 +162,14 @@ function buildToPay({ ledger, creditCards, liabilities, recurTemplates, reconSes
     const paidSince = ledger.filter(e => e.to_id === c.id && e.to_type === "account" && e.tx_date && e.tx_date >= stmtDate).reduce((s, e) => s + Number(e.amount_idr || 0), 0);
     const when = useSess && sess.due_date ? asDate(sess.due_date) : (c.due_day ? ccDueDate(c, today) : null);
     if (!when) return null;
-    return { id: c.id, name: c.name, when, dayLeft: dayLeft(when), amount: Math.max(0, stmtAmt - paidSince), known: true };
-  }).filter(c => c && c.amount >= 25000).sort((a, b) => a.when - b.when);
+    // The bank's own "minimum payment" decides whether there is anything to pay (20 Sep 2026):
+    // 0 = nothing is due, however the balance reads; above 0 = it is a bill, even Rp 4.695.
+    // The row still shows the FULL remaining bill and stays until that is paid off.
+    // Statements parsed before this field existed fall back to "any balance is a bill".
+    const minPay = useSess && sess.minimum_payment != null ? Number(sess.minimum_payment) : null;
+    if (minPay === 0) return null;
+    return { id: c.id, name: c.name, when, dayLeft: dayLeft(when), amount: Math.max(0, stmtAmt - paidSince), minimum: minPay, known: true };
+  }).filter(c => c && c.amount > 0).sort((a, b) => a.when - b.when);
 
   const monthRows = ledger.filter(e => ym(e.tx_date) === curMonth);
   const isCard = id => (creditCards || []).some(c => c.id === id);
