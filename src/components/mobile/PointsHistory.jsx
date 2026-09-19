@@ -24,8 +24,10 @@ export default function PointsHistory({ card }) {
     const prev = rows[i + 1];
     // Printed by the bank when available; otherwise the change in balance (redemptions included, so it can be negative).
     const earned = r.earned != null ? Number(r.earned) : (r.balance != null && prev?.balance != null ? Number(r.balance) - Number(prev.balance) : null);
-    const check = r.earned != null && Array.isArray(r.stmt_rows) && r.stmt_rows.length ? applyRule(card.name, r.stmt_rows) : null;
-    const sf = check ? shortfall(check, r.earned) : null;
+    // Cards that print only a balance are checked against the change in balance (OCBC 90N: Jul 6.097 = 6.097,
+    // Sep 8.852 = 8.852). A redemption in that month makes the change smaller than the rule — shown, not hidden.
+    const check = earned != null && Array.isArray(r.stmt_rows) && r.stmt_rows.length ? applyRule(card.name, r.stmt_rows) : null;
+    const sf = check ? shortfall(check, earned) : null;
     return { ...r, shown: earned, printed: r.earned != null, check, sf };
   }), [rows, card.name]);
 
