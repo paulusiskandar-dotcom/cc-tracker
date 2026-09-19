@@ -421,6 +421,10 @@ function Finance({ user, signOut }) {
   // picture, modals included, and no filter on any ancestor (a filter would break position:fixed).
   const legacyOnScreen = isMobile && (legacyEmbedded > 0 || (!mobileOwnsHeader && tab !== "sweetspot") || (tab === "email" && onMainPage));
   const veil = isDark && legacyOnScreen;
+  useEffect(() => {
+    document.body.classList.toggle("pf-veiled", veil);
+    return () => document.body.classList.remove("pf-veiled");
+  }, [veil]);
   const darkUI = isDark && !veil;
   const shared = {
     txAddSignal,

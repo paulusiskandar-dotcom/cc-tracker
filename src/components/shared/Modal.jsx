@@ -30,6 +30,7 @@ export default function Modal({ isOpen, onClose, title, children, footer, width 
 
   return (
     <div
+      className="pf-modal-scrim"
       onClick={(e) => e.target === e.currentTarget && onClose()}
       style={{
         position:       "fixed",

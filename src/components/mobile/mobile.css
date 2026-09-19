@@ -253,3 +253,5 @@ button.mw-row { cursor: pointer; }
    red stays red, green stays green). It sits above everything, modals included, and takes no
    taps. No ancestor gets a filter, so position:fixed keeps working. */
 .pf-dark-veil { position: fixed; inset: 0; z-index: 2147483000; pointer-events: none; -webkit-backdrop-filter: invert(1) hue-rotate(180deg); backdrop-filter: invert(1) hue-rotate(180deg); }
+/* Under the veil a black scrim would come out light; a white one inverts to the usual dim. */
+.pf-veiled .pf-modal-scrim { background: rgba(255,255,255,0.55) !important; }
