@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { fmtIDR } from "../../utils";
-import { applyRule, shortfall } from "../../lib/pointsRules";
+import { applyRule, shortfall, likelyNotEarning, POINT_RULES } from "../../lib/pointsRules";
 
 const num = n => Number(n || 0).toLocaleString("id-ID");
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -31,6 +31,18 @@ export default function PointsHistory({ card }) {
     return { ...r, shown: earned, printed: r.earned != null, check, sf };
   }), [rows, card.name]);
 
+  // Per purchase: what it earned. "none" only where the evidence is unambiguous, "unclear" where two
+  // explanations differ on that line; instalments and fees never earn under the card's rule.
+  const linesOf = (m) => {
+    if (!m?.check) return [];
+    const { sure, maybe } = likelyNotEarning(list, m);
+    const per = l => (l.kind === "fx" ? m.check.rule.perFx : m.check.rule.per);
+    const earning = m.check.earning.map(l => ({ ...l, pts: l.amount / per(l), state: sure.includes(l) ? "none" : maybe.includes(l) ? "unclear" : (m.sf.ok || sure.length || maybe.length ? "earned" : "rule") }));
+    const skipped = m.check.skipped.map(l => ({ ...l, pts: 0, state: l.kind }));
+    return [...earning, ...skipped].sort((a, b) => b.amount - a.amount);
+  };
+  const lessons = POINT_RULES[card.name]?.lessons || [];
+
   if (!list.length) return null;
   return (
     <>
@@ -43,6 +55,14 @@ export default function PointsHistory({ card }) {
           </button>
         ))}
       </div>
+      {lessons.length > 0 && (
+        <>
+          <div className="mw-label">What the statements taught</div>
+          <div className="mw-list">
+            {lessons.map((t, i) => <div key={i} className="mw-row mw-lesson"><span className="mw-row-name mw-wrap">{t}</span></div>)}
+          </div>
+        </>
+      )}
       {open && (
         <div className="mw-modal" role="dialog" aria-modal="true" onClick={() => setOpen(null)}>
           <div className="mw-modal-card" onClick={ev => ev.stopPropagation()}>
@@ -65,6 +85,15 @@ export default function PointsHistory({ card }) {
                   {open.check.spend > 0 && open.shown > 0 && <div className="mw-row mw-kv"><span className="mw-row-name">Effective</span><span className="mw-row-amt">{fmtIDR(Math.round(open.check.spend / (open.shown + Number(open.bonus || 0))))} per {open.unit || "point"}</span></div>}
                 </div>
                 {!open.sf.ok && open.sf.rupiah > 0 && <div className="mw-note">About {fmtIDR(open.sf.rupiah)} of this statement's spend earned nothing. The bank decides that per merchant category, which the statement does not print.</div>}
+                <div className="mw-label">Purchases</div>
+                <div className="mw-list mw-list-sunk">
+                  {linesOf(open).map((l, i) => (
+                    <div key={i} className="mw-row mw-kv">
+                      <span className="mw-row-name">{String(l.description).replace(/\s+(JAKARTA|SINGAPORE|AMSTERDAM)\b.*$/i, "").replace(/\(.*$/, "").trim()}<small>{fmtIDR(l.amount)}{l.state === "instalment" ? " · instalment" : l.state === "fee" ? " · fee" : l.state === "unclear" ? " · unclear" : l.state === "rule" ? " · by the rule" : ""}</small></span>
+                      <span className={`mw-row-amt${l.state === "none" ? " hot" : l.state === "earned" ? " good" : ""}`}>{l.state === "none" || l.state === "instalment" || l.state === "fee" ? "0" : l.state === "unclear" ? "?" : num(Math.round(l.pts))}</span>
+                    </div>
+                  ))}
+                </div>
               </>
             )}
           </div>
