@@ -247,3 +247,9 @@ button.mw-row { cursor: pointer; }
 
 .mw-linkbtn { border: 0; background: none; padding: 0; font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--accent) !important; cursor: pointer; }
 .mw-linkbtn:disabled { opacity: 0.5; }
+
+/* ── Dark mode while a desktop page is on a phone screen ─────────────────────────────────
+   The app is drawn light and this veil inverts the whole picture (hue kept by the 180° turn:
+   red stays red, green stays green). It sits above everything, modals included, and takes no
+   taps. No ancestor gets a filter, so position:fixed keeps working. */
+.pf-dark-veil { position: fixed; inset: 0; z-index: 2147483000; pointer-events: none; -webkit-backdrop-filter: invert(1) hue-rotate(180deg); backdrop-filter: invert(1) hue-rotate(180deg); }

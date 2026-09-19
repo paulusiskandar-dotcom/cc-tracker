@@ -45,6 +45,7 @@ export default function Modal({ isOpen, onClose, title, children, footer, width 
       }}
     >
       <div
+        className="pf-modal-card"
         style={{
           background:    "#ffffff",
           width:         "100%",

@@ -2,6 +2,7 @@
 // signing out. Accounts, FX rates, recurring bills, merchants and backups stay on the desktop
 // page, one tap away under "All settings".
 import { useState } from "react";
+import LegacyFrame from "./LegacyFrame";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { APP_VERSION } from "../../constants";
 import Settings from "../Settings";
@@ -14,7 +15,7 @@ export default function MobileSettings(props) {
     return (
       <div className={`mw${dark ? " dark" : ""}`}>
         <div className="mw-hdr"><button className="mw-round" onClick={() => setFull(false)} aria-label="Back"><ChevronLeft size={22} strokeWidth={1.8} /></button><h2>All settings</h2></div>
-        <div className="mw-legacy"><Settings {...props} /></div>
+        <LegacyFrame><Settings {...props} /></LegacyFrame>
       </div>
     );
   }

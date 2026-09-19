@@ -2,6 +2,7 @@
 // glance (donut, categories, latest rows). The full list with filters, edit, split and
 // delete is the existing Transactions page, opened from "All transactions" or "+".
 import { useEffect, useMemo, useState } from "react";
+import LegacyFrame from "./LegacyFrame";
 import { ChevronLeft, ChevronRight, Plus, Search, X } from "lucide-react";
 import { tagsApi } from "../../api";
 import { fmtIDR, fmtCurNative } from "../../utils";
@@ -99,7 +100,7 @@ export default function MobileTransactions(props) {
           <button className="mw-round" onClick={() => setLegacy(false)} aria-label="Back"><ChevronLeft size={22} strokeWidth={1.8} /></button>
           <h2>Filters and bulk actions</h2>
         </div>
-        <div className="mw-legacy"><Transactions {...props} /></div>
+        <LegacyFrame><Transactions {...props} /></LegacyFrame>
       </div>
     );
   }

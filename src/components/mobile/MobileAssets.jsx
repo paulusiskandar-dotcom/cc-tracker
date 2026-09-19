@@ -1,6 +1,7 @@
 // Mobile Assets (phones only): Assets · Net Worth. Net worth is the app's own
 // calcNetWorth() result passed down from App, not recomputed here.
 import { useEffect, useMemo, useState } from "react";
+import LegacyFrame from "./LegacyFrame";
 import { ChevronLeft, ChevronDown, X } from "lucide-react";
 import { updateAssetValue } from "../../lib/assetValue";
 import { supabase } from "../../lib/supabase";
@@ -41,7 +42,7 @@ export default function MobileAssets(props) {
           <button className="mw-round" onClick={() => setFull(false)} aria-label="Back"><ChevronLeft size={22} strokeWidth={1.8} /></button>
           <h2>Manage assets</h2>
         </div>
-        <div className="mw-legacy"><Assets {...props} /></div>
+        <LegacyFrame><Assets {...props} /></LegacyFrame>
       </div>
     );
   }

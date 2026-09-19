@@ -91,7 +91,7 @@ async function fetchAll(table, build) {
   }
 }
 
-export default function SweetSpot({ user, ledger = [], accounts = [] }) {
+export default function SweetSpot({ user, ledger = [], accounts = [], dark = false }) {
   const [tab, setTab] = useState("compare");
   const [showFilters, setShowFilters] = useState(false); // phones: promo filters start folded
   const [prog, setProg] = useState("krisflyer");
@@ -163,8 +163,8 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
     return base ? { ...base, fallback: true } : null;
   }, [data, prog]);
 
-  if (error) return <Frame><div className="ss-empty"><b>Could not load SweetSpot data.</b> {error} <button className="ss-btn" onClick={load}>Try again</button></div></Frame>;
-  if (!data) return <Frame><div className="ss-empty">Loading earn rates, promos and news…</div></Frame>;
+  if (error) return <Frame dark={dark}><div className="ss-empty"><b>Could not load SweetSpot data.</b> {error} <button className="ss-btn" onClick={load}>Try again</button></div></Frame>;
+  if (!data) return <Frame dark={dark}><div className="ss-empty">Loading earn rates, promos and news…</div></Frame>;
 
   // other airline programmes your matched cards can reach (Flying Blue via ALL Accor, JAL via D-Point, ...)
   const PROG_LABEL = { flyingblue: "Flying Blue", qatarprivilegeclub: "Qatar Privilege Club", britishairwaysexecutiveclub: "British Airways Club",
@@ -213,7 +213,7 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
   const tabs = [["compare", "Compare cards"], ["promo", "Promos", shownPromos.length], ["news", "Miles news", newsRelevant.length], ["tricks", "Tricks", tricksWorking], ["spending", "My spending"]];
 
   return (
-    <Frame>
+    <Frame dark={dark}>
       <header className="ss-top">
         <div>
           <h1>SweetSpot</h1>
@@ -350,8 +350,8 @@ export default function SweetSpot({ user, ledger = [], accounts = [] }) {
   );
 }
 
-function Frame({ children }) {
-  return <div className="ss" style={{ fontFamily: FF }}><style>{CSS}</style>{children}</div>;
+function Frame({ children, dark }) {
+  return <div className={`ss${dark ? " dark" : ""}`} style={{ fontFamily: FF }}><style>{CSS}</style>{children}</div>;
 }
 
 function Seg({ items, value, onChange, label, labelledBy }) {
@@ -737,6 +737,8 @@ function TricksView({ tricks }) {
 const CSS = `
 .ss{--ink:#111827;--muted:#6b7280;--faint:#9ca3af;--line:#e5e7eb;--sunk:#f3f4f6;--surface:#fff;--accent:#3b5bdb;--accent-soft:#dbeafe;--accent-ink:#1d4ed8;--warn:#d97706;--warn-soft:#fef3c7;--hot:#dc2626;--hot-soft:#fee2e2;--good:#059669;--good-soft:#dcfce7;--bar:#c9d3f6;
   display:flex;flex-direction:column;gap:18px;color:var(--ink);font-size:14px;line-height:1.5}
+/* Dark: the same tokens, redefined once (phones turn it on from Settings). */
+.ss.dark{--ink:#f3f4f6;--muted:#9ca3af;--faint:#6b7280;--line:#2a2f3a;--sunk:#242935;--surface:#181c25;--accent:#8da2fb;--accent-soft:#1e2a4a;--accent-ink:#a5b4fc;--warn:#fbbf24;--warn-soft:#3a2e12;--hot:#f87171;--hot-soft:#3b1d1d;--good:#34d399;--good-soft:#12342a;--bar:#3b4a7a}
 .ss h1,.ss h2,.ss h3{margin:0;text-wrap:balance}
 .ss a{color:var(--accent-ink);text-underline-offset:2px;font-size:12.5px}
 .ss button:focus-visible,.ss select:focus-visible,.ss input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
@@ -764,7 +766,7 @@ const CSS = `
 .ss-chip.soft{background:var(--sunk);color:var(--muted)} .ss-chip.acc{background:var(--accent-soft);color:var(--accent-ink)}
 .ss-btn{height:34px;padding:0 14px;border-radius:8px;border:1px solid var(--line);background:var(--surface);color:var(--ink);font:600 13px/1 ${FF};cursor:pointer;white-space:nowrap}
 .ss-btn:hover{border-color:var(--accent);color:var(--accent-ink)} .ss-btn.small{height:28px;padding:0 10px;font-size:12px}
-.ss-btn.primary{background:var(--ink);border-color:var(--ink);color:#fff} .ss-btn:disabled{opacity:.6;cursor:default}
+.ss-btn.primary{background:var(--ink);border-color:var(--ink);color:var(--surface)} .ss-btn:disabled{opacity:.6;cursor:default}
 .ss-input{height:34px;min-width:min(280px,100%);border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font:500 13px ${FF};padding:0 10px}
 .ss-select{height:42px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink);font:600 13px/1 ${FF};padding:0 10px}
 .ss-linkbtn{all:unset;cursor:pointer;color:var(--accent-ink);font-weight:600;text-decoration:underline;text-underline-offset:2px}

@@ -211,6 +211,13 @@ function Finance({ user, signOut }) {
   const isMobile = useIsMobile();
   const [searchSignal, setSearchSignal] = useState(0);
   const [fullStatement, setFullStatement] = useState(null); // pathname whose desktop statement was asked for
+  // A phone screen that is showing an embedded desktop page says so (mobile/LegacyFrame.jsx).
+  const [legacyEmbedded, setLegacyEmbedded] = useState(0);
+  useEffect(() => {
+    const on = e => setLegacyEmbedded(n => Math.max(0, n + (e.detail ? 1 : -1)));
+    window.addEventListener("pf-legacy", on);
+    return () => window.removeEventListener("pf-legacy", on);
+  }, []);
   const goTab = useCallback((tabId) => {
     if (!onMainPage) navigate("/");
     setTab(tabId);
@@ -403,13 +410,25 @@ function Finance({ user, signOut }) {
   );
 
   // Props passed to every page
+  // Phones get their own statement screen; the desktop page still opens for reconcile
+  // hand-offs (they carry seeds in the navigation state) and from its "Reconcile, PDF and Excel" link.
+  const isStatementRoute = /^\/accounts\/[^/]+\/statement/.test(location.pathname);
+  const phoneStatement = isMobile && isStatementRoute && fullStatement !== location.pathname && !location.state?.reconcileSeeds;
+  const mobileOwnsHeader = phoneStatement || (isMobile && onMainPage && ["dashboard", "cards", "bank", "cash", "transactions", "billing", "assets", "email", "receivables", "reports", "settings", "tags", "reconcile"].includes(tab));
+  // Dark mode on a phone. The phone screens have real dark styles. The desktop pages that still
+  // open there are styled inline in light colours, so while one is on screen the WHOLE app is
+  // drawn light and a full-screen veil inverts it (mobile.css .pf-dark-veil): one uniform dark
+  // picture, modals included, and no filter on any ancestor (a filter would break position:fixed).
+  const legacyOnScreen = isMobile && (legacyEmbedded > 0 || (!mobileOwnsHeader && tab !== "sweetspot") || (tab === "email" && onMainPage));
+  const veil = isDark && legacyOnScreen;
+  const darkUI = isDark && !veil;
   const shared = {
     txAddSignal,
     user, accounts, ledger, thisMonthLedger, categories, incomeSrcs,
     installments, recurTemplates, reminders, merchantMaps, fxRates,
     CURRENCIES, netWorth, bankAccounts, creditCards, assets, liabilities,
     receivables, curMonth, pendingSyncs,
-    isDark, dark: isDark,         // alias: new components use `dark`, old use `isDark`
+    isDark: darkUI, dark: darkUI, // alias: new components use `dark`, old use `isDark`; light while the veil is on
     setIsDark, setDark: setIsDark,
     setTab, setSettingsTab, openEmail, setPendingSyncs,
     reimburseSettlements, setReimburseSettlements,
@@ -450,12 +469,7 @@ function Finance({ user, signOut }) {
   // Phone-only screens bring their own large title, so the top bar steps aside there.
   // Phones: every magnifier opens the one transaction search.
   const phoneSearch = () => { setSearchSignal(n => n + 1); goTab("transactions"); };
-  const walletProps = { user, accounts, ledger, fxRates, installments, reconSessions, dark: isDark, setTab: goTab, onSearch: phoneSearch, onRefresh: loadData };
-  // Phones get their own statement screen; the desktop page still opens for reconcile
-  // hand-offs (they carry seeds in the navigation state) and from its "Reconcile, PDF and Excel" link.
-  const isStatementRoute = /^\/accounts\/[^/]+\/statement/.test(location.pathname);
-  const phoneStatement = isMobile && isStatementRoute && fullStatement !== location.pathname && !location.state?.reconcileSeeds;
-  const mobileOwnsHeader = phoneStatement || (isMobile && onMainPage && ["dashboard", "cards", "bank", "cash", "transactions", "billing", "assets", "email", "receivables", "reports", "settings", "tags", "reconcile"].includes(tab));
+  const walletProps = { user, accounts, ledger, fxRates, installments, reconSessions, dark: darkUI, setTab: goTab, onSearch: phoneSearch, onRefresh: loadData };
   const pageLabel = !onMainPage
     ? "Statement"
     : (TABS.find(t => t.id === tab)?.label || EXTRA_LABELS[tab] || "Dashboard");
@@ -479,7 +493,7 @@ function Finance({ user, signOut }) {
       case "reports":      return isMobile ? <MobileReports {...shared} /> : <Reports {...shared} />;
       case "budget":       return <Budget       {...shared} />;
       case "tags":         return isMobile ? <MobileTrips {...shared} /> : <Tags user={user} ledger={ledger} onRefresh={loadData} />;
-      case "sweetspot":    return <SweetSpot    user={user} ledger={ledger} accounts={accounts} />;
+      case "sweetspot":    return <SweetSpot    user={user} ledger={ledger} accounts={accounts} dark={isMobile && darkUI} />;
       case "calendar":     return <Calendar     {...shared} />;
       case "billing":      return isMobile ? <MobileBills {...shared} /> : <Billing {...shared} />;
       case "settings":     return isMobile ? <MobileSettings {...shared} signOut={signOut} initialTab={settingsInitialTab} /> : <Settings {...shared} signOut={signOut} initialTab={settingsInitialTab} />;
@@ -493,7 +507,8 @@ function Finance({ user, signOut }) {
   };
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: isMobile && isDark && mobileOwnsHeader ? "#0b0d12" : "#f8f9fb" }}>
+    <div style={{ display: "flex", minHeight: "100vh", background: isMobile && darkUI ? "#0b0d12" : "#f8f9fb" }}>
+      {veil && <div className="pf-dark-veil" aria-hidden="true" />}
 
       {/* ── SIDEBAR (desktop) ── */}
       <aside
@@ -610,7 +625,7 @@ function Finance({ user, signOut }) {
           style={{ flex: 1, padding: "20px 24px", maxWidth: sidebarOpen ? 840 : 1080, width: "100%", margin: "0 auto", paddingBottom: 88, transition: "max-width .22s ease" }}
         >
           {isMobile && !mobileOwnsHeader && (
-            <div className={`mw${isDark ? " dark" : ""}`}><div className="mw-hdr"><h1 style={{ fontSize: 28 }}>{pageLabel}</h1></div></div>
+            <div className={`mw${darkUI ? " dark" : ""}`}><div className="mw-hdr"><h1 style={{ fontSize: 28 }}>{pageLabel}</h1></div></div>
           )}
           <Routes>
             <Route path="/accounts/:id/statement"         element={phoneStatement ? <MobileStatement {...shared} onFull={() => setFullStatement(location.pathname)} /> : <StatementPage {...shared} />} />
@@ -622,15 +637,15 @@ function Finance({ user, signOut }) {
       </div>
 
       {/* ── MOBILE BOTTOM NAV ── */}
-      <nav className="mobile-nav" style={{ ...S.mobileNav, ...(isDark ? S.mobileNavDark : {}) }}>
+      <nav className="mobile-nav" style={{ ...S.mobileNav, ...(darkUI ? S.mobileNavDark : {}) }}>
         {MOBILE_MAIN_TABS.map(id => {
           const t      = TABS.find(s => s.id === id);
           const active = tab === id && onMainPage;
           return (
             <button key={id} onClick={() => { goTab(id); setShowMore(false); }} style={{
               ...S.mobileNavBtn,
-              ...(active ? (isDark ? S.mobileNavOnDark : S.mobileNavOn) : {}),
-              color: isDark ? (active ? "#f3f4f6" : "#aab1bd") : (active ? "#111827" : "#4b5563"),
+              ...(active ? (darkUI ? S.mobileNavOnDark : S.mobileNavOn) : {}),
+              color: darkUI ? (active ? "#f3f4f6" : "#aab1bd") : (active ? "#111827" : "#4b5563"),
             }}>
               <NAV_ICON id={id} />
               <span style={{ fontSize: 9, fontWeight: active ? 700 : 500 }}>{MOBILE_TAB_LABELS[id] || t?.label}</span>
@@ -639,8 +654,8 @@ function Finance({ user, signOut }) {
         })}
         <button onClick={() => setShowMore(s => !s)} style={{
           ...S.mobileNavBtn,
-          ...(showMore ? (isDark ? S.mobileNavOnDark : S.mobileNavOn) : {}),
-          color: isDark ? (showMore ? "#f3f4f6" : "#aab1bd") : (showMore ? "#111827" : "#4b5563"),
+          ...(showMore ? (darkUI ? S.mobileNavOnDark : S.mobileNavOn) : {}),
+          color: darkUI ? (showMore ? "#f3f4f6" : "#aab1bd") : (showMore ? "#111827" : "#4b5563"),
         }}>
           <NAV_ICON id="more" />
           <span style={{ fontSize: 9, fontWeight: showMore ? 700 : 500 }}>More</span>
@@ -654,7 +669,7 @@ function Finance({ user, signOut }) {
             onClick={() => setShowMore(false)}
             style={{ position: "fixed", inset: 0, zIndex: 195, background: "rgba(0,0,0,0.3)" }}
           />
-          <div style={{ ...S.moreDrawer, ...(isDark ? { background: "rgba(24,28,37,0.92)", border: "1px solid rgba(255,255,255,0.1)" } : {}) }}>
+          <div style={{ ...S.moreDrawer, ...(darkUI ? { background: "rgba(24,28,37,0.92)", border: "1px solid rgba(255,255,255,0.1)" } : {}) }}>
             <div style={{
               display:             "grid",
               gridTemplateColumns: "repeat(3, 1fr)",
@@ -668,9 +683,9 @@ function Finance({ user, signOut }) {
                     onClick={() => { goTab(t.id); setShowMore(false); }}
                     style={{
                       ...S.moreBtn,
-                      border:     `1.5px solid ${active ? "#3b5bdb" : isDark ? "#2a2f3a" : "#e5e7eb"}`,
-                      background: active ? (isDark ? "#1e2a4a" : "#dbeafe") : isDark ? "#1e232d" : "#ffffff",
-                      color:      active ? (isDark ? "#8da2fb" : "#3b5bdb") : isDark ? "#d1d5db" : "#374151",
+                      border:     `1.5px solid ${active ? "#3b5bdb" : darkUI ? "#2a2f3a" : "#e5e7eb"}`,
+                      background: active ? (darkUI ? "#1e2a4a" : "#dbeafe") : darkUI ? "#1e232d" : "#ffffff",
+                      color:      active ? (darkUI ? "#8da2fb" : "#3b5bdb") : darkUI ? "#d1d5db" : "#374151",
                       fontWeight: active ? 700 : 500,
                       display: "flex", flexDirection: "column",
                       alignItems: "center", gap: 4,
