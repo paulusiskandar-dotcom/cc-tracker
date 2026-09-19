@@ -835,7 +835,7 @@ function TxHorizontalCard({
                     const tpl = (recurTemplates || []).find(t => t.id === templateId);
                     if (tpl) {
                       // reimburse_out & income tidak berkategori — jangan ditempeli
-                      if (tpl.category_id && r.tx_type === "expense") patch.category_id = tpl.category_id;
+                      if (tpl.category_id && r.tx_type === "expense" && !r.category_id) patch.category_id = tpl.category_id;
                       // The template only fills an EMPTY account. A row that already knows its
                       // card (from the bank's own email) keeps it — on 13 Sep 2026 two Jenius
                       // charges were silently moved to BCA Krisflyer by linking "Telkomsel".

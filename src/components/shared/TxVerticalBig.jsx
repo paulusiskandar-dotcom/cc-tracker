@@ -1466,11 +1466,9 @@ export default function TxVerticalBig({
                     const first = (recurTemplates || []).find(t => t.tx_type === type && t.is_active !== false);
                     setFormState(f => {
                       const patch = { ...f, recurring_template_id: first?.id || null };
-                      if (first) {
-                        if (first.category_id && showCat) patch.category_id = first.category_id;
-                        // Template fills an empty account only; never replaces one already chosen.
-                        if (first.from_id && !f.from_id) { patch.from_id = first.from_id; if (first.from_type) patch.from_type = first.from_type; }
-                      }
+                      // Ticking only switches the link on. Nothing is copied from the template that
+                      // happens to be first in the list (it used to stamp its category — "Taxes" —
+                      // onto the row); values are filled when a template is actually chosen.
                       return patch;
                     });
                   } else {
@@ -1491,7 +1489,7 @@ export default function TxVerticalBig({
                     if (templateId) {
                       const tpl = (recurTemplates || []).find(t => t.id === templateId);
                       if (tpl) {
-                        if (tpl.category_id && showCat) patch.category_id = tpl.category_id;
+                        if (tpl.category_id && showCat && !f.category_id) patch.category_id = tpl.category_id;
                         // Template fills an empty account only; never replaces one already chosen.
                         if (tpl.from_id && !f.from_id) { patch.from_id = tpl.from_id; if (tpl.from_type) patch.from_type = tpl.from_type; }
                       }
