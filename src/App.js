@@ -455,7 +455,7 @@ function Finance({ user, signOut }) {
   // hand-offs (they carry seeds in the navigation state) and from its "Reconcile, PDF and Excel" link.
   const isStatementRoute = /^\/accounts\/[^/]+\/statement/.test(location.pathname);
   const phoneStatement = isMobile && isStatementRoute && fullStatement !== location.pathname && !location.state?.reconcileSeeds;
-  const mobileOwnsHeader = phoneStatement || (isMobile && onMainPage && ["dashboard", "cards", "bank", "cash", "transactions", "billing", "assets", "email", "receivables", "reports", "settings", "tags"].includes(tab));
+  const mobileOwnsHeader = phoneStatement || (isMobile && onMainPage && ["dashboard", "cards", "bank", "cash", "transactions", "billing", "assets", "email", "receivables", "reports", "settings", "tags", "reconcile"].includes(tab));
   const pageLabel = !onMainPage
     ? "Statement"
     : (TABS.find(t => t.id === tab)?.label || EXTRA_LABELS[tab] || "Dashboard");
@@ -483,7 +483,7 @@ function Finance({ user, signOut }) {
       case "calendar":     return <Calendar     {...shared} />;
       case "billing":      return isMobile ? <MobileBills {...shared} /> : <Billing {...shared} />;
       case "settings":     return isMobile ? <MobileSettings {...shared} signOut={signOut} initialTab={settingsInitialTab} /> : <Settings {...shared} signOut={signOut} initialTab={settingsInitialTab} />;
-      case "reconcile":    return <Reconcile    {...shared} />;
+      case "reconcile":    return <Reconcile    {...shared} mobile={isMobile} />;
       case "scan":         return <AIImport     {...shared} />;
       case "aiimport":     return <AIImport     {...shared} />; // legacy redirect
       case "email":         return <Email         {...shared} initialTab={emailInitialTab} mobile={isMobile} onBack={() => goTab("transactions")} />;

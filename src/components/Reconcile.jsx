@@ -3,6 +3,7 @@
 // this page groups the results per month: Needs review / All matched /
 // Completed / Waiting. One-click Finalize for perfect statements.
 import { useState, useEffect, useMemo, useCallback } from "react";
+import MobileReconcile from "./mobile/MobileReconcile";
 import { gapOk, GAP_TOLERANCE } from "../lib/reconcileTolerance";
 import { supabase } from "../lib/supabase";
 import { importDrafts } from "../lib/importDrafts";
@@ -60,6 +61,8 @@ export default function Reconcile({
   setTab,
   setPendingReconcileNav,
   ledger = [],
+  mobile = false,   // phones: drawn by mobile/MobileReconcile from this page's own lists and Finalize
+  dark = false,
 }) {
   const now = new Date();
   const [month, setMonth] = useState({ y: now.getFullYear(), m: now.getMonth() + 1 });
@@ -448,6 +451,12 @@ export default function Reconcile({
       {extra}
     </div>
   );
+
+  if (mobile) {
+    return <MobileReconcile dark={dark} monthLabel={monthLabel} onPrev={() => navMonth(-1)} onNext={() => navMonth(1)} canNext={!isCurrentMonth}
+      data={monthData} finalizing={finalizing} onFinalize={finalize} onFinalizeAll={finalizeAll} usualDay={usualDay}
+      onOpenInbox={() => { try { localStorage.setItem("m.tx.view", "inbox"); } catch { /* private mode */ } setTab("transactions"); }} />;
+  }
 
   return (
     <div style={{ padding: 16, fontFamily: FF, maxWidth: 1100, margin: "0 auto" }}>
