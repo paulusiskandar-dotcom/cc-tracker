@@ -1,6 +1,7 @@
 // Points per statement for one card, and whether the earn rule reproduces what the bank printed.
 // Reads points_history (written by the statement parser). Never edits anything.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { fmtIDR } from "../../utils";
@@ -8,11 +9,22 @@ import { applyRule, shortfall, likelyNotEarning, POINT_RULES } from "../../lib/p
 
 const num = n => Number(n || 0).toLocaleString("id-ID");
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+// "ASURANSI ALLIAN*240726AFBJAKARTA SLT ID" → "ASURANSI ALLIAN"; "CICILAN BCA KE 02 DARI 03, TRIP.COM NON" → "TRIP.COM 2/3"
+const tidy = (raw) => {
+  let t = String(raw || "").replace(/\(.*$/, "");
+  const c = t.match(/CICILAN.*?KE\s*0*(\d+)\s*DARI\s*0*(\d+),?\s*(.*)$/i);
+  if (c) return `${c[3].replace(/\s+NON\b.*$/i, "").trim()} ${c[1]}/${c[2]}`;
+  return t.replace(/\*\d{6}\w*.*$/, "").replace(/\s+(JAKARTA|SINGAPORE|AMSTERDAM)\b.*$/i, "").replace(/\s+NON3DS\b.*$/i, "").trim();
+};
 const label = d => { const [y, m] = String(d).split("-"); return `${MON[Number(m) - 1]} ${y}`; };
 
 export default function PointsHistory({ card }) {
   const [rows, setRows] = useState([]);
   const [open, setOpen] = useState(null);
+  // The card sheet is its own stacking layer under the tab bar; the month sheet must sit above both,
+  // so it is mounted on the screen's root (.mw keeps the colour tokens).
+  const anchor = useRef(null);
+  const root = () => anchor.current?.closest(".mw") || document.body;
   useEffect(() => {
     let on = true;
     supabase.from("points_history").select("*").eq("account_id", card.id).order("statement_date", { ascending: false }).limit(12)
@@ -46,7 +58,7 @@ export default function PointsHistory({ card }) {
   if (!list.length) return null;
   return (
     <>
-      <div className="mw-label">Points history</div>
+      <div className="mw-label" ref={anchor}>Points history</div>
       <div className="mw-list">
         {list.map(r => (
           <button key={r.id} className="mw-row mw-tx" onClick={() => setOpen(r)}>
@@ -63,7 +75,7 @@ export default function PointsHistory({ card }) {
           </div>
         </>
       )}
-      {open && (
+      {open && createPortal(
         <div className="mw-modal" role="dialog" aria-modal="true" onClick={() => setOpen(null)}>
           <div className="mw-modal-card" onClick={ev => ev.stopPropagation()}>
             <div className="mw-hdr"><h2>{label(open.statement_date)}</h2><button className="mw-round mw-round-sunk" onClick={() => setOpen(null)} aria-label="Close"><X size={20} strokeWidth={1.8} /></button></div>
@@ -89,7 +101,7 @@ export default function PointsHistory({ card }) {
                 <div className="mw-list mw-list-sunk">
                   {linesOf(open).map((l, i) => (
                     <div key={i} className="mw-row mw-kv">
-                      <span className="mw-row-name">{String(l.description).replace(/\s+(JAKARTA|SINGAPORE|AMSTERDAM)\b.*$/i, "").replace(/\(.*$/, "").trim()}<small>{fmtIDR(l.amount)}{l.state === "instalment" ? " · instalment" : l.state === "fee" ? " · fee" : l.state === "unclear" ? " · unclear" : l.state === "rule" ? " · by the rule" : ""}</small></span>
+                      <span className="mw-row-name">{tidy(l.description)}<small>{fmtIDR(l.amount)}{l.state === "instalment" ? " · instalment" : l.state === "fee" ? " · fee" : l.state === "unclear" ? " · unclear" : l.state === "rule" ? " · by the rule" : ""}</small></span>
                       <span className={`mw-row-amt${l.state === "none" ? " hot" : l.state === "earned" ? " good" : ""}`}>{l.state === "none" || l.state === "instalment" || l.state === "fee" ? "0" : l.state === "unclear" ? "?" : num(Math.round(l.pts))}</span>
                     </div>
                   ))}
@@ -97,7 +109,7 @@ export default function PointsHistory({ card }) {
               </>
             )}
           </div>
-        </div>
+        </div>, root()
       )}
     </>
   );

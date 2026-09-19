@@ -258,3 +258,5 @@ button.mw-row { cursor: pointer; }
 .pf-veiled .pf-modal-scrim { background: rgba(255,255,255,0.55) !important; }
 .mw-row-name.mw-wrap { white-space: normal; line-height: 1.45; font-size: 14px; color: var(--sub); }
 .mw-row.mw-lesson { align-items: flex-start; }
+.mw-row.mw-kv > .mw-row-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.mw-row.mw-kv > .mw-row-amt { flex-shrink: 0; }
