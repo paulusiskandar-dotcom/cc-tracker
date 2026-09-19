@@ -47,7 +47,7 @@ export default function MobileReconcile({ monthLabel, onPrev, onNext, canNext, d
               const miss = it.live ? it.live.missing : (it.s.total_missing || 0);
               return (
                 <button key={it.acc.id} className="mw-row mw-tx" onClick={() => setOpen({ kind: "review", it })}>
-                  <span className="mw-row-name">{it.acc.name}<small className="hot">{miss > 0 ? `${miss} line${miss === 1 ? "" : "s"} not in the book` : it.gap != null ? `gap ${fmtIDR(Math.abs(it.gap))}` : "closing does not tie"}</small></span>
+                  <span className="mw-row-name">{it.acc.name}<small className="hot">{miss > 0 ? `${miss} line${miss === 1 ? "" : "s"} not in the book` : it.gap != null ? `closing off by ${fmtIDR(Math.abs(it.live?.tutup?.selisih || it.gap))}` : "closing does not tie"}</small></span>
                   <span className="mw-row-amt">{fmtIDR(it.s.closing_balance)}</span>
                 </button>
               );
@@ -85,14 +85,26 @@ export default function MobileReconcile({ monthLabel, onPrev, onNext, canNext, d
               <div className="mw-row mw-kv"><span className="mw-row-name">Period</span><span className="mw-row-amt">{d2(open.it.s.period_start)} – {d2(open.it.s.period_end)}</span></div>
               <div className="mw-row mw-kv"><span className="mw-row-name">Statement lines</span><span className="mw-row-amt">{open.it.s.total_statement ?? "—"}</span></div>
               <div className="mw-row mw-kv"><span className="mw-row-name">Not in the book</span><span className={`mw-row-amt${(open.it.live ? open.it.live.missing : open.it.s.total_missing) > 0 ? " hot" : ""}`}>{open.it.live ? open.it.live.missing : (open.it.s.total_missing ?? 0)}</span></div>
-              <div className="mw-row mw-kv"><span className="mw-row-name">Gap</span><span className={`mw-row-amt${open.kind === "review" ? " hot" : ""}`}>{open.it.gap == null ? "—" : fmtIDR(Math.abs(open.it.gap))}</span></div>
+              <div className="mw-row mw-kv"><span className="mw-row-name">Closing off by</span><span className={`mw-row-amt${open.kind === "review" ? " hot" : ""}`}>{open.it.live?.tutup ? fmtIDR(Math.abs(open.it.live.tutup.selisih)) : open.it.gap == null ? "—" : fmtIDR(Math.abs(open.it.gap))}</span></div>
               {open.it.live?.tutup && <div className="mw-row mw-kv"><span className="mw-row-name">Book at closing date</span><span className="mw-row-amt">{fmtIDR(open.it.live.tutup.buku ?? open.it.live.tutup.ledger ?? 0)}</span></div>}
             </div>
             {open.kind === "ready"
               ? <button className="mw-btn" disabled={finalizing === open.it.acc.id} onClick={async () => { await onFinalize(open.it); setOpen(null); }}>{finalizing === open.it.acc.id ? "Finalizing" : "Finalize"}</button>
               : <>
-                  <div className="mw-note">Lines still missing are waiting in the Inbox. Approve them there; anything else (wrong amount, a duplicate, an extra row) is fixed on the desktop Reconcile page.</div>
-                  <button className="mw-btn" onClick={() => { setOpen(null); onOpenInbox(); }}>Open Inbox</button>
+{(() => {
+                    const miss = open.it.live ? open.it.live.missing : (open.it.s.total_missing || 0);
+                    const lebih = open.it.live?.tutup?.lebih || [];
+                    if (miss > 0) return <div className="mw-note">Lines still missing are waiting in the Inbox. Approve them there.</div>;
+                    if (!lebih.length) return <div className="mw-note">Every statement line is in the book, yet the closing does not tie. Check amounts on the desktop Reconcile page.</div>;
+                    return <>
+                      <div className="mw-label">In the book, not on this statement</div>
+                      <div className="mw-list mw-list-sunk">
+                        {lebih.map(r => <div key={r.id} className="mw-row mw-kv"><span className="mw-row-name">{r.name}<small>{d2(r.date)}</small></span><span className="mw-row-amt">{fmtIDR(r.amount)}</span></div>)}
+                      </div>
+                      <div className="mw-note">Paid with another card, or billed next month? Move the row to the right card or date, then Finalize.</div>
+                    </>;
+                  })()}
+                  {(open.it.live ? open.it.live.missing : (open.it.s.total_missing || 0)) > 0 && <button className="mw-btn" onClick={() => { setOpen(null); onOpenInbox(); }}>Open Inbox</button>}
                 </>}
           </div>
         </div>

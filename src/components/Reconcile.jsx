@@ -165,6 +165,11 @@ export default function Reconcile({
           b.setDate(b.getDate() - 3);
           const awal = `${b.getFullYear()}-${String(b.getMonth() + 1).padStart(2, "0")}-${String(b.getDate()).padStart(2, "0")}`;
           let net = Number(acc.initial_balance || 0), geser = 0;
+          // Rows in the book inside this statement's cycle that the statement does not
+          // carry (and are too old to be posting lag) — the usual reason a closing is off.
+          const mulai = (st.stmtRows || []).map(r => r.date).filter(Boolean).sort()[0] || cutoff;
+          const lebih = led.filter(r => !matched.has(r.id) && !r.reconciled_at && r.tx_date >= mulai && r.tx_date < awal)
+            .map(r => ({ id: r.id, date: r.tx_date, name: r.description || r.merchant_name || "", amount: Number(r.amount_idr || r.amount || 0) }));
           for (const r of led) {
             if (r.tx_date > cutoff) continue;
             if (!matched.has(r.id) && r.tx_date >= awal) { geser++; continue; }
@@ -173,7 +178,7 @@ export default function Reconcile({
             if (r.to_id === acc.id && r.to_type === "account") net -= amt;
           }
           tutup = { buku: net, statement: Number(st.stmtClosingBalance),
-                    selisih: Math.round(net - Number(st.stmtClosingBalance)), geser };
+                    selisih: Math.round(net - Number(st.stmtClosingBalance)), geser, lebih };
         }
       }
       out[d.account_id] = {
