@@ -100,7 +100,7 @@ export default function PointsHistory({ card }) {
                 <div className="mw-label">Purchases</div>
                 <div className="mw-list mw-list-sunk">
                   {linesOf(open).map((l, i) => (
-                    <div key={i} className="mw-row mw-kv">
+                    <div key={i} className="mw-row mw-tx">
                       <span className="mw-row-name">{tidy(l.description)}<small>{fmtIDR(l.amount)}{l.state === "instalment" ? " · instalment" : l.state === "fee" ? " · fee" : l.state === "unclear" ? " · unclear" : l.state === "rule" ? " · by the rule" : ""}</small></span>
                       <span className={`mw-row-amt${l.state === "none" ? " hot" : l.state === "earned" ? " good" : ""}`}>{l.state === "none" || l.state === "instalment" || l.state === "fee" ? "0" : l.state === "unclear" ? "?" : num(Math.round(l.pts))}</span>
                     </div>
