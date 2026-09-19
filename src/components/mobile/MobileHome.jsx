@@ -9,19 +9,19 @@ import { supabase } from "../../lib/supabase";
 import { fmtIDR } from "../../utils";
 import { hitungPiutang } from "../../lib/piutang";
 import { buildBills } from "../Billing";
+import { makeSpending } from "../../lib/spending";
 import MobileAssets, { Trend } from "./MobileAssets";
 import "./mobile.css";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const lsGet = k => { try { return localStorage.getItem(k); } catch { return null; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
-const isExpense = e => (e.tx_type === "expense" || e.tx_type === "pay_liability") && !e.is_reimburse;
-const amt = e => Number(e.amount_idr || e.amount || 0);
 const ymOf = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 const LIQUID = /^(stocks?|mutual fund|deposit|deposito)$/i;
 const signed = v => `${v < 0 ? "−" : ""}${fmtIDR(Math.abs(v))}`;
 
 export default function MobileHome(props) {
+  const { spendOf } = useMemo(() => makeSpending(props.incomeSrcs || []), [props.incomeSrcs]);
   const { user, reconSessions = [], ledger = [], accounts = [], creditCards = [], liabilities = [], recurTemplates = [], installments = [], pendingSyncs = [], netWorth = {}, fxRates = {}, assets = [], dark, setTab, onSearch } = props;
   const [view, setView] = useState(() => lsGet("m.home.view") === "assets" ? "assets" : "overview");
   useEffect(() => { lsSet("m.home.view", view); }, [view]);
@@ -55,12 +55,12 @@ export default function MobileHome(props) {
     const days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
     const cur = Array(days).fill(0), old = Array(days).fill(0);
     ledger.forEach(e => {
-      if (!isExpense(e)) return; const m = String(e.tx_date || "").slice(0, 7); const d = Number(String(e.tx_date).slice(8, 10)) - 1;
-      if (m === month && d < days) cur[d] += amt(e); else if (m === prev) old[Math.min(d, days - 1)] += amt(e);
+      const v = spendOf(e); if (!v) return; const m = String(e.tx_date || "").slice(0, 7); const d = Number(String(e.tx_date).slice(8, 10)) - 1;
+      if (m === month && d < days) cur[d] += v; else if (m === prev) old[Math.min(d, days - 1)] += v;
     });
     const cum = a => a.reduce((r, v, i) => { r.push((r[i - 1] || 0) + v); return r; }, []);
     return { cur: cum(cur).slice(0, now.getDate()), old: cum(old), days, today: now.getDate(), prevName: MONTHS[(now.getMonth() + 11) % 12] };
-  }, [ledger, month]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ledger, month, spendOf]); // eslint-disable-line react-hooks/exhaustive-deps
   const spent = pace.cur[pace.cur.length - 1] || 0;
   const lastAtToday = pace.old[pace.today - 1] || 0;
 

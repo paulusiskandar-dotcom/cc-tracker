@@ -4,10 +4,10 @@
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { fmtIDR } from "../../utils";
+import { makeSpending } from "../../lib/spending";
 import "./mobile.css";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-const isExpense = e => (e.tx_type === "expense" || e.tx_type === "pay_liability") && !e.is_reimburse;
 const amt = e => Number(e.amount_idr || e.amount || 0);
 const signed = v => `${v < 0 ? "−" : ""}${fmtIDR(Math.abs(v))}`;
 
@@ -15,6 +15,7 @@ export default function MobileReports({ ledger = [], categories = [], incomeSrcs
   const thisYear = new Date().getFullYear();
   const [year, setYear] = useState(thisYear);
   const [openM, setOpenM] = useState(null);
+  const { isIncome, spendOf } = useMemo(() => makeSpending(incomeSrcs), [incomeSrcs]);
   const catName = useMemo(() => Object.fromEntries(categories.map(c => [c.id, c.name])), [categories]);
   const srcName = useMemo(() => Object.fromEntries(incomeSrcs.map(c => [c.id, c.name])), [incomeSrcs]);
 
@@ -22,12 +23,13 @@ export default function MobileReports({ ledger = [], categories = [], incomeSrcs
     const rows = Array.from({ length: 12 }, (_, i) => ({ i, got: 0, out: 0, cats: {}, srcs: {} }));
     ledger.forEach(e => {
       const d = String(e.tx_date || ""); if (Number(d.slice(0, 4)) !== year) return; const r = rows[Number(d.slice(5, 7)) - 1]; if (!r) return;
-      if (isExpense(e)) { r.out += amt(e); const k = e.category_name || catName[e.category_id] || (e.tx_type === "pay_liability" ? "Loan repayment" : "Uncategorized"); r.cats[k] = (r.cats[k] || 0) + amt(e); }
-      else if (e.tx_type === "income") { r.got += amt(e); const k = srcName[e.from_id] || e.category_name || "Other income"; r.srcs[k] = (r.srcs[k] || 0) + amt(e); }
+      const v = spendOf(e);
+      if (v) { r.out += v; const k = e.category_name || catName[e.category_id] || (e.tx_type === "pay_liability" ? "Loan repayment" : v < 0 ? "Refunds" : "Uncategorized"); r.cats[k] = (r.cats[k] || 0) + v; }
+      else if (isIncome(e)) { r.got += amt(e); const k = srcName[e.from_id] || e.category_name || "Other income"; r.srcs[k] = (r.srcs[k] || 0) + amt(e); }
     });
     const last = year === thisYear ? new Date().getMonth() : 11;
     return rows.filter(r => r.i <= last && (r.got || r.out)).reverse();
-  }, [ledger, year, thisYear, catName, srcName]);
+  }, [ledger, year, thisYear, catName, srcName, spendOf, isIncome]);
   const got = months.reduce((s, r) => s + r.got, 0), out = months.reduce((s, r) => s + r.out, 0);
   const top = Math.max(1, ...months.flatMap(r => [r.got, r.out]));
   const hasEarlier = useMemo(() => ledger.some(e => Number(String(e.tx_date || "").slice(0, 4)) < year), [ledger, year]);
@@ -67,7 +69,7 @@ export default function MobileReports({ ledger = [], categories = [], incomeSrcs
                   <div className="mw-row mw-tx"><span className="mw-row-name"><b>In</b></span><span className="mw-row-amt in">{fmtIDR(r.got)}</span></div>
                   {srcs.slice(0, 4).map(([k, v]) => <div key={k} className="mw-row mw-tx"><span className="mw-row-name">{k}</span><span className="mw-row-amt">{fmtIDR(v)}</span></div>)}
                   <div className="mw-row mw-tx"><span className="mw-row-name"><b>Out</b></span><span className="mw-row-amt">{fmtIDR(r.out)}</span></div>
-                  {cats.slice(0, 6).map(([k, v]) => <div key={k} className="mw-row mw-tx"><span className="mw-row-name">{k}</span><span className="mw-row-amt">{fmtIDR(v)}</span></div>)}
+                  {cats.slice(0, 6).map(([k, v]) => <div key={k} className="mw-row mw-tx"><span className="mw-row-name">{k}</span><span className="mw-row-amt">{signed(v)}</span></div>)}
                   {cats.length > 6 && <div className="mw-more">and {cats.length - 6} smaller categories</div>}
                 </div>
               )}

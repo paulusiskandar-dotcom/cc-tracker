@@ -9,6 +9,7 @@ import Transactions from "../Transactions";
 import Email from "../Email";
 import TxVerticalBig from "../shared/TxVerticalBig";
 import Amt from "./Amt";
+import { makeSpending } from "../../lib/spending";
 import "./mobile.css";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -21,8 +22,6 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private
 const amt = e => Number(e.amount_idr || e.amount || 0);
 
 // Same definition the Dashboard uses for "spending" and "income".
-const isExpense = e => (e.tx_type === "expense" || e.tx_type === "pay_liability") && !e.is_reimburse;
-const isIncome = e => e.tx_type === "income";
 
 // Search on the phone is one thing: the transaction search. Any screen's magnifier lands here
 // (App bumps searchSignal); a signal already acted on is remembered so a later visit is normal.
@@ -64,16 +63,19 @@ export default function MobileTransactions(props) {
   const srcName = useMemo(() => Object.fromEntries(incomeSrcs.map(c => [c.id, c.name])), [incomeSrcs]);
   // Paying down a liability counts as money out (same as the Dashboard) but it is not an
   // uncategorised purchase, so it gets its own name.
-  const nameOfCat = e => e.category_name || catName[e.category_id] || (e.tx_type === "pay_liability" ? "Loan repayment" : "Uncategorized");
+  const nameOfCat = e => e.category_name || catName[e.category_id] || (e.tx_type === "pay_liability" ? "Loan repayment" : e.tx_type === "income" ? "Refunds" : "Uncategorized");
 
   // A trip covers its own dates, so it replaces the month filter instead of narrowing it.
   const scope = useMemo(() => ledger.filter(e => (trip ? e.tag_id === trip : String(e.tx_date || "").slice(0, 7) === month)), [ledger, month, trip]);
-  const rows = useMemo(() => scope.filter(kind === "expense" ? isExpense : isIncome), [scope, kind]);
-  const total = rows.reduce((s, e) => s + amt(e), 0);
+  // Spending is net of refunds: a refund sits in its purchase's category with a minus.
+  const { isIncome, spendOf } = useMemo(() => makeSpending(incomeSrcs), [incomeSrcs]);
+  const val = e => (kind === "expense" ? spendOf(e) : amt(e));
+  const rows = useMemo(() => scope.filter(e => (kind === "expense" ? spendOf(e) !== 0 : isIncome(e))), [scope, kind, spendOf, isIncome]);
+  const total = rows.reduce((s, e) => s + val(e), 0);
 
   const cats = useMemo(() => {
     const m = {};
-    rows.forEach(e => { const k = kind === "expense" ? nameOfCat(e) : (srcName[e.from_id] || e.category_name || "Other income"); (m[k] = m[k] || { name: k, total: 0, items: [] }); m[k].total += amt(e); m[k].items.push(e); });
+    rows.forEach(e => { const k = kind === "expense" ? nameOfCat(e) : (srcName[e.from_id] || e.category_name || "Other income"); (m[k] = m[k] || { name: k, total: 0, items: [] }); m[k].total += val(e); m[k].items.push(e); });
     return Object.values(m).sort((a, b) => b.total - a.total).map((c, i) => ({ ...c, color: COLORS[Math.min(i, COLORS.length - 1)], items: c.items.sort((a, b) => amt(b) - amt(a)) }));
   }, [rows, kind]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -190,7 +192,7 @@ export default function MobileTransactions(props) {
                   <button className="mw-row" onClick={() => setOpenCat(openCat === c.name ? null : c.name)} aria-expanded={openCat === c.name}>
                     <i className="mw-dot" style={{ background: c.color }} />
                     <span className="mw-row-name">{c.name}</span>
-                    <span className="mw-row-amt">{fmtIDR(c.total)}</span>
+                    <span className="mw-row-amt">{c.total < 0 ? "−" : ""}{fmtIDR(Math.abs(c.total))}</span>
                   </button>
                   {openCat === c.name && (
                     <div className="mw-sub">

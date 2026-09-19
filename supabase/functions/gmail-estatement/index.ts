@@ -11,6 +11,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildPaperSplits, cariPecahan } from "../_shared/paperSplit.ts";
 import { buildOrderNotes, cariCatatan } from "../_shared/orderNote.ts";
+import { parseInstalment, isMonthlyFee, findWashPairs } from "../_shared/stmtRules.ts";
 import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
 const CORS = {
@@ -1348,16 +1349,8 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
   const washIds = new Set<string>();
   const washPairs: { retail: any; credit: any }[] = [];
   {
-    const dayMs = 86400000;
-    const credits = missing.filter((m: any) => (m.direction || "out") === "in" && /:\s*0\s*\/\s*\d{1,2}\b/.test(String(m.description || "")));
-    for (const c of credits) {
-      const cAmt = Math.abs(Number(c.amount || 0));
-      const r = missing.find((m: any) => m !== c && !washIds.has(m._id) && (m.direction || "out") !== "in"
-        && /retail/i.test(String(m.description || ""))
-        && Math.abs(Math.abs(Number(m.amount || 0)) - cAmt) <= 2
-        && Math.abs(new Date((m.date || "") + "T00:00:00").getTime() - new Date((c.date || "") + "T00:00:00").getTime()) <= dayMs);
-      if (r) { washIds.add(r._id); washIds.add(c._id); washPairs.push({ retail: r, credit: c }); }
-    }
+    // Aturan per bank (BRI 0/N, BCA REVERSAL CICILAN, Maybank XM …) ada di _shared/stmtRules.ts + ujinya.
+    for (const w of findWashPairs(missing as any[])) { washIds.add(w.retail._id); washIds.add(w.credit._id); washPairs.push(w); }
     if (washPairs.length) console.log(`[prepare] ${washPairs.length} pasangan konversi cicilan dikecualikan: ${washPairs.map((w) => w.retail.amount).join(", ")}`);
   }
 
@@ -1384,11 +1377,7 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
     // statement yang lebih baru. Hanya statement TERBARU yang boleh menulis.
     if (acc.last_statement_date && periodEnd && periodEnd < acc.last_statement_date)
       throw `statement lama (${periodEnd} < anchor ${acc.last_statement_date}) — auto-create dilewati`;
-    // "TRX NOTIFICATION CHARGE" = biaya notifikasi versi Mandiri (Signa, Rp7.500/bulan) — 19 Sep 2026.
-    const BIAYA_RE = /BEA METERAI|BIAYA NOTIFIKASI|NOTIFICATION CHARGE|ADMINISTRATION FEE|E-?BILLING|E-?STATEMENT FEE|STAMP DUTY/i;
-    // Mandiri menulis angsuran tiga digit berawalan nol ("ERASPACE.COM Jakar 012/024"); pola lama
-    // \d{1,2} membacanya "12/02" lalu membuangnya, jadi angsuran itu jatuh ke antrean (19 Sep 2026).
-    const CICIL_RE = /(?<!\d)0*(\d{1,2})\s*\/\s*0*(\d{1,2})(?!\d)/;
+    // Pola biaya & angsuran tiap bank: _shared/stmtRules.ts (teruji dengan baris asli tiap bank).
     // Rencana cicilan aktif kartu ini + angsuran terakhir tiap rencana (sumber nama
     // barang, kategori, entity). Pencocokan lewat nominal bulanan ±50 (nominal BRI
     // bergeser 2–6 rupiah antarbulan) dan tenor — bukan lewat teks deskripsi, yang
@@ -1412,7 +1401,7 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
       const amt = Math.round(Number(m0.amount || 0));
       const isOut = (m0.direction || "out") !== "in";
       // (b) biaya tetap
-      if (isOut && BIAYA_RE.test(desc) && amt > 0 && amt <= 25000) {
+      if (isOut && isMonthlyFee(desc, amt)) {
         const { data: katB } = await serviceSupabase.from("expense_categories")
           .select("id,name").eq("user_id", userId).eq("name", "Bank & Card Fees").maybeSingle();
         inserts.push({
@@ -1427,9 +1416,15 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
         continue;
       }
       // (a) angsuran lanjutan
-      const cm = desc.match(CICIL_RE);
+      const cm = parseInstalment(desc);
       if (isOut && cm) {
-        const n = Number(cm[1]), tot = Number(cm[2]);
+        const n = cm.n, tot = cm.tot;
+        // Angsuran yang BUKAN belanja (mis. Blibli 12 bln = pencairan pinjaman Lieche, dibukukan
+        // give_loan) tidak boleh dibuat otomatis sebagai expense: lihat angsuran bernominal sama
+        // terakhir di kartu ini — kalau tipenya bukan expense/reimburse_out, serahkan ke antrean.
+        const kembar = (ledAll || []).filter((l: any) => l.from_id === acc.id && Math.abs(Math.round(Number(l.amount_idr || l.amount || 0)) - amt) <= 50)
+          .sort((x: any, y: any) => String(y.tx_date).localeCompare(String(x.tx_date)))[0];
+        if (kembar && !["expense", "reimburse_out"].includes(kembar.tx_type)) { sisaMissing.push(m0); continue; }
         // (a1) tersambung ke rencana cicilan yang berjalan
         if (n >= 2 && tot >= n) {
           const plan = plans.find((p: any) => !usedPlan.has(p.id)
