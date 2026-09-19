@@ -9,6 +9,7 @@ import { fmtIDR, fmtCurNative } from "../../utils";
 import { CURRENCIES } from "../../constants";
 import CurrencyFlag from "../shared/CurrencyFlag";
 import Amt from "./Amt";
+import PointsHistory from "./PointsHistory";
 import "./mobile.css";
 
 const slug = s => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -367,6 +368,7 @@ function CardSheet({ card, phase, txs, plans = [], onPlaced, onClose, navigate, 
                 </div>
               </>
             )}
+            <PointsHistory card={card} />
             <MonthByCategory txs={mine} cardId={card.id} />
           </>
         )}

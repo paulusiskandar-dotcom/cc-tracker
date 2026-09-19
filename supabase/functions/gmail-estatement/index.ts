@@ -376,7 +376,7 @@ Return ONLY a valid JSON object (no markdown, no explanation) with this exact sc
   "statement_date": "2025-03-21",
   "due_date": "2025-04-06",
   "minimum_payment": 250000,
-  "points": { "balance": 43331, "unit": "Travel Miles", "expiring": 0, "expiry_date": "2026-10-31" }
+  "points": { "balance": 43331, "previous": null, "earned": null, "bonus": null, "redeemed": null, "unit": "Travel Miles", "expiring": 0, "expiry_date": "2026-10-31" }
 }
 - points: the CARD'S REWARD POINTS / MILES BALANCE printed in the statement summary, or null if the statement prints none.
   balance = the current/total balance AFTER this cycle. unit = the programme name as printed. expiring/expiry_date = the
@@ -389,7 +389,11 @@ Return ONLY a valid JSON object (no markdown, no explanation) with this exact sc
   HSBC "Ringkasan Rewards Poin: Jumlah Poin Bulan Lalu + Tambahan Poin Bulan Ini − Jumlah Poin Ditukarkan" → balance = that sum (unit "Poin Rewards");
   BNI "JUMLAH POIN BULAN LALU + JUMLAH POIN BULAN INI − JUMLAH POIN DITUKARKAN" → balance (unit "BNI Reward Points");
   Skorcard "Jumlah Poin Bulan Lalu + Tambahan − Ditukarkan" (unit "Skorpoin").
-  BCA, BRI, Jenius, Danamon, Mega, DBS print no balance → points = null. Never invent a number.
+  Also fill, ONLY when the statement prints them (else null): previous = "Jumlah Poin Bulan Lalu"; earned = points/miles added
+  THIS cycle ("Tambahan Poin Bulan Ini" / "JUMLAH POIN BULAN INI"); redeemed = "Jumlah Poin Ditukarkan"; bonus = an extra award printed separately.
+  BCA KrisFlyer prints no balance but prints "KRISFLYER MILES ANDA BULAN INI <earned> MILES" and sometimes
+  "SELAMAT ANDA MENDAPATKAN EXTRA SEBESAR <bonus> MILES" → points = { balance: null, earned, bonus, unit: "KrisFlyer Miles" }.
+  BRI, Jenius, Danamon, Mega, DBS and other BCA cards print nothing → points = null. Never invent a number.
 - detected_account: extracted from statement header (card last 4, bank name, account number). Set fields to null if not found. Set entire value to null if no account info present.
 - detected_period: statement month/year from header (e.g. March 2025 → year:2025, month:3). null if not found.
 - closing_balance: the amount BILLED this cycle — "Total Tagihan" / "TAGIHAN BULAN INI" / "Total Payment Due" / "Saldo Akhir" / "Closing Balance". This is what the cardholder must pay by the due date.
@@ -1202,7 +1206,22 @@ function ledgerClosingAt(acc: any, rows: any[], cutoff: string): number {
 // bersama tanggal statement-nya; statement yang lebih lama tidak boleh menimpa
 // catatan yang lebih baru (termasuk isian manual Paulus). Dipanggil juga untuk
 // statement tanpa transaksi (kartu tidur tetap mencetak poinnya).
-async function simpanPoinStatement(serviceSupabase: any, acc: any, extraction: any, asOf: string | null) {
+async function simpanPoinStatement(serviceSupabase: any, acc: any, extraction: any, asOf: string | null, filename?: string, userId?: string) {
+  // Riwayat per statement (20 Sep 2026): apa pun yang dicetak bank siklus itu, termasuk kartu yang
+  // hanya mencetak perolehan (BCA KrisFlyer). Satu baris per kartu+tanggal statement, idempoten.
+  try {
+    const p = extraction?.points;
+    const num = (v: any) => { if (v == null || v === "") return null; const n = Number(String(v).replace(/[^\d.-]/g, "")); return Number.isFinite(n) ? n : null; };
+    if (p && asOf && [p.balance, p.earned, p.bonus, p.redeemed, p.previous].some((v: any) => num(v) != null)) {
+      const { error } = await serviceSupabase.from("points_history").upsert({
+        user_id: userId || acc.user_id, account_id: acc.id, statement_date: asOf, unit: p.unit ? String(p.unit).slice(0, 40) : null,
+        balance: num(p.balance), previous: num(p.previous), earned: num(p.earned), bonus: num(p.bonus), redeemed: num(p.redeemed),
+        expiring: num(p.expiring), expiry_date: normStmtDate(p.expiry_date) || null, source: "statement", source_file: filename || null,
+        stmt_rows: (extraction.transactions || []).map((t: any) => ({ date: t.date || null, description: String(t.description || t.merchant || "").slice(0, 120), amount: Math.abs(Number(t.amount || 0)), direction: t.direction || null, currency: t.currency || "IDR", card_last4: t.card_last4 || null })),
+      }, { onConflict: "account_id,statement_date" });
+      if (error) console.warn("[prepare] points_history:", error.message);
+    }
+  } catch (e) { console.warn("[prepare] points_history:", (e as any)?.message); }
   try {
     const pts = extraction?.points;
     const bal = pts && pts.balance != null ? Number(String(pts.balance).replace(/[^\d.]/g, "")) : NaN;
@@ -1220,7 +1239,7 @@ async function simpanPoinStatement(serviceSupabase: any, acc: any, extraction: a
   } catch (e) { console.warn("[prepare] poin:", (e as any)?.message); }
 }
 
-async function prepareReconcile(serviceSupabase: any, userId: string, extraction: any, filename: string): Promise<any> {
+async function prepareReconcile(serviceSupabase: any, userId: string, extraction: any, filename: string, opts: { headerOnly?: boolean } = {}): Promise<any> {
   const txs: any[] = extraction.transactions || [];
   const { data: accounts } = await serviceSupabase.from("accounts")
     .select("id, name, type, bank_name, account_no, card_last4, currency, initial_balance, is_active, last_statement_date, last_statement_amount")
@@ -1259,7 +1278,7 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
           closing_balance: l4 === utama ? extraction.closing_balance : null,
         };
         hasil.push({ card_last4: l4, account_name: ka.name,
-          ...(await prepareReconcile(serviceSupabase, userId, sub, `${filename} · kartu ${l4}`)) });
+          ...(await prepareReconcile(serviceSupabase, userId, sub, `${filename} · kartu ${l4}`, opts)) });
       }
       return { prepared: true, split_by_card: true, cards: hasil };
     }
@@ -1282,7 +1301,8 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
   if (!txs.length) {
     const tgl = normStmtDate(extraction.statement_date);
     const tutup = extraction.closing_balance ?? null;
-    await simpanPoinStatement(serviceSupabase, acc, extraction, tgl);
+    await simpanPoinStatement(serviceSupabase, acc, extraction, tgl, filename, userId);
+    if (opts.headerOnly) return { prepared: false, header_only: true, account_name: acc.name, statement_date: tgl, points: extraction.points ?? null, minimum_payment: extraction.minimum_payment ?? null };
     if (tgl && tutup != null) {
       const [y, m] = tgl.split("-").map(Number);
       await serviceSupabase.from("reconcile_sessions").delete()
@@ -1347,7 +1367,15 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
     : (periodEnd ? pad(periodEnd, 1) : null);
   const ledgerWindow = (ledAll || []).filter((l: any) => (!winStart || l.tx_date >= winStart) && (!winEnd || l.tx_date <= winEnd));
 
-  await simpanPoinStatement(serviceSupabase, acc, extraction, stmtDate || periodEnd || null);
+  await simpanPoinStatement(serviceSupabase, acc, extraction, stmtDate || periodEnd || null, filename, userId);
+  // header_only: isi riwayat poin / minimum payment dari statement lama TANPA menyentuh draft, sesi, antrean, atau ledger.
+  if (opts.headerOnly) {
+    if (extraction.minimum_payment != null && pY && pM) {
+      await serviceSupabase.from("reconcile_sessions").update({ minimum_payment: extraction.minimum_payment })
+        .eq("user_id", userId).eq("account_id", acc.id).eq("period_year", pY).eq("period_month", pM).neq("status", "void").is("minimum_payment", null);
+    }
+    return { prepared: false, header_only: true, account_name: acc.name, statement_date: stmtDate, points: extraction.points ?? null, minimum_payment: extraction.minimum_payment ?? null };
+  }
 
   // Satu pembayaran yang dicetak bank sebagai beberapa baris (per nomor kartu) digabung dulu.
   stmtRows = mergeSplitPayments(stmtRows as any[], ledgerWindow
@@ -1901,7 +1929,7 @@ Deno.serve(async (req: Request) => {
       if (!extraction.success) {
         result = { prepared: false, reason: extraction.encrypted ? "encrypted" : "extract_failed", ...extraction };
       } else {
-        result = await prepareReconcile(serviceSupabase, userId, extraction, String(body.filename || "statement.pdf"));
+        result = await prepareReconcile(serviceSupabase, userId, extraction, String(body.filename || "statement.pdf"), { headerOnly: body.header_only === true });
       }
 
     } else {

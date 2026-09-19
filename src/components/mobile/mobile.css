@@ -36,6 +36,7 @@ button.mw-row { cursor: pointer; }
 .mw-row-name { flex: 1; min-width: 0; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mw-row-amt { flex: none; text-align: right; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .mw-row-amt.hot { color: var(--hot); }
+.mw-row-amt.good { color: var(--good); }
 .mw-row-amt.in { color: var(--good); }
 .mw-row small { display: block; font-size: 12px; font-weight: 400; color: var(--muted); margin-top: 1px; white-space: normal; }
 .mw-kv .mw-row-name { color: var(--muted); flex: 0 0 auto; overflow: visible; }
