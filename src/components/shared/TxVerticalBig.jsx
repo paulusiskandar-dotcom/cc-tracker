@@ -1468,8 +1468,8 @@ export default function TxVerticalBig({
                       const patch = { ...f, recurring_template_id: first?.id || null };
                       if (first) {
                         if (first.category_id && showCat) patch.category_id = first.category_id;
-                        if (first.from_id)     patch.from_id     = first.from_id;
-                        if (first.from_type)   patch.from_type   = first.from_type;
+                        // Template fills an empty account only; never replaces one already chosen.
+                        if (first.from_id && !f.from_id) { patch.from_id = first.from_id; if (first.from_type) patch.from_type = first.from_type; }
                       }
                       return patch;
                     });
@@ -1492,8 +1492,8 @@ export default function TxVerticalBig({
                       const tpl = (recurTemplates || []).find(t => t.id === templateId);
                       if (tpl) {
                         if (tpl.category_id && showCat) patch.category_id = tpl.category_id;
-                        if (tpl.from_id)     patch.from_id     = tpl.from_id;
-                        if (tpl.from_type)   patch.from_type   = tpl.from_type;
+                        // Template fills an empty account only; never replaces one already chosen.
+                        if (tpl.from_id && !f.from_id) { patch.from_id = tpl.from_id; if (tpl.from_type) patch.from_type = tpl.from_type; }
                       }
                     }
                     return patch;

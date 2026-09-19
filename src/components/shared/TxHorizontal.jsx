@@ -836,8 +836,10 @@ function TxHorizontalCard({
                     if (tpl) {
                       // reimburse_out & income tidak berkategori — jangan ditempeli
                       if (tpl.category_id && r.tx_type === "expense") patch.category_id = tpl.category_id;
-                      if (tpl.from_id)     patch.from_id     = tpl.from_id;
-                      if (tpl.from_type)   patch.from_type   = tpl.from_type;
+                      // The template only fills an EMPTY account. A row that already knows its
+                      // card (from the bank's own email) keeps it — on 13 Sep 2026 two Jenius
+                      // charges were silently moved to BCA Krisflyer by linking "Telkomsel".
+                      if (tpl.from_id && !r.from_id) { patch.from_id = tpl.from_id; if (tpl.from_type) patch.from_type = tpl.from_type; }
                     }
                   }
                   onUpdate(patch);
