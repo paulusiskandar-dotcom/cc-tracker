@@ -40,7 +40,7 @@ Deno.serve(async () => {
 
   // Any reconcile_session for this month (prepared OR completed = statement is in)
   const { data: sess } = await sb.from("reconcile_sessions")
-    .select("account_id, status").eq("user_id", USER_ID)
+    .select("account_id, status").eq("user_id", USER_ID).neq("status", "void")
     .eq("period_year", y).eq("period_month", m);
   const hasSession = new Set((sess || []).map((s: any) => s.account_id));
 

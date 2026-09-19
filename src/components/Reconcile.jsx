@@ -75,6 +75,17 @@ export default function Reconcile({
 
   const allSessions = useMemo(() => sessions ?? reconSessions ?? [], [sessions, reconSessions]);
   const { drafts, reload: reloadDrafts } = useReconcileDrafts(user?.id);
+  // Drafts are stored one per account, not per month. A draft may only vouch for the
+  // session of its own statement month — on 19 Sep 2026 seven June sessions were
+  // finalized against August drafts because this was not checked.
+  const draftFitsSession = (draft, s) => {
+    const st = draft?.state_json;
+    if (!st || !s) return false;
+    const rowDates = (st.stmtRows || []).map(r => r.date).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d || "")).sort();
+    const ref = st.stmtStatementDate || rowDates[rowDates.length - 1] || "";
+    const [y, m] = String(ref).split("-").map(Number);
+    return y === s.period_year && m === s.period_month;
+  };
   const draftByAcc = useMemo(() => Object.fromEntries((drafts || []).map(d => [d.account_id, d])), [drafts]);
 
   const refreshSessions = useCallback(async () => {
@@ -192,7 +203,7 @@ export default function Reconcile({
       const s = byAcc[acc.id];
       if (!s) { waiting.push({ acc }); continue; }
       if (s.status === "completed") { completed.push({ acc, s }); continue; }
-      const live = liveByAcc[acc.id] || null;
+      const live = draftFitsSession(draftByAcc[acc.id], s) ? (liveByAcc[acc.id] || null) : null;
       // Live re-match wins over the stored prepare-time snapshot; without a
       // draft (nothing left to match) fall back to the stored numbers.
       const missingN = live ? live.missing : (s.total_missing || 0);
@@ -257,6 +268,7 @@ export default function Reconcile({
       const draft = draftByAcc[acc.id] || await importDrafts.load(user.id, "reconcile", acc.id);
       const st = draft?.state_json;
       if (!st?.stmtRows?.length) throw new Error("Draft not found — use Review instead");
+      if (!draftFitsSession(draft, s)) throw new Error("Saved draft belongs to another month — use Review instead");
       const dates = st.stmtRows.map(r => r.date).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d || "")).sort();
       if (!dates.length) throw new Error("Statement rows have no dates — use Review");
       const { data: led, error } = await supabase.from("ledger")

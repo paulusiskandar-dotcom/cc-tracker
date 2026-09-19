@@ -1591,12 +1591,22 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
   const ledgerClosing = periodEnd ? ledgerClosingAt(acc, ledAll || [], periodEnd) : null;
   const gap = (stmtClosing != null && ledgerClosing != null) ? Math.round(stmtClosing - ledgerClosing) : null;
 
+  // Bulan yang sudah completed tidak disiapkan ulang: sesi "prepared" kembar dan draft
+  // bulan lama menimpa draft bulan berjalan (akar salah-finalize 19 Sep 2026).
+  let bulanSelesai = false;
+  if (pY && pM) {
+    const { data: done } = await serviceSupabase.from("reconcile_sessions").select("id")
+      .eq("user_id", userId).eq("account_id", acc.id).eq("period_year", pY).eq("period_month", pM)
+      .eq("status", "completed").limit(1);
+    bulanSelesai = !!(done && done.length);
+  }
+
   // Don't clobber a draft the user is actively working on (has edits)
   const { data: existing } = await serviceSupabase.from("import_drafts")
     .select("id, state_json").eq("user_id", userId).eq("source", "reconcile").eq("account_id", acc.id).maybeSingle();
   const hasUserWork = existing && (Object.keys(existing.state_json?.pendingRows || {}).length > 0 || (existing.state_json?.ignoredIds || []).length > 0);
   let draftSaved = false;
-  if (!hasUserWork) {
+  if (!hasUserWork && !bulanSelesai) {
     const state_json = {
       stmtRows, ignoredIds: [...washIds], pendingRows: {}, pdfSource: filename,
       stmtClosingBalance: stmtClosing, stmtOpeningBalance: extraction.opening_balance != null ? Number(extraction.opening_balance) : null,
@@ -1610,7 +1620,7 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
   }
 
   // Track as a "prepared" session (replace any earlier prepared row for the same account+period)
-  if (pY && pM) {
+  if (pY && pM && !bulanSelesai) {
     await serviceSupabase.from("reconcile_sessions").delete()
       .eq("user_id", userId).eq("account_id", acc.id).eq("period_year", pY).eq("period_month", pM).eq("status", "prepared");
     const { error: sesErr } = await serviceSupabase.from("reconcile_sessions").insert({

@@ -2297,6 +2297,7 @@ export const reconcileApi = {
       .from("reconcile_sessions")
       .select("*")
       .eq("user_id", userId)
+      .neq("status", "void")
       .order("created_at", { ascending: false });
     if (error) throw new Error(error.message);
     return data || [];
@@ -2308,6 +2309,7 @@ export const reconcileApi = {
       .select("*")
       .eq("user_id", userId)
       .eq("account_id", accountId)
+      .neq("status", "void")
       .order("period_year", { ascending: false })
       .order("period_month", { ascending: false });
     if (error) throw new Error(error.message);
