@@ -21,7 +21,7 @@ const LIQUID = /^(stocks?|mutual fund|deposit|deposito)$/i;
 const signed = v => `${v < 0 ? "−" : ""}${fmtIDR(Math.abs(v))}`;
 
 export default function MobileHome(props) {
-  const { spendOf } = useMemo(() => makeSpending(props.incomeSrcs || []), [props.incomeSrcs]);
+  const { spendOf } = useMemo(() => makeSpending(props.incomeSrcs || [], props.ledger || []), [props.incomeSrcs, props.ledger]);
   const { user, reconSessions = [], ledger = [], accounts = [], creditCards = [], liabilities = [], recurTemplates = [], installments = [], pendingSyncs = [], netWorth = {}, fxRates = {}, assets = [], dark, setTab, onSearch } = props;
   const [view, setView] = useState(() => lsGet("m.home.view") === "assets" ? "assets" : "overview");
   useEffect(() => { lsSet("m.home.view", view); }, [view]);

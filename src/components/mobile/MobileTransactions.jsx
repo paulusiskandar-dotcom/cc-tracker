@@ -61,14 +61,14 @@ export default function MobileTransactions(props) {
   const accName = useMemo(() => Object.fromEntries(accounts.map(a => [a.id, a.name])), [accounts]);
   const catName = useMemo(() => Object.fromEntries(categories.map(c => [c.id, c.name])), [categories]);
   const srcName = useMemo(() => Object.fromEntries(incomeSrcs.map(c => [c.id, c.name])), [incomeSrcs]);
+  // Spending is net of refunds: a refund sits in its purchase's category with a minus.
+  const { isIncome, spendOf, refundCategory } = useMemo(() => makeSpending(incomeSrcs, ledger), [incomeSrcs, ledger]);
   // Paying down a liability counts as money out (same as the Dashboard) but it is not an
   // uncategorised purchase, so it gets its own name.
-  const nameOfCat = e => e.category_name || catName[e.category_id] || (e.tx_type === "pay_liability" ? "Loan repayment" : e.tx_type === "income" ? "Refunds" : "Uncategorized");
+  const nameOfCat = e => e.category_name || catName[e.category_id] || (e.tx_type === "pay_liability" ? "Loan repayment" : e.tx_type === "income" ? (refundCategory(e) || "Refunds") : "Uncategorized");
 
   // A trip covers its own dates, so it replaces the month filter instead of narrowing it.
   const scope = useMemo(() => ledger.filter(e => (trip ? e.tag_id === trip : String(e.tx_date || "").slice(0, 7) === month)), [ledger, month, trip]);
-  // Spending is net of refunds: a refund sits in its purchase's category with a minus.
-  const { isIncome, spendOf } = useMemo(() => makeSpending(incomeSrcs), [incomeSrcs]);
   const val = e => (kind === "expense" ? spendOf(e) : amt(e));
   const rows = useMemo(() => scope.filter(e => (kind === "expense" ? spendOf(e) !== 0 : isIncome(e))), [scope, kind, spendOf, isIncome]);
   const total = rows.reduce((s, e) => s + val(e), 0);

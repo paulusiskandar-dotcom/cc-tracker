@@ -15,7 +15,7 @@ export default function MobileReports({ ledger = [], categories = [], incomeSrcs
   const thisYear = new Date().getFullYear();
   const [year, setYear] = useState(thisYear);
   const [openM, setOpenM] = useState(null);
-  const { isIncome, spendOf } = useMemo(() => makeSpending(incomeSrcs), [incomeSrcs]);
+  const { isIncome, spendOf, refundCategory } = useMemo(() => makeSpending(incomeSrcs, ledger), [incomeSrcs, ledger]);
   const catName = useMemo(() => Object.fromEntries(categories.map(c => [c.id, c.name])), [categories]);
   const srcName = useMemo(() => Object.fromEntries(incomeSrcs.map(c => [c.id, c.name])), [incomeSrcs]);
 
@@ -24,12 +24,12 @@ export default function MobileReports({ ledger = [], categories = [], incomeSrcs
     ledger.forEach(e => {
       const d = String(e.tx_date || ""); if (Number(d.slice(0, 4)) !== year) return; const r = rows[Number(d.slice(5, 7)) - 1]; if (!r) return;
       const v = spendOf(e);
-      if (v) { r.out += v; const k = e.category_name || catName[e.category_id] || (e.tx_type === "pay_liability" ? "Loan repayment" : v < 0 ? "Refunds" : "Uncategorized"); r.cats[k] = (r.cats[k] || 0) + v; }
+      if (v) { r.out += v; const k = e.category_name || catName[e.category_id] || (e.tx_type === "pay_liability" ? "Loan repayment" : v < 0 ? (refundCategory(e) || "Refunds") : "Uncategorized"); r.cats[k] = (r.cats[k] || 0) + v; }
       else if (isIncome(e)) { r.got += amt(e); const k = srcName[e.from_id] || e.category_name || "Other income"; r.srcs[k] = (r.srcs[k] || 0) + amt(e); }
     });
     const last = year === thisYear ? new Date().getMonth() : 11;
     return rows.filter(r => r.i <= last && (r.got || r.out)).reverse();
-  }, [ledger, year, thisYear, catName, srcName, spendOf, isIncome]);
+  }, [ledger, year, thisYear, catName, srcName, spendOf, isIncome, refundCategory]);
   const got = months.reduce((s, r) => s + r.got, 0), out = months.reduce((s, r) => s + r.out, 0);
   const top = Math.max(1, ...months.flatMap(r => [r.got, r.out]));
   const hasEarlier = useMemo(() => ledger.some(e => Number(String(e.tx_date || "").slice(0, 4)) < year), [ledger, year]);
