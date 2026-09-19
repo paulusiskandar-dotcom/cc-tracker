@@ -103,3 +103,44 @@ export function canAutoBook(stat: MerchantStat | null, amount: number): boolean 
   const a = Math.round(Math.abs(Number(amount || 0)));
   return !!stat && !CHANNELS.test(stat.name) && stat.n >= 5 && stat.expense / stat.n >= 0.95 && stat.topShare >= 0.8 && !!stat.topCategoryId && a > 0 && a <= AUTOBOOK_CAP;
 }
+
+// ── PEMBAYARAN YANG DIPECAH PER NOMOR KARTU ─────────────────────────────────
+// BCA mencetak SATU pembayaran sebagai beberapa baris kredit — satu per nomor kartu
+// dalam tagihan yang sama (Krisflyer Sep 2026: 988.900 + 19.011.100 = 20.000.000).
+// Di buku pembayaran itu satu baris, jadi pencocok satu-lawan-satu gagal dan empat
+// baris masuk antrean sebagai "income". Aturan: baris kredit bertanggal & berketerangan
+// sama, yang JUMLAHNYA tepat sama dengan satu pembayaran di buku (±1, ±3 hari),
+// digabung jadi satu baris. Tanpa pasangan di buku → tidak disentuh (tidak menebak).
+export function mergeSplitPayments<T extends { _id: string; date?: string; description?: string; amount?: number | string; direction?: string }>(
+  rows: T[],
+  payments: { tx_date: string; amount: number }[],
+): T[] {
+  const dayMs = 86400000;
+  const groups = new Map<string, T[]>();
+  for (const r of rows) {
+    if (r.direction !== "in" || !r.date) continue;
+    const k = `${r.date}|${String(r.description || "").trim().toUpperCase()}`;
+    (groups.get(k) || groups.set(k, []).get(k)!).push(r);
+  }
+  const drop = new Set<string>();
+  const replace = new Map<string, T>();
+  const used = new Set<number>();
+  for (const g of groups.values()) {
+    if (g.length < 2) continue;
+    const amts = g.map((r) => Math.abs(Number(r.amount || 0)));
+    const sum = amts.reduce((a, b) => a + b, 0);
+    const d0 = new Date(g[0].date + "T00:00:00").getTime();
+    const near = (p: { tx_date: string }) => Math.abs((new Date(p.tx_date + "T00:00:00").getTime() - d0) / dayMs) <= 3;
+    // Kalau tiap pecahan punya pasangannya sendiri di buku, itu memang pembayaran terpisah.
+    if (amts.every((a) => payments.some((p) => near(p) && Math.abs(p.amount - a) <= 1))) continue;
+    const i = payments.findIndex((p, idx) => !used.has(idx) && near(p) && Math.abs(p.amount - sum) <= 1);
+    if (i < 0) continue;
+    used.add(i);
+    replace.set(g[0]._id, { ...g[0], amount: sum, _mergedFrom: g.map((r) => r._id), _mergedParts: amts } as T);
+    for (const r of g.slice(1)) drop.add(r._id);
+  }
+  return rows.filter((r) => !drop.has(r._id)).map((r) => replace.get(r._id) || r);
+}
+
+// Baris kredit yang berbunyi pembayaran adalah pelunasan kartu, bukan pemasukan.
+export const PAYMENT_RE = /\b(PEMBAYARAN|PAYMENT|PYMT|BAYAR)\b/i;

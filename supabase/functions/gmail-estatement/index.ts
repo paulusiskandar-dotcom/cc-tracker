@@ -11,7 +11,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildPaperSplits, cariPecahan } from "../_shared/paperSplit.ts";
 import { buildOrderNotes, cariCatatan } from "../_shared/orderNote.ts";
-import { parseInstalment, isMonthlyFee, findWashPairs, findMerchant, merchantStat, canAutoBook } from "../_shared/stmtRules.ts";
+import { parseInstalment, isMonthlyFee, findWashPairs, findMerchant, merchantStat, canAutoBook, mergeSplitPayments, PAYMENT_RE } from "../_shared/stmtRules.ts";
 import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
 const CORS = {
@@ -1306,7 +1306,7 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
   const [pY, pM] = bulanDari.split("-").map(Number);
 
   // stmtRows in the exact shape the app's draft loader expects
-  const stmtRows = txs.map((t: any, i: number) => ({ ...t, _id: t._id || `stmt-prep-${i}`, _sourceFile: filename }));
+  let stmtRows = txs.map((t: any, i: number) => ({ ...t, _id: t._id || `stmt-prep-${i}`, _sourceFile: filename }));
 
   // Ledger rows touching this account (all-time: needed for closing calc; window slice for diff)
   // tx_type ikut diambil: penjaga "angsuran kembar bukan expense" membacanya. Tanpa kolom ini
@@ -1338,6 +1338,11 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
   const ledgerWindow = (ledAll || []).filter((l: any) => (!winStart || l.tx_date >= winStart) && (!winEnd || l.tx_date <= winEnd));
 
   await simpanPoinStatement(serviceSupabase, acc, extraction, stmtDate || periodEnd || null);
+
+  // Satu pembayaran yang dicetak bank sebagai beberapa baris (per nomor kartu) digabung dulu.
+  stmtRows = mergeSplitPayments(stmtRows as any[], ledgerWindow
+    .filter((l: any) => l.to_id === acc.id)
+    .map((l: any) => ({ tx_date: l.tx_date, amount: Math.abs(Number(l.amount_idr || l.amount || 0)) })));
 
   let { match, missing, extra } = matchRowsSrv(stmtRows, ledgerWindow);
 
@@ -1725,7 +1730,7 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
       merchant_name: m.merchant || m.description || "",
       amount: Math.abs(Number(m.amount || 0)), amount_idr: Math.abs(Number(m.amount || 0)),
       currency: "IDR",
-      suggested_tx_type: m.direction === "in" ? "income" : "expense",
+      suggested_tx_type: m.direction === "in" ? (acc.type === "credit_card" && PAYMENT_RE.test(m.description || "") ? "pay_cc" : "income") : "expense",
       // Baris kredit di statement (bunga, cashback, koreksi biaya) MENDARAT di
       // rekening ini — jadi rekeningnya tujuan, bukan asal. Kalau dipasang di
       // from_account_id, antrean menampilkan "To Account…" kosong dan tidak bisa

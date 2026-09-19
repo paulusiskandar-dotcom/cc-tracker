@@ -85,3 +85,22 @@ Deno.test("auto-book only unambiguous merchants", () => {
   const cleanTokped = merchantStat("tokopedia", hist("Tokopedia", 30));
   assertEquals(canAutoBook(cleanTokped, 50000), false, "a marketplace is never auto-booked, whatever its history");
 });
+
+import { mergeSplitPayments, PAYMENT_RE } from "./stmtRules.ts";
+Deno.test("split card payments merge only when the sum is in the book", () => {
+  const rows = [
+    { _id: "a", date: "2026-08-21", description: "PEMBAYARAN - MYBCA", amount: 988900, direction: "in" },
+    { _id: "b", date: "2026-08-21", description: "PEMBAYARAN - MYBCA", amount: 19011100, direction: "in" },
+    { _id: "c", date: "2026-08-31", description: "PEMBAYARAN - MYBCA", amount: 606100, direction: "in" },
+    { _id: "d", date: "2026-08-31", description: "PEMBAYARAN - MYBCA", amount: 10032772, direction: "in" },
+    { _id: "e", date: "2026-09-01", description: "DIGITALOCEAN", amount: 1120331, direction: "out" },
+  ];
+  const out = mergeSplitPayments(rows, [{ tx_date: "2026-08-21", amount: 20000000 }, { tx_date: "2026-08-31", amount: 10638872 }]);
+  if (out.length !== 3) throw new Error("expected 3 rows, got " + out.length);
+  if (out[0].amount !== 20000000 || out[1].amount !== 10638872) throw new Error("bad sums");
+  // no book payment → untouched
+  if (mergeSplitPayments(rows, []).length !== 5) throw new Error("merged without evidence");
+  // each part has its own book row → untouched
+  if (mergeSplitPayments(rows.slice(0, 2), [{ tx_date: "2026-08-21", amount: 988900 }, { tx_date: "2026-08-21", amount: 19011100 }]).length !== 2) throw new Error("merged separate payments");
+  if (!PAYMENT_RE.test("PEMBAYARAN - MYBCA") || PAYMENT_RE.test("CASHBACK PROMO")) throw new Error("payment regex");
+});
