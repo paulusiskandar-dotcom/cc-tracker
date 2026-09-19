@@ -11,11 +11,11 @@ const MONTHS = ["January", "February", "March", "April", "May", "June", "July", 
 const amt = e => Number(e.amount_idr || e.amount || 0);
 const signed = v => `${v < 0 ? "−" : ""}${fmtIDR(Math.abs(v))}`;
 
-export default function MobileReports({ ledger = [], categories = [], incomeSrcs = [], dark }) {
+export default function MobileReports({ ledger = [], accounts = [], categories = [], incomeSrcs = [], dark }) {
   const thisYear = new Date().getFullYear();
   const [year, setYear] = useState(thisYear);
   const [openM, setOpenM] = useState(null);
-  const { isIncome, spendOf, refundCategory } = useMemo(() => makeSpending(incomeSrcs, ledger), [incomeSrcs, ledger]);
+  const { isIncome, spendOf, refundCategory } = useMemo(() => makeSpending(incomeSrcs, ledger, accounts), [incomeSrcs, ledger, accounts]);
   const catName = useMemo(() => Object.fromEntries(categories.map(c => [c.id, c.name])), [categories]);
   const srcName = useMemo(() => Object.fromEntries(incomeSrcs.map(c => [c.id, c.name])), [incomeSrcs]);
 

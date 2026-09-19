@@ -3,6 +3,7 @@
 // this page groups the results per month: Needs review / All matched /
 // Completed / Waiting. One-click Finalize for perfect statements.
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { gapOk, GAP_TOLERANCE } from "../lib/reconcileTolerance";
 import { supabase } from "../lib/supabase";
 import { importDrafts } from "../lib/importDrafts";
 import { useReconcileDrafts } from "../lib/useReconcileDrafts";
@@ -197,8 +198,8 @@ export default function Reconcile({
         : ((s.closing_balance != null && s.calculated_balance != null)
             ? Math.round(Number(s.closing_balance) - Number(s.calculated_balance)) : null);
       const item = { acc, s, gap, live, valas: valasByAcc[acc.id] || 0 };
-      const tutupGagal = live?.tutup && Math.abs(live.tutup.selisih) > 2;
-      if (missingN > 0 || gap === null || Math.abs(gap) >= 1 || tutupGagal) needsReview.push(item);
+      const tutupGagal = live?.tutup && Math.abs(live.tutup.selisih) > GAP_TOLERANCE;
+      if (missingN > 0 || gap === null || !gapOk(gap) || tutupGagal) needsReview.push(item);
       else ready.push(item);
     }
     // gap issues first
@@ -304,7 +305,7 @@ export default function Reconcile({
           if (r.to_id === acc.id && r.to_type === "account") net -= amt;
         }
         const selisih = Math.round(net - Number(st.stmtClosingBalance));
-        if (Math.abs(selisih) > 2) {
+        if (Math.abs(selisih) > GAP_TOLERANCE) {
           showToast(
             `Closing check failed: book ${fmtIDR(net)} vs statement ${fmtIDR(st.stmtClosingBalance)} ` +
             `(off by ${fmtIDR(selisih)}) — a row is on the wrong side, use Review`,
@@ -506,7 +507,7 @@ export default function Reconcile({
             {monthData.needsReview.map(({ acc, s, gap, valas, live }) => (
               <div key={acc.id} style={{
                 background: "#fff", border: "1px solid #e5e7eb", borderRadius: 14,
-                borderLeft: `3px solid ${gap !== null && Math.abs(gap) >= 1 ? "#dc2626" : "#d97706"}`,
+                borderLeft: `3px solid ${gap !== null && !gapOk(gap) ? "#dc2626" : "#d97706"}`,
                 padding: "12px 16px", display: "flex", alignItems: "center", gap: 12,
               }}>
                 <AccountTile type={acc.type} />
@@ -525,10 +526,10 @@ export default function Reconcile({
                 <div style={{ flex: 1, minWidth: 0, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                   <span style={CHIP("#dcfce7", "#059669")}><Check size={11} strokeWidth={2.5} />{(live ? live.matched : s.total_match) || 0} matched</span>
                   {((live ? live.missing : s.total_missing) || 0) > 0 && <span style={CHIP("#fef3c7", "#b45309")}>{live ? live.missing : s.total_missing} not in ledger</span>}
-                  {gap !== null && Math.abs(gap) >= 1 && <span style={CHIP("#fee2e2", "#dc2626")}>gap {fmtIDR(Math.abs(gap))}</span>}
-                  {gap !== null && Math.abs(gap) < 1 && !(live?.tutup && Math.abs(live.tutup.selisih) > 2) &&
+                  {gap !== null && !gapOk(gap) && <span style={CHIP("#fee2e2", "#dc2626")}>gap {fmtIDR(Math.abs(gap))}</span>}
+                  {gapOk(gap) && !(live?.tutup && Math.abs(live.tutup.selisih) > GAP_TOLERANCE) &&
                     <span style={CHIP("#f3f4f6", "#6b7280")}>closing matches</span>}
-                  {live?.tutup && Math.abs(live.tutup.selisih) > 2 && (
+                  {live?.tutup && Math.abs(live.tutup.selisih) > GAP_TOLERANCE && (
                     <span style={CHIP("#fee2e2", "#dc2626")}>
                       book {fmtIDR(live.tutup.buku)} vs statement {fmtIDR(live.tutup.statement)}
                     </span>

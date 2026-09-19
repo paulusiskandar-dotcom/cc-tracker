@@ -62,7 +62,7 @@ export default function MobileTransactions(props) {
   const catName = useMemo(() => Object.fromEntries(categories.map(c => [c.id, c.name])), [categories]);
   const srcName = useMemo(() => Object.fromEntries(incomeSrcs.map(c => [c.id, c.name])), [incomeSrcs]);
   // Spending is net of refunds: a refund sits in its purchase's category with a minus.
-  const { isIncome, spendOf, refundCategory } = useMemo(() => makeSpending(incomeSrcs, ledger), [incomeSrcs, ledger]);
+  const { isIncome, spendOf, refundCategory } = useMemo(() => makeSpending(incomeSrcs, ledger, accounts), [incomeSrcs, ledger, accounts]);
   // Paying down a liability counts as money out (same as the Dashboard) but it is not an
   // uncategorised purchase, so it gets its own name.
   const nameOfCat = e => e.category_name || catName[e.category_id] || (e.tx_type === "pay_liability" ? "Loan repayment" : e.tx_type === "income" ? (refundCategory(e) || "Refunds") : "Uncategorized");

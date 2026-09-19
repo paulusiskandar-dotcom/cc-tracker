@@ -1,6 +1,6 @@
 // Real statement lines, one block per bank. Run: deno test supabase/functions/_shared/stmtRules.test.ts
 import { assertEquals } from "jsr:@std/assert@1";
-import { parseInstalment, isMonthlyFee, isConversionCredit, findWashPairs, gapIsRounding } from "./stmtRules.ts";
+import { parseInstalment, isMonthlyFee, isConversionCredit, findWashPairs, gapIsRounding, findMerchant, merchantStat, canAutoBook } from "./stmtRules.ts";
 
 Deno.test("instalment markers, every bank", () => {
   const yes: [string, number, number][] = [
@@ -64,4 +64,24 @@ Deno.test("conversion wash pairs", () => {
 
 Deno.test("finalize tolerance", () => {
   assertEquals(gapIsRounding(1), true); assertEquals(gapIsRounding(-5), true); assertEquals(gapIsRounding(6), false);
+});
+
+Deno.test("auto-book only unambiguous merchants", () => {
+  const names = ["gopay", "grab", "tokopedia", "gojek", "bca", "xxi nsr"];
+  assertEquals(findMerchant("GoPayID DKI Jakarta ID", names), "gopay");
+  assertEquals(findMerchant("Grab* A-9JKXRLIWWND8AV South Jakarta ID", names), "grab");
+  assertEquals(findMerchant("GOJEK RECURRING NON3DS JAKARTA SELATAN ID", names), "gojek");
+  assertEquals(findMerchant("SURUGAYA UMEDACHIYAYAM OSAKA", names), null);
+  const hist = (text: string, n: number, tx_type = "expense", cat = "food", is_reimburse = false) => Array.from({ length: n }, () => ({ text, tx_type, is_reimburse, category_id: cat, category_name: cat }));
+  const gopay = merchantStat("gopay", hist("GoPayID DKI Jakarta ID", 20));
+  assertEquals(canAutoBook(gopay, 84700), true, "20 plain food expenses");
+  assertEquals(canAutoBook(gopay, 2_500_000), false, "over the cap");
+  const few = merchantStat("grab", hist("Grab* x", 3));
+  assertEquals(canAutoBook(few, 50000), false, "fewer than 5 earlier rows");
+  const mixed = merchantStat("xxi nsr", [...hist("XXI NSR", 5, "expense", "fun"), ...hist("XXI NSR", 5, "expense", "food")]);
+  assertEquals(canAutoBook(mixed, 50000), false, "no dominant category");
+  const reimb = merchantStat("tokopedia", [...hist("Tokopedia", 10), ...hist("Tokopedia", 10, "reimburse_out", "", true)]);
+  assertEquals(canAutoBook(reimb, 50000), false, "marketplace, and half of it is reimburse");
+  const cleanTokped = merchantStat("tokopedia", hist("Tokopedia", 30));
+  assertEquals(canAutoBook(cleanTokped, 50000), false, "a marketplace is never auto-booked, whatever its history");
 });

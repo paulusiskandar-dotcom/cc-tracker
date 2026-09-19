@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect, useCallback } from "react";
+import { makeSpending } from "../lib/spending";
 import { Bell, Mail, Camera, Scale, Plus, Pencil } from "lucide-react";
 import { CategoryIcon } from "../lib/categoryIcons";
 import { ledgerApi, recurringApi, reimburseSettlementsApi, loanPaymentsApi, employeeLoanApi } from "../api";
@@ -103,19 +104,19 @@ export default function Dashboard({
   // ─── DERIVED STATS ───────────────────────────────────────────
   const nw = netWorth || { total: 0, bank: 0, cash: 0, assets: 0, receivables: 0, ccDebt: 0, liabilities: 0, reimburseOutstanding: 0 };
 
+  // Refunds reduce spending and are not income — one rule for the whole app (src/lib/spending.js).
+  const money = useMemo(() => makeSpending(incomeSrcs, ledger, accounts), [incomeSrcs, ledger, accounts]);
   const thisMonthIncome = useMemo(() =>
     thisMonthLedger
-      .filter(e => e.tx_type === "income")
+      .filter(money.isIncome)
       .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0),
-  [thisMonthLedger]);
+  [thisMonthLedger, money]);
 
   // Expense = expense rows + pay_liability (BYD installment) — same scope as
   // Reports; only reimburse_out is excluded (Paulus 2026-08-26).
   const thisMonthExpense = useMemo(() =>
-    thisMonthLedger
-      .filter(e => (e.tx_type === "expense" || e.tx_type === "pay_liability") && !e.is_reimburse)
-      .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0),
-  [thisMonthLedger]);
+    thisMonthLedger.reduce((s, e) => s + money.spendOf(e), 0),
+  [thisMonthLedger, money]);
 
   const surplus = thisMonthIncome - thisMonthExpense;
 
@@ -165,14 +166,13 @@ export default function Dashboard({
     for (let i = 5; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const m = ymLocal(d);
-      const income  = ledger.filter(e => ym(e.tx_date) === m && e.tx_type === "income")
+      const income  = ledger.filter(e => ym(e.tx_date) === m && money.isIncome(e))
         .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
-      const expense = ledger.filter(e => ym(e.tx_date) === m && (e.tx_type === "expense" || e.tx_type === "pay_liability") && !e.is_reimburse)
-        .reduce((s, e) => s + Number(e.amount_idr || e.amount || 0), 0);
+      const expense = ledger.filter(e => ym(e.tx_date) === m).reduce((s, e) => s + money.spendOf(e), 0);
       months.push({ month: mlShort(m), income, expense, m });
     }
     return months;
-  }, [ledger]);
+  }, [ledger, money]);
 
   const maxCF = Math.max(...cashFlowData.flatMap(d => [d.income, d.expense]), 1);
 

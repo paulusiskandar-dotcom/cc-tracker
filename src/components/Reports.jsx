@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { makeSpending } from "../lib/spending";
 import { TrendingUp, TrendingDown, Wallet, PiggyBank, Sparkles, CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import SortDropdown from "./shared/SortDropdown";
 import TxVerticalBig from "./shared/TxVerticalBig";
@@ -82,7 +83,7 @@ const txNote = (t) => {
 // reversals, merchant refunds; flagged _ccRefund by the Reports root) are not
 // income: they are expense REDUCTIONS. The original charge sits in expenses,
 // so counting the credit as income inflated BOTH totals (net was untouched).
-const isIncomeRow = (t) => t.tx_type === "income" && !t._ccRefund;
+const isIncomeRow = (t) => t.tx_type === "income" && !t._ccRefund && !t._neutralCredit;
 
 function sumIncome(txs) {
   return txs.filter(isIncomeRow).reduce((s, t) => s + Number(t.amount_idr || 0), 0);
@@ -1186,10 +1187,12 @@ export default function Reports({ user, ledger = [], accounts = [], categories =
     // up cashback credited to the card (Cashback & Rewards is real income, and
     // was disappearing from income while shrinking expenses). Sourceless credits
     // into a card stay treated as refunds: nothing else lands there.
-    const refundSrc = new Set((incomeSrcs || []).filter(s => s.name === "Refund").map(s => s.id));
+    // One rule with the phone screens (src/lib/spending.js). A credit that answers a purchase
+    // which was NOT an expense (Blibli 50,776 jt = the loan to Lieche), or a conversion credit
+    // whose purchase was never booked, is neutral: neither income nor a refund.
+    const { isRefund, spendOf } = makeSpending(incomeSrcs || [], ledger, accounts || []);
     return attributeFixedIncome(ledger, recurTemplates).map(r =>
-      r.tx_type === "income" && (refundSrc.has(r.from_id) || (!r.from_id && ccIds.has(r.to_id)))
-        ? { ...r, _ccRefund: true } : r);
+      isRefund(r) ? (spendOf(r) < 0 ? { ...r, _ccRefund: true } : { ...r, _neutralCredit: true }) : r);
   }, [ledger, recurTemplates, accounts, incomeSrcs]);
 
   return (

@@ -11,7 +11,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { buildPaperSplits, cariPecahan } from "../_shared/paperSplit.ts";
 import { buildOrderNotes, cariCatatan } from "../_shared/orderNote.ts";
-import { parseInstalment, isMonthlyFee, findWashPairs } from "../_shared/stmtRules.ts";
+import { parseInstalment, isMonthlyFee, findWashPairs, findMerchant, merchantStat, canAutoBook } from "../_shared/stmtRules.ts";
 import { PDFDocument } from "https://esm.sh/pdf-lib@1.17.1";
 
 const CORS = {
@@ -1309,8 +1309,10 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
   const stmtRows = txs.map((t: any, i: number) => ({ ...t, _id: t._id || `stmt-prep-${i}`, _sourceFile: filename }));
 
   // Ledger rows touching this account (all-time: needed for closing calc; window slice for diff)
+  // tx_type ikut diambil: penjaga "angsuran kembar bukan expense" membacanya. Tanpa kolom ini
+  // nilainya undefined dan SEMUA angsuran dianggap bukan-expense (tertangkap sebelum dipakai, 19 Sep 2026).
   const { data: ledAll } = await serviceSupabase.from("ledger")
-    .select("id, tx_date, description, merchant_name, amount, amount_idr, from_id, to_id, reconciled_at, split_group_id")
+    .select("id, tx_date, tx_type, description, merchant_name, amount, amount_idr, from_id, to_id, reconciled_at, split_group_id")
     .eq("user_id", userId)
     .or(`from_id.eq.${acc.id},to_id.eq.${acc.id}`);
   // For the dup hint the whole ledger matters, not just this account: photo/email
@@ -1392,6 +1394,14 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
       .order("tx_date", { ascending: false }) : { data: [] };
     const legByPlan = new Map<string, any>();
     for (const l of (legsRaw || [])) if (!legByPlan.has(l.installment_id)) legByPlan.set(l.installment_id, l);
+    // Riwayat setahun (semua akun) + nama merchant yang dikenal, untuk auto-book (c).
+    const setahunLalu = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+    const [{ data: mapRows }, { data: histRows }] = await Promise.all([
+      serviceSupabase.from("merchant_mappings").select("merchant_name").eq("user_id", userId),
+      serviceSupabase.from("ledger").select("description, merchant_name, tx_type, is_reimburse, category_id, category_name").eq("user_id", userId).gte("tx_date", setahunLalu).limit(10000),
+    ]);
+    const namaMerchant: string[] = (mapRows || []).map((r: any) => r.merchant_name).filter(Boolean);
+    const riwayat = (histRows || []).map((r: any) => ({ text: `${r.merchant_name || ""} ${r.description || ""}`, tx_type: r.tx_type, is_reimburse: r.is_reimburse, category_id: r.category_id, category_name: r.category_name }));
     const usedPlan = new Set<string>();
     const sisaMissing: any[] = [];
     const inserts: any[] = [];
@@ -1424,7 +1434,28 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
         // terakhir di kartu ini — kalau tipenya bukan expense/reimburse_out, serahkan ke antrean.
         const kembar = (ledAll || []).filter((l: any) => l.from_id === acc.id && Math.abs(Math.round(Number(l.amount_idr || l.amount || 0)) - amt) <= 50)
           .sort((x: any, y: any) => String(y.tx_date).localeCompare(String(x.tx_date)))[0];
-        if (kembar && !["expense", "reimburse_out"].includes(kembar.tx_type)) { sisaMissing.push(m0); continue; }
+        if (kembar && kembar.tx_type && !["expense", "reimburse_out"].includes(kembar.tx_type)) {
+          // Lanjutan mengikuti angsuran sebelumnya PERSIS (tipe, tujuan, entity, pinjaman) — hanya
+          // kalau rencananya ada dan nomornya memang maju; selain itu serahkan ke antrean.
+          const planK = plans.find((p: any) => !usedPlan.has(p.id) && Math.abs(Number(p.monthly_amount) - amt) <= 50 && (!p.total_months || Number(p.total_months) === tot) && Number(p.paid_months || 0) < n);
+          const { data: kFull } = planK && n >= 2 ? await serviceSupabase.from("ledger").select("tx_type, from_type, to_type, to_id, category_id, category_name, entity, is_reimburse, employee_loan_id, merchant_name, notes").eq("id", kembar.id).maybeSingle() : { data: null };
+          if (planK && kFull) {
+            usedPlan.add(planK.id);
+            inserts.push({
+              user_id: userId, tx_date: m0.date, description: `${String(planK.description || desc).replace(/\s*[:(]?\s*\d+\s*\/\s*\d+\)?\s*$/, "").trim()} · Cicilan ${n}/${tot}`.slice(0, 120),
+              amount: amt, amount_idr: amt, currency: "IDR", tx_type: kFull.tx_type,
+              from_type: "account", from_id: acc.id, to_type: kFull.to_type, to_id: kFull.to_id,
+              category_id: kFull.category_id, category_name: kFull.category_name, entity: kFull.entity || "Personal",
+              is_reimburse: !!kFull.is_reimburse, employee_loan_id: kFull.employee_loan_id || null,
+              source: "statement_auto", merchant_name: kFull.merchant_name || null, installment_id: planK.id,
+              notes: `Angsuran ${n}/${tot} — mengikuti angsuran sebelumnya (${kFull.tx_type})`,
+            });
+            await serviceSupabase.from("installments").update({ paid_months: n, total_paid: Number(planK.monthly_amount) * n, ...(n >= tot ? { status: "settled" } : {}) }).eq("id", planK.id);
+            autoCreated.push({ jenis: "cicilan", date: m0.date, amount: amt, desc: `${planK.description} (${n}/${tot}, ${kFull.tx_type})` });
+            continue;
+          }
+          sisaMissing.push(m0); continue;
+        }
         // (a1) tersambung ke rencana cicilan yang berjalan
         if (n >= 2 && tot >= n) {
           const plan = plans.find((p: any) => !usedPlan.has(p.id)
@@ -1500,6 +1531,25 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
               notes: `Angsuran ${n}/${tot} — dibuat otomatis dari statement; entity/kategori disalin dari angsuran ${n - 1}/${tot}`,
             });
             autoCreated.push({ jenis: "cicilan", date: m0.date, amount: amt, desc: `${desc.slice(0, 40)} (${n}/${tot})` });
+            continue;
+          }
+        }
+      }
+      // (c) merchant yang sudah sangat dikenal (aturan & uji: stmtRules.canAutoBook)
+      if (isOut && !cm) {
+        const nama = findMerchant(desc, namaMerchant);
+        if (nama) {
+          const st = merchantStat(nama, riwayat);
+          if (canAutoBook(st, amt)) {
+            inserts.push({
+              user_id: userId, tx_date: m0.date, description: desc.trim().slice(0, 120),
+              amount: amt, amount_idr: amt, currency: "IDR", tx_type: "expense",
+              from_type: "account", from_id: acc.id, to_type: "expense", to_id: null,
+              category_id: st.topCategoryId, category_name: st.topCategoryName, entity: "Personal", is_reimburse: false,
+              source: "statement_auto", merchant_name: nama,
+              notes: `Dibukukan otomatis dari statement — ${nama}: ${st.expense} transaksi sebelumnya, ${Math.round(st.topShare * 100)}% ${st.topCategoryName}`,
+            });
+            autoCreated.push({ jenis: "merchant", date: m0.date, amount: amt, desc: `${desc.slice(0, 40)} → ${st.topCategoryName}` });
             continue;
           }
         }
@@ -1653,12 +1703,15 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
     };
     const txs = missing.filter((m: any) => !ignoredPrev.has(m._id) && !washIds.has(m._id) && !SUMMARY_RE.test(m.description || "")).map((m: any) => ({
       date: m.date, description: m.description || m.merchant || "",
-      ...(m.is_installment ? {
-        is_installment: true,
-        installment_current: Number(m.installment_current || 0) || null,
-        installment_total: Number(m.installment_total || 0) || null,
-        plan_total: Number(m.installment_current) === 1 ? planTotalFor(m) : null,
-      } : {}),
+      // Penanda angsuran ditentukan ATURAN (stmtRules.parseInstalment), bukan AI: flag AI kosong
+      // untuk format Mandiri/Maybank/BCA. n = 0 (kredit konversi) bukan angsuran.
+      ...((() => {
+        const k = parseInstalment(m.description || "");
+        const cur = k && k.n >= 1 ? k.n : (m.is_installment ? Number(m.installment_current || 0) : 0);
+        const tot = k && k.n >= 1 ? k.tot : (m.is_installment ? Number(m.installment_total || 0) : 0);
+        if (!cur || !tot) return {};
+        return { is_installment: true, installment_current: cur, installment_total: tot, plan_total: cur === 1 ? planTotalFor({ ...m, installment_current: cur, installment_total: tot }) : null };
+      })()),
       merchant_name: m.merchant || m.description || "",
       amount: Math.abs(Number(m.amount || 0)), amount_idr: Math.abs(Number(m.amount || 0)),
       currency: "IDR",

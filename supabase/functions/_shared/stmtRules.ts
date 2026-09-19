@@ -67,3 +67,39 @@ export function findWashPairs(rows: Row[], days = 45): { retail: Row; credit: Ro
  *  (CIMB bills in ,33 fractions; Mandiri Bonvoy was Rp 1 off) and counts as matched. */
 export const GAP_TOLERANCE = 5;
 export const gapIsRounding = (gap: number) => Math.abs(Math.round(Number(gap || 0))) <= GAP_TOLERANCE;
+
+// ── Auto-booking a statement line whose merchant is already well known ──────────────────────
+// Paulus, 19 Sep 2026: "langsung" — Skorcard has no e-mail alerts, so ±30 GoPay/Grab lines a
+// month reached the approval queue from the statement. A line is booked without asking only when
+// the ledger's own history makes the answer unambiguous:
+//   · the merchant is not a marketplace, payment channel or bank (those carry reimburse and
+//     instalment purchases — Tokopedia is "Health" in the mapping table yet mostly Hamasa's),
+//   · it has at least 5 earlier rows, ≥ 95 % of them plain expenses (never reimburse),
+//   · one category covers ≥ 80 % of them,
+//   · and the amount is at most AUTOBOOK_CAP.
+export type MerchantStat = { name: string; n: number; expense: number; topCategoryId: string | null; topCategoryName: string | null; topShare: number };
+export const AUTOBOOK_CAP = 1_000_000;
+const CHANNELS = /tokopedia|tkpd|lazada|shopee|blibli|paper|bukalapak|tiktok|xendit|midtrans|doku|\bbca\b|mandiri|maybank|cimb|ocbc|\buob\b|\bbri\b|\bbni\b|jenius|danamon|\bbank\b|transfer|payment|pembayaran/i;
+export const normMerchant = (s: string) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+/** The longest known merchant name (≥ 4 letters) contained in the statement text. */
+export function findMerchant(desc: string, names: string[]): string | null {
+  const d = normMerchant(desc); let best: string | null = null;
+  for (const n of names) { const k = normMerchant(n); if (k.length >= 4 && d.includes(k) && (!best || k.length > normMerchant(best).length)) best = n; }
+  return best;
+}
+
+export function merchantStat(name: string, history: { text: string; tx_type: string; is_reimburse?: boolean; category_id?: string | null; category_name?: string | null }[]): MerchantStat {
+  const k = normMerchant(name); const rows = history.filter((h) => normMerchant(h.text).includes(k));
+  const cats = new Map<string, { n: number; name: string | null }>(); let expense = 0;
+  for (const r of rows) {
+    if (r.tx_type === "expense" && !r.is_reimburse) { expense++; const id = r.category_id || ""; const c = cats.get(id) || { n: 0, name: r.category_name || null }; c.n++; cats.set(id, c); }
+  }
+  const top = [...cats.entries()].sort((a, b) => b[1].n - a[1].n)[0];
+  return { name, n: rows.length, expense, topCategoryId: top && top[0] ? top[0] : null, topCategoryName: top ? top[1].name : null, topShare: expense ? (top ? top[1].n / expense : 0) : 0 };
+}
+
+export function canAutoBook(stat: MerchantStat | null, amount: number): boolean {
+  const a = Math.round(Math.abs(Number(amount || 0)));
+  return !!stat && !CHANNELS.test(stat.name) && stat.n >= 5 && stat.expense / stat.n >= 0.95 && stat.topShare >= 0.8 && !!stat.topCategoryId && a > 0 && a <= AUTOBOOK_CAP;
+}

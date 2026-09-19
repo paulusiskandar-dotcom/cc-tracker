@@ -4,6 +4,7 @@
 // matched list, and a sticky footer whose Finalize unlocks at 0 pending rows.
 // Mockup (approved 2026-07-15): claude.ai/code/artifact/900e6ccb-c823-4b32-9d66-e910c82bc744
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { gapOk } from "../../lib/reconcileTolerance";
 import { supabase } from "../../lib/supabase";
 import { ledgerApi } from "../../api";
 import { fmtIDR } from "../../utils";
@@ -286,7 +287,7 @@ export default function ReconcileReview({
           <span style={CHIP("#f3f4f6", "#6b7280")}>{extraList.length} extra in ledger</span>
           {fxWaiting > 0 && <span style={CHIP("#efeafb", "#6d28d9")}>{fxWaiting} FX waiting resolves here</span>}
         </div>
-        {gap != null && Math.abs(gap) >= 1 && (
+        {gap != null && !gapOk(gap) && (
           <div style={{ flexBasis: "100%", display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#b45309", borderTop: "1px dashed #e5e7eb", paddingTop: 11, marginTop: 2, flexWrap: "wrap", ...NUM }}>
             <AlertTriangle size={13} strokeWidth={2.2} style={{ flexShrink: 0 }} />
             <span>
@@ -299,7 +300,7 @@ export default function ReconcileReview({
             </span>
           </div>
         )}
-        {gap != null && Math.abs(gap) < 1 && (
+        {gapOk(gap) && (
           <div style={{ flexBasis: "100%", display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#059669", borderTop: "1px dashed #e5e7eb", paddingTop: 11, marginTop: 2, ...NUM }}>
             <Check size={13} strokeWidth={2.6} />
             Closing balance matches the ledger — {fmtIDR(stmtClosing)}
@@ -315,7 +316,7 @@ export default function ReconcileReview({
         <Tile label="Statement closing" highlight
           value={stmtClosing != null ? fmtIDR(stmtClosing) : "—"}
           sub={stmtClosing != null && ledgerAtEnd != null
-            ? (Math.abs(gap) < 1 ? "Ledger matches" : `Ledger: ${fmtIDR(ledgerAtEnd)} · gap ${fmtIDR(Math.abs(gap))}`)
+            ? (gapOk(gap) ? "Ledger matches" : `Ledger: ${fmtIDR(ledgerAtEnd)} · gap ${fmtIDR(Math.abs(gap))}`)
             : null} />
       </div>
 

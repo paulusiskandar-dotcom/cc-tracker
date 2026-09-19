@@ -11,14 +11,17 @@
 //   no purchase found, conversion credit → neutral (the purchase was never booked; legs are the spending)
 //   no purchase found, ordinary refund   → reduces spending under "Refunds"
 const nilai = e => Number(e.amount_idr || e.amount || 0);
-const REFUND_TEXT = /refund|reversal|kredit konversi|konversi cicilan|\(CR\)/i;
 const CONVERSION_TEXT = /reversal\s+cicilan|kredit konversi|konversi cicilan|(?<!\d)0+\s*\/\s*\d{1,2}(?!\d)|^\s*XM\s/i;
 const DAY = 86400000;
 const t = d => new Date(`${String(d).slice(0, 10)}T00:00:00Z`).getTime();
 
-export function makeSpending(incomeSrcs = [], ledger = []) {
-  const refundSrc = new Set(incomeSrcs.filter(s => /refund/i.test(s.name || "")).map(s => s.id));
-  const isCredit = e => e.tx_type === "income" && (refundSrc.has(e.from_id) || REFUND_TEXT.test(e.description || ""));
+// Which rows are refunds is the rule desktop Reports has used since 27 Aug 2026: income from the
+// source named "Refund", or a sourceless credit landing on a credit card. NOT "anything credited
+// to a card" — cashback lands there too and is real income.
+export function makeSpending(incomeSrcs = [], ledger = [], accounts = []) {
+  const refundSrc = new Set(incomeSrcs.filter(s => String(s.name || "").trim().toLowerCase() === "refund").map(s => s.id));
+  const ccIds = new Set(accounts.filter(a => a.type === "credit_card").map(a => a.id));
+  const isCredit = e => e.tx_type === "income" && (refundSrc.has(e.from_id) || (!e.from_id && ccIds.has(e.to_id)));
   const isExpense = e => (e.tx_type === "expense" || e.tx_type === "pay_liability") && !e.is_reimburse;
 
   // Link each credit to its purchase once.
