@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { fmtIDR } from "../../utils";
-import { applyRule, shortfall, likelyNotEarning, POINT_RULES } from "../../lib/pointsRules";
+import { applyRule, shortfall, likelyNotEarning, POINT_RULES, POOLS, poolOf, poolCheck } from "../../lib/pointsRules";
 
 const num = n => Number(n || 0).toLocaleString("id-ID");
 const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -32,6 +32,23 @@ export default function PointsHistory({ card }) {
     return () => { on = false; };
   }, [card.id]);
 
+  // Cards that share one points pot (Maybank TREATS): the check needs every card's statements.
+  const poolName = poolOf(card.name);
+  const [poolRows, setPoolRows] = useState([]);
+  useEffect(() => {
+    if (!poolName) { setPoolRows([]); return undefined; }
+    let on = true;
+    (async () => {
+      const names = Object.keys(POOLS[poolName].cards);
+      const { data: accs } = await supabase.from("accounts").select("id,name").in("name", names);
+      const byId = Object.fromEntries((accs || []).map(a => [a.id, a.name]));
+      const { data } = await supabase.from("points_history").select("account_id,statement_date,earned,stmt_rows").in("account_id", Object.keys(byId));
+      if (on) setPoolRows((data || []).map(h => ({ ...h, card: byId[h.account_id] })));
+    })();
+    return () => { on = false; };
+  }, [poolName]);
+  const pool = useMemo(() => (poolName && poolRows.length ? poolCheck(poolName, poolRows, card.name) : null), [poolName, poolRows, card.name]);
+
   const list = useMemo(() => rows.map((r, i) => {
     const prev = rows[i + 1];
     // Printed by the bank when available; otherwise the change in balance (redemptions included, so it can be negative).
@@ -53,7 +70,7 @@ export default function PointsHistory({ card }) {
     const skipped = m.check.skipped.map(l => ({ ...l, pts: 0, state: l.kind }));
     return [...earning, ...skipped].sort((a, b) => b.amount - a.amount);
   };
-  const lessons = POINT_RULES[card.name]?.lessons || [];
+  const lessons = POINT_RULES[card.name]?.lessons || (poolName ? POOLS[poolName].lessons : []);
 
   if (!list.length) return null;
   return (
@@ -67,6 +84,19 @@ export default function PointsHistory({ card }) {
           </button>
         ))}
       </div>
+      {pool && (
+        <>
+          <div className="mw-label">Rule check, all {poolName.split(" ")[0]} cards</div>
+          <div className="mw-list">
+            <div className="mw-row mw-kv"><span className="mw-row-name">Period</span><span className="mw-row-amt">{label(pool.from)} – {label(pool.to)}</span></div>
+            <div className="mw-row mw-kv"><span className="mw-row-name">Spend</span><span className="mw-row-amt">{fmtIDR(pool.spend)}</span></div>
+            <div className="mw-row mw-kv"><span className="mw-row-name">Earned, per statements</span><span className="mw-row-amt">{num(pool.printed)}</span></div>
+            <div className="mw-row mw-kv"><span className="mw-row-name">Rule says</span><span className="mw-row-amt">{num(pool.rule)}</span></div>
+            <div className="mw-row mw-kv"><span className="mw-row-name">Difference</span><span className={`mw-row-amt${Math.abs(pool.diff) <= Math.max(5, pool.printed * 0.005) ? " good" : pool.diff > 0 ? " good" : " hot"}`}>{pool.diff > 0 ? "+" : ""}{num(pool.diff)}</span></div>
+            <div className="mw-row mw-kv"><span className="mw-row-name">Effective</span><span className="mw-row-amt">{fmtIDR(Math.round(pool.spend / pool.printed))} per point</span></div>
+          </div>
+        </>
+      )}
       {lessons.length > 0 && (
         <>
           <div className="mw-label">What the statements taught</div>

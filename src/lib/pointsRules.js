@@ -88,3 +88,44 @@ export function likelyNotEarning(months, target) {
   const all = hits.reduce((a, b) => a & b), any = hits.reduce((a, b) => a | b);
   return { sure: C.filter((_, i) => all & (1 << i)), maybe: C.filter((_, i) => (any & ~all) & (1 << i)) };
 }
+
+// ── POOLED PROGRAMMES ────────────────────────────────────────────────────────
+// One points pot for several cards; every card's statement prints the POT's figures as of its own
+// statement date. Points land on the bank's posting date, so a single month never lines up with the
+// purchases dated in it (a Rp 25 jt purchase slid a whole month in Jul/Aug 2026) — the check is
+// therefore cumulative: everything the statements say was earned vs everything the rule gives.
+// Maybank, checked 21 Sep 2026 on Apr–Aug statements: VI and MINI Rp 8.888, JCB Rp 10.000, VP/MU
+// Rp 20.000 with online shopping on VP earning 3× (994 extra on a Rp 9,94 jt Tokopedia purchase).
+// Instalment charges DO earn; a purchase converted to instalments is taken back under "adjustment".
+export const POOLS = {
+  "Maybank TREATS": {
+    unit: "TREATS",
+    cards: { "Maybank VI": 8888, "Maybank Mini": 8888, "Maybank JCB": 10000, "Maybank VP": 20000, "Maybank MU": 20000 },
+    boost: { "Maybank VP": { re: /TOKOPEDIA|SHOPEE|BLIBLI|LAZADA/i, x: 3 } },
+    lessons: [
+      "All Maybank cards fill one TREATS pot. VI and MINI earn a point per Rp 8.888, JCB per Rp 10.000, VP and MU per Rp 20.000.",
+      "Insurance and Paper.id earn in full, and so do monthly instalment charges.",
+      "A purchase turned into instalments loses its points: 2.813 TREATS were taken back in Aug 2026 for the Samsung purchase.",
+      "Online shopping on the VP card earned three times the base rate.",
+      "Jun 2026 carried about 5.000 TREATS that no purchase explains, most likely a promotion.",
+    ],
+  },
+};
+export const poolOf = (cardName) => Object.entries(POOLS).find(([, p]) => p.cards[cardName])?.[0] || null;
+
+// histories: [{ card, statement_date, earned, stmt_rows }] for every card of the pool.
+export function poolCheck(poolName, histories, cardName) {
+  const pool = POOLS[poolName]; if (!pool) return null;
+  const mine = histories.filter(h => h.card === cardName && h.earned != null).sort((a, b) => String(a.statement_date).localeCompare(String(b.statement_date)));
+  if (mine.length < 2) return null;
+  const from = mine[0].statement_date, to = mine[mine.length - 1].statement_date;
+  const seen = new Set(); let rule = 0, spend = 0;
+  for (const h of histories) for (const r of (h.stmt_rows || [])) {
+    if (classify(r) === "credit" || classify(r) === "fee" || !r.date || r.date <= from || r.date > to) continue;
+    const k = `${h.card}|${r.date}|${r.amount}|${r.description}`; if (seen.has(k)) continue; seen.add(k);
+    const amt = Math.abs(Number(r.amount || 0)); const b = pool.boost?.[h.card];
+    rule += (amt / pool.cards[h.card]) * (b && b.re.test(r.description || "") ? b.x : 1); spend += amt;
+  }
+  const printed = mine.slice(1).reduce((s, h) => s + Number(h.earned || 0), 0);
+  return { from, to, printed, rule: Math.round(rule), diff: Math.round(printed - rule), spend, unit: pool.unit };
+}
