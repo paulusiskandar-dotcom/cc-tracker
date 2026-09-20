@@ -256,5 +256,5 @@ button.mw-row { cursor: pointer; }
 .pf-dark-veil { position: fixed; inset: 0; z-index: 2147483000; pointer-events: none; -webkit-backdrop-filter: invert(1) hue-rotate(180deg); backdrop-filter: invert(1) hue-rotate(180deg); }
 /* Under the veil a black scrim would come out light; a white one inverts to the usual dim. */
 .pf-veiled .pf-modal-scrim { background: rgba(255,255,255,0.55) !important; }
-.mw-row-name.mw-wrap { white-space: normal; line-height: 1.45; font-size: 14px; color: var(--sub); }
+.mw-row-name.mw-wrap { white-space: normal; line-height: 1.45; font-size: 14px; color: var(--ink); }
 .mw-row.mw-lesson { align-items: flex-start; }
