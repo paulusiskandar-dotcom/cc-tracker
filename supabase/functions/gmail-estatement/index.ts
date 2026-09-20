@@ -391,6 +391,8 @@ Return ONLY a valid JSON object (no markdown, no explanation) with this exact sc
   Skorcard "Jumlah Poin Bulan Lalu + Tambahan − Ditukarkan" (unit "Skorpoin").
   Also fill, ONLY when the statement prints them (else null): previous = "Jumlah Poin Bulan Lalu"; earned = points/miles added
   THIS cycle ("Tambahan Poin Bulan Ini" / "JUMLAH POIN BULAN INI"); redeemed = "Jumlah Poin Ditukarkan"; bonus = an extra award printed separately.
+  CIMB CO-BRAND cards (e.g. "MC WORLD ACCORHOTELS") print "PEROLEHAN COBRAND PARTNER POINT  <card number> <n>": that card earns the
+  PARTNER's points, not Poin Xtra → points = { balance: null, earned: <n>, unit: "ALL Reward Points" } (ignore the Poin Xtra table on that statement).
   BCA KrisFlyer prints no balance but prints "KRISFLYER MILES ANDA BULAN INI <earned> MILES" and sometimes
   "SELAMAT ANDA MENDAPATKAN EXTRA SEBESAR <bonus> MILES" → points = { balance: null, earned, bonus, unit: "KrisFlyer Miles" }.
   BRI, Jenius, Danamon, Mega, DBS and other BCA cards print nothing → points = null. Never invent a number.

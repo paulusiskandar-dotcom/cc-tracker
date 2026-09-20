@@ -294,9 +294,9 @@ function CardSheet({ card, phase, txs, plans = [], onPlaced, onClose, navigate, 
 
   const mine = txs;
   const hasPoints = card.points_balance != null;
-  // BCA KrisFlyer holds no balance: each statement's miles go straight to the KrisFlyer account.
+  // Co-brand cards hold no balance: each statement's miles/points go straight to the partner account (KrisFlyer, ALL Accor).
   const monthly = card.points_source === "statement_earned";
-  const ptsLabel = monthly ? "Miles this month" : "Points";
+  const ptsLabel = monthly ? "Earned this month" : "Points";
   const kf = hasPoints && card.ratio ? Math.floor(Number(card.points_balance) / card.ratio) : null;
   const expDays = card.points_expiry_date ? Math.round((new Date(`${card.points_expiry_date}T00:00:00`) - new Date()) / 86400000) : null;
   const used = card.limit > 0 && card.avail != null ? Math.max(0, card.limit - card.avail) : null;
