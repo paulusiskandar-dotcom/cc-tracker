@@ -294,6 +294,9 @@ function CardSheet({ card, phase, txs, plans = [], onPlaced, onClose, navigate, 
 
   const mine = txs;
   const hasPoints = card.points_balance != null;
+  // BCA KrisFlyer holds no balance: each statement's miles go straight to the KrisFlyer account.
+  const monthly = card.points_source === "statement_earned";
+  const ptsLabel = monthly ? "Miles this month" : "Points";
   const kf = hasPoints && card.ratio ? Math.floor(Number(card.points_balance) / card.ratio) : null;
   const expDays = card.points_expiry_date ? Math.round((new Date(`${card.points_expiry_date}T00:00:00`) - new Date()) / 86400000) : null;
   const used = card.limit > 0 && card.avail != null ? Math.max(0, card.limit - card.avail) : null;
@@ -330,7 +333,7 @@ function CardSheet({ card, phase, txs, plans = [], onPlaced, onClose, navigate, 
             {(showDue || hasPoints) && (
               <div className="mw-tiles">
                 {showDue && <div className="mw-tile"><div className="mw-tile-l">Due</div><div className="mw-tile-m">{fmtDay(card.due.date)}<span className={`mw-chip${card.due.days <= 5 ? " hot" : ""}`}>{dueText}</span></div></div>}
-                {hasPoints && <div className="mw-tile"><div className="mw-tile-l">Points</div><div className="mw-tile-m">{num(card.points_balance)}</div>{kf != null && <div className="mw-tile-s">≈ {num(kf)} KrisFlyer miles</div>}</div>}
+                {hasPoints && <div className="mw-tile"><div className="mw-tile-l">{ptsLabel}</div><div className="mw-tile-m">{num(card.points_balance)}</div>{kf != null && <div className="mw-tile-s">≈ {num(kf)} KrisFlyer miles</div>}</div>}
               </div>
             )}
             {plans.length > 0 && (
@@ -350,12 +353,12 @@ function CardSheet({ card, phase, txs, plans = [], onPlaced, onClose, navigate, 
               {card.limit > 0 && <Row label="Limit" value={fmtIDR(card.limit)} sub={card.shared_limit_group_id ? "Shared" : null} />}
               {showDue && <Row label="Due" value={`${fmtDay(card.due.date)} · ${card.due.days === 0 ? "today" : `${card.due.days} day${card.due.days === 1 ? "" : "s"}`}`} hot={card.due.days <= 5} />}
               {card.statement_day && <Row label="Statement day" value={String(card.statement_day)} />}
-              {hasPoints && <Row label="Points" value={`${num(card.points_balance)}${card.points_unit ? ` ${card.points_unit}` : ""}`} sub={[kf != null ? `≈ ${num(kf)} KrisFlyer miles` : null, card.points_as_of ? `Statement ${fmtDate(card.points_as_of)}` : null].filter(Boolean).join(" · ")} />}
+              {hasPoints && <Row label={ptsLabel} value={`${num(card.points_balance)}${card.points_unit ? ` ${card.points_unit}` : ""}`} sub={[kf != null ? `≈ ${num(kf)} KrisFlyer miles` : null, card.points_as_of ? `Statement ${fmtDate(card.points_as_of)}` : null].filter(Boolean).join(" · ")} />}
               {hasPoints && Number(card.points_expiring) > 0 && card.points_expiry_date && <Row label="Expiring" value={num(card.points_expiring)} sub={fmtDate(card.points_expiry_date)} hot={expDays != null && expDays <= 45} />}
             </div>
             {/* Points typed by hand, for cards whose statement prints none. A statement that
                 does print them always wins (it is newer and final). */}
-            {card.points_source !== "statement" && <PointsEditor card={card} onSaved={onRefresh} />}
+            {card.points_source !== "statement" && !monthly && <PointsEditor card={card} onSaved={onRefresh} />}
             <div className="mw-list mw-gap">
               <button className="mw-row" onClick={() => navigate(`/accounts/${card.id}/statement`)}><span className="mw-row-name">Statement</span><ChevronRight size={16} className="mw-chev" /></button>
               <button className="mw-row" onClick={() => setTab && setTab("reconcile")}><span className="mw-row-name">Reconcile</span><ChevronRight size={16} className="mw-chev" /></button>

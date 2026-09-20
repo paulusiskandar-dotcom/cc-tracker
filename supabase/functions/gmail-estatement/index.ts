@@ -1224,7 +1224,14 @@ async function simpanPoinStatement(serviceSupabase: any, acc: any, extraction: a
   } catch (e) { console.warn("[prepare] points_history:", (e as any)?.message); }
   try {
     const pts = extraction?.points;
-    const bal = pts && pts.balance != null ? Number(String(pts.balance).replace(/[^\d.]/g, "")) : NaN;
+    let bal = pts && pts.balance != null ? Number(String(pts.balance).replace(/[^\d.]/g, "")) : NaN;
+    // Kartu tanpa saldo (BCA KrisFlyer): yang disimpan = miles siklus ini + bonus, ditandai "statement_earned"
+    // supaya app menamainya "Miles this month", bukan saldo.
+    let sumber = "statement";
+    if (!Number.isFinite(bal) && pts && pts.earned != null) {
+      const e = Number(String(pts.earned).replace(/[^\d.]/g, "")), b = pts.bonus != null ? Number(String(pts.bonus).replace(/[^\d.]/g, "")) : 0;
+      if (Number.isFinite(e)) { bal = e + (Number.isFinite(b) ? b : 0); sumber = "statement_earned"; }
+    }
     if (!Number.isFinite(bal) || !asOf) return;
     const { data: cur } = await serviceSupabase.from("accounts").select("points_as_of").eq("id", acc.id).maybeSingle();
     if (cur?.points_as_of && String(cur.points_as_of) > asOf) return;
@@ -1233,7 +1240,7 @@ async function simpanPoinStatement(serviceSupabase: any, acc: any, extraction: a
     await serviceSupabase.from("accounts").update({
       points_balance: bal, points_unit: pts.unit ? String(pts.unit).slice(0, 40) : null,
       points_expiring: Number.isFinite(exp as number) ? exp : null, points_expiry_date: expDate || null,
-      points_as_of: asOf, points_source: "statement",
+      points_as_of: asOf, points_source: sumber,
     }).eq("id", acc.id);
     console.log(`[prepare] poin ${acc.name}: ${bal} ${pts.unit || ""} per ${asOf}${expDate ? `, hangus ${exp} pada ${expDate}` : ""}`);
   } catch (e) { console.warn("[prepare] poin:", (e as any)?.message); }
