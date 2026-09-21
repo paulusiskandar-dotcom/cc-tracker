@@ -26,6 +26,19 @@ export const POINT_RULES = {
     ] },
 };
 
+// Cards the statement cannot check: what they earn never appears on it. Notes only, no rule.
+Object.assign(POINT_RULES, {
+  "Mandiri Bonvoy": { notesOnly: true, lessons: [
+    "This card earns Marriott Bonvoy points: 3 per Rp 20.000, 5 at Marriott hotels, abroad and on airfare. They go straight to the Marriott account and are never printed on the statement.",
+    "The Livin'poin figure on the statement is Bank Mandiri's own pot for the whole customer number. Spending on this card does not move it: Rp 43,9 million in Sep 2026 added nothing.",
+    "To check the earn rate, compare the Marriott app's activity with the statement. By the rule, Sep 2026 should bring about 6.590 Bonvoy points and Mar 2026 about 7.220.",
+  ] },
+  "Mandiri Signa": { notesOnly: true, lessons: [
+    "The statement prints only the Livin'poin balance, and it has stood at 5.242 since Jun 2026 although the card was used every month. What this card really earns cannot be read from the statement.",
+    "Most of the monthly charge here is instalments (iPhone, Travelio), which by the catalogue earn nothing.",
+  ] },
+});
+
 const FEE_RE = /METERAI|STAMP DUTY|ANNUAL|IURAN|BIAYA|\bFEE\b|CHARGE|BUNGA|INTEREST|DENDA|LATE/i;
 const INST_RE = /CICILAN|INSTAL?LMENT|\b\d{1,2}\s*\/\s*\d{1,2}\b|KE \d+ DARI \d+/i;
 const FX_RE = /\((USD|SGD|JPY|EUR|GBP|AUD|HKD|CNY|MYR|THB|KRW|CHF)\s/i;
@@ -40,7 +53,7 @@ export function classify(row) {
 
 export function applyRule(ruleName, rows = []) {
   const rule = POINT_RULES[ruleName];
-  if (!rule) return null;
+  if (!rule || rule.notesOnly) return null;
   const lines = rows.map(r => ({ ...r, amount: Math.abs(Number(r.amount || 0)), kind: classify(r) }));
   const earning = lines.filter(l => l.kind === "retail" || l.kind === "fx" || (l.kind === "instalment" && rule.instalments));
   const spend = earning.reduce((s, l) => s + l.amount, 0);
