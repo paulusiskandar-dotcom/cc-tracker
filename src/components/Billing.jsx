@@ -102,9 +102,14 @@ export function buildBills({ ledger = [], creditCards = [], liabilities = [], re
       .map(c => {
         const pending = computePendingDue(c, ledger, today);
         const when = ccDueDate(c, today);
+        // Same rule as the phone (20 Sep 2026): the statement's minimum payment decides. 0 = the bank asks
+        // for nothing, so it is not a bill; anything above 0 is one, however small.
+        const sess = (reconSessions || []).filter(r => r.account_id === c.id && r.statement_date && r.status !== "void")
+          .sort((x, y) => String(y.statement_date).localeCompare(String(x.statement_date)))[0];
+        if (sess && sess.minimum_payment != null && Number(sess.minimum_payment) === 0) return null;
         return { id: c.id, name: c.name, when, dayLeft: dayLeft(when), amount: pending, known: true };
       })
-      .filter(c => c.amount >= 25000)                  // hide already-paid + ignore trivial (< Rp 25rb)
+      .filter(c => c && c.amount > 0)                  // hide already-paid
       .sort((a, b) => a.when - b.when);
 
     // 📆 Installments — liability cicilan (BYD) + installments table (ongoing)
@@ -193,14 +198,14 @@ function buildToPay({ ledger, creditCards, liabilities, recurTemplates, reconSes
 // ─── Component ────────────────────────────────────────────────────
 export default function Billing({
   ledger = [], creditCards = [], liabilities = [],
-  recurTemplates = [], installments = [],
+  recurTemplates = [], installments = [], reconSessions = [],
 }) {
   const [tab, setTab] = useState("cards");
   const today = new Date();
   const curMonth = ym(today.toISOString().slice(0, 10));
 
-  const { cards, cicilan, rutinManual, subs } = useMemo(() => buildBills({ ledger, creditCards, liabilities, recurTemplates, installments }, today),
-    [ledger, creditCards, liabilities, recurTemplates, installments, curMonth]); // eslint-disable-line
+  const { cards, cicilan, rutinManual, subs } = useMemo(() => buildBills({ ledger, creditCards, liabilities, recurTemplates, installments, reconSessions }, today),
+    [ledger, creditCards, liabilities, recurTemplates, installments, reconSessions, curMonth]); // eslint-disable-line
 
   const byTab = { cards, installments: cicilan, recurring: rutinManual, subscriptions: subs };
   const items = byTab[tab] || [];

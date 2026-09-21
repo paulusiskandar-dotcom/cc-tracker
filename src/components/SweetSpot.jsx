@@ -3,6 +3,7 @@ import { supabase } from "../lib/supabase";
 import { settingsApi } from "../api";
 import { Check, X, HelpCircle, AlertTriangle, Minus, ChevronDown } from "lucide-react";
 import SweetSpotSpending from "./SweetSpotSpending";
+import MobileEarned from "./mobile/MobileEarned";
 
 // SweetSpot — earn rates, exclusions, promos and miles news for the cards Paulus
 // holds. Data comes from public sources collected by n8n and pushed through the
@@ -93,6 +94,9 @@ async function fetchAll(table, build) {
 
 export default function SweetSpot({ user, ledger = [], accounts = [], dark = false }) {
   const [tab, setTab] = useState("compare");
+  // Same breakpoint as App.js useIsMobile: the phone gets the statement-based spending view.
+  const [phone, setPhone] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 768px)").matches);
+  useEffect(() => { const mq = window.matchMedia("(max-width: 768px)"); const f = e => setPhone(e.matches); mq.addEventListener("change", f); return () => mq.removeEventListener("change", f); }, []);
   const [showFilters, setShowFilters] = useState(false); // phones: promo filters start folded
   const [prog, setProg] = useState("krisflyer");
   const [spend, setSpend] = useState("e:everyday");
@@ -345,7 +349,7 @@ export default function SweetSpot({ user, ledger = [], accounts = [], dark = fal
 
       {tab === "tricks" && <TricksView tricks={data.tricks} />}
 
-      {tab === "spending" && <SweetSpotSpending ledger={ledger} accounts={accounts} />}
+      {tab === "spending" && (phone ? <MobileEarned accounts={accounts} dark={dark} /> : <SweetSpotSpending ledger={ledger} accounts={accounts} />)}
     </Frame>
   );
 }
