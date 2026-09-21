@@ -3,12 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import { fmtIDR } from "../../utils";
-import { classify, POOLS, poolOf, poolCheck } from "../../lib/pointsRules";
+import { classify, POOLS, POINT_RULES, poolOf, poolCheck } from "../../lib/pointsRules";
 import "./mobile.css";
 
 const num = n => Math.round(Number(n || 0)).toLocaleString("id-ID");
-const MON = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const label = d => { const [y, m] = String(d).split("-"); return `${MON[Number(m) - 1]} ${y}`; };
 
 // Spend that could earn on one statement: purchases and instalments, without fees, and without a
 // purchase the same statement credits back in full (converted to instalments, or refunded).
@@ -40,6 +38,8 @@ export default function MobileEarned({ accounts = [], dark = false }) {
     for (const h of hist) { const n = name[h.account_id]; if (n) (byCard[n] = byCard[n] || []).push({ ...h, card: n }); }
     const out = []; const pooled = new Set();
     for (const [card, list] of Object.entries(byCard)) {
+      // Statement figure is not this card's own earning (Mandiri: Livin'poin is the bank-wide pot).
+      if (POINT_RULES[card]?.notesOnly) continue;
       const pool = poolOf(card);
       if (pool) {
         if (pooled.has(pool)) continue; pooled.add(pool);
@@ -70,13 +70,13 @@ export default function MobileEarned({ accounts = [], dark = false }) {
         <div className="mw-list">
           {rows.map(r => (
             <div key={r.key} className="mw-row mw-tx">
-              <span className="mw-row-name">{r.name}<small>{num(r.points)} {r.unit} · {fmtIDR(r.spend)} · {label(r.from)} – {label(r.to)}</small></span>
+              <span className="mw-row-name">{r.name}<small>{num(r.points)} {r.unit} · Rp {(r.spend / 1e6).toLocaleString("id-ID", { maximumFractionDigits: 1 })} jt</small></span>
               <span className="mw-row-amt">{fmtIDR(Math.round(r.spend / r.points))}</span>
             </div>
           ))}
         </div>
       )}
-      <div className="mw-note">Rupiah spent for one point or mile, from what the statements printed. Lower is better. Units differ by programme, so compare cards inside the same programme. Cards whose statements print no points are not listed.</div>
+      <div className="mw-note">Rupiah spent for one point or mile, from every 2026 statement that printed them. Lower is better. Units differ by programme, so compare cards inside the same programme. Cards whose statements print no points are not listed.</div>
     </div>
   );
 }
