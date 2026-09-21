@@ -23,7 +23,7 @@ export function parseInstalment(desc: string): Instalment | null {
 
 /** Fixed monthly card charges (stamp duty, SMS/e-statement/notification, admin, other-bank
  *  payment fee). Amount-capped so a real purchase can never be swept in. */
-const FEE_RE = /BEA\s*METERAI|STAMP\s*DUTY|BIAYA\s+(?:LAYANAN\s+)?NOTIFIKASI|NOTIFICATION\s+CHA?RGE|E-?BILLING|BIAYA\s+(?:E-?|EMAIL\s+)STATEMENT|E-?STATEMENT\s+(?:FEE|CHA?RGE)|ADMINISTRATION\s+FEE|BIAYA\s+ADMIN(?:ISTRASI)?\b|BIAYA\s+PEMBAYARAN\s+BANK\s+LAIN/i;
+const FEE_RE = /BEA\s*METERAI|STAMP\s*DUTY|BIAYA\s+(?:LAYANAN\s+)?NOTIFIKASI|NOTIFICATION\s+CHA?RGE|E-?BILLING|BIAYA\s+(?:E-?|EMAIL\s+)STATEMENT|E-?STATEMENT\s+(?:FEE|CHA?RGE)|ADMINISTRATION\s+FEE|BIAYA\s+ADMIN(?:ISTRASI)?\b|BIAYA\s+PEMBAYARAN\s+BANK\s+LAIN|PAYMENT\s+OTHER\s+BANK\s+FEE/i;
 export const FEE_CAP = 25000;
 export function isMonthlyFee(desc: string, amount: number): boolean {
   const a = Math.round(Math.abs(Number(amount || 0)));

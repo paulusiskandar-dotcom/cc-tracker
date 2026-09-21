@@ -17,6 +17,7 @@
 //   onCreateInstallment (row) => void  — optional, estatement only
 
 import { useState, useEffect, Fragment } from "react";
+import { useLoanPaid, loanLeft } from "../../lib/loans";
 import { REIMBURSE_ENTITIES } from "../../constants";
 import { showToast } from "./Card";
 import { supabase } from "../../lib/supabase";
@@ -250,6 +251,7 @@ const BADGE = (bg, color) => ({
 // ─── COLLECT LOAN CELL ──────────────────────────────────────────
 // Separate component so useEffect can be called unconditionally (React hook rules)
 function CollectLoanCell({ r, onUpdate, T, accounts, employeeLoans }) {
+  const loanPaid = useLoanPaid();
   const activeLoans = (employeeLoans || []).filter(l => {
     const s = (l.status || "active").toLowerCase();
     return s === "active" || s === "partial";
@@ -274,7 +276,7 @@ function CollectLoanCell({ r, onUpdate, T, accounts, employeeLoans }) {
           onChange={e => onUpdate({ employee_loan_id: e.target.value, from_id: e.target.value })}>
           <option value="">Borrower…</option>
           {activeLoans.map(l => {
-            const outstanding = Math.max(0, Number(l.total_amount || 0) - Number(l.paid_months || 0) * Number(l.monthly_installment || 0));
+            const outstanding = loanLeft(l, loanPaid);
             return (
               <option key={l.id} value={l.id}>
                 {l.employee_name} ({fmtAmt(outstanding)})
@@ -950,7 +952,7 @@ export default function TxHorizontal({
       if (!user || cancelled) return;
       supabase
         .from("employee_loans")
-        .select("id, employee_name, status, total_amount, monthly_installment, paid_months")
+        .select("id, employee_name, status, total_amount, monthly_installment, paid_months, paid_before_books")
         .eq("user_id", user.id)
         .in("status", ["active", "partial"])
         .then(({ data }) => {

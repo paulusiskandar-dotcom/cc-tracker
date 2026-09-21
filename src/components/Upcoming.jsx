@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { loanStatus } from "../lib/loans";
 import { recurringApi, loanPaymentsApi, ledgerApi, recalculateBalance } from "../api";
 import { fmtIDR, todayStr } from "../utils";
 import { showToast, Button, Modal, AmountInput, Field, Input, FormRow } from "./shared/index";
@@ -86,14 +87,12 @@ export default function Upcoming({
   // ── Loan stats (outstanding = paid_months × monthly_installment) ────
   const loansWithStats = useMemo(() => {
     return employeeLoans.map(loan => {
-      const paidMonths = Number(loan.paid_months || 0);
-      const monthly    = Number(loan.monthly_installment || 0);
-      const total      = Number(loan.total_amount || 0);
-      const paidSoFar  = paidMonths * monthly;
-      const remaining  = Math.max(0, total - paidSoFar);
-      return { ...loan, paidSoFar, remaining };
+      // One formula everywhere (src/lib/loans.js). paid_months × instalment drifted from the
+      // ledger on four loans (21 Sep 2026: Lieche, Fairuz, Cecek, Daniel).
+      const st = loanStatus(loan, ledger);
+      return { ...loan, paidSoFar: st.paid, remaining: st.left };
     });
-  }, [employeeLoans]);
+  }, [employeeLoans, ledger]);
 
   // ── Build unified upcoming list ──────────────────────────────
   const items = useMemo(() => {

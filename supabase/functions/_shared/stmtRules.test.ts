@@ -104,3 +104,9 @@ Deno.test("split card payments merge only when the sum is in the book", () => {
   if (mergeSplitPayments(rows.slice(0, 2), [{ tx_date: "2026-08-21", amount: 988900 }, { tx_date: "2026-08-21", amount: 19011100 }]).length !== 2) throw new Error("merged separate payments");
   if (!PAYMENT_RE.test("PEMBAYARAN - MYBCA") || PAYMENT_RE.test("CASHBACK PROMO")) throw new Error("payment regex");
 });
+
+import { isMonthlyFee as feeT } from "./stmtRules.ts";
+Deno.test("Mandiri's English wording for the other-bank payment fee is a fee", () => {
+  if (!feeT("Payment Other Bank Fee", 20000)) throw new Error("not caught");
+  if (feeT("CIRENG KERATON Karawang", 25000)) throw new Error("a snack is not a fee");
+});

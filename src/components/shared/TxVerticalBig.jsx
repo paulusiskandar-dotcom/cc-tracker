@@ -21,6 +21,7 @@
  */
 
 import { useState, useEffect } from "react";
+import { useLoanPaid, loanLeft } from "../../lib/loans";
 import {
   ledgerApi, merchantApi, getTxFromToTypes,
   assetsApi,
@@ -236,6 +237,7 @@ export default function TxVerticalBig({
   setReminders,
   onRefresh,
 }) {
+  const loanPaid = useLoanPaid();
   const [form,    setFormState] = useState(EMPTY);
   const [group,   setGroup]     = useState("cashflow");
   const [saving,  setSaving]    = useState(false);
@@ -1264,7 +1266,7 @@ export default function TxVerticalBig({
               <select value={form.to_id || ""} onChange={e => set("to_id", e.target.value || null)} style={SEL}>
                 <option value="">Select borrower…</option>
                 {loanList.map(l => {
-                  const outstanding = Math.max(0, Number(l.total_amount || 0) - Number(l.paid_months || 0) * Number(l.monthly_installment || 0));
+                  const outstanding = loanLeft(l, loanPaid);
                   return (
                     <option key={l.id} value={l.id}>
                       {l.employee_name}{outstanding > 0 ? ` · ${fmtIDR(outstanding)} outstanding` : ""}
@@ -1343,7 +1345,7 @@ export default function TxVerticalBig({
             }} style={SEL}>
               <option value="">Select borrower…</option>
               {activeLoans.map(l => {
-                const outstanding = Math.max(0, Number(l.total_amount || 0) - Number(l.paid_months || 0) * Number(l.monthly_installment || 0));
+                const outstanding = loanLeft(l, loanPaid);
                 const monthly     = Number(l.monthly_installment || 0);
                 return (
                   <option key={l.id} value={l.id}>

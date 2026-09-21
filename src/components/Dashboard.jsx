@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect, useCallback } from "react";
 import { makeSpending } from "../lib/spending";
+import { loanStatus } from "../lib/loans";
 import { Bell, Mail, Camera, Scale, Plus, Pencil } from "lucide-react";
 import { CategoryIcon } from "../lib/categoryIcons";
 import { ledgerApi, recurringApi, reimburseSettlementsApi, loanPaymentsApi, employeeLoanApi } from "../api";
@@ -264,12 +265,11 @@ export default function Dashboard({
   // Per-loan stats
   const loansWithStats = useMemo(() => {
     return employeeLoans.map(loan => {
-      const paid = loanPayments.filter(p => p.loan_id === loan.id)
-        .reduce((s, p) => s + Number(p.amount || 0), 0);
-      const remaining = Math.max(0, Number(loan.total_amount || 0) - paid);
-      return { ...loan, paidSoFar: paid, remaining };
+      // One formula everywhere (src/lib/loans.js): total − paid before the books − collect_loan rows.
+      const st = loanStatus(loan, ledger);
+      return { ...loan, paidSoFar: st.paid, remaining: st.left };
     });
-  }, [employeeLoans, loanPayments]);
+  }, [employeeLoans, ledger]);
 
   const RE_CAT_NAMES = { Hamasa: "Hamasa RE", SDC: "SDC RE", Personal: "Personal RE" };
 

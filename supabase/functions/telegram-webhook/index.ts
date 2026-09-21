@@ -1613,12 +1613,16 @@ async function cmdHutang(supabase: any, uid: string): Promise<string> {
 
 async function cmdPiutang(supabase: any, uid: string): Promise<string> {
   // 1. utang karyawan
-  const { data: loans } = await supabase.from("employee_loans").select("employee_name, total_amount, monthly_installment, paid_months, status").eq("user_id", uid).eq("status", "active");
+  const { data: loans } = await supabase.from("employee_loans").select("id, employee_name, total_amount, monthly_installment, paid_before_books, status").eq("user_id", uid).eq("status", "active");
+  // Rumus yang sama dengan app (src/lib/loans.js): total − dibayar sebelum buku − baris collect_loan di ledger.
+  const { data: bayar } = await supabase.from("ledger").select("employee_loan_id, amount, amount_idr").eq("user_id", uid).eq("tx_type", "collect_loan").not("employee_loan_id", "is", null);
+  const dibayar: Record<string, number> = {};
+  for (const b of (bayar || [])) dibayar[b.employee_loan_id] = (dibayar[b.employee_loan_id] || 0) + Number(b.amount_idr || b.amount || 0);
   let loanTotal = 0;
   let out = "🤝 <b>PIUTANG</b> <i>(yang orang utang ke kamu)</i>\n";
   out += "\n👥 <b>Utang karyawan</b>\n\n";
   for (const l of (loans || [])) {
-    const sisa = Math.max(0, Number(l.total_amount || 0) - Number(l.paid_months || 0) * Number(l.monthly_installment || 0));
+    const sisa = Math.max(0, Number(l.total_amount || 0) - Number(l.paid_before_books || 0) - (dibayar[l.id] || 0));
     if (sisa <= 0) continue;
     loanTotal += sisa;
     out += `${esc(l.employee_name)} · cicilan ${idr(l.monthly_installment)}/bln\n<b>${idr(sisa)}</b>\n\n`;
