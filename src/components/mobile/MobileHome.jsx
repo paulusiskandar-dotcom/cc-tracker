@@ -4,6 +4,7 @@
 //   3. what needs me  — approvals, bills due within 7 days, money owed, points about to expire
 // Every figure is one another screen already computes; nothing is recalculated differently here.
 import { useEffect, useMemo, useState } from "react";
+import { lateStatements } from "../../lib/statementsLate";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { fmtIDR } from "../../utils";
@@ -75,7 +76,9 @@ export default function MobileHome(props) {
   const expiring = accounts.filter(a => a.type === "credit_card" && Number(a.points_expiring) > 0 && a.points_expiry_date)
     .map(a => ({ a, days: Math.round((new Date(`${a.points_expiry_date}T00:00:00`) - new Date()) / 86400000) }))
     .filter(x => x.days >= 0 && x.days <= 45).sort((x, y) => x.days - y.days);
+  const late = useMemo(() => lateStatements(accounts, reconSessions), [accounts, reconSessions]);
   const needs = [
+    late.length > 0 && { key: "late", name: "Statement late", sub: late.map(l => l.acc.name).join(", "), value: String(late.length), hot: true, on: () => go("reconcile") },
     inbox > 0 && { key: "inbox", name: "To approve", sub: `${inbox} transaction${inbox === 1 ? "" : "s"} from email`, value: String(inbox), on: () => go("transactions", "m.tx.view", "inbox") },
     week.length > 0 && { key: "bills", name: "Due soon", sub: `${week.length} bill${week.length === 1 ? "" : "s"}`, value: fmtIDR(weekSum), on: () => go("billing", "m.bills.view", "bills") },
     Math.round(owed) !== 0 && { key: "owed", name: "Owed to you", sub: "Reimbursements not yet repaid", value: signed(owed), on: () => go("billing", "m.bills.view", "reimburse") },

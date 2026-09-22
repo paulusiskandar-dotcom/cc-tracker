@@ -3,6 +3,7 @@
 // this page groups the results per month: Needs review / All matched /
 // Completed / Waiting. One-click Finalize for perfect statements.
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { lateStatements } from "../lib/statementsLate";
 import MobileReconcile from "./mobile/MobileReconcile";
 import { gapOk, GAP_TOLERANCE } from "../lib/reconcileTolerance";
 import { supabase } from "../lib/supabase";
@@ -472,6 +473,7 @@ export default function Reconcile({
   if (mobile) {
     return <MobileReconcile dark={dark} monthLabel={monthLabel} onPrev={() => navMonth(-1)} onNext={() => navMonth(1)} canNext={!isCurrentMonth}
       data={monthData} finalizing={finalizing} onFinalize={finalize} onFinalizeAll={finalizeAll} usualDay={usualDay}
+      late={isCurrentMonth ? lateStatements(accounts, allSessions) : []}
       onOpenInbox={() => { try { localStorage.setItem("m.tx.view", "inbox"); } catch { /* private mode */ } setTab("transactions"); }} />;
   }
 

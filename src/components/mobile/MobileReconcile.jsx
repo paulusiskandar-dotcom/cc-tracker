@@ -10,7 +10,7 @@ import "./mobile.css";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const d2 = s => { if (!s) return ""; const d = new Date(`${String(s).slice(0, 10)}T00:00:00`); return `${d.getDate()} ${MONTHS[d.getMonth()]}`; };
 
-export default function MobileReconcile({ monthLabel, onPrev, onNext, canNext, data, finalizing, onFinalize, onFinalizeAll, onOpenInbox, usualDay, dark }) {
+export default function MobileReconcile({ monthLabel, onPrev, onNext, canNext, data, finalizing, onFinalize, onFinalizeAll, onOpenInbox, usualDay, dark, late = [] }) {
   const [open, setOpen] = useState(null);
   const { ready = [], needsReview = [], completed = [], waiting = [] } = data;
   const sub = it => `${it.s.total_statement ?? 0} lines${it.s.period_end ? ` · to ${d2(it.s.period_end)}` : ""}`;
@@ -65,14 +65,31 @@ export default function MobileReconcile({ monthLabel, onPrev, onNext, canNext, d
         </>
       )}
 
-      {waiting.length > 0 && (
-        <>
-          <div className="mw-label">No statement yet</div>
-          <div className="mw-list">
-            {waiting.map(({ acc }) => { const day = usualDay(acc.id); return <div key={acc.id} className="mw-row"><span className="mw-row-name">{acc.name}</span><span className="mw-row-amt" style={{ fontWeight: 400, color: "var(--muted)" }}>{day ? `usually ~${day}` : ""}</span></div>; })}
-          </div>
-        </>
-      )}
+      {waiting.length > 0 && (() => {
+        const lateIds = new Set(late.map(l => l.acc.id));
+        const lateRows = waiting.filter(({ acc }) => lateIds.has(acc.id));
+        const rest = waiting.filter(({ acc }) => !lateIds.has(acc.id));
+        return (
+          <>
+            {lateRows.length > 0 && (
+              <>
+                <div className="mw-label">Statement late</div>
+                <div className="mw-list">
+                  {lateRows.map(({ acc }) => { const l = late.find(x => x.acc.id === acc.id); return <div key={acc.id} className="mw-row"><span className="mw-row-name">{acc.name}</span><span className="mw-row-amt hot">{l.daysLate} day{l.daysLate === 1 ? "" : "s"} · usually ~{l.usual}</span></div>; })}
+                </div>
+              </>
+            )}
+            {rest.length > 0 && (
+              <>
+                <div className="mw-label">No statement yet</div>
+                <div className="mw-list">
+                  {rest.map(({ acc }) => { const day = usualDay(acc.id); return <div key={acc.id} className="mw-row"><span className="mw-row-name">{acc.name}</span><span className="mw-row-amt" style={{ fontWeight: 400, color: "var(--muted)" }}>{day ? `usually ~${day}` : "dormant"}</span></div>; })}
+                </div>
+              </>
+            )}
+          </>
+        );
+      })()}
       {!ready.length && !needsReview.length && !completed.length && !waiting.length && <div className="mw-empty">Nothing for {monthLabel}.</div>}
 
       {open && (
