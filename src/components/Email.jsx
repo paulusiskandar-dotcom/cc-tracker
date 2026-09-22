@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import MobileQueue from "./mobile/MobileQueue";
 import { ChevronLeft } from "lucide-react";
 import "./mobile/mobile.css";
-import { gmailApi, settingsApi, ledgerApi, merchantApi, getTxFromToTypes, flattenEmailSync, loanPaymentsApi, installmentsApi, recurringApi } from "../api";
+import { gmailApi, settingsApi, ledgerApi, merchantApi, getTxFromToTypes, flattenEmailSync, loanPaymentsApi, installmentsApi, recurringApi, tagsApi } from "../api";
 import { supabase } from "../lib/supabase";
 import { undoManager } from "../lib/undoManager";
 import { merchantRules } from "../lib/merchantRules";
@@ -43,11 +43,13 @@ const syncToRow = (s) => ({
   tx_type:       s.tx_type || "expense",
   from_id:       s.matched_account_id || "",
   to_id:         s.to_account_id || "",
-  entity:        s.entity || "",
-  category_id:   null,
+  entity:        s._plan?.entity || s.entity || "",
+  category_id:   s._plan?.category_id || null,
+  tag_id:        s._plan?.tag_id || null,
+  _plan:         s._plan || null,
   suggested_category_label: s.suggested_category_label || "",
   // Nama barang dari email pesanan (item_note) ikut ke ledger.notes.
-  notes:         s.notes || "",
+  notes:         s._plan?.name || s.notes || "",
   status:        "new",
   // Angsuran 1/N dari statement → rencana cicilan dibuat saat baris disetujui.
   _cicilan:       !!(s.is_installment && Number(s.installment_current) === 1 && Number(s.installment_total) >= 2),
@@ -521,6 +523,22 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
   const isFXRow = (r) => r.currency && r.currency !== "IDR";
   const visibleRows = rows.filter(r => waitingMode ? isFXRow(r) : !isFXRow(r));
   const [showWaiting, setShowWaiting] = useState(false);
+  // Trips for the waiting sheet (phones). Loaded once; "New trip" appends to it.
+  const [trips, setTrips] = useState([]);
+  useEffect(() => { if (!user?.id || !embedded) return; tagsApi.list(user.id, { status: "active" }).then(t => setTrips((t || []).filter(x => x.type === "trip"))).catch(() => {}); }, [user?.id, embedded]);
+  const newTrip = async (name) => { const t = await tagsApi.create(user.id, { name, type: "trip", start_date: new Date().toISOString().slice(0, 10) }); setTrips(v => [t, ...v]); return t; };
+  // Edits on a parked row are decisions for later: persist them with the row.
+  const planRow = async (id, patch) => {
+    const r = rows.find(x => x._id === id); if (!r) return;
+    updateRow(id, patch);
+    const cat = patch.category_id !== undefined ? (categories.find(c => c.id === patch.category_id) || null) : undefined;
+    const plan = {};
+    if (patch.category_id !== undefined) { plan.category_id = patch.category_id || null; plan.category_name = cat ? cat.name : null; }
+    if (patch.tag_id !== undefined) plan.tag_id = patch.tag_id || null;
+    if (patch.entity !== undefined) plan.entity = patch.entity || null;
+    if (patch.notes !== undefined) plan.name = patch.notes || null;
+    try { await gmailApi.saveTxPlan(r.email_sync_id, r.tx_index ?? 0, plan); } catch (e) { showToast(e.message, "error"); }
+  };
   const [selected,     setSelected]     = useState(() => Object.fromEntries((pendingSyncs || []).map(s => [s.id, true])));
   const [importing,    setImporting]    = useState(false);
   const [processedCount, setProcessedCount] = useState(0);
@@ -1091,8 +1109,9 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
         <span className="mw-row-amt" style={{ fontWeight: 400, color: "var(--muted)" }}>{showWaiting ? "Hide" : "Show"}</span>
       </button>
       {showWaiting && (
-        <MobileQueue rows={fxRows} onUpdateRow={updateRow} onConfirmRow={confirm} onSkipRow={skipById}
-          accounts={accounts} categories={categories} incomeSrcs={incomeSrcs} busy={importing} waiting dark={dark} onFullEditor={null} />
+        <MobileQueue rows={fxRows} onUpdateRow={planRow} onConfirmRow={confirm} onSkipRow={skipById}
+          accounts={accounts} categories={categories} incomeSrcs={incomeSrcs} busy={importing} waiting dark={dark} onFullEditor={null}
+          trips={trips} onNewTrip={newTrip} />
       )}
     </>
   );

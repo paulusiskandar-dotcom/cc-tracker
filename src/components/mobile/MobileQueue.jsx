@@ -17,7 +17,7 @@ const NEEDS_FULL = r => ["collect_loan", "give_loan", "buy_asset", "sell_asset",
 const amountText = r => (r.currency && r.currency !== "IDR" ? fmtCurNative(r.amount, r.currency) : fmtIDR(r.amount_idr || r.amount));
 const ERR_EN = { "Pilih akun sumber": "Choose the account it came from", "Pilih akun tujuan": "Choose the account it went to", "Pilih kategori": "Choose a category", "Pilih entity reimburse": "Choose who reimburses", "Isi FX rate": "Needs an FX rate", "Pilih borrower": "Choose the borrower", "Pilih asset": "Choose the asset" };
 
-export default function MobileQueue({ rows = [], onUpdateRow, onConfirmRow, onSkipRow, accounts = [], categories = [], incomeSrcs = [], busy = false, waiting = false, dark = false, onFullEditor }) {
+export default function MobileQueue({ rows = [], onUpdateRow, onConfirmRow, onSkipRow, accounts = [], categories = [], incomeSrcs = [], busy = false, waiting = false, dark = false, onFullEditor, trips = [], onNewTrip = null }) {
   const [openId, setOpenId] = useState(null);
   const row = rows.find(r => r._id === openId);
   return (
@@ -27,14 +27,14 @@ export default function MobileQueue({ rows = [], onUpdateRow, onConfirmRow, onSk
           const err = waiting ? null : validateRow(r, accounts);
           return (
             <button key={r._id} className="mw-row mw-tx" onClick={() => setOpenId(r._id)}>
-              <span className="mw-row-name">{r.notes || r.description || r.subject || "Transaction"}<small className={err ? "hot" : ""}>{fmtDate(r.tx_date)}{err ? ` · ${ERR_EN[err] || err}` : ""}</small></span>
+              <span className="mw-row-name">{r.notes || r.description || r.subject || "Transaction"}<small className={err ? "hot" : ""}>{fmtDate(r.tx_date)}{err ? ` · ${ERR_EN[err] || err}` : ""}{waiting && r.category_id ? ` · ${(categories.find(c => c.id === r.category_id) || {}).name || "categorised"}` : ""}{waiting && r.tag_id ? ` · ${(trips.find(t => t.id === r.tag_id) || {}).name || "trip"}` : ""}</small></span>
               <span className="mw-row-amt">{amountText(r)}</span>
             </button>
           );
         })}
         {onFullEditor && <button className="mw-row mw-showall" onClick={onFullEditor}>Open full editor</button>}
       </div>
-      {row && <QueueSheet r={row} accounts={accounts} categories={categories} incomeSrcs={incomeSrcs} busy={busy} waiting={waiting}
+      {row && <QueueSheet r={row} accounts={accounts} categories={categories} incomeSrcs={incomeSrcs} busy={busy} waiting={waiting} trips={trips} onNewTrip={onNewTrip}
         onUpdate={patch => onUpdateRow(row._id, patch)} onClose={() => setOpenId(null)} onFullEditor={onFullEditor}
         onApprove={() => { setOpenId(null); onConfirmRow(row); }} onSkip={() => { setOpenId(null); onSkipRow(row._id); }} />}
     </div>
@@ -66,7 +66,7 @@ function AccountPick({ id, label, list = [], value, onChange }) {
   );
 }
 
-function QueueSheet({ r, accounts, categories, incomeSrcs, busy, waiting, onUpdate, onClose, onApprove, onSkip, onFullEditor }) {
+function QueueSheet({ r, accounts, categories, incomeSrcs, busy, waiting, onUpdate, onClose, onApprove, onSkip, onFullEditor, trips = [], onNewTrip }) {
   const cfg = getAcctCfg(r.tx_type, accounts);
   const needFrom = cfg.mode === "from" || cfg.mode === "from_to";
   const needTo = cfg.mode === "to" || cfg.mode === "from_to";
@@ -87,7 +87,30 @@ function QueueSheet({ r, accounts, categories, incomeSrcs, busy, waiting, onUpda
         <div className="mw-tile-s">{fmtDate(r.tx_date)}{r.description && r.notes ? ` · ${r.description}` : ""}</div>
 
         {waiting ? (
-          <div className="mw-note">Foreign-currency charge. It waits for the statement, which carries the real rupiah amount, and clears from here once that statement is reconciled.</div>
+          <>
+            <div className="mw-note">Foreign-currency charge. The statement brings the rupiah amount; what you set here is booked with it when that statement arrives.</div>
+            <div className="mw-fields">
+              <label htmlFor={`${sid}-cat`}>Category
+                <select id={`${sid}-cat`} value={r.category_id || ""} onChange={e => onUpdate({ category_id: e.target.value || null })}>
+                  <option value="">Choose</option>{opt(categories)}
+                </select>
+              </label>
+              <label htmlFor={`${sid}-trip`}>Trip
+                <select id={`${sid}-trip`} value={r.tag_id || ""} onChange={async e => {
+                  if (e.target.value === "__new") { const name = window.prompt("Trip name"); if (name && onNewTrip) { const t = await onNewTrip(name.trim()); if (t) onUpdate({ tag_id: t.id }); } return; }
+                  onUpdate({ tag_id: e.target.value || null });
+                }}>
+                  <option value="">None</option>{opt(trips)}{onNewTrip && <option value="__new">New trip…</option>}
+                </select>
+              </label>
+              <label htmlFor={`${sid}-ent`}>Entity
+                <select id={`${sid}-ent`} value={r.entity || ""} onChange={e => onUpdate({ entity: e.target.value })}><option value="">Personal</option>{ENTITIES.map(x => <option key={x} value={x}>{x}</option>)}</select>
+              </label>
+              <label htmlFor={`${sid}-notes`}>Name
+                <input id={`${sid}-notes`} defaultValue={r.notes || ""} onBlur={e => { if (e.target.value !== (r.notes || "")) onUpdate({ notes: e.target.value }); }} placeholder="What was it" />
+              </label>
+            </div>
+          </>
         ) : (
           <div className="mw-fields">
             <label htmlFor={`${sid}-type`}>Type

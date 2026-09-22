@@ -1973,6 +1973,9 @@ export function flattenEmailSync(rows) {
         is_qris:                 tx.is_qris,
         is_transfer:             tx.is_transfer,
         is_cc_payment:           tx.is_cc_payment,
+        // What Paulus already decided on a parked foreign-currency row (22 Sep 2026):
+        // carried into the statement row when the statement arrives.
+        _plan:                   tx._plan || null,
       });
     });
   }
@@ -2044,6 +2047,18 @@ export const gmailApi = {
   // row status to 'waiting_statement' only when every not-yet-done sibling is
   // also waiting (mixed rows with still-actionable IDR items stay 'pending').
   // Never writes to the ledger — the exact IDR comes from the monthly statement.
+  // Saves the decisions made on a parked (waiting_statement) row: category, trip, entity,
+  // name. Stored on the tx as _plan; prepare copies them onto the statement row. No ledger write.
+  saveTxPlan: async (id, txIndex, plan) => {
+    const { data, error: fetchErr } = await supabase.from("email_sync").select("ai_raw_result").eq("id", id).single();
+    if (fetchErr) throw new Error(fetchErr.message);
+    const txs = Array.isArray(data?.ai_raw_result) ? data.ai_raw_result.map(t => ({ ...(t || {}) })) : [];
+    if (txIndex < 0 || txIndex >= txs.length) throw new Error("Row not found");
+    txs[txIndex] = { ...txs[txIndex], _plan: { ...(txs[txIndex]._plan || {}), ...plan, updated_at: new Date().toISOString() } };
+    const { error } = await supabase.from("email_sync").update({ ai_raw_result: txs }).eq("id", id);
+    if (error) throw new Error(error.message);
+  },
+
   markTxWaiting: async (id, txIndex) => {
     const { data, error: fetchErr } = await supabase
       .from("email_sync")

@@ -1457,11 +1457,63 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
     const usedPlan = new Set<string>();
     const sisaMissing: any[] = [];
     const inserts: any[] = [];
+    // (0) Kembaran valas yang diparkir dari email ("waiting for statement", 22 Sep 2026). Statement
+    // ini membawa nilai rupiahnya. Kalau Paulus sudah mengisi kategori di baris parkir → langsung
+    // dibukukan dengan kategori/trip/entity/nama itu. Kalau belum → baris antrean mewarisi isiannya.
+    // Server tidak menebak: yang dibukukan hanya yang diisi sendiri.
+    const parkir: { wr: any; arr: any[]; t: any; idx: number }[] = [];
+    try {
+      const { data: wrows0 } = await serviceSupabase.from("email_sync")
+        .select("id, ai_raw_result").eq("user_id", userId).eq("status", "waiting_statement");
+      for (const wr of (wrows0 || [])) {
+        let arr: any = wr.ai_raw_result; try { if (typeof arr === "string") arr = JSON.parse(arr); } catch { continue; }
+        if (!Array.isArray(arr)) continue;
+        arr.forEach((t: any, idx: number) => {
+          if (t && t._waiting_statement && !t._imported && !t._skipped && (!t.from_account_id || t.from_account_id === acc.id)) parkir.push({ wr, arr, t, idx });
+        });
+      }
+    } catch (e) { console.warn("[prepare] parkir valas:", (e as any)?.message); }
+    const normP = (x: any) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const cariParkir = (m0: any) => {
+      const n = normP(m0.description || m0.merchant); const d = new Date((m0.date || "") + "T00:00:00").getTime();
+      return parkir.find(({ t }) => {
+        if (t._matchedStmt) return false;
+        const tok = normP(t.merchant_name || t.description); if (tok.length < 5) return false;
+        const td = new Date((t.date || "") + "T00:00:00").getTime();
+        return (n.includes(tok) || tok.includes(n)) && (!isFinite(td) || !isFinite(d) || Math.abs(d - td) <= 3 * 86400000);
+      }) || null;
+    };
+    const parkirTersentuh = new Set<any>();
     for (const m0 of missing) {
       if (washIds.has(m0._id)) continue; // pasangan konversi: tidak dibukukan
       const desc = String(m0.description || "");
       const amt = Math.round(Number(m0.amount || 0));
       const isOut = (m0.direction || "out") !== "in";
+      if (isOut) {
+        const hit = cariParkir(m0);
+        if (hit) {
+          hit.t._matchedStmt = true;
+          const plan = hit.t._plan || {};
+          const nama = String(plan.name || hit.t.merchant_name || desc).trim().slice(0, 120);
+          if (plan.category_id) {
+            inserts.push({
+              user_id: userId, tx_date: m0.date, description: nama,
+              amount: amt, amount_idr: amt, currency: "IDR", tx_type: "expense",
+              from_type: "account", from_id: acc.id, to_type: "expense", to_id: null,
+              category_id: plan.category_id, category_name: plan.category_name || null,
+              entity: plan.entity || "Personal", is_reimburse: false, tag_id: plan.tag_id || null,
+              source: "statement_auto", merchant_name: hit.t.merchant_name || null,
+              notes: `Dari email ${hit.t.currency || ""} ${hit.t.amount || ""} (parkir menunggu statement); rupiah dari statement`,
+            });
+            hit.t._imported = true; hit.t._bookedByStatement = true; parkirTersentuh.add(hit.wr);
+            autoCreated.push({ jenis: "valas", date: m0.date, amount: amt, desc: `${nama.slice(0, 40)} → ${plan.category_name || "?"}` });
+            continue;
+          }
+          // belum dikategorikan: bawa isian & nama email ke baris antrean
+          m0._plan = { ...plan, name: plan.name || hit.t.merchant_name || null };
+          m0._emailName = hit.t.merchant_name || null;
+        }
+      }
       // (b) biaya tetap
       if (isOut && isMonthlyFee(desc, amt)) {
         const { data: katB } = await serviceSupabase.from("expense_categories")
@@ -1607,6 +1659,13 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
         }
       }
       sisaMissing.push(m0);
+    }
+    for (const wr of parkirTersentuh) {
+      const arr = parkir.find(p => p.wr === wr)?.arr; if (!arr) continue;
+      for (const t of arr) if (t && t._matchedStmt) delete t._matchedStmt;
+      const allDone = arr.every((t: any) => t?._imported || t?._skipped || t?.confirmed || t?.skipped);
+      const stillWaiting = arr.some((t: any) => t?._waiting_statement && !t?._imported && !t?._skipped);
+      await serviceSupabase.from("email_sync").update({ ai_raw_result: arr, status: allDone ? "imported" : (stillWaiting ? "waiting_statement" : "pending") }).eq("id", wr.id);
     }
     if (inserts.length) {
       const { data: madeRows, error: insErr } = await serviceSupabase.from("ledger").insert(inserts).select("id, tx_date, description, merchant_name, amount, amount_idr, from_id, to_id, reconciled_at, split_group_id");
@@ -1772,6 +1831,7 @@ async function prepareReconcile(serviceSupabase: any, userId: string, extraction
     };
     const txs = missing.filter((m: any) => !ignoredPrev.has(m._id) && !washIds.has(m._id) && !SUMMARY_RE.test(m.description || "")).map((m: any) => ({
       date: m.date, description: m.description || m.merchant || "",
+      ...(m._plan ? { _plan: m._plan } : {}),
       // Penanda angsuran ditentukan ATURAN (stmtRules.parseInstalment), bukan AI: flag AI kosong
       // untuk format Mandiri/Maybank/BCA. n = 0 (kredit konversi) bukan angsuran.
       ...((() => {
