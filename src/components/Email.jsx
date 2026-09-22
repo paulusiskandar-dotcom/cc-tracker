@@ -520,6 +520,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
   // Valas (foreign-currency) rows live in the "⏳ Waiting for Statement" tab; IDR rows in "Email Pending".
   const isFXRow = (r) => r.currency && r.currency !== "IDR";
   const visibleRows = rows.filter(r => waitingMode ? isFXRow(r) : !isFXRow(r));
+  const [showWaiting, setShowWaiting] = useState(false);
   const [selected,     setSelected]     = useState(() => Object.fromEntries((pendingSyncs || []).map(s => [s.id, true])));
   const [importing,    setImporting]    = useState(false);
   const [processedCount, setProcessedCount] = useState(0);
@@ -1080,9 +1081,26 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
     <EmptyState icon="" title="No transactions waiting" message="Transaksi mata uang asing akan parkir di sini sampai statement bulanannya masuk (bawa nilai IDR pasti), lalu hilang otomatis." />
   );
 
+  // Phones, inside Transactions › Inbox: foreign-currency purchases parked until their statement
+  // brings the rupiah amount. One folded row at the bottom; open it to see them (22 Sep 2026).
+  const fxRows = embedded && !waitingMode ? rows.filter(isFXRow) : [];
+  const waitingFooter = fxRows.length > 0 && (
+    <>
+      <button className="mw-row" onClick={() => setShowWaiting(v => !v)} style={{ borderRadius: 14, background: "var(--card)" }}>
+        <span className="mw-row-name">Waiting for statement<small>{fxRows.length} foreign-currency purchase{fxRows.length === 1 ? "" : "s"}, booked when the statement arrives</small></span>
+        <span className="mw-row-amt" style={{ fontWeight: 400, color: "var(--muted)" }}>{showWaiting ? "Hide" : "Show"}</span>
+      </button>
+      {showWaiting && (
+        <MobileQueue rows={fxRows} onUpdateRow={updateRow} onConfirmRow={confirm} onSkipRow={skipById}
+          accounts={accounts} categories={categories} incomeSrcs={incomeSrcs} busy={importing} waiting dark={dark} onFullEditor={null} />
+      )}
+    </>
+  );
+
   if (!waitingMode && !visibleRows.length && failedRows === null) return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       <EmptyState icon="" title="No pending emails" message="Gmail sync will surface transactions here for review." />
+      {waitingFooter}
       <button onClick={loadFailed} disabled={loadingFailed} hidden={embedded}
         style={{ fontSize: 11, color: "#9ca3af", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "Figtree, sans-serif", alignSelf: "flex-start" }}>
         {loadingFailed ? "Loading…" : "Show failed extractions"}
@@ -1139,6 +1157,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
           accounts={accounts} categories={categories} incomeSrcs={incomeSrcs} busy={importing} waiting={waitingMode} dark={dark}
           onFullEditor={waitingMode ? null : () => setFullEditor(true)} />
       )}
+      {mobile && !fullEditor && waitingFooter}
       {(!mobile || fullEditor) && visibleRows.length > 0 && (
         <TxHorizontal
           rows={visibleRows}
