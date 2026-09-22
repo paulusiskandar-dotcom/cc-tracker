@@ -10,7 +10,7 @@ import "./mobile.css";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const d2 = s => { if (!s) return ""; const d = new Date(`${String(s).slice(0, 10)}T00:00:00`); return `${d.getDate()} ${MONTHS[d.getMonth()]}`; };
 
-export default function MobileReconcile({ monthLabel, onPrev, onNext, canNext, data, finalizing, onFinalize, onFinalizeAll, onOpenInbox, usualDay, dark, late = [] }) {
+export default function MobileReconcile({ monthLabel, onPrev, onNext, canNext, data, finalizing, onFinalize, onFinalizeAll, onOpenInbox, usualDay, dark, late = [], cadenceOf = null }) {
   const [open, setOpen] = useState(null);
   const { ready = [], needsReview = [], completed = [], waiting = [] } = data;
   const sub = it => `${it.s.total_statement ?? 0} lines${it.s.period_end ? ` · to ${d2(it.s.period_end)}` : ""}`;
@@ -68,7 +68,7 @@ export default function MobileReconcile({ monthLabel, onPrev, onNext, canNext, d
       {waiting.length > 0 && (() => {
         const lateIds = new Set(late.map(l => l.acc.id));
         const lateRows = waiting.filter(({ acc }) => lateIds.has(acc.id));
-        const rest = waiting.filter(({ acc }) => !lateIds.has(acc.id));
+        const rest = waiting.filter(({ acc }) => !lateIds.has(acc.id)).map(w => ({ ...w, cadence: cadenceOf ? cadenceOf(w.acc) : null })).sort((p, q) => (p.cadence?.dormant ? 1 : 0) - (q.cadence?.dormant ? 1 : 0));
         return (
           <>
             {lateRows.length > 0 && (
@@ -83,7 +83,7 @@ export default function MobileReconcile({ monthLabel, onPrev, onNext, canNext, d
               <>
                 <div className="mw-label">No statement yet</div>
                 <div className="mw-list">
-                  {rest.map(({ acc }) => { const day = usualDay(acc.id); return <div key={acc.id} className="mw-row"><span className="mw-row-name">{acc.name}</span><span className="mw-row-amt" style={{ fontWeight: 400, color: "var(--muted)" }}>{day ? `usually ~${day}` : "dormant"}</span></div>; })}
+                  {rest.map(({ acc, cadence }) => <div key={acc.id} className="mw-row"><span className="mw-row-name">{acc.name}</span><span className="mw-row-amt" style={{ fontWeight: 400, color: "var(--muted)" }}>{cadence?.dormant ? "dormant" : cadence?.usual ? `usually ~${cadence.usual}` : ""}</span></div>)}
                 </div>
               </>
             )}
