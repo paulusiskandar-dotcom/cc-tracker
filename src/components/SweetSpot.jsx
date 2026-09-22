@@ -2,7 +2,6 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { settingsApi } from "../api";
 import { Check, X, HelpCircle, AlertTriangle, Minus, ChevronDown } from "lucide-react";
-import SweetSpotSpending from "./SweetSpotSpending";
 import MobileEarned from "./mobile/MobileEarned";
 
 // SweetSpot — earn rates, exclusions, promos and miles news for the cards Paulus
@@ -349,7 +348,7 @@ export default function SweetSpot({ user, ledger = [], accounts = [], dark = fal
 
       {tab === "tricks" && <TricksView tricks={data.tricks} />}
 
-      {tab === "spending" && (phone ? <MobileEarned accounts={accounts} dark={dark} /> : <SweetSpotSpending ledger={ledger} accounts={accounts} />)}
+      {tab === "spending" && <MobileEarned accounts={accounts} dark={dark} wide={!phone} />}
     </Frame>
   );
 }

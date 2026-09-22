@@ -22,7 +22,7 @@ function stmtSpend(rows = []) {
   return s;
 }
 
-export default function MobileEarned({ accounts = [], dark = false }) {
+export default function MobileEarned({ accounts = [], dark = false, wide = false }) {
   const [hist, setHist] = useState(null);
   useEffect(() => {
     let on = true;
@@ -64,7 +64,7 @@ export default function MobileEarned({ accounts = [], dark = false }) {
   }, [hist, accounts]);
 
   return (
-    <div className={`mw${dark ? " dark" : ""}`} style={{ padding: 0, background: "none", minHeight: 0 }}>
+    <div className={`mw${dark ? " dark" : ""}`} style={{ padding: 0, background: "none", minHeight: 0, maxWidth: wide ? 560 : undefined }}>
       <div className="mw-label">Earned, per statements</div>
       {hist == null ? <div className="mw-note">Loading</div> : !rows.length ? <div className="mw-note">No statement has printed points yet.</div> : (
         <div className="mw-list">
