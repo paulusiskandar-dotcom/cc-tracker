@@ -50,6 +50,7 @@ function dueDateInMonth(dayOfMonth, base) {
 // the statement cut-off day, the payment is due the month AFTER the cut-off.
 // e.g. stmt 18 / due 4 → statement closed on the 18th is due on the 4th NEXT month.
 function ccDueDate(cc, today) {
+  if (!cc.due_day) return null;
   const dd = Number(cc.due_day);
   const sd = cc.statement_day ? Number(cc.statement_day) : null;
   if (!sd) {
@@ -98,15 +99,18 @@ export function buildBills({ ledger = [], creditCards = [], liabilities = [], re
 
     // 💳 Credit Card — unpaid only (pending > 0)
     const cards = (creditCards || [])
-      .filter(c => c.is_active !== false && c.due_day)
+      .filter(c => c.is_active !== false)
       .map(c => {
         const pending = computePendingDue(c, ledger, today);
-        const when = ccDueDate(c, today);
         // Same rule as the phone (20 Sep 2026): the statement's minimum payment decides. 0 = the bank asks
-        // for nothing, so it is not a bill; anything above 0 is one, however small.
+        // for nothing, so it is not a bill; anything above 0 is one, however small. The due date comes
+        // from the statement too (HSBC prints 25 Sep; the card's fixed due_day said 27).
         const sess = (reconSessions || []).filter(r => r.account_id === c.id && r.statement_date && r.status !== "void")
           .sort((x, y) => String(y.statement_date).localeCompare(String(x.statement_date)))[0];
         if (sess && sess.minimum_payment != null && Number(sess.minimum_payment) === 0) return null;
+        const fresh = sess && (!c.last_statement_date || String(sess.statement_date).slice(0, 10) >= String(c.last_statement_date).slice(0, 10));
+        const when = fresh && sess.due_date ? new Date(`${String(sess.due_date).slice(0, 10)}T00:00:00`) : ccDueDate(c, today);
+        if (!when || isNaN(when)) return null;
         return { id: c.id, name: c.name, when, dayLeft: dayLeft(when), amount: pending, known: true };
       })
       .filter(c => c && c.amount > 0)                  // hide already-paid
