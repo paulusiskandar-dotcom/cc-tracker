@@ -1,5 +1,6 @@
 import { sweepLedgerGhosts, sweepWaitingStatement } from "../_shared/sweep.ts";
 import { buildPaperSplits, cariPecahan, type PaperSplit } from "../_shared/paperSplit.ts";
+import { findLiabSplit } from "../_shared/liabSplit.ts";
 import { buildOrderNotes, cariCatatan } from "../_shared/orderNote.ts";
 // ─────────────────────────────────────────────────────────────────
 // gmail-sync/index.ts
@@ -715,6 +716,10 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
     // Tempelkan deskripsi belanja: cocokkan nominal transaksi ke struk/pesanan.
     // Lalu tempelkan pecahan Paper: satu tagihan kartu = piutang + fee.
     if (Array.isArray(aiResult)) {
+      // Angsuran liabilitas yang dibayar lewat marketplace (BYD Seal via Blibli): satu debit
+      // = angsuran + biaya admin. Dikenali dari accounts.pay_via / pay_from_id / monthly_installment.
+      const { data: liabs } = await supabase.from("accounts").select("id,name,monthly_installment,pay_from_id,pay_via")
+        .eq("user_id", userId).eq("type", "liability").eq("is_active", true).not("monthly_installment", "is", null);
       for (const tx of aiResult) {
         const amt = Number(tx.amount_idr || tx.amount || 0);
         const n = cariCatatan(orderNotes, amt);
@@ -723,6 +728,14 @@ async function processUser(supabase: any, userId: string, anthropicKey: string, 
         if (pecah) {
           tx.paper_split = pecah;
           console.log(`[gmail-sync] Paper split ${amt} → kirim ${pecah.kirim} + fee ${pecah.fee} (${pecah.ke})`);
+        }
+        const ls = !pecah && tx.type !== "in" && !tx.is_credit ? findLiabSplit(tx, (liabs || []) as any[]) : null;
+        if (ls) {
+          tx.liab_split = ls;
+          tx.suggested_tx_type = "pay_liability";
+          tx.to_account_id = ls.liability_id;
+          tx.item_note = `Cicilan ${ls.liability_name}`;
+          console.log(`[gmail-sync] Liability split ${amt} → ${ls.liability_name} ${ls.pokok} + fee ${ls.fee}`);
         }
       }
     }

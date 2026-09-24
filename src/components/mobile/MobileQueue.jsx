@@ -73,7 +73,7 @@ function QueueSheet({ r, accounts, categories, incomeSrcs, busy, waiting, onUpda
   const cats = r.tx_type === "income" ? incomeSrcs : categories;
   const err = waiting ? null : validateRow(r, accounts);
   const types = SIMPLE_TYPES.includes(r.tx_type) ? SIMPLE_TYPES : [r.tx_type, ...SIMPLE_TYPES];
-  const complex = NEEDS_FULL(r) || r._cicilan || r._paper_split;
+  const complex = NEEDS_FULL(r) || r._cicilan || r._paper_split || r._liab_split;
   const opt = list => (list || []).map(a => <option key={a.id} value={a.id}>{a.name}</option>);
   const sid = `q-${r._id}`;
   return (
@@ -135,7 +135,7 @@ function QueueSheet({ r, accounts, categories, incomeSrcs, busy, waiting, onUpda
         )}
 
         {r._dup && !waiting && <div className="mw-note mw-note-warn">Looks like a transaction already in the ledger (same amount and date). Approving asks you to confirm.</div>}
-        {complex && !waiting && <div className="mw-note">This one has parts this sheet does not edit{r._cicilan ? " (it starts an installment plan)" : r._paper_split ? " (Paper.id split)" : ""}. {err ? "Finish it in the full editor." : "Approving books it the same way as on desktop."}</div>}
+        {complex && !waiting && <div className="mw-note">This one has parts this sheet does not edit{r._cicilan ? " (it starts an installment plan)" : r._paper_split ? " (Paper.id split)" : r._liab_split ? " (instalment + admin fee)" : ""}. {err ? "Finish it in the full editor." : "Approving books it the same way as on desktop."}</div>}
         {err && <div className="mw-err">{ERR_EN[err] || err}</div>}
 
         <div className="mw-form-act">

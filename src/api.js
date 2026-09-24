@@ -369,6 +369,7 @@ export const ledgerApi = {
       loan_auto_payment,
       loan_increment_principal,
       _paper_split,
+      _liab_split,
       ...insertEntry
     } = entry;
     let safeEntry = sanitizeUUIDs(insertEntry);
@@ -401,6 +402,19 @@ export const ledgerApi = {
     // transaksi = satu baris statement, lalu menguncinya. Tanpa ini, statement
     // mencari 47.937.677 tapi ledger cuma punya 47.205.000 dan 732.677 yang
     // berdiri sendiri → baris dilaporkan HILANG dan berisiko ditambahkan dobel.
+    // ── Pecahan angsuran liabilitas: pokok (pay_liability) + biaya admin (expense) ──
+    const pecahLiab = (() => {
+      if (!_liab_split || safeEntry.tx_type !== "pay_liability") return null;
+      const pokok = Number(_liab_split.pokok || 0), fee = Number(_liab_split.fee || 0);
+      const amt = Number(safeEntry.amount_idr || safeEntry.amount || 0);
+      if (pokok <= 0 || fee < 0 || Math.abs(pokok + fee - amt) > 2) return null;
+      if (!safeEntry.from_id || !safeEntry.to_id) return null;
+      return { pokok, fee, name: _liab_split.liability_name || "" };
+    })();
+    if (pecahLiab) {
+      safeEntry.amount = pecahLiab.pokok; safeEntry.amount_idr = pecahLiab.pokok;
+      if (pecahLiab.fee > 0) safeEntry.split_group_id = safeEntry.split_group_id || (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : null);
+    }
     let paperGroupId = null;
     if (pecahPaper) {
       paperGroupId = safeEntry.split_group_id
@@ -511,6 +525,21 @@ export const ledgerApi = {
       }
     }
 
+    if (pecahLiab && pecahLiab.fee > 0) {
+      try {
+        const { data: kat } = await supabase.from("expense_categories").select("id, name")
+          .or(`user_id.is.null,user_id.eq.${userId}`).eq("name", "Bank & Card Fees").maybeSingle();
+        await supabase.from("ledger").insert([{
+          user_id: userId, tx_date: safeEntry.tx_date, tx_type: "expense",
+          amount: pecahLiab.fee, amount_idr: pecahLiab.fee, currency: "IDR", entity: "Personal",
+          from_type: "account", from_id: safeEntry.from_id, to_type: "expense", to_id: null,
+          category_id: kat?.id || null, category_name: kat?.name || "Bank & Card Fees",
+          description: `Biaya admin (cicilan ${pecahLiab.name})`.slice(0, 180),
+          source: safeEntry.source || "gmail", email_sync_id: safeEntry.email_sync_id || null, split_group_id: safeEntry.split_group_id,
+        }]);
+      } catch (e) { console.error("[ledgerApi.create] baris biaya admin cicilan GAGAL:", e?.message); }
+    }
+
     const amount  = Number(safeEntry.amount_idr || safeEntry.amount || 0);
     const fromAcc = localAccounts.find(a => a.id === safeEntry.from_id);
     const toAcc   = localAccounts.find(a => a.id === safeEntry.to_id);
@@ -518,6 +547,10 @@ export const ledgerApi = {
     // Delta fee dikenakan HANYA ke kartu, tidak ke sisi tujuan (piutang) — kalau
     // ikut ditambahkan ke `amount`, piutang akan menggelembung sebesar fee, persis
     // kesalahan yang sedang kita perbaiki.
+    if (pecahLiab && pecahLiab.fee > 0 && fromAcc) {
+      const dFee = getDeltas("expense", pecahLiab.fee);
+      if (dFee.from?.[fromAcc.type] !== undefined) await applyBalanceDelta(fromAcc.id, fromAcc.type, dFee.from[fromAcc.type]);
+    }
     if (pecahPaper && fromAcc) {
       const dFee = getDeltas("expense", pecahPaper.fee);
       if (dFee.from?.[fromAcc.type] !== undefined) {
@@ -1901,7 +1934,7 @@ const EMAIL_TX_TYPE_NORM = {
   withdrawal:    "expense",
   purchase:      "expense",
 };
-const VALID_TX_TYPES = new Set(["expense","income","transfer","pay_cc","reimburse_out","reimburse_in","give_loan","collect_loan","fx_exchange"]);
+const VALID_TX_TYPES = new Set(["expense","income","transfer","pay_cc","reimburse_out","reimburse_in","give_loan","collect_loan","fx_exchange","pay_liability"]);
 const normEmailTxType = (raw) => {
   if (!raw) return "expense";
   if (VALID_TX_TYPES.has(raw)) return raw;
@@ -1937,6 +1970,8 @@ export function flattenEmailSync(rows) {
         // untuk membuat DUA baris. Nominal di antrean tetap total tagihan kartu —
         // sama dengan notifikasi bank — pemecahan terjadi saat baris disetujui.
         _paper_split:            tx.paper_split || null,
+        // Angsuran liabilitas + biaya admin marketplace (BYD via Blibli): dua baris saat disetujui.
+        _liab_split:             tx.liab_split || null,
         amount:                  tx.amount,
         currency:                tx.currency || "IDR",
         amount_idr:              tx.amount_idr || tx.amount,

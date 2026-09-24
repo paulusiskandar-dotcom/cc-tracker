@@ -47,6 +47,7 @@ const syncToRow = (s) => ({
   category_id:   s._plan?.category_id || null,
   tag_id:        s._plan?.tag_id || null,
   _plan:         s._plan || null,
+  _liab_split:   s._liab_split || null,
   suggested_category_label: s.suggested_category_label || "",
   // Nama barang dari email pesanan (item_note) ikut ke ledger.notes.
   notes:         s._plan?.name || s.notes || "",
@@ -806,6 +807,7 @@ function EmailPendingTab({ pendingSyncs, setPendingSyncs, accounts, categories, 
       // Tanpa baris ini pemecahnya tidak pernah menyala sekali pun: tiga tagihan
       // PT. GLOBAL DIGITAL 31 Agu 2026 masuk utuh, fee-nya ikut jadi piutang.
       _paper_split:  r._paper_split || null,
+      _liab_split:   r._liab_split || null,
     };
   };
 
